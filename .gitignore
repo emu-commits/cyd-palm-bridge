@@ -1,0 +1,19 @@
+# build artifacts
+/roundtrip
+/bridge_cli
+/incremental
+*.o
+
+# generated / working data
+/pdb/
+/state/
+*.pdb
+
+# local DAV server (dev only)
+/davvenv/
+/radicale-collections/
+/radicale.log
+/radicale.htpasswd
+
+# editor
+*.swp
