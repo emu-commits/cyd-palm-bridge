@@ -61,6 +61,10 @@ static void baseName(const char*full,char*out,int cap){
     int n=(int)(e-s); if(n>cap-1)n=cap-1; if(n<0)n=0; memcpy(out,s,n); out[n]=0;
 }
 
+/* an href ending in '/' is a collection (the Depth:1 self-entry), not a member
+ * object -- iCloud returns the addressbook/calendar itself as the first response. */
+static int hrefIsColl(const char*h){ int n=(int)strlen(h); return n>0 && h[n-1]=='/'; }
+
 /* run a command, capture stdout into out (cap). returns bytes or -1. */
 static int run(const char*cmd,char*out,int cap){
     FILE*p=popen(cmd,"r"); if(!p) return -1;
@@ -150,6 +154,7 @@ int dav_list(const DavCtx*d,const char*coll,dav_list_cb cb,void*ctx){
     while((p=strcasestr(p,"<response"))){
         const char*end=strcasestr(p,"</response>"); if(!end) break;
         char href[512]=""; xml_text_e(p,end,"href",href,sizeof href);
+        if(hrefIsColl(href)){ p=end+1; continue; }        /* skip the collection self */
         char name[256]=""; baseName(href,name,sizeof name);
         char etag[160]=""; xml_text_e(p,end,"getetag",etag,sizeof etag); stripQuotes(etag);
         if(name[0] && cb){ cb(name,etag,ctx); count++; }
@@ -193,6 +198,7 @@ int dav_sync_report(const DavCtx*d,const char*coll,const char*token,
     while((p=strcasestr(p,"<response"))){
         const char*end=strcasestr(p,"</response>"); if(!end) break;
         char href[512]=""; xml_text_e(p,end,"href",href,sizeof href);
+        if(hrefIsColl(href)){ p=end+1; continue; }        /* skip the collection self */
         char name[256]=""; baseName(href,name,sizeof name);
         char etag[160]=""; int hasEtag=xml_text_e(p,end,"getetag",etag,sizeof etag); stripQuotes(etag);
         /* a removed member has a 404 status and no getetag */

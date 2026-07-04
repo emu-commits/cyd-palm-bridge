@@ -232,12 +232,24 @@ static void keepBytes(Sink*k,uint32_t uid,uint8_t attr,const uint8_t*data,int le
 
 /* GET a server object, parse+pack into a local record, keep it (stamped with
  * the sink's pullCat category). */
+/* fetch buffer for one server object. iCloud contacts can embed a base64 PHOTO
+ * that pushes the raw vCard well past 16 KB; too small a buffer truncates the
+ * object (no END:VCARD) and it silently fails to parse. Generous on host; the
+ * device build (B3, no PSRAM) overrides this small. */
+#ifndef OBJ_FETCH_CAP
+#define OBJ_FETCH_CAP (256*1024)
+#endif
 static int keepFromServer(const DavCtx*d,const char*coll,int kind,Sink*k,
                           uint32_t uid,const char*name,const char*etag){
-    char obj[16384]; if(dav_get(d,coll,name,obj,sizeof obj)<=0) return -1;
+    static char obj[OBJ_FETCH_CAP];       /* static, not stack (too big for stack) */
+    int got=dav_get(d,coll,name,obj,sizeof obj);
+    if(got<=0){ fprintf(stderr,"warning: could not fetch %s -- dropped\n",name); return -1; }
+    if(got>=OBJ_FETCH_CAP-1){             /* hit the buffer limit => truncated */
+        fprintf(stderr,"warning: %s exceeds %d bytes (large PHOTO?) -- dropped\n",name,OBJ_FETCH_CAP);
+        return -1; }
     uint8_t tmp[PALM_REC_MAX];
     int l=parse_object(kind,obj,tmp,sizeof tmp);
-    if(l<=0) return -1;
+    if(l<=0){ fprintf(stderr,"warning: could not parse %s -- dropped\n",name); return -1; }
     char body[8192]; emit_object(kind,tmp,l,uid,body,sizeof body);
     keepBytes(k,uid,(uint8_t)k->pullCat,tmp,l,name,etag,fnv1a(body));
     return 0;
@@ -335,7 +347,7 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         } else if(lc==LCLEAN && sc==SCLEAN){
             keepBytes(k,n->uid,L->attr,s->locArena+L->off,L->len,srvName,n->mEtag,L->hash); st->unchanged++;
         } else if(lc==LCLEAN && sc==SMOD){
-            keepFromServer(d,coll,kind,k,n->uid,srvName,n->sEtag); st->pullMod++;
+            if(keepFromServer(d,coll,kind,k,n->uid,srvName,n->sEtag)==0) st->pullMod++;
         } else if(lc==LCLEAN && sc==SDEL){
             st->pullDel++;
         } else if(lc==LDEL && sc==SCLEAN){
@@ -343,7 +355,7 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         } else if(lc==LDEL && sc==SDEL){
             st->pushDel++;
         } else if(lc==LABSENT && sc==SNEW){
-            keepFromServer(d,coll,kind,k,n->uid,srvName,n->sEtag); st->pullNew++;
+            if(keepFromServer(d,coll,kind,k,n->uid,srvName,n->sEtag)==0) st->pullNew++;
         } else if(lc==LABSENT && sc==SCLEAN){
             dav_delete(d,coll,srvName,n->mEtag); st->pushDel++;
         }

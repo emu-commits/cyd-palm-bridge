@@ -5,9 +5,12 @@
  *   bridge_cli pull  <cal-out> <addr-out>          -> full download
  *   bridge_cli sync  <cal-pdb> <addr-pdb> [policy] -> incremental two-way (RFC 6578)
  *   bridge_cli synccat cal|todo|card <pdb> [pol]   -> category-routed sync (name match)
+ *   bridge_cli synccontacts <pdb> [policy]         -> contact sync (single address book)
+ *   bridge_cli demo cal|todo|card <pdb>            -> write a categorized sample PDB
  *   bridge_cli dump  cal|card <pdb>                -> canonical text dump
  *
  * DAV target from env: DAV_BASE, DAV_USER, DAV_PASS, DAV_CAL, DAV_CARD, BRIDGE_TZ.
+ * Contacts (iCloud) are on a separate host: DAV_CARD_BASE (default contacts.icloud.com).
  * policy: server | local | both  (conflict resolution; default server)
  * iCloud: DAV_BASE=https://caldav.icloud.com, DAV_USER=<appleid>,
  *         DAV_PASS=<app-specific-password>  (run `discover` to get paths)
@@ -31,6 +34,25 @@ static int dumpCard(const PdbRec*r,int i,void*ctx){ (void)ctx;(void)i;
     char b[2048]; vcard_emit(b,sizeof b,&a,r->uniqueID); fputs(b,stdout); return 0; }
 
 static const char*env(const char*k,const char*def){ const char*v=getenv(k); return v&&*v?v:def; }
+
+/* iCloud CardDAV lives on a DIFFERENT host than CalDAV: caldav.icloud.com serves
+ * calendars only, contacts are on contacts.icloud.com. Return a copy of `d` whose
+ * base points at the contacts host:
+ *   - DAV_CARD_BASE if set (explicit override),
+ *   - else if DAV_BASE contains "caldav.icloud.com", swap "caldav" -> "contacts",
+ *   - else leave base unchanged (self-hosted DAV usually shares one host).       */
+static DavCtx cardBase(DavCtx d){
+    const char*ov=getenv("DAV_CARD_BASE");
+    if(ov&&*ov){ snprintf(d.base,sizeof d.base,"%s",ov); return d; }
+    char*cd=strstr(d.base,"caldav.icloud.com");
+    if(cd){
+        char out[256]; int pre=(int)(cd-d.base);
+        if(pre<(int)sizeof out)
+            snprintf(out,sizeof out,"%.*s%s%s",pre,d.base,"contacts",cd+strlen("caldav"));
+        snprintf(d.base,sizeof d.base,"%s",out);
+    }
+    return d;
+}
 
 /* If href is an absolute URL, point d->base at its origin and return the path;
  * otherwise return href unchanged (already a path on the current base).        */
@@ -92,8 +114,8 @@ static int cmd_discover(DavCtx d){
     if(nc<0){ diagnose(&dc); return 1; }
     printf("host: %s\ncalendars:\n",dc.base);
     for(int i=0;i<cal.n;i++) printf("  %-28s  %s\n",cal.name[i][0]?cal.name[i]:"(unnamed)",cal.path[i]);
-    DavCtx da=d; resolveColls(&da,'a',&card);
-    printf("addressbooks:\n");
+    DavCtx da=cardBase(d); resolveColls(&da,'a',&card);   /* contacts on separate iCloud host */
+    printf("addressbooks (host: %s):\n",da.base);
     for(int i=0;i<card.n;i++) printf("  %-28s  %s\n",card.name[i][0]?card.name[i]:"(unnamed)",card.path[i]);
     printf("\nSet DAV_BASE to the host and DAV_CAL/DAV_CARD to a path, then `sync`;\n"
            "or use `synccat` to auto-route Palm categories to same-named calendars.\n");
@@ -106,6 +128,7 @@ static int cmd_demo(int kind,const char*path){
     CatTable t; memset(&t,0,sizeof t);
     strcpy(t.name[0],"Unfiled");
     if(kind==KIND_TODO) strcpy(t.name[1],"Reminders");
+    else if(kind==KIND_CARD){ strcpy(t.name[1],"Business"); strcpy(t.name[2],"Personal"); }
     else { strcpy(t.name[1],"Work"); strcpy(t.name[2],"Home"); }
     uint8_t ai[APPINFO_SIZE]; int al=appinfo_build(ai,sizeof ai,&t);
     static uint8_t arena[8*PALM_REC_MAX]; PdbRec r[8]; int nr=0, used=0;
@@ -118,6 +141,19 @@ static int cmd_demo(int kind,const char*path){
             t2.priority=td[i].pr; snprintf(t2.description,sizeof t2.description,"%s",td[i].s);
             int l=ToDoPack(arena+used,PALM_REC_MAX,&t2); REC((uint32_t)(i+1),td[i].cat,l); }
         pdb_write_ai(path,"ToDoDB",0x44415441,0x746F646F,ai,al,r,nr);
+    } else if(kind==KIND_CARD){
+        struct{ const char*last,*first,*co,*phone,*email; int cat; } pc[]={
+            {"Appleseed","Johnny","Acme Corp","555-0100","johnny@acme.example",1},
+            {"Bramble","Rosa","Widgets Inc","555-0200","rosa@widgets.example",2} };
+        for(int i=0;i<2;i++){ Addr a; memset(&a,0,sizeof a);
+            a.fields[F_name]=AddrIntern(&a,pc[i].last);
+            a.fields[F_firstName]=AddrIntern(&a,pc[i].first);
+            a.fields[F_company]=AddrIntern(&a,pc[i].co);
+            a.fields[F_phone1]=AddrIntern(&a,pc[i].phone); a.phoneLabel[0]=workLabel;
+            a.fields[F_phone2]=AddrIntern(&a,pc[i].email); a.phoneLabel[1]=emailLabel;
+            a.displayPhone=0;
+            int l=AddrPack(arena+used,PALM_REC_MAX,&a); REC((uint32_t)(i+1),pc[i].cat,l); }
+        pdb_write_ai(path,"AddressDB",0x44415441,0x61646472,ai,al,r,nr);
     } else {
         struct{ const char*s; int cat; int d,h; } ev[]={
             {"Standup",1,3,9},{"1:1 with Sam",1,4,14},{"Groceries",2,5,18},{"Dentist",2,6,10} };
@@ -128,7 +164,7 @@ static int cmd_demo(int kind,const char*path){
     }
     #undef REC
     printf("wrote %s with %d records (categories: %s)\n",path,nr,
-        kind==KIND_TODO?"Reminders":"Work, Home");
+        kind==KIND_TODO?"Reminders":kind==KIND_CARD?"Business, Personal":"Work, Home");
     return 0;
 }
 
@@ -165,6 +201,31 @@ static int cmd_synccat(DavCtx d,int kind,const char*pdb,ConflictPolicy pol){
     if(!rt.def) printf("  (no default collection; records in unmatched categories are left local)\n");
     SyncStats s={0};
     sync_categorized(&d,pdb,pdb,kind,&rt,"state",pol,&s);
+    printf("synced: +%d ~%d -%d push | +%d ~%d -%d pull | %d conflict | %d clean\n",
+        s.pushNew,s.pushMod,s.pushDel,s.pullNew,s.pullMod,s.pullDel,s.conflicts,s.unchanged);
+    return 0;
+}
+
+/* contact sync: iCloud exposes ONE address book, on a separate host. Categories
+ * are preserved on each record (attr nibble) but NOT routed — so this is a plain
+ * single-collection sync_collection with KIND_CARD, not sync_categorized.        */
+static int cmd_synccontacts(DavCtx d,const char*pdb,ConflictPolicy pol){
+    DavCtx cc=cardBase(d);
+    Colls cs={0}; int n=resolveColls(&cc,'a',&cs);
+    if(n<=0){ fprintf(stderr,"no address book found on %s\n",cc.base);
+              if(n<0) diagnose(&cc);
+              return 1; }
+    char coll[256]; const char*cardEnv=getenv("DAV_CARD");
+    if(cardEnv&&*cardEnv) trimColl(cardEnv,coll,sizeof coll);
+    else {                                    /* prefer an href ending in /card/, else first */
+        int pick=0;
+        for(int j=0;j<cs.n;j++){ int l=(int)strlen(cs.path[j]);
+            if(l>=6 && !strcmp(cs.path[j]+l-6,"/card/")){ pick=j; break; } }
+        trimColl(cs.path[pick],coll,sizeof coll);
+    }
+    printf("address book: %s (host: %s)\n",coll,cc.base);
+    SyncStats s={0};
+    sync_collection(&cc,pdb,pdb,coll,KIND_CARD,"state/contacts.map",pol,&s);
     printf("synced: +%d ~%d -%d push | +%d ~%d -%d pull | %d conflict | %d clean\n",
         s.pushNew,s.pushMod,s.pushDel,s.pullNew,s.pullMod,s.pullDel,s.conflicts,s.unchanged);
     return 0;
@@ -214,8 +275,13 @@ int main(int argc,char**argv){
         return cmd_discover(d);
     }
     if(!strcmp(argv[1],"demo") && argc>=4){
-        int kind = !strcmp(argv[2],"todo")?KIND_TODO:KIND_CAL;
+        int kind = !strcmp(argv[2],"todo")?KIND_TODO : !strcmp(argv[2],"card")?KIND_CARD : KIND_CAL;
         return cmd_demo(kind,argv[3]);
+    }
+    if(!strcmp(argv[1],"synccontacts") && argc>=3){
+        const char*pols = argc>3?argv[3]:"server";
+        ConflictPolicy pol = !strcmp(pols,"local")?POL_LOCAL : !strcmp(pols,"both")?POL_BOTH : POL_SERVER;
+        return cmd_synccontacts(d,argv[2],pol);
     }
     if(!strcmp(argv[1],"synccat") && argc>=4){
         int kind = !strcmp(argv[2],"card")?KIND_CARD : !strcmp(argv[2],"todo")?KIND_TODO : KIND_CAL;
