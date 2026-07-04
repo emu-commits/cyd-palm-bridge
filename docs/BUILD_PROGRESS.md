@@ -43,6 +43,33 @@ GPLv3). Palm fonts are recreated in src/BOOT/font_90NN_72.txt as ASCII bitmaps
   Icon scaling (1.5x/2x) was fuzzy (non-integer A8 upscale) -> reverted to 1x crisp
   (cells 68x52, 3-across). Launcher/silkscreen DONE (commit 141eadd).
 
+## Functional buildout F1–F4 + U6 + U7   [ALL BUILT CLEAN, awaiting one batch flash]
+User: "progress through the whole build out and we'll flash and test on device at
+the end." So the following were implemented + compiled clean but NOT yet flashed
+(CYD /dev/ttyUSB0 was disconnected). Commits: F1 29fcefc, F2 39dd903, F3-memo
+27289ee, F4 48beabc, U7 28e27ec, U6 f9ed28b.
+
+- **F2 categories (39dd903):** demo PDBs now carry Unfiled/Business/Personal;
+  title-bar category pop-up trigger filters the list (data_set_category + iterators
+  honor it); Options->Categories opens it. Filter resets to All per app.
+- **F3 Memo Pad (27289ee):** MemoDB = plain text (no codec); list/detail/edit
+  (single textarea)/get/save/delete. All 4 apps functional now.
+- **F4 Details (48beabc):** Details button on edit form -> category picker; category
+  threaded through data_save_* + rewrite. FIXED bug: rewrite passed NULL AppInfo so
+  edits/deletes wiped the category table -> now preserves it.
+- **U7 HotSync (28e27ec):** hotsync.[ch] background task (wifi+SNTP+resolve host+
+  sync_collection of the configured calendar), DEFENSIVE (no ESP_ERROR_CHECK, fails
+  to a status string). HotSync app screen: Sync Now + live status. Seeding now only
+  fills missing DBs (edits/synced data persist). RISK: RAM for wifi+TLS+sync while
+  LVGL up (~166 free vs ~169 peak) -- may need LVGL draw-buffer teardown (mode
+  switch); VALIDATE ON DEVICE.
+- **U6 Graffiti (f9ed28b):** graffiti.[ch] $1 recognizer + starter templates;
+  writing surface in the Graffiti strip captures strokes -> recognize -> insert into
+  active field. FRAMEWORK: templates + threshold NEED on-device tuning. Fixed a
+  guard collision (graffiti.h used GRAFFITI_H = display.h's strip-height macro).
+- REMAINING: U8 power mgmt, U9 case (hardware). ToDo multi-column/sort polish. On-
+  device tuning of Graffiti + HotSync RAM.
+
 ## F1 — menu system   [BUILT, awaiting flash]
 Menu silkscreen button -> menu_open() pull-down overlay on lv_layer_top (dim
 backdrop, tap-outside closes). Grouped by Palm menu categories: Record (New ->
