@@ -97,23 +97,27 @@ static void collectName(const char*name,const char*etag,void*ctx){
 }
 
 int sync_pull(const DavCtx*d,const char*coll,const char*outpdb,int kind){
-    NameList nl={0}; dav_list(d,coll,collectName,&nl);
-    static uint8_t arena[ARENA_CAP]; static PdbRec recs[MAXR];
+    NameList *nl = calloc(1,sizeof *nl);
+    uint8_t *arena = malloc(ARENA_CAP);
+    PdbRec *recs = calloc(MAXR,sizeof *recs);
+    if(!nl || !arena || !recs){ free(nl); free(arena); free(recs); fprintf(stderr,"sync_pull: out of memory\n"); return -1; }
+    dav_list(d,coll,collectName,nl);
     int nrec=0, used=0;
     const char*ext=kindExt(kind);
-    for(int i=0;i<nl.n;i++){
-        const char*nm=nl.names[i]; const char*dot=strrchr(nm,'.'); if(!dot) continue;
+    for(int i=0;i<nl->n;i++){
+        const char*nm=nl->names[i]; const char*dot=strrchr(nm,'.'); if(!dot) continue;
         if(strcmp(dot+1,ext)) continue;                 /* keep only matching kind */
         char obj[16384]; if(dav_get(d,coll,nm,obj,sizeof obj)<=0) continue;
         uint32_t uid=(uint32_t)strtoul(nm,NULL,10);
         uint8_t*dst=arena+used; int l=parse_object(kind,obj,dst,PALM_REC_MAX);
         if(l<=0) continue;
         recs[nrec]=(PdbRec){ .attr=0,.uniqueID=uid,.data=dst,.len=l }; used+=l; nrec++;
-        if(nrec>=MAXR||used+PALM_REC_MAX>(int)sizeof arena) break;
+        if(nrec>=MAXR||used+PALM_REC_MAX>ARENA_CAP) break;
     }
     for(int i=1;i<nrec;i++){ PdbRec k=recs[i]; int j=i-1;
         while(j>=0 && recs[j].uniqueID>k.uniqueID){ recs[j+1]=recs[j]; j--; } recs[j+1]=k; }
     kindWrite(kind,outpdb,NULL,0,recs,nrec);
+    free(nl); free(arena); free(recs);
     return nrec;
 }
 
@@ -296,7 +300,12 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
     loadMap(s,mapfile);
     buildServer(s,d,coll);
 
-    static Node nodes[MAXR*2]; int nn=0;
+    /* heap (not static BSS) so this working set is freed after the sync and the
+     * ~memory returns to the UI in interactive mode. */
+    Node *nodes = calloc((size_t)MAXR*2, sizeof *nodes);
+    Sink *k = calloc(1, sizeof *k);
+    if(!nodes || !k){ free(nodes); free(k); fprintf(stderr,"sync_one: out of memory\n"); return; }
+    int nn=0;
     uint32_t seed=1;
     for(int i=0;i<s->nloc;i++){ Node*n=nodeFor(nodes,&nn,s->loc[i].uid); n->li=i; if(s->loc[i].uid>=seed)seed=s->loc[i].uid+1; }
     for(int i=0;i<s->nmap;i++){ Node*n=nodeFor(nodes,&nn,s->map[i].uid); n->hasMap=1;
@@ -309,7 +318,7 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         snprintf(n->sEtag,sizeof n->sEtag,"%s",s->srv[i].etag);
         if(s->srv[i].uid>=seed)seed=s->srv[i].uid+1; }
 
-    static Sink kbuf; kbuf.o=o; kbuf.nmap=0; kbuf.pullCat=pullCat; Sink*k=&kbuf;
+    k->o=o; k->pullCat=pullCat;   /* nmap already 0 from calloc */
     const char*ext = kindExt(s->kind); int kind=s->kind;
 
     for(int i=0;i<nn;i++){
@@ -388,6 +397,7 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         for(int i=0;i<k->nmap;i++) fprintf(mf,"%u\t%s\t%s\t%llu\n",
                 (unsigned)k->map[i].uid,k->map[i].href,k->map[i].etag,(unsigned long long)k->map[i].hash);
         fclose(mf); }
+    free(nodes); free(k);
 }
 
 static void sortByUid(Out*o){
@@ -398,15 +408,16 @@ static void sortByUid(Out*o){
 int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
                     const char*coll,int kind,const char*mapfile,
                     ConflictPolicy pol,SyncStats*st){
-    static S s; memset(&s,0,sizeof s); s.kind=kind;
+    S *s = calloc(1,sizeof *s); Out *o = calloc(1,sizeof *o);
+    if(!s || !o){ free(s); free(o); fprintf(stderr,"sync_collection: out of memory\n"); return -1; }
+    s->kind=kind;
     static uint8_t ai[512]; int ailen=pdb_read_appinfo(localpdb,ai,sizeof ai); if(ailen<0)ailen=0;
-    pdb_read(localpdb,loadRec,&s);
-    static Out o; memset(&o,0,sizeof o);
+    pdb_read(localpdb,loadRec,s);
     SyncStats z={0}; if(!st) st=&z;
-    sync_one(d,&s,coll,mapfile,pol,&o,0,st);
-    sortByUid(&o);
-    kindWrite(kind,outpdb, ailen?ai:NULL, ailen, o.rec,o.nrec);
-    return o.nrec;
+    sync_one(d,s,coll,mapfile,pol,o,0,st);
+    sortByUid(o);
+    kindWrite(kind,outpdb, ailen?ai:NULL, ailen, o->rec,o->nrec);
+    int n=o->nrec; free(s); free(o); return n;
 }
 
 /* ---- category-routed multi-collection sync ---- */
@@ -418,9 +429,10 @@ int sync_categorized(const DavCtx*d,const char*localpdb,const char*outpdb,
                      int kind,const CatRoute*rt,const char*mapdir,
                      ConflictPolicy pol,SyncStats*st){
     static uint8_t ai[512]; int ailen=pdb_read_appinfo(localpdb,ai,sizeof ai); if(ailen<0)ailen=0;
-    static S all; memset(&all,0,sizeof all); all.kind=kind;
-    pdb_read(localpdb,loadRec,&all);
-    static Out o; memset(&o,0,sizeof o);
+    S *all = calloc(1,sizeof *all); Out *o = calloc(1,sizeof *o); S *sub = calloc(1,sizeof *sub);
+    if(!all || !o || !sub){ free(all); free(o); free(sub); fprintf(stderr,"sync_categorized: out of memory\n"); return -1; }
+    all->kind=kind;
+    pdb_read(localpdb,loadRec,all);
     SyncStats z={0}; if(!st) st=&z;
 
     /* distinct destination collections + a representative category id each */
@@ -435,21 +447,21 @@ int sync_categorized(const DavCtx*d,const char*localpdb,const char*outpdb,
 
     for(int ci=0;ci<nc;ci++){
         const char*C=colls[ci];
-        static S sub; memset(&sub,0,sizeof sub); sub.kind=kind;
-        for(int i=0;i<all.nloc;i++){
-            int cat = all.loc[i].attr & REC_ATTR_CAT;
+        memset(sub,0,sizeof *sub); sub->kind=kind;
+        for(int i=0;i<all->nloc;i++){
+            int cat = all->loc[i].attr & REC_ATTR_CAT;
             const char*dest = rt->coll[cat]?rt->coll[cat]:rt->def;
             if(!dest || strcmp(dest,C)) continue;
-            if(sub.nloc>=MAXR || sub.locUsed+all.loc[i].len>(int)sizeof sub.locArena) break;
-            Loc*L=&sub.loc[sub.nloc]; *L=all.loc[i]; L->off=sub.locUsed;
-            memcpy(sub.locArena+sub.locUsed, all.locArena+all.loc[i].off, all.loc[i].len);
-            sub.locUsed+=all.loc[i].len; sub.nloc++;
+            if(sub->nloc>=MAXR || sub->locUsed+all->loc[i].len>(int)sizeof sub->locArena) break;
+            Loc*L=&sub->loc[sub->nloc]; *L=all->loc[i]; L->off=sub->locUsed;
+            memcpy(sub->locArena+sub->locUsed, all->locArena+all->loc[i].off, all->loc[i].len);
+            sub->locUsed+=all->loc[i].len; sub->nloc++;
         }
         char san[300], mapfile[400]; sanitizeColl(C,san,sizeof san);
         snprintf(mapfile,sizeof mapfile,"%s/%s.map",mapdir,san);
-        sync_one(d,&sub,C,mapfile,pol,&o,catOf[ci],st);
+        sync_one(d,sub,C,mapfile,pol,o,catOf[ci],st);
     }
-    sortByUid(&o);
-    kindWrite(kind,outpdb, ailen?ai:NULL, ailen, o.rec,o.nrec);
-    return o.nrec;
+    sortByUid(o);
+    kindWrite(kind,outpdb, ailen?ai:NULL, ailen, o->rec,o->nrec);
+    int n=o->nrec; free(all); free(o); free(sub); return n;
 }
