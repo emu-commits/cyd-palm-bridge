@@ -50,6 +50,20 @@ typedef struct {
 int  ApptUnpack(const uint8_t *r, int len, Appt *a);        /* bytes -> Appt */
 int  ApptPack(uint8_t *buf, int cap, const Appt *a);        /* Appt -> bytes, returns len or -1 */
 
+/* ============================ ToDo ===================================== */
+typedef struct {
+    int  hasDue; int dueY, dueM, dueD;   /* due date (date only)          */
+    int  priority;                        /* Palm 1..5 (1 = highest)       */
+    int  completed;                       /* 0/1                           */
+    char description[256];
+    char note[512];
+} Todo;
+
+int  ToDoUnpack(const uint8_t *r, int len, Todo *t);
+int  ToDoPack(uint8_t *buf, int cap, const Todo *t);
+int  vtodo_emit(char *out, int cap, const Todo *t, uint32_t uid);   /* Todo->VTODO */
+int  vtodo_parse(const char *ics, Todo *t);                         /* VTODO->Todo, 0 ok */
+
 /* ============================ AddressBook =============================== */
 enum { F_name, F_firstName, F_company, F_phone1, F_phone2, F_phone3, F_phone4,
        F_phone5, F_address, F_city, F_state, F_zip, F_country, F_title,
@@ -99,5 +113,14 @@ int pdb_read(const char *path, pdb_rec_cb cb, void *ctx);
 int pdb_write(const char *path, const char *name,
               uint32_t type, uint32_t creator,
               const PdbRec *recs, int nrecs);
+
+/* writer variant that also emits an AppInfo block (category table etc.). */
+int pdb_write_ai(const char *path, const char *name,
+                 uint32_t type, uint32_t creator,
+                 const uint8_t *appinfo, int ailen,
+                 const PdbRec *recs, int nrecs);
+
+/* read the AppInfo block bytes into buf (returns length, 0 if none, -1 err). */
+int pdb_read_appinfo(const char *path, uint8_t *buf, int cap);
 
 #endif

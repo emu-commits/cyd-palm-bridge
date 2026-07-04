@@ -16,40 +16,59 @@
 #include <stdlib.h>
 #include <string.h>
 #include "palm.h"
+#include "appinfo.h"
 #include "sync.h"
 
-/* ======================= full-sync primitives ========================== */
-typedef struct { const DavCtx*d; const char*coll; int isCal; FILE*map; int n; } PushCtx;
+/* ---- kind helpers ---- */
+static const char* kindExt(int k){ return k==KIND_CARD?"vcf":"ics"; }
+static const char* kindCType(int k){ return k==KIND_CARD?"text/vcard; charset=utf-8":"text/calendar; charset=utf-8"; }
+static int kindWrite(int k,const char*path,const uint8_t*ai,int ailen,const PdbRec*recs,int nrec){
+    if(k==KIND_CAL)  return pdb_write_ai(path,"DatebookDB",0x44415441,0x64617465,ai,ailen,recs,nrec);
+    if(k==KIND_TODO) return pdb_write_ai(path,"ToDoDB",   0x44415441,0x746F646F,ai,ailen,recs,nrec);
+    return                pdb_write_ai(path,"AddressDB", 0x44415441,0x61646472,ai,ailen,recs,nrec);
+}
 
-static int emit_object(int isCal,const uint8_t*data,int len,uint32_t uid,char*out,int cap){
-    if(isCal){
+/* ======================= full-sync primitives ========================== */
+typedef struct { const DavCtx*d; const char*coll; int kind; FILE*map; int n; } PushCtx;
+
+static int emit_object(int kind,const uint8_t*data,int len,uint32_t uid,char*out,int cap){
+    if(kind==KIND_CAL){
         Appt a; if(ApptUnpack(data,len,&a)) return -1;
         char v[4096]; ical_emit(v,sizeof v,&a,uid);
         char vt[1200]; int vl=(a.hasTime)?ical_vtimezone(vt,sizeof vt):0; if(vl<0)vl=0; if(!vl)vt[0]=0;
         return snprintf(out,cap,"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//CYD-Palm-Bridge//EN\r\n%s%sEND:VCALENDAR\r\n",vt,v);
+    } else if(kind==KIND_TODO){
+        Todo t; if(ToDoUnpack(data,len,&t)) return -1;
+        char v[2048]; vtodo_emit(v,sizeof v,&t,uid);
+        return snprintf(out,cap,"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//CYD-Palm-Bridge//EN\r\n%sEND:VCALENDAR\r\n",v);
     } else {
         Addr a; if(AddrUnpack(data,len,&a)) return -1;
         return vcard_emit(out,cap,&a,uid);
     }
 }
+/* server object bytes -> packed Palm record (inverse of emit_object). len or -1. */
+static int parse_object(int kind,const char*obj,uint8_t*out,int cap){
+    if(kind==KIND_CAL){ Appt a; if(ical_parse(obj,&a)) return -1; return ApptPack(out,cap,&a); }
+    if(kind==KIND_TODO){ Todo t; if(vtodo_parse(obj,&t)) return -1; return ToDoPack(out,cap,&t); }
+    Addr a; if(vcard_parse(obj,&a)) return -1; return AddrPack(out,cap,&a);
+}
 
 static int pushRec(const PdbRec*r,int i,void*ctx){
     (void)i; PushCtx*p=ctx;
-    char body[8192]; int bl=emit_object(p->isCal,r->data,r->len,r->uniqueID,body,sizeof body);
+    char body[8192]; int bl=emit_object(p->kind,r->data,r->len,r->uniqueID,body,sizeof body);
     if(bl<0) return 0;
     FILE*f=fopen("state/.body","wb"); fwrite(body,1,strlen(body),f); fclose(f);
-    char name[64]; snprintf(name,sizeof name,"%u.%s",r->uniqueID,p->isCal?"ics":"vcf");
+    char name[64]; snprintf(name,sizeof name,"%u.%s",r->uniqueID,kindExt(p->kind));
     char etag[160]=""; int st=0;
-    dav_put(p->d,p->coll,name,p->isCal?"text/calendar; charset=utf-8":"text/vcard; charset=utf-8",
-            "state/.body",NULL,etag,sizeof etag,&st);
-    fprintf(p->map,"%s\t%u\t%s\t%s\n",p->isCal?"cal":"card",r->uniqueID,name,etag);
+    dav_put(p->d,p->coll,name,kindCType(p->kind),"state/.body",NULL,etag,sizeof etag,&st);
+    fprintf(p->map,"%d\t%u\t%s\t%s\n",p->kind,r->uniqueID,name,etag);
     p->n++;
     return 0;
 }
 
-int sync_push(const DavCtx*d,const char*pdbpath,const char*coll,int isCal){
+int sync_push(const DavCtx*d,const char*pdbpath,const char*coll,int kind){
     FILE*map=fopen("state/sync_map.tsv","a");
-    PushCtx p={ .d=d,.coll=coll,.isCal=isCal,.map=map,.n=0 };
+    PushCtx p={ .d=d,.coll=coll,.kind=kind,.map=map,.n=0 };
     pdb_read(pdbpath,pushRec,&p);
     if(map) fclose(map);
     return p.n;
@@ -60,28 +79,24 @@ static void collectName(const char*name,const char*etag,void*ctx){
     (void)etag; NameList*l=ctx; if(l->n<256) snprintf(l->names[l->n++],256,"%s",name);
 }
 
-int sync_pull(const DavCtx*d,const char*coll,const char*outpdb,int isCal){
+int sync_pull(const DavCtx*d,const char*coll,const char*outpdb,int kind){
     NameList nl={0}; dav_list(d,coll,collectName,&nl);
     static uint8_t arena[256*PALM_REC_MAX]; static PdbRec recs[256];
     int nrec=0, used=0;
+    const char*ext=kindExt(kind);
     for(int i=0;i<nl.n;i++){
         const char*nm=nl.names[i]; const char*dot=strrchr(nm,'.'); if(!dot) continue;
-        if(isCal!=!strcmp(dot,".ics")) {} /* keep only matching */
-        if(isCal && strcmp(dot,".ics")) continue;
-        if(!isCal && strcmp(dot,".vcf")) continue;
+        if(strcmp(dot+1,ext)) continue;                 /* keep only matching kind */
         char obj[16384]; if(dav_get(d,coll,nm,obj,sizeof obj)<=0) continue;
         uint32_t uid=(uint32_t)strtoul(nm,NULL,10);
-        uint8_t*dst=arena+used; int l;
-        if(isCal){ Appt a; if(ical_parse(obj,&a)) continue; l=ApptPack(dst,PALM_REC_MAX,&a); }
-        else     { Addr a; if(vcard_parse(obj,&a)) continue; l=AddrPack(dst,PALM_REC_MAX,&a); }
+        uint8_t*dst=arena+used; int l=parse_object(kind,obj,dst,PALM_REC_MAX);
         if(l<=0) continue;
         recs[nrec]=(PdbRec){ .attr=0,.uniqueID=uid,.data=dst,.len=l }; used+=l; nrec++;
         if(nrec>=256||used+PALM_REC_MAX>(int)sizeof arena) break;
     }
     for(int i=1;i<nrec;i++){ PdbRec k=recs[i]; int j=i-1;
         while(j>=0 && recs[j].uniqueID>k.uniqueID){ recs[j+1]=recs[j]; j--; } recs[j+1]=k; }
-    if(isCal) pdb_write(outpdb,"DatebookDB",0x44415441,0x64617465,recs,nrec);
-    else      pdb_write(outpdb,"AddressDB",0x44415441,0x61646472,recs,nrec);
+    kindWrite(kind,outpdb,NULL,0,recs,nrec);
     return nrec;
 }
 
@@ -111,7 +126,7 @@ typedef struct {                       /* server objects (from PROPFIND / sync R
 } Srv;
 
 typedef struct {
-    int isCal;
+    int kind;
     Loc loc[MAXR]; int nloc; uint8_t locArena[MAXR*PALM_REC_MAX]; int locUsed;
     Map map[MAXR]; int nmap;
     Srv srv[MAXR]; int nsrv;
@@ -124,7 +139,7 @@ static int loadRec(const PdbRec*r,int i,void*ctx){
     Loc*L=&s->loc[s->nloc];
     L->uid=r->uniqueID; L->attr=r->attr; L->len=r->len; L->off=s->locUsed;
     memcpy(s->locArena+s->locUsed,r->data,r->len); s->locUsed+=r->len;
-    char body[8192]; if(emit_object(s->isCal,r->data,r->len,r->uniqueID,body,sizeof body)<0) L->hash=0;
+    char body[8192]; if(emit_object(s->kind,r->data,r->len,r->uniqueID,body,sizeof body)<0) L->hash=0;
     else L->hash=fnv1a(body);
     s->nloc++;
     return 0;
@@ -195,81 +210,81 @@ static Node* nodeFor(Node*nodes,int*nn,uint32_t uid){
     Node*n=&nodes[(*nn)++]; memset(n,0,sizeof *n); n->uid=uid; n->li=-1; return n;
 }
 
-/* ---- output accumulator: kept records -> merged PDB + refreshed map ---- */
+/* ---- output accumulator: kept records -> merged PDB ---- */
 typedef struct {
     PdbRec rec[MAXR]; int nrec; uint8_t arena[MAXR*PALM_REC_MAX]; int used;
-    Map map[MAXR]; int nmap;
 } Out;
+/* per-collection sink: shared record output + this collection's map rows +
+ * the category to stamp on records pulled from the server.                  */
+typedef struct { Out*o; Map map[MAXR]; int nmap; int pullCat; } Sink;
 
-static void keepBytes(Out*o,uint32_t uid,uint8_t attr,const uint8_t*data,int len,
+static void keepBytes(Sink*k,uint32_t uid,uint8_t attr,const uint8_t*data,int len,
                       const char*href,const char*etag,uint64_t hash){
+    Out*o=k->o;
+    if(o->nrec>=MAXR || o->used+len>(int)sizeof o->arena) return;
     uint8_t*dst=o->arena+o->used; memcpy(dst,data,len);
     o->rec[o->nrec]=(PdbRec){ .attr=(uint8_t)(attr&~REC_ATTR_DIRTY&~REC_ATTR_DELETE),
                               .uniqueID=uid,.data=dst,.len=len };
     o->used+=len; o->nrec++;
-    Map*m=&o->map[o->nmap++]; m->uid=uid; snprintf(m->href,sizeof m->href,"%s",href);
+    Map*m=&k->map[k->nmap++]; m->uid=uid; snprintf(m->href,sizeof m->href,"%s",href);
     snprintf(m->etag,sizeof m->etag,"%s",etag); m->hash=hash;
 }
 
-/* GET a server object, parse+pack into a local record, keep it. */
-static int keepFromServer(const DavCtx*d,const char*coll,int isCal,Out*o,
+/* GET a server object, parse+pack into a local record, keep it (stamped with
+ * the sink's pullCat category). */
+static int keepFromServer(const DavCtx*d,const char*coll,int kind,Sink*k,
                           uint32_t uid,const char*name,const char*etag){
     char obj[16384]; if(dav_get(d,coll,name,obj,sizeof obj)<=0) return -1;
-    uint8_t tmp[PALM_REC_MAX]; int l;
-    if(isCal){ Appt a; if(ical_parse(obj,&a)) return -1; l=ApptPack(tmp,sizeof tmp,&a); }
-    else     { Addr a; if(vcard_parse(obj,&a)) return -1; l=AddrPack(tmp,sizeof tmp,&a); }
+    uint8_t tmp[PALM_REC_MAX];
+    int l=parse_object(kind,obj,tmp,sizeof tmp);
     if(l<=0) return -1;
-    char body[8192]; emit_object(isCal,tmp,l,uid,body,sizeof body);
-    keepBytes(o,uid,0,tmp,l,name,etag,fnv1a(body));
+    char body[8192]; emit_object(kind,tmp,l,uid,body,sizeof body);
+    keepBytes(k,uid,(uint8_t)k->pullCat,tmp,l,name,etag,fnv1a(body));
     return 0;
 }
 
 /* PUT a local record; ifmatch NULL = unconditional. keep it locally. */
-static int pushLocal(const DavCtx*d,const char*coll,int isCal,Out*o,
+static int pushLocal(const DavCtx*d,const char*coll,int kind,Sink*k,
                      const Loc*L,const uint8_t*arena,uint32_t uid,
                      const char*name,const char*ifmatch){
-    char body[8192]; int bl=emit_object(isCal,arena+L->off,L->len,uid,body,sizeof body);
+    char body[8192]; int bl=emit_object(kind,arena+L->off,L->len,uid,body,sizeof body);
     if(bl<0) return -1;
     FILE*f=fopen("state/.body","wb"); fwrite(body,1,strlen(body),f); fclose(f);
     char etag[160]=""; int st=0;
-    dav_put(d,coll,name,isCal?"text/calendar; charset=utf-8":"text/vcard; charset=utf-8",
-            "state/.body",ifmatch,etag,sizeof etag,&st);
+    dav_put(d,coll,name,kindCType(kind),"state/.body",ifmatch,etag,sizeof etag,&st);
     if(!etag[0]) dav_getetag(d,coll,name,etag,sizeof etag);   /* fallback */
-    keepBytes(o,uid,L->attr,arena+L->off,L->len,name,etag,fnv1a(body));
+    keepBytes(k,uid,L->attr,arena+L->off,L->len,name,etag,fnv1a(body));
     return st;
 }
 
-int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
-                    const char*coll,int isCal,const char*mapfile,
-                    ConflictPolicy pol,SyncStats*st){
-    static S s; memset(&s,0,sizeof s); s.isCal=isCal;
-    pdb_read(localpdb,loadRec,&s);
-    loadMap(&s,mapfile);
-    buildServer(&s,d,coll);
+/* Reconcile one preloaded subset (s->loc filled, s->kind set) against one
+ * collection; append kept records to *o; rewrite this collection's map.      */
+static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
+                     ConflictPolicy pol,Out*o,int pullCat,SyncStats*st){
+    loadMap(s,mapfile);
+    buildServer(s,d,coll);
 
     static Node nodes[MAXR*2]; int nn=0;
     uint32_t seed=1;
-    for(int i=0;i<s.nloc;i++){ Node*n=nodeFor(nodes,&nn,s.loc[i].uid); n->li=i; if(s.loc[i].uid>=seed)seed=s.loc[i].uid+1; }
-    for(int i=0;i<s.nmap;i++){ Node*n=nodeFor(nodes,&nn,s.map[i].uid); n->hasMap=1;
-        snprintf(n->mHref,sizeof n->mHref,"%s",s.map[i].href);
-        snprintf(n->mEtag,sizeof n->mEtag,"%s",s.map[i].etag); n->mHash=s.map[i].hash;
-        if(s.map[i].uid>=seed)seed=s.map[i].uid+1; }
-    for(int i=0;i<s.nsrv;i++){ if(!s.srv[i].present) continue;   /* deleted on server */
-        Node*n=nodeFor(nodes,&nn,s.srv[i].uid); n->hasSrv=1;
-        snprintf(n->sName,sizeof n->sName,"%s",s.srv[i].name);
-        snprintf(n->sEtag,sizeof n->sEtag,"%s",s.srv[i].etag);
-        if(s.srv[i].uid>=seed)seed=s.srv[i].uid+1; }
+    for(int i=0;i<s->nloc;i++){ Node*n=nodeFor(nodes,&nn,s->loc[i].uid); n->li=i; if(s->loc[i].uid>=seed)seed=s->loc[i].uid+1; }
+    for(int i=0;i<s->nmap;i++){ Node*n=nodeFor(nodes,&nn,s->map[i].uid); n->hasMap=1;
+        snprintf(n->mHref,sizeof n->mHref,"%s",s->map[i].href);
+        snprintf(n->mEtag,sizeof n->mEtag,"%s",s->map[i].etag); n->mHash=s->map[i].hash;
+        if(s->map[i].uid>=seed)seed=s->map[i].uid+1; }
+    for(int i=0;i<s->nsrv;i++){ if(!s->srv[i].present) continue;
+        Node*n=nodeFor(nodes,&nn,s->srv[i].uid); n->hasSrv=1;
+        snprintf(n->sName,sizeof n->sName,"%s",s->srv[i].name);
+        snprintf(n->sEtag,sizeof n->sEtag,"%s",s->srv[i].etag);
+        if(s->srv[i].uid>=seed)seed=s->srv[i].uid+1; }
 
-    static Out o; memset(&o,0,sizeof o);
-    SyncStats z={0}; if(!st) st=&z;
-    const char*ext = isCal?"ics":"vcf";
+    static Sink kbuf; kbuf.o=o; kbuf.nmap=0; kbuf.pullCat=pullCat; Sink*k=&kbuf;
+    const char*ext = kindExt(s->kind); int kind=s->kind;
 
     for(int i=0;i<nn;i++){
         Node*n=&nodes[i];
-        const Loc*L = n->li>=0 ? &s.loc[n->li] : NULL;
+        const Loc*L = n->li>=0 ? &s->loc[n->li] : NULL;
         int ldel = L && (L->attr & REC_ATTR_DELETE);
 
-        /* classify local */
         enum { LABSENT, LNEW, LMOD, LDEL, LCLEAN } lc;
         if(!L)               lc=LABSENT;
         else if(ldel)        lc=LDEL;
@@ -277,7 +292,6 @@ int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
         else if(L->hash!=n->mHash) lc=LMOD;
         else                 lc=LCLEAN;
 
-        /* classify server */
         enum { SABSENT, SNEW, SMOD, SDEL, SCLEAN } sc;
         if(!n->hasMap &&  n->hasSrv) sc=SNEW;
         else if(!n->hasMap)          sc=SABSENT;
@@ -295,66 +309,115 @@ int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
             st->conflicts++;
             int serverWins = (pol==POL_SERVER);
             int localWins  = (pol==POL_LOCAL);
-            /* modify-beats-delete for POL_BOTH and as the humane default edge */
             if(pol==POL_BOTH){
-                if(sc==SDEL){ localWins=1; }          /* local mod survives   */
-                else if(lc==LDEL){ serverWins=1; }    /* server mod survives   */
-                else {                                 /* true mod/mod or new/new: keep both */
-                    if(sc!=SDEL) keepFromServer(d,coll,isCal,&o,n->uid,srvName,n->sEtag);
+                if(sc==SDEL){ localWins=1; }
+                else if(lc==LDEL){ serverWins=1; }
+                else {
+                    if(sc!=SDEL) keepFromServer(d,coll,kind,k,n->uid,srvName,n->sEtag);
                     if(L && lc!=LDEL){ uint32_t u2=seed++; char n2[64]; snprintf(n2,sizeof n2,"%u.%s",u2,ext);
-                        pushLocal(d,coll,isCal,&o,L,s.locArena,u2,n2,NULL); }
+                        pushLocal(d,coll,kind,k,L,s->locArena,u2,n2,NULL); }
                     continue;
                 }
             }
             if(serverWins){
-                if(sc==SDEL){ /* server deleted -> honor delete */ if(n->hasMap) {} }
-                else keepFromServer(d,coll,isCal,&o,n->uid,srvName,n->sEtag);
+                if(sc!=SDEL) keepFromServer(d,coll,kind,k,n->uid,srvName,n->sEtag);
             } else if(localWins){
                 if(lc==LDEL){ dav_delete(d,coll,srvName,NULL); }
-                else pushLocal(d,coll,isCal,&o,L,s.locArena,n->uid,lname,NULL);
+                else pushLocal(d,coll,kind,k,L,s->locArena,n->uid,lname,NULL);
             }
             continue;
         }
 
-        /* ---- no-conflict matrix ---- */
         if(lc==LNEW && sc==SABSENT){
-            pushLocal(d,coll,isCal,&o,L,s.locArena,n->uid,lname,NULL); st->pushNew++;
+            pushLocal(d,coll,kind,k,L,s->locArena,n->uid,lname,NULL); st->pushNew++;
         } else if(lc==LMOD && sc==SCLEAN){
-            pushLocal(d,coll,isCal,&o,L,s.locArena,n->uid,srvName,n->mEtag); st->pushMod++;
+            pushLocal(d,coll,kind,k,L,s->locArena,n->uid,srvName,n->mEtag); st->pushMod++;
         } else if(lc==LCLEAN && sc==SCLEAN){
-            keepBytes(&o,n->uid,L->attr,s.locArena+L->off,L->len,srvName,n->mEtag,L->hash); st->unchanged++;
+            keepBytes(k,n->uid,L->attr,s->locArena+L->off,L->len,srvName,n->mEtag,L->hash); st->unchanged++;
         } else if(lc==LCLEAN && sc==SMOD){
-            keepFromServer(d,coll,isCal,&o,n->uid,srvName,n->sEtag); st->pullMod++;
+            keepFromServer(d,coll,kind,k,n->uid,srvName,n->sEtag); st->pullMod++;
         } else if(lc==LCLEAN && sc==SDEL){
-            st->pullDel++; /* drop local, remove map */
-        } else if(lc==LDEL && (sc==SCLEAN)){
+            st->pullDel++;
+        } else if(lc==LDEL && sc==SCLEAN){
             dav_delete(d,coll,srvName,n->mEtag); st->pushDel++;
         } else if(lc==LDEL && sc==SDEL){
             st->pushDel++;
         } else if(lc==LABSENT && sc==SNEW){
-            keepFromServer(d,coll,isCal,&o,n->uid,srvName,n->sEtag); st->pullNew++;
+            keepFromServer(d,coll,kind,k,n->uid,srvName,n->sEtag); st->pullNew++;
         } else if(lc==LABSENT && sc==SCLEAN){
-            /* record removed locally without tombstone -> treat as local delete */
             dav_delete(d,coll,srvName,n->mEtag); st->pushDel++;
-        } else if(lc==LABSENT && sc==SDEL){
-            /* gone on both, just forget */
         }
-        /* remaining combos are contradictions; skip */
     }
 
-    /* sort merged records by uid, write PDB */
-    for(int i=1;i<o.nrec;i++){ PdbRec k=o.rec[i]; Map km=o.map[i]; int j=i-1;
-        while(j>=0 && o.rec[j].uniqueID>k.uniqueID){ o.rec[j+1]=o.rec[j]; o.map[j+1]=o.map[j]; j--; }
-        o.rec[j+1]=k; o.map[j+1]=km; }
-    if(isCal) pdb_write(outpdb,"DatebookDB",0x44415441,0x64617465,o.rec,o.nrec);
-    else      pdb_write(outpdb,"AddressDB",0x44415441,0x61646472,o.rec,o.nrec);
-
-    /* rewrite the map (sync-token header first, then one row per kept record) */
+    /* rewrite this collection's map (token header + one row per kept record) */
     FILE*mf=fopen(mapfile,"w");
     if(mf){
-        if(s.newToken[0]) fprintf(mf,"#synctoken\t%s\n",s.newToken);
-        for(int i=0;i<o.nmap;i++) fprintf(mf,"%u\t%s\t%s\t%llu\n",
-                o.map[i].uid,o.map[i].href,o.map[i].etag,(unsigned long long)o.map[i].hash);
+        if(s->newToken[0]) fprintf(mf,"#synctoken\t%s\n",s->newToken);
+        for(int i=0;i<k->nmap;i++) fprintf(mf,"%u\t%s\t%s\t%llu\n",
+                k->map[i].uid,k->map[i].href,k->map[i].etag,(unsigned long long)k->map[i].hash);
         fclose(mf); }
+}
+
+static void sortByUid(Out*o){
+    for(int i=1;i<o->nrec;i++){ PdbRec k=o->rec[i]; int j=i-1;
+        while(j>=0 && o->rec[j].uniqueID>k.uniqueID){ o->rec[j+1]=o->rec[j]; j--; } o->rec[j+1]=k; }
+}
+
+int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
+                    const char*coll,int kind,const char*mapfile,
+                    ConflictPolicy pol,SyncStats*st){
+    static S s; memset(&s,0,sizeof s); s.kind=kind;
+    static uint8_t ai[512]; int ailen=pdb_read_appinfo(localpdb,ai,sizeof ai); if(ailen<0)ailen=0;
+    pdb_read(localpdb,loadRec,&s);
+    static Out o; memset(&o,0,sizeof o);
+    SyncStats z={0}; if(!st) st=&z;
+    sync_one(d,&s,coll,mapfile,pol,&o,0,st);
+    sortByUid(&o);
+    kindWrite(kind,outpdb, ailen?ai:NULL, ailen, o.rec,o.nrec);
+    return o.nrec;
+}
+
+/* ---- category-routed multi-collection sync ---- */
+static void sanitizeColl(const char*coll,char*out,int cap){
+    int j=0; for(int i=0;coll[i]&&j<cap-1;i++){ char c=coll[i]; out[j++]=(c=='/'||c==':')?'_':c; } out[j]=0;
+}
+
+int sync_categorized(const DavCtx*d,const char*localpdb,const char*outpdb,
+                     int kind,const CatRoute*rt,const char*mapdir,
+                     ConflictPolicy pol,SyncStats*st){
+    static uint8_t ai[512]; int ailen=pdb_read_appinfo(localpdb,ai,sizeof ai); if(ailen<0)ailen=0;
+    static S all; memset(&all,0,sizeof all); all.kind=kind;
+    pdb_read(localpdb,loadRec,&all);
+    static Out o; memset(&o,0,sizeof o);
+    SyncStats z={0}; if(!st) st=&z;
+
+    /* distinct destination collections + a representative category id each */
+    const char* colls[CAT_COUNT+1]; int catOf[CAT_COUNT+1]; int nc=0;
+    for(int c=0;c<CAT_COUNT;c++){
+        const char*cl = rt->coll[c]?rt->coll[c]:rt->def; if(!cl||!cl[0]) continue;
+        int found=0; for(int j=0;j<nc;j++) if(!strcmp(colls[j],cl)){ found=1; break; }
+        if(!found){ colls[nc]=cl; catOf[nc]=c; nc++; }
+    }
+    if(rt->def && rt->def[0]){ int f=0; for(int j=0;j<nc;j++) if(!strcmp(colls[j],rt->def)){f=1;break;}
+        if(!f){ colls[nc]=rt->def; catOf[nc]=0; nc++; } }
+
+    for(int ci=0;ci<nc;ci++){
+        const char*C=colls[ci];
+        static S sub; memset(&sub,0,sizeof sub); sub.kind=kind;
+        for(int i=0;i<all.nloc;i++){
+            int cat = all.loc[i].attr & REC_ATTR_CAT;
+            const char*dest = rt->coll[cat]?rt->coll[cat]:rt->def;
+            if(!dest || strcmp(dest,C)) continue;
+            if(sub.nloc>=MAXR || sub.locUsed+all.loc[i].len>(int)sizeof sub.locArena) break;
+            Loc*L=&sub.loc[sub.nloc]; *L=all.loc[i]; L->off=sub.locUsed;
+            memcpy(sub.locArena+sub.locUsed, all.locArena+all.loc[i].off, all.loc[i].len);
+            sub.locUsed+=all.loc[i].len; sub.nloc++;
+        }
+        char san[300], mapfile[400]; sanitizeColl(C,san,sizeof san);
+        snprintf(mapfile,sizeof mapfile,"%s/%s.map",mapdir,san);
+        sync_one(d,&sub,C,mapfile,pol,&o,catOf[ci],st);
+    }
+    sortByUid(&o);
+    kindWrite(kind,outpdb, ailen?ai:NULL, ailen, o.rec,o.nrec);
     return o.nrec;
 }

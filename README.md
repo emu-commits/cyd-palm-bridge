@@ -10,9 +10,10 @@ The headless bridge is built and **verified against a real DAV server** (Radical
 `Palm PDB <-> CalDAV/CardDAV` incremental two-way sync with conflict resolution.
 Three test gates, all green:
 
-- `make test` → `tests/roundtrip.c`: **254 checks, 0 failures.** PDB codec is lossless
+- `make test` → `tests/roundtrip.c`: **285 checks, 0 failures.** PDB codec is lossless
   on every field; the full write→read→emit→parse→repack→reread chain reconstructs
-  the originals — now including **VALARM, EXDATE, timezone conversion, and CP1252↔UTF-8**.
+  the originals — including **VALARM, EXDATE, timezone conversion, CP1252↔UTF-8, the
+  ToDo/VTODO codec, and the AppInfo category table**.
 - `tests/dav_roundtrip.sh`: pushes real PDBs to Radicale, pulls them back into fresh
   PDBs, diffs canonical dumps. **CAL: byte-identical. CARD: property-set identical**
   (vCard doesn't preserve Palm's ordered phone slots; no data is lost/changed).
@@ -31,15 +32,17 @@ bridge/palm.h              shared model + module seams (no full DB ever resident
 bridge/pdb.c               PDB container: streaming reader (1 record RAM) + writer
 bridge/datebook.c          Appt <-> bytes  (Pack + Unpack; PumpkinOS exceptions bug fixed)
 bridge/address.c           Addr <-> bytes  (email-is-a-phone-slot quirk both ways)
+bridge/todo.c              Todo <-> bytes <-> VTODO  (due/priority/complete)
+bridge/appinfo.c           Palm AppInfo category-table parse/build
 bridge/ical.c              Appt <-> VEVENT (emit + the NEW parse/download half)
 bridge/vcard.c             Addr <-> VCARD  (emit + parse; UID required by CardDAV)
 bridge/tz.[ch]             timezone registry + DST math + UTC->local + VTIMEZONE emission
 bridge/charset.[ch]        Palm CP1252/Latin-1 <-> UTF-8
 bridge/dav.[ch]            CalDAV/CardDAV via curl (PUT+If-Match/GET/PROPFIND/DELETE) -> esp_http_client on device
 bridge/sync.[ch]           push/pull primitives + sync_collection: incremental, conflict-aware two-way sync
-bridge/main.c              CLI: discover | push | pull | sync | dump   (BRIDGE_TZ sets device zone)
-tests/                     roundtrip.c (codec) + dav_roundtrip.sh (server) + incremental.c (two-way sync)
-                           + synctoken.c (RFC 6578 delta sync)
+bridge/main.c              CLI: discover | push | pull | sync | synccat | dump  (BRIDGE_TZ sets zone)
+tests/                     roundtrip.c (codec) + dav_roundtrip.sh (server) + incremental.c (two-way)
+                           + synctoken.c (RFC 6578 delta) + category.c (category->collection routing)
 ```
 
 ### First-time DAV server setup (for the server-backed tests)
@@ -132,8 +135,31 @@ Notes: iCloud requires **HTTPS** (curl handles it; on-device = mbedTLS) and an
 supports `sync-collection`, so syncs are delta after the first. (Discovery flow verified
 against Radicale; live iCloud needs your credentials.)
 
+### Categories → collections + ToDo/Reminders (done)
+Palm records carry a category (low nibble of the record attribute byte; labels in the
+`AppInfoType` block — `appinfo.c`). `sync_categorized` partitions records by category and
+syncs each subset against its **own** DAV collection (own map + sync-token), then writes
+one merged PDB with the AppInfo preserved; pulled records are stamped with the category
+that owns their collection. `bridge_cli synccat` resolves the routing by **display-name
+match** (via `discover`): Palm category "Business" → the calendar named "Business";
+unmatched → a default (the "Unfiled" calendar, else `DAV_CAL`). No collection creation,
+so it works on iCloud (make the calendars/lists in the UI first).
+
+Applies to the component apps, per the iCloud data model:
+- **Calendar** categories → separate calendars ✓
+- **ToDo** (new `VTODO` codec — `todo.c`) categories → **Reminders lists** ✓ (a
+  Reminders list is a CalDAV collection of VTODOs; use `synccat todo`)
+- **Contacts** — one iCloud address book, no per-category collection; categories are
+  preserved on the record but not routed.
+- **Memos** — iCloud Notes has no CalDAV/CardDAV surface; out of scope.
+
+Proven in `tests/category.c` (`make ctest`): records partition to the right calendars,
+the merged PDB keeps each category nibble, a server-side add pulls back tagged with the
+owning category, and a second sync is a no-op across all collections.
+
 ### Still ahead
-- **Categories** — Palm AppInfo categories → DAV collections (nice-to-have).
+- **Live iCloud validation** — flows verified against Radicale; needs a real Apple ID +
+  app-specific password to confirm iCloud's discovery/quirks.
 - **Port to ESP32** — swap curl for esp_http_client+mbedTLS; PDB files on SD; cap the
   static reconciliation arenas (host proof uses MAXR=256 × 4 KB).
 

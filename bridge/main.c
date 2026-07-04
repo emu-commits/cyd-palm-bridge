@@ -4,6 +4,7 @@
  *   bridge_cli push  <cal-pdb> <addr-pdb>          -> full upload (seed)
  *   bridge_cli pull  <cal-out> <addr-out>          -> full download
  *   bridge_cli sync  <cal-pdb> <addr-pdb> [policy] -> incremental two-way (RFC 6578)
+ *   bridge_cli synccat cal|todo|card <pdb> [pol]   -> category-routed sync (name match)
  *   bridge_cli dump  cal|card <pdb>                -> canonical text dump
  *
  * DAV target from env: DAV_BASE, DAV_USER, DAV_PASS, DAV_CAL, DAV_CARD, BRIDGE_TZ.
@@ -14,8 +15,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include "palm.h"
 #include "dav.h"
+#include "appinfo.h"
 #include "sync.h"
 
 /* dump: read a PDB and print each record's canonical ICS/vCard to stdout,
@@ -41,39 +44,76 @@ static char* absPath(char*href,DavCtx*d){
     return href;
 }
 
-typedef struct { const char*label; } DiscCtx;
-static void discCb(const char*href,int kind,const char*dn,void*ctx){
-    (void)ctx;
-    const char*k = kind=='c'?"CALENDAR   ":kind=='a'?"ADDRESSBOOK":"(other)    ";
-    if(kind) printf("  %s  %-28s  %s\n",k,dn[0]?dn:"(unnamed)",href);
+/* collect (displayname, path) collections of a kind ('c' cal / 'a' card) */
+typedef struct { char name[16][128]; char path[16][256]; int n; int want; } Colls;
+static void collCb(const char*href,int kind,const char*dn,void*ctx){
+    Colls*c=ctx; if(kind!=c->want || c->n>=16) return;
+    snprintf(c->name[c->n],128,"%s",dn); snprintf(c->path[c->n],256,"%s",href); c->n++;
+}
+
+/* Resolve principal -> home-set -> collections of `want` kind. Updates d->base
+ * to the resolved host. Returns count; paths in cs->path are host-relative.    */
+static int resolveColls(DavCtx*d,int want,Colls*cs){
+    memset(cs,0,sizeof *cs); cs->want=want;
+    char host[256]; if(dav_effective_host(d,"/",host,sizeof host)==0 && host[0]) snprintf(d->base,sizeof d->base,"%s",host);
+    char principal[512]="";
+    if(dav_prop_href(d,"/","<d:current-user-principal/>","",principal,sizeof principal)!=0 || !principal[0]) return -1;
+    char*ppath=absPath(principal,d);
+    char home[512]="";
+    if(want=='a') dav_prop_href(d,ppath,"<e:addressbook-home-set/>","xmlns:e=\"urn:ietf:params:xml:ns:carddav\"",home,sizeof home);
+    else          dav_prop_href(d,ppath,"<c:calendar-home-set/>","xmlns:c=\"urn:ietf:params:xml:ns:caldav\"",home,sizeof home);
+    if(!home[0]) return -1;
+    char*hp=absPath(home,d);
+    dav_list_collections(d,hp,collCb,cs);
+    return cs->n;
 }
 
 static int cmd_discover(DavCtx d){
-    /* follow any redirect to the real host (iCloud: caldav.icloud.com -> pNN-...) */
-    char host[256]; if(dav_effective_host(&d,"/",host,sizeof host)==0 && host[0]){
-        snprintf(d.base,sizeof d.base,"%s",host);
-        printf("host: %s\n",d.base);
+    Colls cal={0}, card={0};
+    DavCtx dc=d; int nc=resolveColls(&dc,'c',&cal);
+    if(nc<0){ fprintf(stderr,"could not resolve principal (check credentials)\n"); return 1; }
+    printf("host: %s\ncalendars:\n",dc.base);
+    for(int i=0;i<cal.n;i++) printf("  %-28s  %s\n",cal.name[i][0]?cal.name[i]:"(unnamed)",cal.path[i]);
+    DavCtx da=d; resolveColls(&da,'a',&card);
+    printf("addressbooks:\n");
+    for(int i=0;i<card.n;i++) printf("  %-28s  %s\n",card.name[i][0]?card.name[i]:"(unnamed)",card.path[i]);
+    printf("\nSet DAV_BASE to the host and DAV_CAL/DAV_CARD to a path, then `sync`;\n"
+           "or use `synccat` to auto-route Palm categories to same-named calendars.\n");
+    return 0;
+}
+
+/* strip leading/trailing slashes so a discovered href works as a `coll` arg */
+static void trimColl(const char*in,char*out,int cap){
+    while(*in=='/') in++;
+    int l=(int)strlen(in); while(l>0 && in[l-1]=='/') l--;
+    if(l>cap-1) l=cap-1;
+    memcpy(out,in,l); out[l]=0;
+}
+
+/* category-routed sync: match Palm category labels to same-named collections */
+static int cmd_synccat(DavCtx d,int kind,const char*pdb,ConflictPolicy pol){
+    uint8_t ai[512]; int al=pdb_read_appinfo(pdb,ai,sizeof ai);
+    CatTable ct; if(al<=0 || appinfo_parse(ai,al,&ct)!=0){ fprintf(stderr,"no category table in %s\n",pdb); return 1; }
+    Colls cs={0}; int n=resolveColls(&d,'c',&cs);   /* cal + todo both live under calendar-home */
+    if(n<0){ fprintf(stderr,"discovery failed (check credentials)\n"); return 1; }
+
+    static char paths[CAT_COUNT][256];
+    CatRoute rt; memset(&rt,0,sizeof rt);
+    const char*defEnv=getenv("DAV_CAL");
+    printf("category routing:\n");
+    for(int c=0;c<CAT_COUNT;c++){
+        if(!ct.name[c][0]) continue;
+        for(int j=0;j<cs.n;j++) if(!strcasecmp(ct.name[c],cs.name[j])){
+            trimColl(cs.path[j],paths[c],sizeof paths[c]); rt.coll[c]=paths[c];
+            printf("  [%2d] %-16s -> %s\n",c,ct.name[c],paths[c]); break; }
+        if(!rt.coll[c]) printf("  [%2d] %-16s -> (default)\n",c,ct.name[c]);
     }
-    char principal[512]="";
-    if(dav_prop_href(&d,"/","<d:current-user-principal/>","",principal,sizeof principal)!=0 || !principal[0]){
-        fprintf(stderr,"could not resolve current-user-principal (check credentials)\n"); return 1;
-    }
-    char*ppath=absPath(principal,&d);
-    printf("principal: %s%s\n",d.base,ppath);
-
-    char calHome[512]="", cardHome[512]="";
-    dav_prop_href(&d,ppath,"<c:calendar-home-set/>",
-                  "xmlns:c=\"urn:ietf:params:xml:ns:caldav\"",calHome,sizeof calHome);
-    dav_prop_href(&d,ppath,"<e:addressbook-home-set/>",
-                  "xmlns:e=\"urn:ietf:params:xml:ns:carddav\"",cardHome,sizeof cardHome);
-
-    if(calHome[0]){ char*cp=absPath(calHome,&d); printf("\ncalendars under %s%s:\n",d.base,cp);
-        dav_list_collections(&d,cp,discCb,NULL); }
-    if(cardHome[0]){ char*cp=absPath(cardHome,&d); printf("\naddressbooks under %s%s:\n",d.base,cp);
-        dav_list_collections(&d,cp,discCb,NULL); }
-
-    printf("\nTo sync a collection, set DAV_BASE to the host above and DAV_CAL/DAV_CARD\n"
-           "to the collection path (minus the host), then run: bridge_cli sync ...\n");
+    rt.def = rt.coll[0] ? rt.coll[0] : defEnv;   /* Unfiled's collection, else DAV_CAL */
+    if(!rt.def){ fprintf(stderr,"no default collection: name a calendar 'Unfiled' or set DAV_CAL\n"); return 1; }
+    SyncStats s={0};
+    sync_categorized(&d,pdb,pdb,kind,&rt,"state",pol,&s);
+    printf("synced: +%d ~%d -%d push | +%d ~%d -%d pull | %d conflict | %d clean\n",
+        s.pushNew,s.pushMod,s.pushDel,s.pullNew,s.pullMod,s.pullDel,s.conflicts,s.unchanged);
     return 0;
 }
 
@@ -119,6 +159,12 @@ int main(int argc,char**argv){
     }
     if(!strcmp(argv[1],"discover")){
         return cmd_discover(d);
+    }
+    if(!strcmp(argv[1],"synccat") && argc>=4){
+        int kind = !strcmp(argv[2],"card")?KIND_CARD : !strcmp(argv[2],"todo")?KIND_TODO : KIND_CAL;
+        const char*pols = argc>4?argv[4]:"server";
+        ConflictPolicy pol = !strcmp(pols,"local")?POL_LOCAL : !strcmp(pols,"both")?POL_BOTH : POL_SERVER;
+        return cmd_synccat(d,kind,argv[3],pol);
     }
     if(!strcmp(argv[1],"dump") && argc>=4){
         int isCal=!strcmp(argv[2],"cal");

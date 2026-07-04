@@ -13,6 +13,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "../bridge/palm.h"
+#include "../bridge/appinfo.h"
 
 static int fails=0, checks=0;
 #define CK(cond,msg) do{ checks++; if(!(cond)){ fails++; printf("  FAIL: %s\n",msg);} }while(0)
@@ -27,6 +28,7 @@ typedef struct { Addr a[8]; int n; } AddrBag;
 static int addrCollect(const PdbRec *r,int i,void *ctx){ (void)i; AddrBag*b=ctx;
     if(b->n<8 && AddrUnpack(r->data,r->len,&b->a[b->n])==0) b->n++;
     return 0; }
+static int catNibble(const PdbRec *r,int i,void *ctx){ (void)i; *(int*)ctx = r->attr & REC_ATTR_CAT; return 0; }
 
 /* ---------- semantic compares ---------- */
 static void cmpAppt_full(const Appt*x,const Appt*y,const char*tag){
@@ -213,9 +215,67 @@ static void testTZ(void){
     ical_set_tz(NULL);   /* back to floating for any later tests */
 }
 
+/* ---------- ToDo / VTODO both directions ---------- */
+static int todoCollect(const PdbRec*r,int i,void*ctx){ (void)i; struct{Todo t[4];int n;}*b=ctx;
+    if(b->n<4 && ToDoUnpack(r->data,r->len,&b->t[b->n])==0) b->n++;
+    return 0; }
+static void testTodo(void){
+    printf("== ToDo ==\n");
+    Todo orig[2]; memset(orig,0,sizeof orig);
+    orig[0].hasDue=1; orig[0].dueY=2026;orig[0].dueM=8;orig[0].dueD=20; orig[0].priority=1; orig[0].completed=0;
+    strcpy(orig[0].description,"File taxes"); strcpy(orig[0].note,"before deadline");
+    orig[1].hasDue=0; orig[1].priority=4; orig[1].completed=1; strcpy(orig[1].description,"Call plumber");
+    uint8_t bytes[2][PALM_REC_MAX]; PdbRec recs[2];
+    for(int i=0;i<2;i++){ int l=ToDoPack(bytes[i],PALM_REC_MAX,&orig[i]); CK(l>0,"ToDoPack ok");
+        recs[i]=(PdbRec){ .attr=0,.uniqueID=(uint32_t)(i+1),.data=bytes[i],.len=l }; }
+    pdb_write("pdb/ToDoDB.pdb","ToDoDB",0x44415441,0x746F646F,recs,2);
+    struct{Todo t[4];int n;}bag={.n=0}; pdb_read("pdb/ToDoDB.pdb",todoCollect,&bag);
+    CK(bag.n==2,"read back 2 todos");
+    for(int i=0;i<bag.n;i++){
+        CK(orig[i].hasDue==bag.t[i].hasDue,"hasDue(pdb)");
+        if(orig[i].hasDue) CK(orig[i].dueY==bag.t[i].dueY&&orig[i].dueM==bag.t[i].dueM&&orig[i].dueD==bag.t[i].dueD,"due(pdb)");
+        CK(orig[i].priority==bag.t[i].priority,"priority(pdb)");
+        CK(orig[i].completed==bag.t[i].completed,"completed(pdb)");
+        CKSTR(orig[i].description,bag.t[i].description,"desc(pdb)");
+        /* through VTODO */
+        char vt[2048]; vtodo_emit(vt,sizeof vt,&bag.t[i],i+1);
+        Todo back; CK(vtodo_parse(vt,&back)==0,"vtodo_parse ok");
+        CK(orig[i].hasDue==back.hasDue,"hasDue(vtodo)");
+        if(orig[i].hasDue) CK(orig[i].dueY==back.dueY&&orig[i].dueM==back.dueM&&orig[i].dueD==back.dueD,"due(vtodo)");
+        CK(orig[i].priority==back.priority,"priority(vtodo)");
+        CK(orig[i].completed==back.completed,"completed(vtodo)");
+        CKSTR(orig[i].description,back.description,"desc(vtodo)");
+        CKSTR(orig[i].note,back.note,"note(vtodo)");
+    }
+}
+
+/* ---------- AppInfo category table round-trip ---------- */
+static void testAppInfo(void){
+    printf("== AppInfo categories ==\n");
+    CatTable t; memset(&t,0,sizeof t);
+    strcpy(t.name[0],"Unfiled"); strcpy(t.name[1],"Business"); strcpy(t.name[2],"Personal");
+    uint8_t ai[APPINFO_SIZE]; int al=appinfo_build(ai,sizeof ai,&t);
+    CK(al==APPINFO_SIZE,"appinfo_build size");
+    /* write a PDB carrying the AppInfo + a categorized record, read both back */
+    Appt a=mkAppt2(); uint8_t rb[PALM_REC_MAX]; int rl=ApptPack(rb,sizeof rb,&a);
+    PdbRec r={ .attr=2/*category 2*/,.uniqueID=1,.data=rb,.len=rl };
+    pdb_write_ai("pdb/CatDB.pdb","DatebookDB",0x44415441,0x64617465,ai,al,&r,1);
+    uint8_t ai2[512]; int al2=pdb_read_appinfo("pdb/CatDB.pdb",ai2,sizeof ai2);
+    CK(al2>=APPINFO_SIZE,"appinfo read back");
+    CatTable t2; CK(appinfo_parse(ai2,al2,&t2)==0,"appinfo_parse ok");
+    CKSTR(t.name[1],t2.name[1],"category 1 label survives");
+    CKSTR(t.name[2],t2.name[2],"category 2 label survives");
+    /* the record keeps its category nibble */
+    static int gotcat; gotcat=-1;
+    pdb_read("pdb/CatDB.pdb", catNibble, &gotcat);
+    CK(gotcat==2,"record category nibble preserved");
+}
+
 int main(void){
     testDateBook();
     testAddress();
+    testTodo();
+    testAppInfo();
     testCharset();
     testTZ();
     printf("\n%d checks, %d failures\n", checks, fails);
