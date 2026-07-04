@@ -15,6 +15,7 @@
 #include "lv_font_palm.h" /* authentic PalmOS system fonts */
 #include "palm_icons.h"   /* Palm app launcher icons */
 #include "hotsync.h"
+#include "graffiti.h"
 #include "lvgl.h"
 #include <string.h>
 #include <stdio.h>
@@ -75,6 +76,7 @@ static lv_obj_t *g_kb;                 /* on-screen keyboard (overlay), or NULL 
 static lv_obj_t *g_form;               /* scrollable field container */
 static lv_obj_t *g_fields[8];          /* edit-form textareas */
 static int g_nfields;
+static lv_obj_t *active_ta;            /* last-focused textarea (Graffiti target) */
 
 static void list_view(const AppDef *ad);
 static void show_detail(uint32_t uid);
@@ -170,6 +172,7 @@ static void show_detail(uint32_t uid){
 /* ------------------------- edit form ------------------------- */
 static void ta_click_cb(lv_event_t *e){
     lv_obj_t *ta = (lv_obj_t *)lv_event_get_target(e);
+    active_ta = ta;                    /* Graffiti inserts here */
     lv_keyboard_set_textarea(g_kb, ta);
     lv_obj_clear_flag(g_kb, LV_OBJ_FLAG_HIDDEN);
     if(g_form){                                   /* shrink viewport above the keyboard, */
@@ -586,6 +589,17 @@ static void details_open(void){
     }
 }
 
+/* ------------------------- U6: Graffiti stroke capture ------------------------- */
+static void graf_down_cb(lv_event_t *e){ (void)e; graffiti_clear(); }
+static void graf_move_cb(lv_event_t *e){ (void)e;
+    lv_point_t p; lv_indev_get_point(lv_indev_active(), &p);
+    graffiti_add_point(p.x, p.y);
+}
+static void graf_up_cb(lv_event_t *e){ (void)e;
+    char c = graffiti_recognize();
+    if(c && active_ta) lv_textarea_add_char(active_ta, c);
+}
+
 /* a small bordered silkscreen button with a recolored icon */
 static lv_obj_t *mk_silk(lv_obj_t *par, const lv_image_dsc_t *ic, lv_align_t al,
                          int xo, int yo, lv_event_cb_t cb){
@@ -647,6 +661,19 @@ void ui_init(void){
     mk_silk(graf, &silk_menu, LV_ALIGN_BOTTOM_LEFT,  3, -3, menu_cb);
     mk_silk(graf, &silk_find, LV_ALIGN_TOP_RIGHT,   -3,  3, find_cb);
     mk_silk(graf, &silk_calc, LV_ALIGN_BOTTOM_RIGHT,-3, -3, calc_cb);
+
+    /* U6: Graffiti writing surface (center); strokes -> $1 -> active field */
+    lv_obj_t *surf = lv_obj_create(graf);
+    lv_obj_set_size(surf, LCD_W - 76, GRAFFITI_H - 4);
+    lv_obj_align(surf, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_opa(surf, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(surf, 0, 0);
+    lv_obj_set_style_pad_all(surf, 0, 0);
+    lv_obj_add_flag(surf, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(surf, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(surf, graf_down_cb, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(surf, graf_move_cb, LV_EVENT_PRESSING, NULL);
+    lv_obj_add_event_cb(surf, graf_up_cb, LV_EVENT_RELEASED, NULL);
 
     lv_obj_t *sep = panel(graf, LCD_W/2, 6, 2, GRAFFITI_H-12, COL_LINE);
     (void)sep;
