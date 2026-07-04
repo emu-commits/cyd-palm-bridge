@@ -65,6 +65,7 @@ static const AppDef *cur_app;   /* the data app whose list/detail is showing */
 static uint32_t cur_uid;        /* the record currently in detail/edit (0 = none) */
 
 /* edit state */
+static int edit_cat;            /* category chosen for the record being edited */
 #define KB_H       150
 #define FORM_FULL  ((PDA_H - TITLE_H) - 34)                 /* form height, no keyboard */
 #define FORM_KB    (LCD_H - KB_H - TITLE_H - 34)            /* form height above keyboard */
@@ -79,6 +80,7 @@ static void show_detail(uint32_t uid);
 static void show_edit(uint32_t uid);
 static void update_cat_trigger(void);
 static void cat_trigger_cb(lv_event_t *e);
+static void details_open(void);
 
 /* the keyboard lives on the screen (overlay), so it survives lv_obj_clean(content);
  * drop it whenever we navigate away from an edit form. */
@@ -199,12 +201,12 @@ static void save_cb(lv_event_t *e){
         Appt a; if(!data_get_cal(edit_uid,&a)) memset(&a,0,sizeof a);
         snprintf(a.description,sizeof a.description,"%s",fv(0));
         snprintf(a.note,sizeof a.note,"%s",fv(1));
-        data_save_cal(edit_uid,&a);
+        data_save_cal(edit_uid,edit_cat,&a);
     } else if(cur_app->app == APP_TODO){
         Todo t; if(!data_get_todo(edit_uid,&t)) memset(&t,0,sizeof t);
         snprintf(t.description,sizeof t.description,"%s",fv(0));
         snprintf(t.note,sizeof t.note,"%s",fv(1));
-        data_save_todo(edit_uid,&t);
+        data_save_todo(edit_uid,edit_cat,&t);
     } else if(cur_app->app == APP_ADDR){
         Addr old; int have=data_get_addr(edit_uid,&old);
         Addr a; memset(&a,0,sizeof a);
@@ -219,26 +221,34 @@ static void save_cb(lv_event_t *e){
             for(unsigned k=0;k<sizeof keep/sizeof keep[0];k++) if(old.fields[keep[k]]) a.fields[keep[k]]=iv(&a,old.fields[keep[k]]);
             a.displayPhone=old.displayPhone;
         }
-        data_save_addr(edit_uid,&a);
+        data_save_addr(edit_uid,edit_cat,&a);
     } else if(cur_app->app == APP_MEMO){
-        data_save_memo(edit_uid, fv(0));
+        data_save_memo(edit_uid,edit_cat,fv(0));
     }
     list_view(cur_app);
 }
 static void cancel_cb(lv_event_t *e){ (void)e; list_view(cur_app); }
 
+static void details_btn_cb(lv_event_t *e){ (void)e; details_open(); }
+
 static void show_edit(uint32_t uid){
     if(!cur_app) return;
     edit_uid = uid; cur_uid = uid; g_nfields = 0;
+    int rc = uid ? data_record_category(cur_app->app, uid) : data_get_category();
+    edit_cat = rc < 0 ? 0 : rc;   /* new records default to Unfiled / the current filter */
     lv_obj_clean(content);
     lv_label_set_text(title_lbl, uid ? "Edit" : "New");
 
     lv_obj_t *cancel = lv_button_create(content);
-    lv_obj_set_size(cancel, 74, 28); lv_obj_align(cancel, LV_ALIGN_TOP_LEFT, 2, 2);
+    lv_obj_set_size(cancel, 66, 28); lv_obj_align(cancel, LV_ALIGN_TOP_LEFT, 2, 2);
     lv_obj_t *cl=lv_label_create(cancel); lv_label_set_text(cl,"Cancel"); lv_obj_center(cl);
     lv_obj_add_event_cb(cancel, cancel_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *det = lv_button_create(content);
+    lv_obj_set_size(det, 74, 28); lv_obj_align(det, LV_ALIGN_TOP_MID, 0, 2);
+    lv_obj_t *dtl=lv_label_create(det); lv_label_set_text(dtl,"Details"); lv_obj_center(dtl);
+    lv_obj_add_event_cb(det, details_btn_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *save = lv_button_create(content);
-    lv_obj_set_size(save, 74, 28); lv_obj_align(save, LV_ALIGN_TOP_RIGHT, -2, 2);
+    lv_obj_set_size(save, 66, 28); lv_obj_align(save, LV_ALIGN_TOP_RIGHT, -2, 2);
     lv_obj_t *sl=lv_label_create(save); lv_label_set_text(sl,"Save"); lv_obj_center(sl);
     lv_obj_add_event_cb(save, save_cb, LV_EVENT_CLICKED, NULL);
 
@@ -486,6 +496,59 @@ static void cat_trigger_cb(lv_event_t *e){
 
     cat_item(panel, "All", -1);
     if(have) for(int c=0;c<CAT_COUNT;c++) if(t.name[c][0]) cat_item(panel, t.name[c], c);
+}
+
+/* ------------------------- F4: Details (category) ------------------------- */
+static lv_obj_t *g_details;
+static void details_close(void){ if(g_details){ lv_obj_del(g_details); g_details=NULL; } }
+static void details_backdrop_cb(lv_event_t *e){ (void)e; details_close(); }
+static void details_pick_cb(lv_event_t *e){ edit_cat = (int)(intptr_t)lv_event_get_user_data(e); details_close(); }
+
+/* Details dialog: choose the record's category (Palm's per-record Details). */
+static void details_open(void){
+    if(!cur_app || g_details) return;
+    CatTable t; int have = data_get_categories(cur_app->app, &t);
+
+    g_details = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_details, LCD_W, LCD_H);
+    lv_obj_set_style_bg_color(g_details, COL_LINE, 0);
+    lv_obj_set_style_bg_opa(g_details, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(g_details, 0, 0);
+    lv_obj_set_style_pad_all(g_details, 0, 0);
+    lv_obj_add_flag(g_details, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_details, details_backdrop_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *panel = lv_obj_create(g_details);
+    lv_obj_set_width(panel, 150);
+    lv_obj_set_height(panel, LV_SIZE_CONTENT);
+    lv_obj_set_style_max_height(panel, LCD_H - 40, 0);
+    lv_obj_center(panel);
+    lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
+    lv_obj_set_style_border_width(panel, 1, 0);
+    lv_obj_set_style_border_color(panel, COL_LINE, 0);
+    lv_obj_set_style_radius(panel, 0, 0);
+    lv_obj_set_style_pad_all(panel, 4, 0);
+    lv_obj_set_style_pad_row(panel, 2, 0);
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *hdr = lv_label_create(panel);
+    lv_label_set_text(hdr, "Category:");
+    lv_obj_set_style_text_font(hdr, &lv_font_palm_bold, 0);
+
+    if(have){
+        for(int c=0;c<CAT_COUNT;c++){
+            if(!t.name[c][0]) continue;
+            lv_obj_t *b = lv_button_create(panel);
+            lv_obj_set_width(b, lv_pct(100));
+            lv_obj_set_style_radius(b, 0, 0);
+            lv_obj_set_style_pad_ver(b, 4, 0);
+            lv_obj_t *l = lv_label_create(b);
+            lv_label_set_text_fmt(l, "%s%s", c==edit_cat?"* ":"  ", t.name[c]);
+            lv_obj_align(l, LV_ALIGN_LEFT_MID, 2, 0);
+            lv_obj_add_event_cb(b, details_pick_cb, LV_EVENT_CLICKED, (void *)(intptr_t)c);
+        }
+    }
 }
 
 /* a small bordered silkscreen button with a recolored icon */

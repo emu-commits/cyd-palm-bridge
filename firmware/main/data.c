@@ -253,55 +253,61 @@ int data_get_todo(uint32_t uid, Todo *out){ Get g={uid,out,0}; pdb_read(DB_TODO,
 /* ------------------------- rewrite (replace/append one record) ------------------------- */
 #define RW_ARENA (12*1024)
 #define RW_MAX   64
-typedef struct { uint32_t uid; const uint8_t *nd; int nl; uint8_t *arena; int used; PdbRec *recs; int nr; int done; } RW;
+typedef struct { uint32_t uid; const uint8_t *nd; int nl; int cat; uint8_t *arena; int used; PdbRec *recs; int nr; int done; } RW;
 static int rwCb(const PdbRec *r,int i,void *ctx){ (void)i; RW*w=ctx;
     const uint8_t *src=r->data; int len=r->len; uint8_t attr=r->attr;
     if(r->uniqueID==w->uid){
         if(!w->nd){ w->done=1; return 0; }             /* delete: drop this record */
-        src=w->nd; len=w->nl; attr|=REC_ATTR_DIRTY; w->done=1;
+        src=w->nd; len=w->nl;
+        if(w->cat>=0) attr=(attr & ~0x0F) | (uint8_t)(w->cat & 0x0F);   /* recategorize */
+        attr|=REC_ATTR_DIRTY; w->done=1;
     }
     if(w->used+len>RW_ARENA || w->nr>=RW_MAX) return 1;
     memcpy(w->arena+w->used, src, len);
     w->recs[w->nr]=(PdbRec){.attr=attr,.uniqueID=r->uniqueID,.data=w->arena+w->used,.len=len};
     w->used+=len; w->nr++; return 0;
 }
+/* replace/append/delete one record, preserving the PDB's AppInfo (categories).
+ * nd==NULL => delete; cat<0 => keep the record's current category. */
 static int rewrite(const char *path,const char *nm,uint32_t type,uint32_t creator,
-                   uint32_t uid,const uint8_t *nd,int nl){
+                   uint32_t uid,const uint8_t *nd,int nl,int cat){
     static uint8_t arena[RW_ARENA]; static PdbRec recs[RW_MAX];
-    RW w={uid,nd,nl,arena,0,recs,0,0};
+    uint8_t ai[512]; int al=pdb_read_appinfo(path,ai,sizeof ai); if(al<0)al=0;
+    RW w={uid,nd,nl,cat,arena,0,recs,0,0};
     pdb_read(path,rwCb,&w);
-    if(!w.done){                      /* new record (uid==0 or not found): append */
+    if(!w.done && nd){                /* new record (uid==0 or not found): append */
         uint32_t nu=1; for(int i=0;i<w.nr;i++) if(recs[i].uniqueID>=nu) nu=recs[i].uniqueID+1;
         if(w.used+nl<=RW_ARENA && w.nr<RW_MAX){
             memcpy(arena+w.used,nd,nl);
-            recs[w.nr]=(PdbRec){.attr=REC_ATTR_DIRTY,.uniqueID=nu,.data=arena+w.used,.len=nl};
+            uint8_t na=REC_ATTR_DIRTY | (cat>=0 ? (uint8_t)(cat & 0x0F) : 0);
+            recs[w.nr]=(PdbRec){.attr=na,.uniqueID=nu,.data=arena+w.used,.len=nl};
             w.used+=nl; w.nr++;
         }
     }
-    return pdb_write_ai(path,nm,type,creator,NULL,0,recs,w.nr);
+    return pdb_write_ai(path,nm,type,creator, al?ai:NULL, al, recs, w.nr);
 }
 
-int data_save_cal(uint32_t uid, const Appt *in){
+int data_save_cal(uint32_t uid, int cat, const Appt *in){
     uint8_t pk[1024]; int l=ApptPack(pk,sizeof pk,in); if(l<=0) return 0;
-    return rewrite(DB_CAL,"DatebookDB",0x44415441,0x64617465,uid,pk,l)>=0;
+    return rewrite(DB_CAL,"DatebookDB",0x44415441,0x64617465,uid,pk,l,cat)>=0;
 }
-int data_save_addr(uint32_t uid, const Addr *in){
+int data_save_addr(uint32_t uid, int cat, const Addr *in){
     uint8_t pk[1024]; int l=AddrPack(pk,sizeof pk,in); if(l<=0) return 0;
-    return rewrite(DB_ADDR,"AddressDB",0x44415441,0x61646472,uid,pk,l)>=0;
+    return rewrite(DB_ADDR,"AddressDB",0x44415441,0x61646472,uid,pk,l,cat)>=0;
 }
-int data_save_todo(uint32_t uid, const Todo *in){
+int data_save_todo(uint32_t uid, int cat, const Todo *in){
     uint8_t pk[1024]; int l=ToDoPack(pk,sizeof pk,in); if(l<=0) return 0;
-    return rewrite(DB_TODO,"ToDoDB",0x44415441,0x746F646F,uid,pk,l)>=0;
+    return rewrite(DB_TODO,"ToDoDB",0x44415441,0x746F646F,uid,pk,l,cat)>=0;
 }
 
 /* remove a record (rewrite the PDB without it). the map still lists it, so the
  * next sync propagates the delete to the server. */
 int data_delete(int app, uint32_t uid){
     switch(app){
-        case APP_CAL:  return rewrite(DB_CAL, "DatebookDB",0x44415441,0x64617465,uid,NULL,0)>=0;
-        case APP_ADDR: return rewrite(DB_ADDR,"AddressDB", 0x44415441,0x61646472,uid,NULL,0)>=0;
-        case APP_TODO: return rewrite(DB_TODO,"ToDoDB",    0x44415441,0x746F646F,uid,NULL,0)>=0;
-        case APP_MEMO: return rewrite(DB_MEMO,"MemoDB",    0x44415441,0x6D656D6F,uid,NULL,0)>=0;
+        case APP_CAL:  return rewrite(DB_CAL, "DatebookDB",0x44415441,0x64617465,uid,NULL,0,-1)>=0;
+        case APP_ADDR: return rewrite(DB_ADDR,"AddressDB", 0x44415441,0x61646472,uid,NULL,0,-1)>=0;
+        case APP_TODO: return rewrite(DB_TODO,"ToDoDB",    0x44415441,0x746F646F,uid,NULL,0,-1)>=0;
+        case APP_MEMO: return rewrite(DB_MEMO,"MemoDB",    0x44415441,0x6D656D6F,uid,NULL,0,-1)>=0;
     }
     return 0;
 }
@@ -329,7 +335,15 @@ int data_get_memo(uint32_t uid, char *out, int cap){
     if(cap>0) out[0]=0;
     Det g={uid,out,cap,0}; pdb_read(DB_MEMO,getMemo,&g); return g.found;
 }
-int data_save_memo(uint32_t uid, const char *text){
+int data_save_memo(uint32_t uid, int cat, const char *text){
     int l=(int)strlen(text)+1;
-    return rewrite(DB_MEMO,"MemoDB",0x44415441,0x6D656D6F,uid,(const uint8_t *)text,l)>=0;
+    return rewrite(DB_MEMO,"MemoDB",0x44415441,0x6D656D6F,uid,(const uint8_t *)text,l,cat)>=0;
+}
+
+/* the category index of a record (attr nibble), or -1 if not found */
+typedef struct { uint32_t uid; int cat; } CatOf;
+static int catCb(const PdbRec *r,int i,void *ctx){ (void)i; CatOf*c=ctx;
+    if(r->uniqueID==c->uid){ c->cat=r->attr & 0x0F; return 1; } return 0; }
+int data_record_category(int app, uint32_t uid){
+    CatOf c={uid,-1}; pdb_read(db_path(app),catCb,&c); return c.cat;
 }

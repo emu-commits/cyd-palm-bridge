@@ -20,8 +20,8 @@ void data_todo(data_row_cb cb, void *ctx);
 void data_memo(data_row_cb cb, void *ctx);
 
 /* Memo records are plain text: read/write the whole memo string. */
-int data_get_memo(uint32_t uid, char *out, int cap);   /* 1 if found */
-int data_save_memo(uint32_t uid, const char *text);     /* uid 0 = new */
+int data_get_memo(uint32_t uid, char *out, int cap);        /* 1 if found */
+int data_save_memo(uint32_t uid, int cat, const char *text); /* uid 0 = new */
 
 /* format the full detail of one record (by app + uid) into out. 1 if found. */
 int data_detail(int app, uint32_t uid, char *out, int cap);
@@ -31,11 +31,13 @@ int data_detail(int app, uint32_t uid, char *out, int cap);
 int data_get_cal(uint32_t uid, Appt *out);   /* 1 if found */
 int data_get_addr(uint32_t uid, Addr *out);
 int data_get_todo(uint32_t uid, Todo *out);
-/* write the record back (uid==0 => create new). sets the Palm dirty bit so the
- * sync engine uploads it. 1 on success. */
-int data_save_cal(uint32_t uid, const Appt *in);
-int data_save_addr(uint32_t uid, const Addr *in);
-int data_save_todo(uint32_t uid, const Todo *in);
+/* write the record back (uid==0 => create new). cat = category index, or -1 to
+ * keep the record's current category. sets the Palm dirty bit. 1 on success. */
+int data_save_cal(uint32_t uid, int cat, const Appt *in);
+int data_save_addr(uint32_t uid, int cat, const Addr *in);
+int data_save_todo(uint32_t uid, int cat, const Todo *in);
+/* category index of a record (attr nibble), or -1 if not found */
+int data_record_category(int app, uint32_t uid);
 /* delete a record by uid (next sync propagates it). */
 int data_delete(int app, uint32_t uid);
 
