@@ -19,6 +19,48 @@ static const char* strcasestr_range(const char*s,const char*end,const char*needl
     return NULL;
 }
 
+/* XML value extraction that ignores namespace prefixes AND attributes -- iCloud
+ * writes <href xmlns="DAV:">.. so "href>" substring matching fails; match the
+ * element by its local name instead. Returns content start (after '>'), NULL if
+ * not found. Skips closing tags. */
+static const char* xml_open_e(const char*from,const char*end,const char*name){
+    size_t nl=strlen(name);
+    for(const char*p=from; p && (!end||p<end) && (p=strchr(p,'<')); p++){
+        if(end && p>=end) break;
+        const char*q=p+1; if(*q=='/'||*q=='!'||*q=='?') continue;   /* closing / comment / decl */
+        const char*e=q, *colon=NULL;
+        while(*e && *e!='>' && *e!=' ' && *e!='\t' && *e!='/'){ if(*e==':') colon=e; e++; }
+        const char*loc = colon?colon+1:q; size_t ll=(size_t)(e-loc);
+        if(ll==nl && strncasecmp(loc,name,nl)==0){
+            const char*gt=strchr(e,'>'); if(!gt||(end&&gt>=end)) return NULL;
+            return gt+1;                        /* self-closing yields "" text */
+        }
+    }
+    return NULL;
+}
+/* text content of the first element named `name` in [from,end), trimmed. 1 if found. */
+static int xml_text_e(const char*from,const char*end,const char*name,char*out,int cap){
+    if(out&&cap) out[0]=0;
+    const char*s=xml_open_e(from,end,name); if(!s) return 0;
+    const char*e=strchr(s,'<'); if(!e) e=s+strlen(s);
+    while(s<e && (*s==' '||*s=='\r'||*s=='\n'||*s=='\t')) s++;
+    while(e>s && (e[-1]==' '||e[-1]=='\r'||e[-1]=='\n'||e[-1]=='\t')) e--;
+    int n=(int)(e-s); if(n>cap-1)n=cap-1; if(n<0)n=0; memcpy(out,s,n); out[n]=0;
+    return 1;
+}
+static const char* xml_open(const char*from,const char*name){ return xml_open_e(from,NULL,name); }
+static int xml_text(const char*from,const char*name,char*out,int cap){ return xml_text_e(from,NULL,name,out,cap); }
+static void stripQuotes(char*s){
+    int l=(int)strlen(s); if(l>=2 && s[0]=='"' && s[l-1]=='"'){ memmove(s,s+1,l-2); s[l-2]=0; }
+    /* also strip a leading weak-etag marker W/ */
+    if(!strncmp(s,"W/",2)) memmove(s,s+2,strlen(s+2)+1);
+}
+static void baseName(const char*full,char*out,int cap){
+    const char*e=full+strlen(full); while(e>full && e[-1]=='/') e--;   /* trailing slash */
+    const char*s=e; while(s>full && s[-1]!='/') s--;
+    int n=(int)(e-s); if(n>cap-1)n=cap-1; if(n<0)n=0; memcpy(out,s,n); out[n]=0;
+}
+
 /* run a command, capture stdout into out (cap). returns bytes or -1. */
 static int run(const char*cmd,char*out,int cap){
     FILE*p=popen(cmd,"r"); if(!p) return -1;
@@ -81,9 +123,8 @@ int dav_getetag(const DavCtx*d,const char*coll,const char*name,char*etag,int cap
         d->user,d->pass,d->base,coll,name);
     char buf[8192]={0};
     if(run(cmd,buf,sizeof buf)<0){ if(etag&&cap)etag[0]=0; return -1; }
-    const char*e=strcasestr(buf,"getetag>"); if(!e){ if(etag&&cap)etag[0]=0; return -1; }
-    e+=8; const char*ee=strchr(e,'<'); int i=0;
-    for(const char*q=e;q<ee&&i<cap-1;q++){ if(*q!='"') etag[i++]=*q; } etag[i]=0;
+    if(!xml_text(buf,"getetag",etag,cap)){ if(etag&&cap)etag[0]=0; return -1; }
+    stripQuotes(etag);
     return 0;
 }
 
@@ -108,17 +149,10 @@ int dav_list(const DavCtx*d,const char*coll,dav_list_cb cb,void*ctx){
     const char*p=buf;
     while((p=strcasestr(p,"<response"))){
         const char*end=strcasestr(p,"</response>"); if(!end) break;
-        /* href */
-        const char*h=strcasestr(p,"href>"); char name[256]="";
-        if(h&&h<end){ h+=5; const char*he=strchr(h,'<');
-            const char*slash=he; while(slash>h && slash[-1]!='/') slash--;
-            int i=0; for(const char*q=slash;q<he&&i<255;q++) name[i++]=*q; name[i]=0; }
-        /* etag */
-        const char*e=strcasestr(p,"getetag>"); char etag[128]="";
-        if(e&&e<end){ e+=8; const char*ee=strchr(e,'<'); int i=0;
-            for(const char*q=e;q<ee&&i<127;q++){ if(*q!='"') etag[i++]=*q; } etag[i]=0; }
-        /* skip the collection itself (empty basename) */
-        if(name[0] && strcmp(name,"")!=0 && cb){ cb(name,etag,ctx); count++; }
+        char href[512]=""; xml_text_e(p,end,"href",href,sizeof href);
+        char name[256]=""; baseName(href,name,sizeof name);
+        char etag[160]=""; xml_text_e(p,end,"getetag",etag,sizeof etag); stripQuotes(etag);
+        if(name[0] && cb){ cb(name,etag,ctx); count++; }
         p=end+1;
     }
     free(buf);
@@ -133,18 +167,6 @@ static char* slurp(const char*path,int*len){
     size_t got=fread(b,1,(size_t)n,f); b[got]=0; if(len)*len=(int)got; fclose(f);
     return b;
 }
-/* basename of an <href> value (strip trailing slash + whitespace) */
-static void hrefBase(const char*h,const char*end,char*out,int cap){
-    const char*e=end; while(e>h && (e[-1]=='/'||e[-1]=='\r'||e[-1]=='\n'||e[-1]==' ')) e--;
-    const char*s=e; while(s>h && s[-1]!='/') s--;
-    int i=0; for(const char*q=s;q<e&&i<cap-1;q++) out[i++]=*q; out[i]=0;
-}
-/* full href path (not basename), trimmed */
-static void hrefFull(const char*h,const char*end,char*out,int cap){
-    const char*e=end; while(e>h && (e[-1]=='\r'||e[-1]=='\n'||e[-1]==' ')) e--;
-    int i=0; for(const char*q=h;q<e&&i<cap-1;q++) out[i++]=*q; out[i]=0;
-}
-
 int dav_sync_report(const DavCtx*d,const char*coll,const char*token,
                     dav_sync_cb cb,void*ctx,char*newtoken,int tokcap){
     if(newtoken&&tokcap) newtoken[0]=0;
@@ -170,21 +192,17 @@ int dav_sync_report(const DavCtx*d,const char*coll,const char*token,
     const char*p=buf;
     while((p=strcasestr(p,"<response"))){
         const char*end=strcasestr(p,"</response>"); if(!end) break;
-        const char*h=strcasestr(p,"href>"); char name[256]="";
-        if(h&&h<end){ h+=5; const char*he=strchr(h,'<'); if(he&&he<end) hrefBase(h,he,name,sizeof name); }
-        const char*e=strcasestr(p,"getetag>"); char etag[160]="";
-        int hasEtag = (e&&e<end);
-        if(hasEtag){ e+=8; const char*ee=strchr(e,'<'); int i=0;
-            for(const char*q=e;q<ee&&i<159;q++){ if(*q!='"') etag[i++]=*q; } etag[i]=0; }
+        char href[512]=""; xml_text_e(p,end,"href",href,sizeof href);
+        char name[256]=""; baseName(href,name,sizeof name);
+        char etag[160]=""; int hasEtag=xml_text_e(p,end,"getetag",etag,sizeof etag); stripQuotes(etag);
         /* a removed member has a 404 status and no getetag */
-        int deleted = !hasEtag && strstr(p,"404")!=NULL && strstr(p,"404")<end;
+        const char*f404=strstr(p,"404");
+        int deleted = !hasEtag && f404 && f404<end;
         if(name[0] && cb) cb(name,etag,deleted,ctx);
         p=end+1;
     }
     /* the new sync-token is a top-level element */
-    const char*t=strcasestr(buf,"sync-token>");
-    if(t){ t+=strlen("sync-token>"); const char*te=strchr(t,'<');
-        if(te && newtoken && tokcap){ int i=0; for(const char*q=t;q<te&&i<tokcap-1;q++) newtoken[i++]=*q; newtoken[i]=0; } }
+    if(newtoken && tokcap) xml_text(buf,"sync-token",newtoken,tokcap);
     free(buf);
     return 0;
 }
@@ -206,16 +224,16 @@ int dav_prop_href(const DavCtx*d,const char*path,const char*propOpen,
     char code[16]={0}; if(run(cmd,code,sizeof code)<0) return -1;
     dav_last_status=atoi(code);
     int len=0; char*buf=slurp("state/.drep",&len); if(!buf) return -1;
-    /* locate the property element by its local name (strip '<' and any ns prefix) */
+    /* local name of the property element (strip '<' and any ns prefix) */
     char local[64]={0};
     { const char*s=propOpen; while(*s=='<') s++;
       const char*stop=s; while(*stop && *stop!=' '&&*stop!='/'&&*stop!='>') stop++;
       const char*colon=strchr(s,':'); if(colon && colon<stop) s=colon+1;
       int i=0; for(; s+i<stop && i<63; i++) local[i]=s[i]; local[i]=0; }
-    const char*el=strcasestr(buf,local);
+    /* find the property element, then its inner <href> (ns/attrs tolerant) */
+    const char*el=xml_open(buf,local);
     int rc=-1;
-    if(el){ const char*h=strcasestr(el,"href>");
-        if(h){ h+=5; const char*he=strchr(h,'<'); if(he){ hrefFull(h,he,out,cap); rc=0; } } }
+    if(el && xml_text(el,"href",out,cap) && out[0]) rc=0;
     free(buf);
     return rc;
 }
@@ -253,16 +271,14 @@ int dav_list_collections(const DavCtx*d,const char*path,dav_coll_cb cb,void*ctx)
     int count=0; const char*p=buf;
     while((p=strcasestr(p,"<response"))){
         const char*end=strcasestr(p,"</response>"); if(!end) break;
-        char href[512]="";
-        const char*h=strcasestr(p,"href>"); if(h&&h<end){ h+=5; const char*he=strchr(h,'<'); if(he&&he<end) hrefFull(h,he,href,sizeof href); }
+        char href[512]=""; xml_text_e(p,end,"href",href,sizeof href);
         int kind=0;
         const char*rt=strcasestr(p,"resourcetype"); if(rt&&rt<end){
             const char*rte=strcasestr(rt,"/resourcetype"); if(!rte||rte>end) rte=end;
             if(strcasestr_range(rt,rte,"calendar")) kind='c';
             else if(strcasestr_range(rt,rte,"addressbook")) kind='a';
         }
-        char dn[128]=""; const char*dnp=strcasestr(p,"displayname>");
-        if(dnp&&dnp<end){ dnp+=strlen("displayname>"); const char*de=strchr(dnp,'<'); if(de){ int i=0; for(const char*q=dnp;q<de&&i<127;q++) dn[i++]=*q; dn[i]=0; } }
+        char dn[128]=""; xml_text_e(p,end,"displayname",dn,sizeof dn);
         if(href[0] && cb){ cb(href,kind,dn,ctx); count++; }
         p=end+1;
     }
