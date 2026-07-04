@@ -117,6 +117,31 @@ Decision can wait until U3; start with LVGL, keep the door open to LovyanGFX.
 
 ---
 
+## PumpkinOS: what we donate, and what we don't
+
+The original plan was **native app + PumpkinOS as a donor codebase, not a
+runtime** — and that survives the no-framebuffer design unchanged, because the
+framebuffer/SDL2/MMU baggage is exactly the part we never port.
+
+- **Donate (framebuffer-agnostic pure C):**
+  - *Data formats* — **already banked**. `pdb/datebook/address/todo.c` are
+    clean-room from the documented Palm byte layouts, with PumpkinOS's
+    `DateDB.c`/`AddressDB.c` as the format oracle (we even fixed a bug its
+    `ApptUnpack` has). License-clean.
+  - *Algorithms* — `libpumpkin/Find.c` global-search logic as a reference for
+    the streaming Find (U4); date math. No framebuffer involved.
+- **Do NOT port (framebuffer-coupled or stubbed):**
+  - PumpkinOS's **Forms/rendering API** (`FrmDrawForm`, `WinDrawXXX`) assumes a
+    full-bitmap window system — the wrong donor for partial-strip rendering. The
+    UI is our own (U3), which is the "native app" half of the original decision.
+  - **Graffiti** — PumpkinOS stubs it; we bring $Q regardless (U6).
+- **License rule:** stay clean-room (reference layout/algorithm, reimplement) to
+  keep the firmware license-free. Directly lifting a PumpkinOS `.c` makes the
+  firmware GPLv3 — a deliberate choice if ever taken, not an accident.
+
+Net: every useful PumpkinOS donation is framebuffer-independent and either done
+or referenced as an algorithm; the framebuffer constraint doesn't erode it.
+
 ## Phased plan
 
 **U0 — Sync working set: static → heap.** Prerequisite (frees ~55 KB for UI).
