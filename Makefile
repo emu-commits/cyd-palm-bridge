@@ -2,7 +2,7 @@ CC      = cc
 CFLAGS  = -std=gnu99 -Wall -O2 -g
 CORE    = bridge/pdb.c bridge/datebook.c bridge/address.c bridge/ical.c bridge/vcard.c bridge/tz.c bridge/charset.c
 
-all: roundtrip bridge_cli incremental
+all: roundtrip bridge_cli incremental synctoken
 
 dirs:
 	@mkdir -p pdb state
@@ -16,6 +16,9 @@ bridge_cli: bridge/main.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 incremental: tests/incremental.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
+synctoken: tests/synctoken.c bridge/dav.c bridge/sync.c $(CORE) | dirs
+	$(CC) $(CFLAGS) -o $@ $^
+
 test: roundtrip
 	./roundtrip
 
@@ -23,7 +26,10 @@ test: roundtrip
 itest: incremental bridge_cli
 	./incremental
 
-clean:
-	rm -f roundtrip bridge_cli incremental pdb/_rt_*.pdb
+stest: synctoken
+	./synctoken
 
-.PHONY: all dirs test itest clean
+clean:
+	rm -f roundtrip bridge_cli incremental synctoken pdb/_rt_*.pdb
+
+.PHONY: all dirs test itest stest clean

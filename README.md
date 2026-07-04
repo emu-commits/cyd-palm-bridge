@@ -21,6 +21,9 @@ Three test gates, all green:
   conflict), syncs under each policy, and asserts **local and server converge** to the
   expected set and that a **second sync is a total no-op (idempotent)**. All three
   policies (server-wins / local-wins / keep-both) pass.
+- `make synctoken` → `tests/synctoken.c`: proves the **RFC 6578 sync-collection** delta
+  path — initial→token, empty delta when idle, exact `{1 changed, 1 deleted}` delta,
+  invalid-token→full-resync, and a delta-driven no-op second sync.
 
 ### Layout
 ```
@@ -34,8 +37,9 @@ bridge/tz.[ch]             timezone registry + DST math + UTC->local + VTIMEZONE
 bridge/charset.[ch]        Palm CP1252/Latin-1 <-> UTF-8
 bridge/dav.[ch]            CalDAV/CardDAV via curl (PUT+If-Match/GET/PROPFIND/DELETE) -> esp_http_client on device
 bridge/sync.[ch]           push/pull primitives + sync_collection: incremental, conflict-aware two-way sync
-bridge/main.c              CLI: push | pull | sync | dump   (BRIDGE_TZ env sets device zone)
+bridge/main.c              CLI: discover | push | pull | sync | dump   (BRIDGE_TZ sets device zone)
 tests/                     roundtrip.c (codec) + dav_roundtrip.sh (server) + incremental.c (two-way sync)
+                           + synctoken.c (RFC 6578 delta sync)
 ```
 
 ### First-time DAV server setup (for the server-backed tests)
@@ -93,10 +97,42 @@ record). Modify beats delete under `both`.
 - **Charset** — Palm CP1252/Latin-1 ↔ UTF-8 on all text fields (`charset.c`); curly
   quotes, accents, €, … round-trip byte-exact; unmappable UTF-8 → `?`.
 
+### Incremental delta sync — RFC 6578 (done; initial target: iCloud)
+The engine prefers the `sync-collection` REPORT (`dav_sync_report`): it sends the
+`sync-token` stored from last run and the server returns **only** changed/added/removed
+members plus a fresh token — no full listing when nothing changed. Server state is then
+built from the map baseline (unchanged) overlaid with the delta, feeding the same
+reconciliation matrix. Fallbacks are automatic:
+- token **invalid/expired** (`DAV:valid-sync-token`) → full resync with an empty token;
+- server **doesn't support** sync-collection → plain `PROPFIND` Depth:1 (no token stored).
+
+The token is persisted as a `#synctoken\t…` header line in `state/<coll>.map`. Proven in
+`tests/synctoken.c` against Radicale: initial→token, empty delta when idle, an exact
+`{1 changed, 1 deleted}` delta after a server edit+delete, bogus-token→resync, and a
+delta-driven no-op second sync.
+
+### iCloud
+`bridge_cli discover` runs the CalDAV/CardDAV bootstrap — follows the
+`caldav.icloud.com` → `pNN-caldav.icloud.com` redirect, reads `current-user-principal`,
+then `calendar-home-set` / `addressbook-home-set`, and lists the collections (with their
+absolute per-user URLs). Then:
+```
+export DAV_BASE=https://caldav.icloud.com
+export DAV_USER='you@icloud.com'
+export DAV_PASS='xxxx-xxxx-xxxx-xxxx'      # an APP-SPECIFIC password (2FA required)
+export BRIDGE_TZ=America/New_York
+./bridge_cli discover                       # prints host + collection paths
+export DAV_BASE=https://pNN-caldav.icloud.com   # host from discover
+export DAV_CAL='1234567890/calendars/home'      # path from discover
+export DAV_CARD='1234567890/carddavhome/card'
+./bridge_cli sync pdb/DatebookDB.pdb pdb/AddressDB.pdb
+```
+Notes: iCloud requires **HTTPS** (curl handles it; on-device = mbedTLS) and an
+**app-specific password** — the main Apple ID password is rejected under 2FA. iCloud
+supports `sync-collection`, so syncs are delta after the first. (Discovery flow verified
+against Radicale; live iCloud needs your credentials.)
+
 ### Still ahead
-- **sync-token (RFC 6578) optimisation** — engine currently diffs a full PROPFIND
-  Depth:1 ETag listing each run (correct + universal); a `sync-collection` REPORT would
-  cut it to a delta. Slots in behind the existing ETag comparison.
 - **Categories** — Palm AppInfo categories → DAV collections (nice-to-have).
 - **Port to ESP32** — swap curl for esp_http_client+mbedTLS; PDB files on SD; cap the
   static reconciliation arenas (host proof uses MAXR=256 × 4 KB).

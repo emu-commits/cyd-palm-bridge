@@ -106,8 +106,8 @@ typedef struct {                       /* local records (from PDB) */
 typedef struct {                       /* persisted map rows */
     uint32_t uid; char href[64]; char etag[160]; uint64_t hash;
 } Map;
-typedef struct {                       /* server objects (from PROPFIND) */
-    char name[128]; char etag[160]; uint32_t uid;
+typedef struct {                       /* server objects (from PROPFIND / sync REPORT) */
+    char name[128]; char etag[160]; uint32_t uid; int present;
 } Srv;
 
 typedef struct {
@@ -115,6 +115,8 @@ typedef struct {
     Loc loc[MAXR]; int nloc; uint8_t locArena[MAXR*PALM_REC_MAX]; int locUsed;
     Map map[MAXR]; int nmap;
     Srv srv[MAXR]; int nsrv;
+    char token[1200];                  /* RFC 6578 sync-token from last run   */
+    char newToken[1200];               /* token to persist after this run     */
 } S;
 
 static int loadRec(const PdbRec*r,int i,void*ctx){
@@ -129,8 +131,12 @@ static int loadRec(const PdbRec*r,int i,void*ctx){
 }
 static void loadMap(S*s,const char*mapfile){
     FILE*f=fopen(mapfile,"r"); if(!f) return;
-    char line[512];
+    char line[1400];
     while(fgets(line,sizeof line,f)){
+        if(!strncmp(line,"#synctoken\t",11)){
+            char *t=line+11; size_t l=strlen(t); while(l&&(t[l-1]=='\n'||t[l-1]=='\r'))t[--l]=0;
+            snprintf(s->token,sizeof s->token,"%s",t); continue;
+        }
         Map m; memset(&m,0,sizeof m); unsigned long long h=0;
         if(sscanf(line,"%u\t%63[^\t]\t%159[^\t]\t%llu",&m.uid,m.href,m.etag,&h)>=3){
             m.hash=(uint64_t)h; if(s->nmap<MAXR) s->map[s->nmap++]=m;
@@ -138,10 +144,42 @@ static void loadMap(S*s,const char*mapfile){
     }
     fclose(f);
 }
-static void srvCb(const char*name,const char*etag,void*ctx){
-    S*s=ctx; if(s->nsrv>=MAXR) return;
-    Srv*v=&s->srv[s->nsrv]; snprintf(v->name,sizeof v->name,"%s",name);
-    snprintf(v->etag,sizeof v->etag,"%s",etag); v->uid=nameToUid(name); s->nsrv++;
+/* find/add a server slot by object name */
+static Srv* srvSlot(S*s,const char*name){
+    for(int i=0;i<s->nsrv;i++) if(!strcmp(s->srv[i].name,name)) return &s->srv[i];
+    if(s->nsrv>=MAXR) return NULL;
+    Srv*v=&s->srv[s->nsrv++]; memset(v,0,sizeof*v);
+    snprintf(v->name,sizeof v->name,"%s",name); v->uid=nameToUid(name); return v;
+}
+static void srvCb(const char*name,const char*etag,void*ctx){   /* full PROPFIND listing */
+    Srv*v=srvSlot((S*)ctx,name); if(!v) return;
+    snprintf(v->etag,sizeof v->etag,"%s",etag); v->present=1;
+}
+static void reportCb(const char*name,const char*etag,int deleted,void*ctx){ /* sync REPORT delta */
+    Srv*v=srvSlot((S*)ctx,name); if(!v) return;
+    if(deleted){ v->present=0; }
+    else { snprintf(v->etag,sizeof v->etag,"%s",etag); v->present=1; }
+}
+
+/* Build current server state into s->srv[], preferring RFC 6578 sync-collection.
+ * Returns via s->newToken the token to persist (empty if unsupported).          */
+static void buildServer(S*s,const DavCtx*d,const char*coll){
+    s->newToken[0]=0;
+    if(s->token[0]){
+        /* incremental: seed baseline from map (unchanged), then apply the delta */
+        for(int i=0;i<s->nmap;i++){ Srv*v=srvSlot(s,s->map[i].href);
+            if(v){ snprintf(v->etag,sizeof v->etag,"%s",s->map[i].etag); v->present=1; } }
+        int rc=dav_sync_report(d,coll,s->token,reportCb,s,s->newToken,sizeof s->newToken);
+        if(rc==0) return;                    /* delta applied                     */
+        /* token invalid or unsupported -> reset and fall through to full */
+        s->nsrv=0; s->token[0]=0; s->newToken[0]=0;
+    }
+    /* full sync: try REPORT with empty token (also yields a fresh token) */
+    int rc=dav_sync_report(d,coll,"",reportCb,s,s->newToken,sizeof s->newToken);
+    if(rc==0) return;
+    /* server doesn't support sync-collection: plain PROPFIND, no token */
+    s->nsrv=0; s->newToken[0]=0;
+    dav_list(d,coll,srvCb,s);
 }
 
 /* ---- reconciliation node: everything known about one uid ---- */
@@ -207,7 +245,7 @@ int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
     static S s; memset(&s,0,sizeof s); s.isCal=isCal;
     pdb_read(localpdb,loadRec,&s);
     loadMap(&s,mapfile);
-    dav_list(d,coll,srvCb,&s);
+    buildServer(&s,d,coll);
 
     static Node nodes[MAXR*2]; int nn=0;
     uint32_t seed=1;
@@ -216,7 +254,8 @@ int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
         snprintf(n->mHref,sizeof n->mHref,"%s",s.map[i].href);
         snprintf(n->mEtag,sizeof n->mEtag,"%s",s.map[i].etag); n->mHash=s.map[i].hash;
         if(s.map[i].uid>=seed)seed=s.map[i].uid+1; }
-    for(int i=0;i<s.nsrv;i++){ Node*n=nodeFor(nodes,&nn,s.srv[i].uid); n->hasSrv=1;
+    for(int i=0;i<s.nsrv;i++){ if(!s.srv[i].present) continue;   /* deleted on server */
+        Node*n=nodeFor(nodes,&nn,s.srv[i].uid); n->hasSrv=1;
         snprintf(n->sName,sizeof n->sName,"%s",s.srv[i].name);
         snprintf(n->sEtag,sizeof n->sEtag,"%s",s.srv[i].etag);
         if(s.srv[i].uid>=seed)seed=s.srv[i].uid+1; }
@@ -310,9 +349,11 @@ int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
     if(isCal) pdb_write(outpdb,"DatebookDB",0x44415441,0x64617465,o.rec,o.nrec);
     else      pdb_write(outpdb,"AddressDB",0x44415441,0x61646472,o.rec,o.nrec);
 
-    /* rewrite the map */
+    /* rewrite the map (sync-token header first, then one row per kept record) */
     FILE*mf=fopen(mapfile,"w");
-    if(mf){ for(int i=0;i<o.nmap;i++) fprintf(mf,"%u\t%s\t%s\t%llu\n",
+    if(mf){
+        if(s.newToken[0]) fprintf(mf,"#synctoken\t%s\n",s.newToken);
+        for(int i=0;i<o.nmap;i++) fprintf(mf,"%u\t%s\t%s\t%llu\n",
                 o.map[i].uid,o.map[i].href,o.map[i].etag,(unsigned long long)o.map[i].hash);
         fclose(mf); }
     return o.nrec;

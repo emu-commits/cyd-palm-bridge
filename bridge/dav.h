@@ -27,4 +27,26 @@ int dav_get(const DavCtx*d,const char*coll,const char*name,char*out,int cap);
 typedef void (*dav_list_cb)(const char*name,const char*etag,void*ctx);
 int dav_list(const DavCtx*d,const char*coll,dav_list_cb cb,void*ctx);
 
+/* RFC 6578 sync-collection REPORT. token="" for an initial (full) sync; else
+ * the token stored from the previous run. cb fires once per changed member
+ * (deleted=1 => removed on server). newtoken receives the server's fresh token.
+ * returns: 0 ok; 1 = token invalid/expired (caller should full-resync with "");
+ *          -1 = server doesn't support sync-collection (caller: fall back to PROPFIND). */
+typedef void (*dav_sync_cb)(const char*name,const char*etag,int deleted,void*ctx);
+int dav_sync_report(const DavCtx*d,const char*coll,const char*token,
+                    dav_sync_cb cb,void*ctx,char*newtoken,int tokcap);
+
+/* --- discovery (CalDAV/CardDAV bootstrap, e.g. iCloud) --- */
+/* PROPFIND Depth:0 on `path`; returns the first <href> found inside the element
+ * whose local-name is `prop` (e.g. "current-user-principal","calendar-home-set").
+ * `extra_ns` is any additional xmlns decls the prop needs. 0 on success.        */
+int dav_prop_href(const DavCtx*d,const char*path,const char*propOpen,
+                  const char*extra_ns,char*out,int cap);
+/* Effective URL (after redirects) for a PROPFIND on `path` -> scheme://host. */
+int dav_effective_host(const DavCtx*d,const char*path,char*out,int cap);
+/* PROPFIND Depth:1 on `path`; cb(href, kind) where kind: 'c'=calendar,
+ * 'a'=addressbook, 0=other. href is the absolute path as returned.             */
+typedef void (*dav_coll_cb)(const char*href,int kind,const char*displayname,void*ctx);
+int dav_list_collections(const DavCtx*d,const char*path,dav_coll_cb cb,void*ctx);
+
 #endif
