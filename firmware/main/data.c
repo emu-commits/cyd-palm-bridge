@@ -125,11 +125,11 @@ static void seed_memo(void){
 }
 
 void data_seed_if_empty(void){
-    (void)file_exists;   /* overwrite each boot for now (demo data; U7 replaces) */
-    seed_datebook();
-    seed_address();
-    seed_todo();
-    seed_memo();
+    /* only seed a DB that doesn't exist yet, so edits + synced data persist */
+    if(!file_exists(DB_CAL))  seed_datebook();
+    if(!file_exists(DB_ADDR)) seed_address();
+    if(!file_exists(DB_TODO)) seed_todo();
+    if(!file_exists(DB_MEMO)) seed_memo();
 }
 
 /* ------------------------- iteration ------------------------- */

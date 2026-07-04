@@ -14,6 +14,7 @@
 #include "data.h"
 #include "lv_font_palm.h" /* authentic PalmOS system fonts */
 #include "palm_icons.h"   /* Palm app launcher icons */
+#include "hotsync.h"
 #include "lvgl.h"
 #include <string.h>
 #include <stdio.h>
@@ -82,9 +83,14 @@ static void update_cat_trigger(void);
 static void cat_trigger_cb(lv_event_t *e);
 static void details_open(void);
 
+/* HotSync screen state (status label + polling timer live in `content`) */
+static lv_obj_t *hs_status;
+static lv_timer_t *hs_timer;
+static void kill_hs(void){ if(hs_timer){ lv_timer_delete(hs_timer); hs_timer=NULL; } hs_status=NULL; }
+
 /* the keyboard lives on the screen (overlay), so it survives lv_obj_clean(content);
  * drop it whenever we navigate away from an edit form. */
-static void kill_kb(void){ if(g_kb){ lv_obj_del(g_kb); g_kb=NULL; } g_form=NULL; }
+static void kill_kb(void){ if(g_kb){ lv_obj_del(g_kb); g_kb=NULL; } g_form=NULL; kill_hs(); }
 
 static void row_cb(lv_event_t *e){
     show_detail((uint32_t)(uintptr_t)lv_event_get_user_data(e));
@@ -296,10 +302,39 @@ static void show_edit(uint32_t uid){
     lv_obj_add_event_cb(g_kb, kb_done_cb, LV_EVENT_CANCEL, NULL);
 }
 
+/* U7: HotSync screen (Sync Now + a status line polled from the background task) */
+static void hs_tick(lv_timer_t *t){ (void)t; if(hs_status) lv_label_set_text(hs_status, hotsync_status()); }
+static void hs_sync_cb(lv_event_t *e){ (void)e; hotsync_start(); }
+
+static void show_hotsync(void){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, "HotSync");
+    update_cat_trigger();
+
+    lv_obj_t *btn = lv_button_create(content);
+    lv_obj_set_size(btn, 120, 40);
+    lv_obj_align(btn, LV_ALIGN_TOP_MID, 0, 16);
+    lv_obj_t *bl = lv_label_create(btn);
+    lv_label_set_text(bl, "Sync Now");
+    lv_obj_center(bl);
+    lv_obj_add_event_cb(btn, hs_sync_cb, LV_EVENT_CLICKED, NULL);
+
+    hs_status = lv_label_create(content);
+    lv_label_set_long_mode(hs_status, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(hs_status, LCD_W - 12);
+    lv_obj_align(hs_status, LV_ALIGN_TOP_MID, 0, 70);
+    lv_obj_set_style_text_align(hs_status, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(hs_status, hotsync_status());
+
+    hs_timer = lv_timer_create(hs_tick, 400, NULL);
+}
+
 static void show_app(const char *name){
     for(int i=0;i<NAPPDEFS;i++)
         if(!strcmp(name, APPDEFS[i].name)){ data_set_category(-1); list_view(&APPDEFS[i]); return; }
-    /* Memo Pad (no codec yet) + HotSync (U7) -> placeholder */
+    if(!strcmp(name, "HotSync")){ show_hotsync(); return; }
     cur_app = NULL;
     lv_obj_clean(content);
     lv_label_set_text(title_lbl, name);
