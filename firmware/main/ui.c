@@ -12,20 +12,24 @@
 #include "ui.h"
 #include "display.h"      /* LCD_W, PDA_H, GRAFFITI_H */
 #include "data.h"
+#include "lv_font_palm.h" /* authentic PalmOS system fonts */
 #include "lvgl.h"
 #include <string.h>
 #include <stdio.h>
 
 #define TITLE_H     24
-#define COL_TITLE   lv_color_hex(0x000080)   /* navy title bar   */
-#define COL_BODY    lv_color_hex(0xC6C6C6)   /* light gray body  */
-#define COL_GRAF    lv_color_hex(0x808080)   /* graffiti strip   */
-#define COL_LINE    lv_color_hex(0x404040)
+#define COL_TITLE   lv_color_hex(0xFFFFFF)   /* white title bar (Palm) */
+#define COL_BODY    lv_color_hex(0xFFFFFF)   /* white app body   */
+#define COL_GRAF    lv_color_hex(0xD6D6D6)   /* graffiti strip   */
+#define COL_LINE    lv_color_hex(0x000000)   /* black rules      */
 
 static lv_obj_t *content;      /* the swappable view area */
 static lv_obj_t *title_lbl;
 
 static const char *APPS[] = { "Date Book", "Address", "To Do List", "Memo Pad", "HotSync" };
+/* functional glyphs for quick recognition (real Palm launcher icons: U3a.2 refine) */
+static const char *APP_ICONS[] = { LV_SYMBOL_LIST, LV_SYMBOL_CALL, LV_SYMBOL_OK,
+                                   LV_SYMBOL_FILE, LV_SYMBOL_REFRESH };
 #define NAPPS ((int)(sizeof(APPS)/sizeof(APPS[0])))
 
 static void show_launcher(void);
@@ -287,7 +291,7 @@ static void show_launcher(void){
     lv_obj_set_style_border_width(list, 0, 0);
     lv_obj_set_style_pad_all(list, 0, 0);
     for(int i=0;i<NAPPS;i++){
-        lv_obj_t *b = lv_list_add_button(list, NULL, APPS[i]);
+        lv_obj_t *b = lv_list_add_button(list, APP_ICONS[i], APPS[i]);
         lv_obj_set_style_radius(b, 0, 0);
         lv_obj_add_event_cb(b, app_cb, LV_EVENT_CLICKED, (void *)APPS[i]);
     }
@@ -296,22 +300,25 @@ static void show_launcher(void){
 void ui_init(void){
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, COL_BODY, 0);
+    lv_obj_set_style_text_font(scr, &lv_font_palm, 0);   /* authentic Palm font, inherited */
     lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* title bar: home button (left) + title label */
+    /* title bar: home button (left) + title label, black rule underneath (Palm) */
     lv_obj_t *bar = panel(scr, 0, 0, LCD_W, TITLE_H, COL_TITLE);
+    lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_width(bar, 2, 0);
+    lv_obj_set_style_border_color(bar, COL_LINE, 0);
     lv_obj_t *home = lv_button_create(bar);
-    lv_obj_set_size(home, 30, TITLE_H);
-    lv_obj_align(home, LV_ALIGN_LEFT_MID, 0, 0);
-    lv_obj_set_style_radius(home, 0, 0);
-    lv_obj_set_style_bg_color(home, COL_TITLE, 0);
+    lv_obj_set_size(home, 30, TITLE_H - 4);
+    lv_obj_align(home, LV_ALIGN_LEFT_MID, 0, -1);
     lv_obj_t *hi = lv_label_create(home);
     lv_label_set_text(hi, LV_SYMBOL_HOME);
     lv_obj_center(hi);
     lv_obj_add_event_cb(home, home_cb, LV_EVENT_CLICKED, NULL);
 
     title_lbl = lv_label_create(bar);
-    lv_obj_set_style_text_color(title_lbl, lv_color_white(), 0);
+    lv_obj_set_style_text_color(title_lbl, COL_LINE, 0);   /* black on white */
+    lv_obj_set_style_text_font(title_lbl, &lv_font_palm_bold, 0);
     lv_obj_align(title_lbl, LV_ALIGN_LEFT_MID, 38, 0);
 
     /* content area (swappable views) */

@@ -20,5 +20,8 @@ CONFIG_FATFS_LFN_HEAP=y
 # --- the sync runs in the main task; give it headroom ---
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288
 
+# --- LVGL: monochrome theme for the PalmOS grayscale look ---
+CONFIG_LV_USE_THEME_MONO=y
+
 # --- quieter default log level ---
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y

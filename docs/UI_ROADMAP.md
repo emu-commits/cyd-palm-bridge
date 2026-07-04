@@ -150,6 +150,53 @@ So we lift the *portable value* (formats, fonts, icons, layout specs, algorithms
 without porting the framebuffer-coupled runtime. The look is authentic; the engine
 is LVGL.
 
+## Palm FUNCTIONAL design — the priority (leverage, don't reinvent)
+
+Direction (2026-07-04): pixel/font fidelity is secondary; the goal is to leverage
+PalmOS's **functional, user-centric design** — its menus, feature set, and
+interaction patterns — rather than reinventing usability by trial and error.
+Ground truth: the **PalmOS Programmer's Companion UI reference**
+(https://palm.wiki/development/docs/601/PalmOSCompanion/UserInterface.html) for
+conventions, and the **PumpkinOS app sources** (scratchpad/PumpkinOS/src/{DateBook,
+AddressBook,ToDoList,MemoPad}) for each app's actual menus/forms/features. Replicate
+these; don't invent.
+
+**F1 — Menu system (central Palm pattern; currently missing).** Tapping the title
+bar (Palm OS 3.5+) opens the menu bar with pull-downs. Per app: **Record** (New,
+Delete, Duplicate, Beam), **Options** (Font, Preferences, Categories, About),
+**Edit** (Cut/Copy/Paste in text fields). Implement as an LVGL overlay driven off
+a per-screen menu descriptor.
+
+**F2 — Categories (we already have the codec).** Category picker = a **pop-up
+trigger top-right of the title bar** showing the current category; list = All +
+the AppInfo categories + Edit Categories. Filters the list view. Wire to the
+existing `appinfo.c` AppInfo table (max 16) + record attr nibble — the data half
+is done; this is UI over it.
+
+**F3 — Per-app views, per PalmOS + PumpkinOS:**
+- **To Do**: multi-column rows = checkbox · priority · text · due; Options: sort
+  (priority/due/category combos), Show Completed, Show Only Due, show/hide
+  due/priority/category columns; Details dialog (priority, category, due, private).
+- **Date Book**: Day view (time grid), Agenda, Week; Go to Date; the New-at-time
+  and untimed-event patterns; alarms/repeat in Details.
+- **Address**: Name+phone list filtered by category; record view → Edit; Details
+  (category, private); the labeled multi-phone/show-in-list convention.
+- **Memo Pad**: list of memo first-lines by category; sort; the plain-text editor.
+
+**F4 — Details dialog + record form conventions.** Record edit form bottom row =
+**Done / Details / New** (Palm layout, not our current Done/Edit). Details =
+modal dialog (category trigger, private, per-app fields) with **Delete/Note/Beam**
+in its menu; **OK right, Cancel left**. Dialogs follow Done/OK-right, Cancel-left.
+
+**F5 — Standard Palm controls.** Pop-up triggers (label+▾ opening a list),
+selector triggers (gray frame opening a picker, e.g. dates), checkboxes, push-
+button groups (view switching), Palm button behavior (highlight while pressed).
+
+This reframes U4/U5 (which built basic list/detail/edit scaffolding) toward Palm's
+real information architecture. Suggested order: **F1 menus + F2 categories** first
+(they touch every app and unlock the command/filter model), then **F3** app by app,
+with **F4/F5** controls filled in as needed. U3a (skin) continues in parallel/light.
+
 ## Phased plan
 
 **U0 — Sync working set: static → heap.** Prerequisite (frees ~55 KB for UI).

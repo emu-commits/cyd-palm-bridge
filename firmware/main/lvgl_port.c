@@ -3,6 +3,7 @@
 #include "lvgl_port.h"
 #include "display.h"
 #include "touch.h"
+#include "lv_font_palm.h"
 #include "lvgl.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
@@ -53,6 +54,9 @@ void lvgl_port_init(void){
     lv_indev_t *indev = lv_indev_create();
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(indev, indev_cb);
+
+    /* monochrome theme (black on white, flat, thin borders) = the PalmOS look */
+    lv_display_set_theme(disp, lv_theme_mono_init(disp, false, &lv_font_palm));
 
     ESP_LOGI(TAG, "LVGL up: %dx%d, %u-byte partial buffer", LCD_W, LCD_H, (unsigned)buf_bytes);
 }

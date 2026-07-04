@@ -3,12 +3,42 @@
 Running log of the UI build (docs/UI_ROADMAP.md). Updated after each step so work
 can resume cold. Newest phase on top.
 
-> **QUEUED — do not skip: U3a "Convert to authentic PalmOS look".** U3–U5 built the
-> UI functionally with LVGL's *default* Montserrat font/theme (placeholder). The
-> locked decision (commit 357f044) is to re-skin with real Palm assets from
-> PumpkinOS (fonts + icons/chrome) and PumpkinOS Form layouts; firmware GPLv3.
-> Detailed sub-steps U3a.1–U3a.4 in docs/UI_ROADMAP.md. This is the visual
-> conversion pass and is NOT optional — the current look is a stand-in.
+---
+
+## U3a — convert to authentic PalmOS look   [IN PROGRESS]
+
+**Source:** PumpkinOS cloned at scratchpad/PumpkinOS (github.com/migueletto/PumpkinOS,
+GPLv3). Palm fonts are recreated in src/BOOT/font_90NN_72.txt as ASCII bitmaps
+(GLYPH <code> + #/- rows; ascent 9 + descent 2 = 11px). 9000=stdFont(FONTID128),
+9001=boldFont(129).
+
+### Step log
+- U3a.1 FONTS: scratchpad/palmfont.py converts the .txt -> LVGL v9 1bpp C font
+  (pixel-exact; cell width = advance). Generated firmware/main/lv_font_palm.c
+  (std) + lv_font_palm_bold.c (bold), lv_font_palm.h. Applied: screen default
+  font = lv_font_palm (inherited), title bar = bold. Builds, boots. AWAITING:
+  does the authentic Palm font render + is it readable?
+- U3a.3 THEME: enabled CONFIG_LV_USE_THEME_MONO; lv_theme_mono_init(disp,false,
+  &lv_font_palm) applied in lvgl_port -> black-on-white flat widgets w/ thin
+  borders = PalmOS grayscale look. ui.c chrome: white bg, white title bar w/ black
+  bold text + 2px black bottom rule, gray graffiti strip. Boots. AWAITING: does it
+  read as authentic Palm now?
+- U3a.1b FONT BUMP: user found 11px std too small -> regenerated lv_font_palm from
+  Palm largeFont (9002, 14px), bold from largeBold (9007, 15px). palmfont.py + the
+  9000-9007 .txt in scratchpad/PumpkinOS/src/BOOT.
+- U3a.2 ICONS: launcher rows get LVGL symbol icons (LV_SYMBOL LIST/CALL/OK/FILE/
+  REFRESH) for quick recognition; real Palm bitmaps deferred (user de-emphasized
+  pixel accuracy).
+- **DIRECTION SHIFT (user):** prioritize PalmOS FUNCTIONAL/menu/feature design over
+  pixel fidelity. Reference = palm.wiki PalmOS Companion UI doc + PumpkinOS app
+  sources (src/{DateBook,AddressBook,ToDoList,MemoPad}). New plan section "Palm
+  FUNCTIONAL design" in UI_ROADMAP.md: F1 menu system (title-tap menu bar; Record/
+  Options/Edit menus), F2 category picker top-right (wire existing appinfo codec),
+  F3 per-app views (ToDo multi-col+sort+show-completed; DateBook day/agenda;
+  Address cat filter; Memo), F4 Details dialog + Done/Details/New record buttons,
+  F5 Palm controls (popup/selector triggers, checkboxes). Suggested order: F1+F2
+  first, then F3 per app. This reframes the remaining UI work. NEXT: start F1/F2.
+- TODO U3a.4 skin refine + LICENSE(GPLv3) (continues light/in parallel).
 
 ---
 
