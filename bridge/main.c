@@ -48,6 +48,7 @@ static char* absPath(char*href,DavCtx*d){
 typedef struct { char name[16][128]; char path[16][256]; int n; int want; } Colls;
 static void collCb(const char*href,int kind,const char*dn,void*ctx){
     Colls*c=ctx; if(kind!=c->want || c->n>=16) return;
+    if(strstr(href,"/notification")) return;   /* iCloud internal pseudo-collection */
     snprintf(c->name[c->n],128,"%s",dn); snprintf(c->path[c->n],256,"%s",href); c->n++;
 }
 
@@ -99,6 +100,38 @@ static int cmd_discover(DavCtx d){
     return 0;
 }
 
+/* write a small categorized sample PDB so `synccat` has category labels to
+ * route (real Palm DBs carry these; the test samples do not).                */
+static int cmd_demo(int kind,const char*path){
+    CatTable t; memset(&t,0,sizeof t);
+    strcpy(t.name[0],"Unfiled");
+    if(kind==KIND_TODO) strcpy(t.name[1],"Reminders");
+    else { strcpy(t.name[1],"Work"); strcpy(t.name[2],"Home"); }
+    uint8_t ai[APPINFO_SIZE]; int al=appinfo_build(ai,sizeof ai,&t);
+    static uint8_t arena[8*PALM_REC_MAX]; PdbRec r[8]; int nr=0, used=0;
+    #define REC(uid,cat,LN) do{ r[nr]=(PdbRec){ .attr=(uint8_t)(cat),.uniqueID=(uid),.data=arena+used,.len=(LN) }; used+=(LN); nr++; }while(0)
+    if(kind==KIND_TODO){
+        struct{ const char*s; int cat; int y,m,d,pr; } td[]={
+            {"Buy stamps",1,2026,8,10,2},{"Renew passport",1,0,0,0,1} };
+        for(int i=0;i<2;i++){ Todo t2; memset(&t2,0,sizeof t2);
+            if(td[i].y){ t2.hasDue=1; t2.dueY=td[i].y; t2.dueM=td[i].m; t2.dueD=td[i].d; }
+            t2.priority=td[i].pr; snprintf(t2.description,sizeof t2.description,"%s",td[i].s);
+            int l=ToDoPack(arena+used,PALM_REC_MAX,&t2); REC((uint32_t)(i+1),td[i].cat,l); }
+        pdb_write_ai(path,"ToDoDB",0x44415441,0x746F646F,ai,al,r,nr);
+    } else {
+        struct{ const char*s; int cat; int d,h; } ev[]={
+            {"Standup",1,3,9},{"1:1 with Sam",1,4,14},{"Groceries",2,5,18},{"Dentist",2,6,10} };
+        for(int i=0;i<4;i++){ Appt a; memset(&a,0,sizeof a); a.hasTime=1; a.sH=ev[i].h; a.eH=ev[i].h+1;
+            a.year=2026;a.month=8;a.day=ev[i].d; snprintf(a.description,sizeof a.description,"%s",ev[i].s);
+            int l=ApptPack(arena+used,PALM_REC_MAX,&a); REC((uint32_t)(i+1),ev[i].cat,l); }
+        pdb_write_ai(path,"DatebookDB",0x44415441,0x64617465,ai,al,r,nr);
+    }
+    #undef REC
+    printf("wrote %s with %d records (categories: %s)\n",path,nr,
+        kind==KIND_TODO?"Reminders":"Work, Home");
+    return 0;
+}
+
 /* strip leading/trailing slashes so a discovered href works as a `coll` arg */
 static void trimColl(const char*in,char*out,int cap){
     while(*in=='/') in++;
@@ -125,8 +158,11 @@ static int cmd_synccat(DavCtx d,int kind,const char*pdb,ConflictPolicy pol){
             printf("  [%2d] %-16s -> %s\n",c,ct.name[c],paths[c]); break; }
         if(!rt.coll[c]) printf("  [%2d] %-16s -> (default)\n",c,ct.name[c]);
     }
-    rt.def = rt.coll[0] ? rt.coll[0] : defEnv;   /* Unfiled's collection, else DAV_CAL */
-    if(!rt.def){ fprintf(stderr,"no default collection: name a calendar 'Unfiled' or set DAV_CAL\n"); return 1; }
+    static char defbuf[256];
+    if(rt.coll[0]) rt.def=rt.coll[0];             /* Unfiled matched a collection   */
+    else if(defEnv){ trimColl(defEnv,defbuf,sizeof defbuf); rt.def=defbuf; }  /* DAV_CAL */
+    else rt.def=NULL;                             /* no default: skip unmatched cats */
+    if(!rt.def) printf("  (no default collection; records in unmatched categories are left local)\n");
     SyncStats s={0};
     sync_categorized(&d,pdb,pdb,kind,&rt,"state",pol,&s);
     printf("synced: +%d ~%d -%d push | +%d ~%d -%d pull | %d conflict | %d clean\n",
@@ -176,6 +212,10 @@ int main(int argc,char**argv){
     }
     if(!strcmp(argv[1],"discover")){
         return cmd_discover(d);
+    }
+    if(!strcmp(argv[1],"demo") && argc>=4){
+        int kind = !strcmp(argv[2],"todo")?KIND_TODO:KIND_CAL;
+        return cmd_demo(kind,argv[3]);
     }
     if(!strcmp(argv[1],"synccat") && argc>=4){
         int kind = !strcmp(argv[2],"card")?KIND_CARD : !strcmp(argv[2],"todo")?KIND_TODO : KIND_CAL;
