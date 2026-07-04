@@ -2,6 +2,7 @@
 #ifndef DATA_H
 #define DATA_H
 #include <stdint.h>
+#include "appinfo.h"   /* CatTable */
 
 /* seed demo PDBs on the SD card for any that are missing (so views have content
  * before a HotSync). safe to call every boot. */
@@ -32,5 +33,11 @@ int data_save_addr(uint32_t uid, const Addr *in);
 int data_save_todo(uint32_t uid, const Todo *in);
 /* delete a record by uid (next sync propagates it). */
 int data_delete(int app, uint32_t uid);
+
+/* categories: read the app's category table; get/set the active list filter
+ * (-1 = All). List iterators honor the filter. */
+int  data_get_categories(int app, CatTable *t);
+void data_set_category(int cat);
+int  data_get_category(void);
 
 #endif

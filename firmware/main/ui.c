@@ -76,6 +76,8 @@ static int g_nfields;
 static void list_view(const AppDef *ad);
 static void show_detail(uint32_t uid);
 static void show_edit(uint32_t uid);
+static void update_cat_trigger(void);
+static void cat_trigger_cb(lv_event_t *e);
 
 /* the keyboard lives on the screen (overlay), so it survives lv_obj_clean(content);
  * drop it whenever we navigate away from an edit form. */
@@ -113,6 +115,7 @@ static void list_view(const AppDef *ad){
         lv_obj_t *b = lv_list_add_button(list, NULL, "(no records)");
         lv_obj_set_style_radius(b, 0, 0);
     }
+    update_cat_trigger();
 }
 
 static void done_cb(lv_event_t *e){ (void)e; if(cur_app) list_view(cur_app); }
@@ -272,7 +275,7 @@ static void show_edit(uint32_t uid){
 
 static void show_app(const char *name){
     for(int i=0;i<NAPPDEFS;i++)
-        if(!strcmp(name, APPDEFS[i].name)){ list_view(&APPDEFS[i]); return; }
+        if(!strcmp(name, APPDEFS[i].name)){ data_set_category(-1); list_view(&APPDEFS[i]); return; }
     /* Memo Pad (no codec yet) + HotSync (U7) -> placeholder */
     cur_app = NULL;
     lv_obj_clean(content);
@@ -289,6 +292,7 @@ static void show_launcher(void){
     cur_uid = 0;
     lv_obj_clean(content);
     lv_label_set_text(title_lbl, "Applications");
+    update_cat_trigger();   /* hides it (no data app) */
 
     /* Palm Application Launcher = an icon grid (not a list) */
     lv_obj_t *grid = lv_obj_create(content);
@@ -334,7 +338,7 @@ static void act_delete(lv_event_t *e){ (void)e;
     const AppDef *a=cur_app; uint32_t u=cur_uid; menu_close();
     if(a && u){ data_delete(a->app, u); list_view(a); }
 }
-static void act_categories(lv_event_t *e){ (void)e; menu_close(); /* TODO F2 */ }
+static void act_categories(lv_event_t *e){ (void)e; menu_close(); cat_trigger_cb(NULL); }
 static void act_about(lv_event_t *e){ (void)e;
     menu_close();
     lv_obj_t *mb = lv_msgbox_create(NULL);
@@ -403,6 +407,74 @@ static void menu_cb(lv_event_t *e){ (void)e; menu_open(); }
 static void find_cb(lv_event_t *e){ (void)e; /* TODO global Find */ }
 static void calc_cb(lv_event_t *e){ (void)e; /* TODO calculator */ }
 
+/* ------------------------- F2: category picker ------------------------- */
+static lv_obj_t *cat_trigger, *cat_label, *g_catpop;
+
+static void catpop_close(void){ if(g_catpop){ lv_obj_del(g_catpop); g_catpop=NULL; } }
+static void catpop_backdrop_cb(lv_event_t *e){ (void)e; catpop_close(); }
+
+static void update_cat_trigger(void){
+    if(!cat_trigger) return;
+    if(!cur_app){ lv_obj_add_flag(cat_trigger, LV_OBJ_FLAG_HIDDEN); return; }
+    lv_obj_clear_flag(cat_trigger, LV_OBJ_FLAG_HIDDEN);
+    int f = data_get_category();
+    if(f < 0){ lv_label_set_text(cat_label, "All"); return; }
+    CatTable t;
+    if(data_get_categories(cur_app->app, &t) && t.name[f][0]) lv_label_set_text(cat_label, t.name[f]);
+    else lv_label_set_text(cat_label, "All");
+}
+
+static void cat_pick_cb(lv_event_t *e){
+    int cat = (int)(intptr_t)lv_event_get_user_data(e);
+    const AppDef *a = cur_app;
+    catpop_close();
+    data_set_category(cat);
+    if(a) list_view(a);   /* refresh filtered + updates the trigger */
+}
+
+static void cat_item(lv_obj_t *par, const char *txt, int cat){
+    lv_obj_t *b = lv_button_create(par);
+    lv_obj_set_width(b, lv_pct(100));
+    lv_obj_set_style_radius(b, 0, 0);
+    lv_obj_set_style_pad_ver(b, 4, 0);
+    lv_obj_t *l = lv_label_create(b);
+    lv_label_set_text(l, txt);
+    lv_obj_align(l, LV_ALIGN_LEFT_MID, 2, 0);
+    lv_obj_add_event_cb(b, cat_pick_cb, LV_EVENT_CLICKED, (void *)(intptr_t)cat);
+}
+
+/* Palm category pop-up: All + the app's categories, top-right under the trigger */
+static void cat_trigger_cb(lv_event_t *e){
+    (void)e;
+    if(!cur_app || g_catpop) return;
+    CatTable t; int have = data_get_categories(cur_app->app, &t);
+
+    g_catpop = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_catpop, LCD_W, LCD_H);
+    lv_obj_set_style_bg_opa(g_catpop, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(g_catpop, 0, 0);
+    lv_obj_set_style_pad_all(g_catpop, 0, 0);
+    lv_obj_add_flag(g_catpop, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_catpop, catpop_backdrop_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *panel = lv_obj_create(g_catpop);
+    lv_obj_set_width(panel, 110);
+    lv_obj_set_height(panel, LV_SIZE_CONTENT);
+    lv_obj_set_style_max_height(panel, LCD_H - 30, 0);
+    lv_obj_align(panel, LV_ALIGN_TOP_RIGHT, -2, TITLE_H);
+    lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
+    lv_obj_set_style_border_width(panel, 1, 0);
+    lv_obj_set_style_border_color(panel, COL_LINE, 0);
+    lv_obj_set_style_radius(panel, 0, 0);
+    lv_obj_set_style_pad_all(panel, 3, 0);
+    lv_obj_set_style_pad_row(panel, 2, 0);
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
+
+    cat_item(panel, "All", -1);
+    if(have) for(int c=0;c<CAT_COUNT;c++) if(t.name[c][0]) cat_item(panel, t.name[c], c);
+}
+
 /* a small bordered silkscreen button with a recolored icon */
 static lv_obj_t *mk_silk(lv_obj_t *par, const lv_image_dsc_t *ic, lv_align_t al,
                          int xo, int yo, lv_event_cb_t cb){
@@ -441,6 +513,18 @@ void ui_init(void){
     lv_obj_set_style_text_color(title_lbl, COL_LINE, 0);   /* black on white */
     lv_obj_set_style_text_font(title_lbl, &lv_font_palm_bold, 0);
     lv_obj_align(title_lbl, LV_ALIGN_LEFT_MID, 6, 0);
+
+    /* F2: category pop-up trigger (top-right, Palm convention) */
+    cat_trigger = lv_button_create(bar);
+    lv_obj_set_height(cat_trigger, TITLE_H - 4);
+    lv_obj_align(cat_trigger, LV_ALIGN_RIGHT_MID, -2, 0);
+    lv_obj_set_style_radius(cat_trigger, 0, 0);
+    lv_obj_set_style_pad_hor(cat_trigger, 4, 0);
+    lv_obj_add_event_cb(cat_trigger, cat_trigger_cb, LV_EVENT_CLICKED, NULL);
+    cat_label = lv_label_create(cat_trigger);
+    lv_label_set_text(cat_label, "All");
+    lv_obj_center(cat_label);
+    lv_obj_add_flag(cat_trigger, LV_OBJ_FLAG_HIDDEN);   /* only shown in data apps */
 
     /* content area (swappable views) */
     content = panel(scr, 0, TITLE_H, LCD_W, PDA_H - TITLE_H, COL_BODY);

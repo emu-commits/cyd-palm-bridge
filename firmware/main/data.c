@@ -4,6 +4,7 @@
  */
 #include "data.h"
 #include "palm.h"
+#include "appinfo.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -11,10 +12,31 @@
 #define DB_ADDR "/sdcard/AddressDB.pdb"
 #define DB_TODO "/sdcard/ToDoDB.pdb"
 
+static const char *db_path(int app){
+    return app==APP_CAL?DB_CAL : app==APP_ADDR?DB_ADDR : DB_TODO;
+}
 static int file_exists(const char *path){
     FILE *f = fopen(path, "rb");
     if(f){ fclose(f); return 1; }
     return 0;
+}
+
+/* shared demo category table (Unfiled/Business/Personal) written into each PDB */
+static int build_appinfo(uint8_t *ai){
+    CatTable t; memset(&t,0,sizeof t);
+    strcpy(t.name[0],"Unfiled"); strcpy(t.name[1],"Business"); strcpy(t.name[2],"Personal");
+    return appinfo_build(ai, APPINFO_SIZE, &t);
+}
+
+/* current category filter for list views: -1 = All, else a category index */
+static int g_catfilter = -1;
+void data_set_category(int cat){ g_catfilter = cat; }
+int  data_get_category(void){ return g_catfilter; }
+
+int data_get_categories(int app, CatTable *t){
+    uint8_t ai[512]; int al = pdb_read_appinfo(db_path(app), ai, sizeof ai);
+    if(al<=0) return 0;
+    return appinfo_parse(ai, al, t)==0;
 }
 
 /* ------------------------- demo seeding -------------------------
@@ -23,6 +45,7 @@ static int file_exists(const char *path){
 #define SEEDMAX 32
 static void seed_datebook(void){
     static uint8_t arena[SEEDMAX*96]; PdbRec r[SEEDMAX]; int nr=0, used=0;
+    uint8_t ai[APPINFO_SIZE]; int al=build_appinfo(ai);
     struct { const char *s; int mo, d, h; } ev[] = {
         {"Standup",8,3,9},{"1:1 with Sam",8,3,14},{"Groceries",8,4,18},{"Dentist",8,5,10},
         {"Team lunch",8,5,12},{"Code review",8,6,15},{"Gym",8,6,7},{"Call Mom",8,7,19},
@@ -35,13 +58,14 @@ static void seed_datebook(void){
         a.year=2026; a.month=ev[i].mo; a.day=ev[i].d;
         snprintf(a.description,sizeof a.description,"%s",ev[i].s);
         int l=ApptPack(arena+used,96,&a);
-        if(l>0){ r[nr]=(PdbRec){.attr=0,.uniqueID=(uint32_t)(i+1),.data=arena+used,.len=l}; used+=l; nr++; }
+        if(l>0){ r[nr]=(PdbRec){.attr=(uint8_t)(i%3),.uniqueID=(uint32_t)(i+1),.data=arena+used,.len=l}; used+=l; nr++; }
     }
-    pdb_write_ai(DB_CAL,"DatebookDB",0x44415441,0x64617465,NULL,0,r,nr);
+    pdb_write_ai(DB_CAL,"DatebookDB",0x44415441,0x64617465,ai,al,r,nr);
 }
 
 static void seed_address(void){
     static uint8_t arena[SEEDMAX*96]; PdbRec r[SEEDMAX]; int nr=0, used=0;
+    uint8_t ai[APPINFO_SIZE]; int al=build_appinfo(ai);
     struct { const char *last,*first,*co,*phone; } pc[] = {
         {"Appleseed","Johnny","Acme Corp","555-0100"},{"Bramble","Rosa","Widgets Inc","555-0200"},
         {"Chen","Mei","","555-0300"},{"Okafor","Ada","Globex","555-0400"},
@@ -57,13 +81,14 @@ static void seed_address(void){
         if(pc[i].co[0]) a.fields[F_company]=AddrIntern(&a,pc[i].co);
         a.fields[F_phone1]=AddrIntern(&a,pc[i].phone); a.phoneLabel[0]=workLabel;
         int l=AddrPack(arena+used,96,&a);
-        if(l>0){ r[nr]=(PdbRec){.attr=0,.uniqueID=(uint32_t)(i+1),.data=arena+used,.len=l}; used+=l; nr++; }
+        if(l>0){ r[nr]=(PdbRec){.attr=(uint8_t)(i%3),.uniqueID=(uint32_t)(i+1),.data=arena+used,.len=l}; used+=l; nr++; }
     }
-    pdb_write_ai(DB_ADDR,"AddressDB",0x44415441,0x61646472,NULL,0,r,nr);
+    pdb_write_ai(DB_ADDR,"AddressDB",0x44415441,0x61646472,ai,al,r,nr);
 }
 
 static void seed_todo(void){
     static uint8_t arena[SEEDMAX*96]; PdbRec r[SEEDMAX]; int nr=0, used=0;
+    uint8_t ai[APPINFO_SIZE]; int al=build_appinfo(ai);
     struct { const char *s; int pr, done; } td[] = {
         {"Buy stamps",2,0},{"Renew passport",1,0},{"Call plumber",3,0},{"File taxes",1,1},
         {"Water plants",4,0},{"Read RFC 6578",2,1},{"Fix bike tire",3,0},{"Book dentist",2,0},
@@ -74,9 +99,9 @@ static void seed_todo(void){
         t.priority=td[i].pr; t.completed=td[i].done;
         snprintf(t.description,sizeof t.description,"%s",td[i].s);
         int l=ToDoPack(arena+used,96,&t);
-        if(l>0){ r[nr]=(PdbRec){.attr=0,.uniqueID=(uint32_t)(i+1),.data=arena+used,.len=l}; used+=l; nr++; }
+        if(l>0){ r[nr]=(PdbRec){.attr=(uint8_t)(i%3),.uniqueID=(uint32_t)(i+1),.data=arena+used,.len=l}; used+=l; nr++; }
     }
-    pdb_write_ai(DB_TODO,"ToDoDB",0x44415441,0x746F646F,NULL,0,r,nr);
+    pdb_write_ai(DB_TODO,"ToDoDB",0x44415441,0x746F646F,ai,al,r,nr);
 }
 
 void data_seed_if_empty(void){
@@ -91,6 +116,7 @@ typedef struct { data_row_cb cb; void *ctx; } It;
 
 static int cbCal(const PdbRec *r, int i, void *ctx){
     (void)i; It *it=ctx; Appt a;
+    if(g_catfilter>=0 && (r->attr & 0x0F)!=g_catfilter) return 0;
     if(ApptUnpack(r->data,r->len,&a)) return 0;
     char pri[96];
     if(a.hasTime) snprintf(pri,sizeof pri,"%d/%d %d:%02d  %.72s",a.month,a.day,a.sH,a.sM,a.description);
@@ -102,6 +128,7 @@ void data_datebook(data_row_cb cb, void *ctx){ It it={cb,ctx}; pdb_read(DB_CAL,c
 
 static int cbAddr(const PdbRec *r, int i, void *ctx){
     (void)i; It *it=ctx; Addr a;
+    if(g_catfilter>=0 && (r->attr & 0x0F)!=g_catfilter) return 0;
     if(AddrUnpack(r->data,r->len,&a)) return 0;
     const char *last=a.fields[F_name], *first=a.fields[F_firstName], *co=a.fields[F_company];
     char pri[96];
@@ -116,6 +143,7 @@ void data_address(data_row_cb cb, void *ctx){ It it={cb,ctx}; pdb_read(DB_ADDR,c
 
 static int cbTodo(const PdbRec *r, int i, void *ctx){
     (void)i; It *it=ctx; Todo t;
+    if(g_catfilter>=0 && (r->attr & 0x0F)!=g_catfilter) return 0;
     if(ToDoUnpack(r->data,r->len,&t)) return 0;
     char pri[96];
     snprintf(pri,sizeof pri,"%s%.80s",t.completed?"[x] ":"[ ] ",t.description);
