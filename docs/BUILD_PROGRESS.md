@@ -5,7 +5,16 @@ can resume cold. Newest phase on top.
 
 ---
 
-## U3 — app shell (LVGL, Palm-skinned)   [IN PROGRESS]
+## U3 — app shell (LVGL, Palm-skinned)   [DONE ✓]
+
+**RESULT:** LVGL 9.2 up on the partial-buffer path (lvgl_port.[ch]), bound to
+display.c (flush) + touch.c/tp_* (indev), esp_timer tick. Palm-style shell
+(ui.[ch]): navy title bar + home button, swappable content area, Graffiti strip
+(abc|123). Launcher lists the classic Palm apps; tap opens a placeholder + updates
+title, home returns. Confirmed on hardware (render + navigation). 189KB free heap
+with LVGL. Default Montserrat font for now -> U3a swaps in authentic Palm fonts/
+icons. NEXT: U4 read-only data views (stream from PDB), U3a assets.
+
 
 **Goal:** LVGL on the partial-buffer path, wired to display.c (flush) + touch.c
 (indev), then a Palm-style launcher + nav. Internet OK → LVGL via managed
@@ -23,8 +32,13 @@ bump SPI max_transfer_sz). indev: touch_read -> point/state. tick: esp_timer ms.
   blit, indev=tp_read, tick=esp_timer). NAME CLASH: ESP RTC lib defines
   touch_init/touch_read -> renamed my touch API to tp_*. ui.[ch] test UI (navy
   title bar, Tap-me counter button, gray graffiti strip "abc | 123").
-  Builds; LVGL up on hardware, 189KB free heap (LVGL ~67KB). AWAITING: does the
-  UI render + does the button count on tap?
+  Builds; LVGL up on hardware, 189KB free heap (LVGL ~67KB). CONFIRMED by user:
+  UI renders + button counts on tap. LVGL integration proven. Committed d86b33d.
+- U3.2/U3.3: launcher + navigation. Persistent chrome (title bar w/ home button +
+  title label, content area 24..208, graffiti strip w/ abc|123 split). Launcher =
+  lv_list of classic Palm apps (Date Book, Address, To Do List, Memo Pad,
+  HotSync). Tap app -> placeholder view + title updates; home button -> back to
+  launcher. Flashed. AWAITING: launcher renders + nav (open app / home) works?
 
 ---
 
