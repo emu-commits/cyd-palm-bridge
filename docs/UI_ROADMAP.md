@@ -102,45 +102,53 @@ design; it doesn't break it.
 
 ---
 
-## Graphics stack choice
+## Graphics stack — DECIDED: LVGL, skinned with real Palm assets + layouts
 
-- **LVGL (recommended for speed)** with tiny partial buffers. Gives widgets,
-  fonts, touch input, scrolling lists out of the box. ~40 KB RAM (buffers) +
-  ~30 KB (core/objects), fonts in flash. CYD-proven.
-- **LovyanGFX / direct drawing (RAM-minimal alt)** — hand-draw lists/forms with a
-  small sprite; ~a few KB of buffer, more dev effort, gives a crisp retro look and
-  the tightest RAM. Good fallback if LVGL proves heavy.
-- **Sync-mode progress screen**: direct SPI writes regardless of stack, so it
-  needs no big buffer while TLS is up.
+**Decision:** render with **LVGL** (partial buffers, ~40 KB), but make it *look*
+authentically Palm by **reusing as many Palm assets as practical** and
+**reproducing PumpkinOS's actual screen layouts**. Fast/low-risk engine,
+authentic skin. Reusing GPLv3 Palm assets makes the **firmware GPLv3** (accepted).
 
-Decision can wait until U3; start with LVGL, keep the door open to LovyanGFX.
+- **Fonts** — convert the Palm system bitmap fonts (from PumpkinOS resources) to
+  LVGL fonts (`lv_font_conv`). Authentic Palm glyphs are the single biggest
+  "feels like a Palm" win and live in flash (glyph cache is a few KB).
+- **Icons / chrome** — extract Palm app icons, checkbox/scrollbar/button bitmaps,
+  the silkscreen/title-bar look from PumpkinOS resources → LVGL image assets.
+- **Layouts** — use PumpkinOS's Form definitions (its `.rcp`/`FrmXXX` layout code)
+  as the **spec** for each screen: DateBook agenda/day, Address list/edit, ToDo,
+  Memo, dialogs, menus — place LVGL widgets at the authentic Palm coordinates and
+  proportions so structure matches, even though LVGL draws it.
+- **LovyanGFX / direct drawing** — kept as a fallback only if LVGL proves heavy.
+- **Sync-mode progress screen**: direct SPI writes, no big buffer while TLS is up.
+
+Asset pipeline is its own step (U3a below); layouts are referenced throughout
+U4–U5. Note: the earlier 160×160-framebuffer analysis still applies if we ever
+want a Palm-native logical surface, but LVGL partial rendering is the chosen path.
 
 ---
 
 ## PumpkinOS: what we donate, and what we don't
 
-The original plan was **native app + PumpkinOS as a donor codebase, not a
-runtime** — and that survives the no-framebuffer design unchanged, because the
-framebuffer/SDL2/MMU baggage is exactly the part we never port.
+PumpkinOS is a donor codebase, not a runtime. With **GPLv3 accepted**, we now use
+it three ways (the firmware is therefore GPLv3):
 
-- **Donate (framebuffer-agnostic pure C):**
-  - *Data formats* — **already banked**. `pdb/datebook/address/todo.c` are
-    clean-room from the documented Palm byte layouts, with PumpkinOS's
-    `DateDB.c`/`AddressDB.c` as the format oracle (we even fixed a bug its
-    `ApptUnpack` has). License-clean.
-  - *Algorithms* — `libpumpkin/Find.c` global-search logic as a reference for
-    the streaming Find (U4); date math. No framebuffer involved.
-- **Do NOT port (framebuffer-coupled or stubbed):**
-  - PumpkinOS's **Forms/rendering API** (`FrmDrawForm`, `WinDrawXXX`) assumes a
-    full-bitmap window system — the wrong donor for partial-strip rendering. The
-    UI is our own (U3), which is the "native app" half of the original decision.
-  - **Graffiti** — PumpkinOS stubs it; we bring $Q regardless (U6).
-- **License rule:** stay clean-room (reference layout/algorithm, reimplement) to
-  keep the firmware license-free. Directly lifting a PumpkinOS `.c` makes the
-  firmware GPLv3 — a deliberate choice if ever taken, not an accident.
+- **Data formats — already banked.** `pdb/datebook/address/todo.c` are clean-room
+  from the documented Palm layouts, with PumpkinOS's `DateDB.c`/`AddressDB.c` as
+  the format oracle (we even fixed a bug its `ApptUnpack` has).
+- **Assets — reuse (new).** Palm **system fonts** → LVGL fonts; **icons/chrome**
+  bitmaps → LVGL images (U3a). These are the authentic-look payload.
+- **Layouts — reference (new).** PumpkinOS's Form definitions are the **spec** for
+  our LVGL screens (authentic coordinates/structure), U4–U5.
+- **Algorithms — reference.** `libpumpkin/Find.c` for the streaming Find (U4);
+  date math.
+- **Not ported:** PumpkinOS's *rendering runtime* (SDL2 blit, PACE, module loader,
+  the `WinXXX` window system) — we render with LVGL instead, so this desktop
+  baggage never comes along. **Graffiti** is stubbed in PumpkinOS; we bring $Q
+  (U6).
 
-Net: every useful PumpkinOS donation is framebuffer-independent and either done
-or referenced as an algorithm; the framebuffer constraint doesn't erode it.
+So we lift the *portable value* (formats, fonts, icons, layout specs, algorithms)
+without porting the framebuffer-coupled runtime. The look is authentic; the engine
+is LVGL.
 
 ## Phased plan
 
@@ -154,18 +162,25 @@ panel/controller this unit has.
 **U2 — Touch.** XPT2046 read + a 5-point calibration stored in NVS. Crosshair
 calibration screen. Map raw → screen coords.
 
-**U3 — Graphics stack + app shell.** Bring up LVGL (partial buffers) or
-LovyanGFX. A launcher (DateBook / Address / ToDo / Memo / Sync) and a nav model
-(app → list → detail → edit), styled for a crisp PDA feel.
+**U3 — Graphics stack + app shell.** Bring up **LVGL** (partial buffers). A
+launcher (DateBook / Address / ToDo / Memo / Sync) and a nav model (app → list →
+detail → edit), themed for a crisp Palm feel.
 
-**U4 — Read-only views (data plane already done).** Stream records from the PDB
-on SD into: DateBook agenda/day, Address list + detail, ToDo list, Memo list +
-viewer. Global Find (streaming search) — the codec + PDB reader are ready; this
-is UI over existing data.
+**U3a — Palm asset pipeline.** Convert PumpkinOS Palm system **fonts** →
+`lv_font` (via `lv_font_conv`), and Palm **icons/chrome** bitmaps → LVGL image
+assets. Build an LVGL theme (fonts, colors, 1-px borders, title bars) matching
+Palm. This is where "looks like a real Palm" comes from. GPLv3 assets.
 
-**U5 — Editing.** Record forms (new/edit/delete), setting the Palm dirty bit so
-edits flow back through the **already-proven** sync engine. On-screen keyboard
-first (works before Graffiti).
+**U4 — Read-only views (data plane done), laid out per PumpkinOS.** Stream
+records from the PDB on SD into DateBook agenda/day, Address list + detail, ToDo
+list, Memo list + viewer — each screen's **layout referenced from PumpkinOS's
+Form definitions** (authentic positions/structure). Global Find (streaming
+search), Find.c as the reference. Codec + PDB reader are ready; this is UI +
+skinning over existing data.
+
+**U5 — Editing (authentic forms).** Record new/edit/delete forms matching the
+Palm Form layouts, setting the Palm dirty bit so edits flow back through the
+**already-proven** sync engine. On-screen keyboard first (works before Graffiti).
 
 **U6 — Graffiti.** Ink capture surface + the **$Q recognizer** (built for MCUs,
 ~1–2 KB working set; templates in flash). PumpkinOS stubs Graffiti, so we bring
@@ -205,8 +220,14 @@ roomy — keep fonts subset-ed.
 - **Graffiti accuracy** on resistive touch → $Q is forgiving; add a keyboard
   fallback (U5) so text entry never depends solely on it.
 
+## Licensing
+Reusing PumpkinOS's GPLv3 Palm fonts/icons (and possibly `Find.c`) makes the
+**firmware GPLv3** — accepted. The host-side codecs remain clean-room and can
+stay separately license-free; the device binary that links Palm assets is GPLv3.
+Add a `LICENSE` (GPLv3) and asset-provenance note when U3a lands.
+
 ## Open decisions (settle as we go)
-- LVGL vs LovyanGFX (U3).
+- ~~LVGL vs LovyanGFX~~ — **decided: LVGL, Palm-skinned** (assets + layouts reused).
 - Sync trigger: physical button vs on-screen vs periodic timer (U7).
 - Two-way on-device editing v1, or view + keyboard-edit first, Graffiti after.
 - Battery gauge calibration + charge circuit (confirm this unit's charging).
