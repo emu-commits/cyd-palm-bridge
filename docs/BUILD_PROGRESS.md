@@ -5,6 +5,29 @@ can resume cold. Newest phase on top.
 
 ---
 
+## U3 — app shell (LVGL, Palm-skinned)   [IN PROGRESS]
+
+**Goal:** LVGL on the partial-buffer path, wired to display.c (flush) + touch.c
+(indev), then a Palm-style launcher + nav. Internet OK → LVGL via managed
+component (lvgl/lvgl ^9.2). Steps: U3.1 integration proof (label+button, touch
+works through LVGL); U3.2 launcher UI (title bar, app list, graffiti strip);
+U3.3 navigation; U3a Palm font/icon assets (separate).
+
+RAM: partial draw buffer ~240×40×2=19KB (×1), DMA-capable; U0 freed ~127KB so
+plenty. flush_cb: lv_draw_sw_rgb565_swap then display_blit (need to add blit +
+bump SPI max_transfer_sz). indev: touch_read -> point/state. tick: esp_timer ms.
+
+### Step log
+- U3.1: lvgl/lvgl ^9.2 managed component; display_blit (bumped SPI max_transfer_sz
+  to LCD_W*60*2); lvgl_port.[ch] (partial buffer 240x40 DMA, flush=rgb565_swap+
+  blit, indev=tp_read, tick=esp_timer). NAME CLASH: ESP RTC lib defines
+  touch_init/touch_read -> renamed my touch API to tp_*. ui.[ch] test UI (navy
+  title bar, Tap-me counter button, gray graffiti strip "abc | 123").
+  Builds; LVGL up on hardware, 189KB free heap (LVGL ~67KB). AWAITING: does the
+  UI render + does the button count on tap?
+
+---
+
 ## U2 — touch (XPT2046)   [DONE ✓]
 
 **RESULT:** bit-banged XPT2046 (pins CLK25 MOSI32 MISO39 CS33; IRQ36 unused —

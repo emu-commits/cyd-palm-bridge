@@ -31,10 +31,9 @@
 #include "sync.h"
 #include "display.h"
 #include "touch.h"
+#include "lvgl_port.h"
+#include "ui.h"
 #include "secrets.h"
-
-/* U2 bring-up: when set, run the touch test loop instead of the wifi/sync flow. */
-#define U2_TOUCH_TEST 1
 
 static const char *TAG = "app";
 
@@ -213,25 +212,20 @@ void app_main(void){
 
     /* U2: touch. Load saved calibration; (re)calibrate only if none is stored or
      * the user is holding the screen at boot (force re-cal). */
-    touch_init();
-    if(touch_pressed() || !touch_cal_load()){
+    tp_init();
+    if(tp_pressed() || !tp_cal_load()){
         ESP_LOGI(TAG,"U2 calibration: tap each white crosshair (TL, TR, BL)");
-        touch_calibrate();
-        touch_cal_save();
+        tp_calibrate();
+        tp_cal_save();
         ESP_LOGI(TAG,"calibration saved to NVS");
     } else {
         ESP_LOGI(TAG,"loaded touch calibration from NVS (hold screen at boot to re-cal)");
     }
 
-#if U2_TOUCH_TEST
-    ESP_LOGI(TAG,"tracking dot -- drag to confirm");
-    display_test_pattern();
-    while(1){
-        int sx,sy;
-        if(touch_read(&sx,&sy)) display_fill_rect(sx-3,sy-3,7,7,C_RED);
-        vTaskDelay(pdMS_TO_TICKS(30));
-    }
-#endif
+    /* U3: bring up LVGL + the Palm app shell (never returns). */
+    lvgl_port_init();
+    ui_init();
+    lvgl_port_run();
 
     if(wifi_connect()!=ESP_OK){ ESP_LOGE(TAG,"wifi failed; halting"); return; }
     if(clock_sync()!=ESP_OK){ ESP_LOGE(TAG,"clock not set; TLS would fail; halting"); return; }

@@ -68,6 +68,14 @@ void display_fill_rect(int x, int y, int w, int h, uint16_t color){
 
 void display_fill(uint16_t color){ display_fill_rect(0,0,LCD_W,LCD_H,color); }
 
+void display_blit(int x, int y, int w, int h, const void *px){
+    if(w<=0 || h<=0) return;
+    set_window(x, y, w, h);
+    lcd_dc(1);
+    spi_transaction_t t = { .length = (size_t)w*h*16, .tx_buffer = px };
+    spi_device_polling_transmit(s_spi, &t);
+}
+
 static void panel_init_seq(void){
     lcd_cmd(0x01); vTaskDelay(pdMS_TO_TICKS(150));   /* software reset */
     lcd_cmd(0x11); vTaskDelay(pdMS_TO_TICKS(120));   /* sleep out       */
@@ -97,7 +105,7 @@ void display_init(void){
     spi_bus_config_t bus = {
         .sclk_io_num = PIN_SCLK, .mosi_io_num = PIN_MOSI, .miso_io_num = PIN_MISO,
         .quadwp_io_num = -1, .quadhd_io_num = -1,
-        .max_transfer_sz = LCD_W*2 + 16,
+        .max_transfer_sz = LCD_W*60*2,   /* fits an LVGL partial buffer blit */
     };
     ESP_ERROR_CHECK(spi_bus_initialize(LCD_HOST, &bus, SPI_DMA_CH_AUTO));
 

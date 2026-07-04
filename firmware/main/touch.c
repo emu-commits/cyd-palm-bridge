@@ -4,7 +4,7 @@
  * IRQ(PENIRQ) 36. GPIO 39/36 are input-only (no internal pulls) -- fine, the
  * XPT2046 drives DOUT and idles PENIRQ high, pulling low on touch.
  *
- * Calibration is applied in touch_read(): raw ADC (~200..3900) -> screen px.
+ * Calibration is applied in tp_read(): raw ADC (~200..3900) -> screen px.
  * The constants below are refined from real corner taps during U2 (see
  * docs/BUILD_PROGRESS.md); start as identity-ish and get replaced with measured
  * values. Portrait 240x320.
@@ -31,12 +31,12 @@
 
 /* ---- affine calibration: screen = A*rawx + B*rawy + C (per axis) ----
  * A general affine handles axis swap, flip, scale and skew in one shot, solved
- * from 3 on-screen crosshair taps (touch_calibrate). Defaults are a rough
- * identity so touch_read is safe before calibration. */
+ * from 3 on-screen crosshair taps (tp_calibrate). Defaults are a rough
+ * identity so tp_read is safe before calibration. */
 static float ax_=0.06f, bx_=0.0f,  cx_=-18.0f;
 static float ay_=0.0f,  by_=0.09f, cy_=-18.0f;
 
-static uint16_t read_ch(uint8_t cmd);   /* fwd decl (used by touch_pressed) */
+static uint16_t read_ch(uint8_t cmd);   /* fwd decl (used by tp_pressed) */
 
 static void clk_pulse(void){
     gpio_set_level(T_CLK, 1); esp_rom_delay_us(1);
@@ -61,7 +61,7 @@ static uint16_t xfer(uint8_t cmd){
     return v & 0x0FFF;
 }
 
-void touch_init(void){
+void tp_init(void){
     gpio_config_t out = {
         .pin_bit_mask = (1ULL<<T_CLK)|(1ULL<<T_MOSI)|(1ULL<<T_CS),
         .mode = GPIO_MODE_OUTPUT,
@@ -84,12 +84,12 @@ void touch_init(void){
  * idle mostly <30 with rare spikes to ~250. */
 #define TOUCH_Z1_MIN 110
 
-int touch_pressed(void){
+int tp_pressed(void){
     if(read_ch(CMD_Z1) <= TOUCH_Z1_MIN) return 0;
     return read_ch(CMD_Z1) > TOUCH_Z1_MIN;   /* confirm (kills single-sample glitches) */
 }
 
-void touch_read_debug(uint16_t *x, uint16_t *y, uint16_t *z1, uint16_t *z2){
+void tp_read_debug(uint16_t *x, uint16_t *y, uint16_t *z1, uint16_t *z2){
     uint16_t a=read_ch(CMD_Z1), b=read_ch(CMD_Z2), rx=read_ch(CMD_X), ry=read_ch(CMD_Y);
     if(z1)*z1=a;
     if(z2)*z2=b;
@@ -106,8 +106,8 @@ static uint16_t read_ch(uint8_t cmd){
     return s[2];
 }
 
-int touch_read_raw(uint16_t *x, uint16_t *y, uint16_t *z){
-    if(!touch_pressed()) return 0;
+int tp_read_raw(uint16_t *x, uint16_t *y, uint16_t *z){
+    if(!tp_pressed()) return 0;
     uint16_t rx = read_ch(CMD_X);
     uint16_t ry = read_ch(CMD_Y);
     uint16_t z1 = xfer(CMD_Z1), z2 = xfer(CMD_Z2);
@@ -118,9 +118,9 @@ int touch_read_raw(uint16_t *x, uint16_t *y, uint16_t *z){
     return 1;
 }
 
-int touch_read(int *sx, int *sy){
+int tp_read(int *sx, int *sy){
     uint16_t rx, ry, rz;
-    if(!touch_read_raw(&rx, &ry, &rz)) return 0;
+    if(!tp_read_raw(&rx, &ry, &rz)) return 0;
     float fx = ax_*rx + bx_*ry + cx_;
     float fy = ay_*rx + by_*ry + cy_;
     int x = (int)(fx + 0.5f), y = (int)(fy + 0.5f);
@@ -153,7 +153,7 @@ static void draw_cross(int x, int y, uint16_t col){
 static void avg_touch(int *rx, int *ry){
     long sx=0, sy=0; int n=0;
     for(int i=0;i<24 && n<16;i++){
-        uint16_t x,y,z1,z2; touch_read_debug(&x,&y,&z1,&z2);
+        uint16_t x,y,z1,z2; tp_read_debug(&x,&y,&z1,&z2);
         if(z1>TOUCH_Z1_MIN){ sx+=x; sy+=y; n++; }
         vTaskDelay(pdMS_TO_TICKS(10));
     }
@@ -161,7 +161,7 @@ static void avg_touch(int *rx, int *ry){
     *ry = n? (int)(sy/n):0;
 }
 
-void touch_calibrate(void){
+void tp_calibrate(void){
     /* inset 40px: the touch digitizer's active area is slightly smaller than the
      * LCD, so targets at the extreme edge can be unreachable. Affine extrapolates. */
     const int tx[3] = { 40, LCD_W-40, 40 };
@@ -170,17 +170,17 @@ void touch_calibrate(void){
     for(int i=0;i<3;i++){
         display_fill(C_BLACK);
         draw_cross(tx[i], ty[i], C_WHITE);
-        while(!touch_pressed()) vTaskDelay(pdMS_TO_TICKS(20));   /* wait for tap */
+        while(!tp_pressed()) vTaskDelay(pdMS_TO_TICKS(20));   /* wait for tap */
         avg_touch(&rx[i], &ry[i]);
         draw_cross(tx[i], ty[i], C_GREEN);                       /* confirm      */
-        while(touch_pressed()) vTaskDelay(pdMS_TO_TICKS(20));    /* wait release */
+        while(tp_pressed()) vTaskDelay(pdMS_TO_TICKS(20));    /* wait release */
         vTaskDelay(pdMS_TO_TICKS(250));
     }
     solve3(rx, ry, tx, &ax_, &bx_, &cx_);
     solve3(rx, ry, ty, &ay_, &by_, &cy_);
 }
 
-void touch_cal_save(void){
+void tp_cal_save(void){
     nvs_handle_t h;
     if(nvs_open("touch", NVS_READWRITE, &h) != ESP_OK) return;
     float c[6] = { ax_, bx_, cx_, ay_, by_, cy_ };
@@ -189,7 +189,7 @@ void touch_cal_save(void){
     nvs_close(h);
 }
 
-int touch_cal_load(void){
+int tp_cal_load(void){
     nvs_handle_t h;
     if(nvs_open("touch", NVS_READONLY, &h) != ESP_OK) return 0;
     float c[6]; size_t sz = sizeof c;

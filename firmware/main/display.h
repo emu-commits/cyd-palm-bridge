@@ -24,5 +24,7 @@ void display_init(void);
 void display_fill(uint16_t color);
 void display_fill_rect(int x, int y, int w, int h, uint16_t color);
 void display_test_pattern(void);   /* 4 colored quadrants + yellow border */
+/* blit a w*h block of RGB565 pixels (already in wire byte order) to (x,y). */
+void display_blit(int x, int y, int w, int h, const void *px);
 
 #endif
