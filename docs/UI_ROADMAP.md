@@ -166,10 +166,30 @@ calibration screen. Map raw → screen coords.
 launcher (DateBook / Address / ToDo / Memo / Sync) and a nav model (app → list →
 detail → edit), themed for a crisp Palm feel.
 
-**U3a — Palm asset pipeline.** Convert PumpkinOS Palm system **fonts** →
-`lv_font` (via `lv_font_conv`), and Palm **icons/chrome** bitmaps → LVGL image
-assets. Build an LVGL theme (fonts, colors, 1-px borders, title bars) matching
-Palm. This is where "looks like a real Palm" comes from. GPLv3 assets.
+**U3a — Convert to authentic PalmOS look (Palm assets from PumpkinOS).**  ← the
+skinning pass; NOT optional. U3–U5 built the UI functionally with LVGL's *default*
+Montserrat font and default theme — placeholder styling. U3a replaces that skin
+with the real Palm look, per the locked decision (commit 357f044): LVGL engine,
+authentic Palm assets + PumpkinOS layouts, firmware GPLv3. The functional UI
+already in `ui.c` is the base to re-skin (title bar, launcher list, list/detail/
+edit views, Graffiti strip). Concrete steps:
+- **U3a.1 Fonts.** Lift the PalmOS system bitmap fonts from PumpkinOS
+  (`libpumpkin` font resources) and convert to `lv_font` with `lv_font_conv`
+  (bitmap mode, subset to Latin-1). Wire as the default LVGL theme font +
+  a bold variant for the title bar. This is the single biggest "feels like a
+  Palm" change (the crisp Palm glyphs vs Montserrat).
+- **U3a.2 Chrome + icons.** Extract Palm UI bitmaps (app-launcher icons for
+  DateBook/Address/ToDo/Memo/HotSync, checkbox, scrollbar, button, the
+  title-bar/silkscreen look) from PumpkinOS resources → LVGL image assets;
+  swap the placeholder `LV_SYMBOL_*` and list bullets for them.
+- **U3a.3 Theme.** An LVGL theme matching Palm: the Palm font, black 1-px
+  borders (no rounded corners — already radius 0), the inverted-bar title style,
+  flat gray/mono palette, Palm-proportioned list rows and buttons.
+- **U3a.4 Apply across screens.** Re-skin launcher, list views, detail, edit
+  forms, and the Graffiti strip with the theme + assets; match spacing to the
+  PumpkinOS Form layouts. Add a `LICENSE` (GPLv3) + asset-provenance note.
+Keep the option to render a Palm-native 160×160 low-color logical surface if we
+want pixel-exact Palm rendering later (the framebuffer fits — see RAM analysis).
 
 **U4 — Read-only views (data plane done), laid out per PumpkinOS.** Stream
 records from the PDB on SD into DateBook agenda/day, Address list + detail, ToDo

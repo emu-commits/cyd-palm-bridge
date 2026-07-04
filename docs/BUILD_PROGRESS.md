@@ -3,6 +3,13 @@
 Running log of the UI build (docs/UI_ROADMAP.md). Updated after each step so work
 can resume cold. Newest phase on top.
 
+> **QUEUED — do not skip: U3a "Convert to authentic PalmOS look".** U3–U5 built the
+> UI functionally with LVGL's *default* Montserrat font/theme (placeholder). The
+> locked decision (commit 357f044) is to re-skin with real Palm assets from
+> PumpkinOS (fonts + icons/chrome) and PumpkinOS Form layouts; firmware GPLv3.
+> Detailed sub-steps U3a.1–U3a.4 in docs/UI_ROADMAP.md. This is the visual
+> conversion pass and is NOT optional — the current look is a stand-in.
+
 ---
 
 ## U5 — record detail + editing   [IN PROGRESS]
