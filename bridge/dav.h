@@ -7,6 +7,8 @@
 
 typedef struct { char base[256]; char user[64]; char pass[64]; } DavCtx;
 
+extern int dav_last_status;   /* HTTP status of the most recent discovery PROPFIND */
+
 /* PUT body (from file) to <base>/<coll>/<name>; captures returned ETag and
  * HTTP status. ifmatch: NULL/"" = unconditional; else sent as If-Match (a
  * 412 means the object changed on the server since ifmatch was observed).  */

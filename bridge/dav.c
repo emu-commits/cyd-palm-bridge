@@ -10,6 +10,8 @@
 #include <strings.h>
 #include "dav.h"
 
+int dav_last_status = 0;   /* HTTP status of the most recent discovery request */
+
 /* case-insensitive substring search bounded by [s,end). */
 static const char* strcasestr_range(const char*s,const char*end,const char*needle){
     size_t nl=strlen(needle);
@@ -202,6 +204,7 @@ int dav_prop_href(const DavCtx*d,const char*path,const char*propOpen,
         "-H 'Depth: 0' -H 'Content-Type: application/xml' --data-binary @state/.dreq '%s%s'",
         d->user,d->pass,d->base,path);
     char code[16]={0}; if(run(cmd,code,sizeof code)<0) return -1;
+    dav_last_status=atoi(code);
     int len=0; char*buf=slurp("state/.drep",&len); if(!buf) return -1;
     /* locate the property element by its local name (strip '<' and any ns prefix) */
     char local[64]={0};

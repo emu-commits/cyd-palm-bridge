@@ -68,10 +68,27 @@ static int resolveColls(DavCtx*d,int want,Colls*cs){
     return cs->n;
 }
 
+static void diagnose(const DavCtx*d){
+    fprintf(stderr,"\n-- discovery failed --\nhost tried: %s\nHTTP status: %d\n",d->base,dav_last_status);
+    FILE*f=fopen("state/.drep","rb");
+    if(f){ char b[900]; int n=(int)fread(b,1,sizeof b-1,f); b[n>0?n:0]=0; fclose(f);
+        if(n>0) fprintf(stderr,"server said:\n%.900s\n",b); }
+    if(dav_last_status==401)
+        fprintf(stderr,"\n401 = auth rejected. For iCloud: DAV_USER must be your full Apple ID email,\n"
+                       "and DAV_PASS an APP-SPECIFIC password (appleid.apple.com > Sign-In & Security >\n"
+                       "App-Specific Passwords), entered WITH its dashes. The normal password is blocked by 2FA.\n");
+    else if(dav_last_status==0)
+        fprintf(stderr,"\nstatus 0 = no HTTP response (DNS/TLS/proxy). Check network and that DAV_BASE is https.\n");
+    else if(dav_last_status>=300 && dav_last_status<400)
+        fprintf(stderr,"\n%d = redirect not resolved. Try DAV_BASE=https://caldav.icloud.com (no trailing path).\n",dav_last_status);
+    else if(dav_last_status==207)
+        fprintf(stderr,"\n207 = the server answered but no current-user-principal href was found (namespace/shape).\n");
+}
+
 static int cmd_discover(DavCtx d){
     Colls cal={0}, card={0};
     DavCtx dc=d; int nc=resolveColls(&dc,'c',&cal);
-    if(nc<0){ fprintf(stderr,"could not resolve principal (check credentials)\n"); return 1; }
+    if(nc<0){ diagnose(&dc); return 1; }
     printf("host: %s\ncalendars:\n",dc.base);
     for(int i=0;i<cal.n;i++) printf("  %-28s  %s\n",cal.name[i][0]?cal.name[i]:"(unnamed)",cal.path[i]);
     DavCtx da=d; resolveColls(&da,'a',&card);
