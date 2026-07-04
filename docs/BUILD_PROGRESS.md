@@ -5,6 +5,56 @@ can resume cold. Newest phase on top.
 
 ---
 
+## U2 — touch (XPT2046)   [DONE ✓]
+
+**RESULT:** bit-banged XPT2046 (pins CLK25 MOSI32 MISO39 CS33; IRQ36 unused —
+detect via pressure z1). Pressure threshold 110 + double-read debounce (edge
+presses read weak z1 ~150; center ~800; idle <30, rare ~250 spike). 3-point
+AFFINE calibration (touch_calibrate: screen = A*rawx+B*rawy+C, handles the
+axis swap/flip), targets inset 40px (digitizer active area < LCD). Calibration
+persisted in NVS (namespace "touch"), re-cal by holding screen at boot.
+Confirmed on hardware: accurate tracking whole screen incl. former right-edge
+dead zone, no idle false-touches, NVS load verified on reset. touch.[ch] in
+firmware/main. Next: U3 app shell (LVGL, Palm-skinned).
+
+
+**Goal:** calibrated touch input. Both HW SPI hosts are taken (SD=SPI2, TFT=SPI3),
+XPT2046 is on its own pins (CLK25 MOSI32 MISO39 CS33 IRQ36; 39/36 are input-only,
+no internal pulls — fine, XPT2046 drives them) → **bit-bang** the touch SPI.
+Approach: (U2a) log RAW x/y/z on touch; user taps the 4 corners + center while
+serial is captured → derive the affine screen map from real data. (U2b) apply
+map, draw a tracking dot, user confirms; store cal (hardcode first, NVS later).
+Build flag U2_TOUCH_TEST gates the touch test loop vs the normal wifi/sync flow.
+
+### Step log
+- U2.1: bit-bang XPT2046 reader + raw-logging loop.
+- U2.2: FIX — IRQ pin (GPIO36) never signaled touch; switched to PRESSURE
+  detection (z1>300; idle z1<251, touched z1~700-970). Also fixed bit-bang:
+  12-bit read was misaligned (was read16>>4; now skip busy bit + read 12) and
+  swapped X/Y command bytes (X=0xD0, Y=0x90). Touch now reads.
+- U2.3: calibrated from corner taps. AXES SWAPPED: screenX<-rawY (301..3663),
+  screenY<-rawX (~3700 top..~570 bottom, flipped). cal in touch.c:
+  swap=1, xmin=301 xmax=3663 flipx=0, ymin=570 ymax=3700 flipy=1.
+  Switched to tracking-dot build. Result: horizontal finger drag produced
+  VERTICAL dot motion — blind corner clustering was unreliable (BL/BR
+  mis-registered). Abandoned manual swap/flip guessing.
+- U2.4: replaced with GENERAL AFFINE calibration (touch_calibrate): draws 3
+  crosshair targets (TL/TR/BL), user taps each, solve3() solves
+  screen = A*rawx + B*rawy + C per axis (handles swap/flip/scale/skew in one).
+  Applied in touch_read. app_main runs touch_calibrate() then tracking dot.
+  Flashed. Tracking + accuracy CONFIRMED good by user.
+- U2.5: user reports a wedge-shaped dead zone on the RIGHT edge (~1/6 wide at
+  top-right tapering to ~1/20 at bottom-right). Diagnosed w/ raw probe: NOT a
+  dead panel — right-edge presses DO register (rawY up to 3788) but z1
+  (pressure) reads only ~145-196 there vs ~800 center; the 300 threshold
+  rejected them. Resistive panels read lower pressure near edges (divider
+  geometry). Idle z1 mostly <30, rare spikes ~250 (overlaps edge presses).
+  FIX: TOUCH_Z1_MIN 300→110 + double-read debounce in touch_pressed; avg_touch
+  uses same. Re-flashed. AWAITING: does the dead zone shrink + any idle false
+  touches at threshold 110?
+
+---
+
 ## U1 — display bring-up (ILI9341/ST7789)   [DONE ✓]
 
 **RESULT:** ILI9341 works in **portrait 240×320** on SPI3 @ 20 MHz (pins SCLK14

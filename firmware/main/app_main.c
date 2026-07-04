@@ -30,7 +30,11 @@
 #include "dav.h"
 #include "sync.h"
 #include "display.h"
+#include "touch.h"
 #include "secrets.h"
+
+/* U2 bring-up: when set, run the touch test loop instead of the wifi/sync flow. */
+#define U2_TOUCH_TEST 1
 
 static const char *TAG = "app";
 
@@ -198,14 +202,36 @@ void app_main(void){
              (unsigned long)esp_get_free_heap_size(),
              (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 
-    /* U1: display bring-up -- draw a diagnostic test pattern first thing. */
-    display_init();
-    display_test_pattern();
-
     esp_err_t e = nvs_flash_init();
     if(e==ESP_ERR_NVS_NO_FREE_PAGES || e==ESP_ERR_NVS_NEW_VERSION_FOUND){
         ESP_ERROR_CHECK(nvs_flash_erase()); ESP_ERROR_CHECK(nvs_flash_init());
     }
+
+    /* U1: display bring-up -- draw a diagnostic test pattern first thing. */
+    display_init();
+    display_test_pattern();
+
+    /* U2: touch. Load saved calibration; (re)calibrate only if none is stored or
+     * the user is holding the screen at boot (force re-cal). */
+    touch_init();
+    if(touch_pressed() || !touch_cal_load()){
+        ESP_LOGI(TAG,"U2 calibration: tap each white crosshair (TL, TR, BL)");
+        touch_calibrate();
+        touch_cal_save();
+        ESP_LOGI(TAG,"calibration saved to NVS");
+    } else {
+        ESP_LOGI(TAG,"loaded touch calibration from NVS (hold screen at boot to re-cal)");
+    }
+
+#if U2_TOUCH_TEST
+    ESP_LOGI(TAG,"tracking dot -- drag to confirm");
+    display_test_pattern();
+    while(1){
+        int sx,sy;
+        if(touch_read(&sx,&sy)) display_fill_rect(sx-3,sy-3,7,7,C_RED);
+        vTaskDelay(pdMS_TO_TICKS(30));
+    }
+#endif
 
     if(wifi_connect()!=ESP_OK){ ESP_LOGE(TAG,"wifi failed; halting"); return; }
     if(clock_sync()!=ESP_OK){ ESP_LOGE(TAG,"clock not set; TLS would fail; halting"); return; }
