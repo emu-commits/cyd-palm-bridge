@@ -26,9 +26,22 @@ GPLv3). Palm fonts are recreated in src/BOOT/font_90NN_72.txt as ASCII bitmaps
 - U3a.1b FONT BUMP: user found 11px std too small -> regenerated lv_font_palm from
   Palm largeFont (9002, 14px), bold from largeBold (9007, 15px). palmfont.py + the
   9000-9007 .txt in scratchpad/PumpkinOS/src/BOOT.
-- U3a.2 ICONS: launcher rows get LVGL symbol icons (LV_SYMBOL LIST/CALL/OK/FILE/
-  REFRESH) for quick recognition; real Palm bitmaps deferred (user de-emphasized
-  pixel accuracy).
+- U3a.2 ICONS v1 (LVGL symbols) showed as EMPTY SQUARES — Palm font lacks the
+  symbol glyphs. FIXED: extract REAL Palm app icons from PumpkinOS tAIB03e8.dat
+  (25x22 1bpp, uncompressed, first entry of the bitmap family) via
+  scratchpad/palmicon.py -> LVGL A8 images (firmware/main/palm_icons.[ch]:
+  icon_datebook/address/todo/memo + a drawn icon_hotsync). Launcher rebuilt as an
+  ICON GRID (flex row-wrap, 3 col, icon+label cells, recolor black) per real Palm
+  Application Launcher (user wanted grid, not list). Icons render + grid + tap
+  confirmed; user asked: bigger icons + home doesn't belong in title bar.
+- U3a.2b: grid icons scaled 2x (lv_image_set_scale 512), cells 74x74. Removed the
+  broken title-bar home (LV_SYMBOL_HOME square — Palm font has no symbol glyphs).
+  Added the 4 PALM SILKSCREEN BUTTONS flanking the Graffiti area (drawn A8 icons
+  silk_home/menu/find/calc in palm_icons.c): [Home][Menu] left, abc|123 center,
+  [Find][Calc] right. Home->launcher; Menu = F1 entry (placeholder); Find/Calc
+  placeholders. Title bar now just app title (category picker goes here in F2).
+  Icon scaling (1.5x/2x) was fuzzy (non-integer A8 upscale) -> reverted to 1x crisp
+  (cells 68x52, 3-across). Launcher/silkscreen DONE. NEXT: F1 menu system.
 - **DIRECTION SHIFT (user):** prioritize PalmOS FUNCTIONAL/menu/feature design over
   pixel fidelity. Reference = palm.wiki PalmOS Companion UI doc + PumpkinOS app
   sources (src/{DateBook,AddressBook,ToDoList,MemoPad}). New plan section "Palm

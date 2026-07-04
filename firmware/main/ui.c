@@ -13,6 +13,7 @@
 #include "display.h"      /* LCD_W, PDA_H, GRAFFITI_H */
 #include "data.h"
 #include "lv_font_palm.h" /* authentic PalmOS system fonts */
+#include "palm_icons.h"   /* Palm app launcher icons */
 #include "lvgl.h"
 #include <string.h>
 #include <stdio.h>
@@ -27,9 +28,9 @@ static lv_obj_t *content;      /* the swappable view area */
 static lv_obj_t *title_lbl;
 
 static const char *APPS[] = { "Date Book", "Address", "To Do List", "Memo Pad", "HotSync" };
-/* functional glyphs for quick recognition (real Palm launcher icons: U3a.2 refine) */
-static const char *APP_ICONS[] = { LV_SYMBOL_LIST, LV_SYMBOL_CALL, LV_SYMBOL_OK,
-                                   LV_SYMBOL_FILE, LV_SYMBOL_REFRESH };
+/* authentic Palm app launcher icons (from PumpkinOS) */
+static const lv_image_dsc_t *APP_ICONS[] = { &icon_datebook, &icon_address,
+                                             &icon_todo, &icon_memo, &icon_hotsync };
 #define NAPPS ((int)(sizeof(APPS)/sizeof(APPS[0])))
 
 static void show_launcher(void);
@@ -285,16 +286,64 @@ static void show_launcher(void){
     lv_obj_clean(content);
     lv_label_set_text(title_lbl, "Applications");
 
-    lv_obj_t *list = lv_list_create(content);
-    lv_obj_set_size(list, lv_pct(100), lv_pct(100));
-    lv_obj_set_style_radius(list, 0, 0);
-    lv_obj_set_style_border_width(list, 0, 0);
-    lv_obj_set_style_pad_all(list, 0, 0);
+    /* Palm Application Launcher = an icon grid (not a list) */
+    lv_obj_t *grid = lv_obj_create(content);
+    lv_obj_set_size(grid, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_radius(grid, 0, 0);
+    lv_obj_set_style_border_width(grid, 0, 0);
+    lv_obj_set_style_bg_color(grid, COL_BODY, 0);
+    lv_obj_set_style_pad_all(grid, 6, 0);
+    lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
+
     for(int i=0;i<NAPPS;i++){
-        lv_obj_t *b = lv_list_add_button(list, APP_ICONS[i], APPS[i]);
-        lv_obj_set_style_radius(b, 0, 0);
-        lv_obj_add_event_cb(b, app_cb, LV_EVENT_CLICKED, (void *)APPS[i]);
+        lv_obj_t *cell = lv_obj_create(grid);
+        lv_obj_set_size(cell, 68, 52);
+        lv_obj_set_style_radius(cell, 0, 0);
+        lv_obj_set_style_border_width(cell, 0, 0);
+        lv_obj_set_style_bg_opa(cell, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_pad_all(cell, 2, 0);
+        lv_obj_set_style_pad_row(cell, 3, 0);
+        lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_add_flag(cell, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(cell, app_cb, LV_EVENT_CLICKED, (void *)APPS[i]);
+
+        lv_obj_t *img = lv_image_create(cell);
+        lv_image_set_src(img, APP_ICONS[i]);                       /* 1x (crisp) */
+        lv_obj_set_style_image_recolor(img, COL_LINE, 0);          /* A8 mask -> black */
+        lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);
+
+        lv_obj_t *lbl = lv_label_create(cell);
+        lv_label_set_text(lbl, APPS[i]);
+        lv_obj_set_style_text_font(lbl, &lv_font_palm, 0);
     }
+}
+
+/* silkscreen button placeholders (Menu -> F1, Find/Calc later) */
+static void menu_cb(lv_event_t *e){ (void)e; /* TODO F1 menu bar */ }
+static void find_cb(lv_event_t *e){ (void)e; /* TODO global Find */ }
+static void calc_cb(lv_event_t *e){ (void)e; /* TODO calculator */ }
+
+/* a small bordered silkscreen button with a recolored icon */
+static lv_obj_t *mk_silk(lv_obj_t *par, const lv_image_dsc_t *ic, lv_align_t al,
+                         int xo, int yo, lv_event_cb_t cb){
+    lv_obj_t *b = lv_obj_create(par);
+    lv_obj_set_size(b, 30, 30);
+    lv_obj_align(b, al, xo, yo);
+    lv_obj_set_style_radius(b, 3, 0);
+    lv_obj_set_style_border_width(b, 1, 0);
+    lv_obj_set_style_border_color(b, COL_LINE, 0);
+    lv_obj_set_style_bg_color(b, lv_color_white(), 0);
+    lv_obj_set_style_pad_all(b, 0, 0);
+    lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *im = lv_image_create(b);
+    lv_image_set_src(im, ic);
+    lv_obj_center(im);
+    lv_obj_set_style_image_recolor(im, COL_LINE, 0);
+    lv_obj_set_style_image_recolor_opa(im, LV_OPA_COVER, 0);
+    return b;
 }
 
 void ui_init(void){
@@ -303,37 +352,37 @@ void ui_init(void){
     lv_obj_set_style_text_font(scr, &lv_font_palm, 0);   /* authentic Palm font, inherited */
     lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* title bar: home button (left) + title label, black rule underneath (Palm) */
+    /* title bar: app title + category picker (F2), black rule underneath (Palm).
+     * Home/Menu live on the silkscreen buttons below, not here. */
     lv_obj_t *bar = panel(scr, 0, 0, LCD_W, TITLE_H, COL_TITLE);
     lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_BOTTOM, 0);
     lv_obj_set_style_border_width(bar, 2, 0);
     lv_obj_set_style_border_color(bar, COL_LINE, 0);
-    lv_obj_t *home = lv_button_create(bar);
-    lv_obj_set_size(home, 30, TITLE_H - 4);
-    lv_obj_align(home, LV_ALIGN_LEFT_MID, 0, -1);
-    lv_obj_t *hi = lv_label_create(home);
-    lv_label_set_text(hi, LV_SYMBOL_HOME);
-    lv_obj_center(hi);
-    lv_obj_add_event_cb(home, home_cb, LV_EVENT_CLICKED, NULL);
 
     title_lbl = lv_label_create(bar);
     lv_obj_set_style_text_color(title_lbl, COL_LINE, 0);   /* black on white */
     lv_obj_set_style_text_font(title_lbl, &lv_font_palm_bold, 0);
-    lv_obj_align(title_lbl, LV_ALIGN_LEFT_MID, 38, 0);
+    lv_obj_align(title_lbl, LV_ALIGN_LEFT_MID, 6, 0);
 
     /* content area (swappable views) */
     content = panel(scr, 0, TITLE_H, LCD_W, PDA_H - TITLE_H, COL_BODY);
 
-    /* Graffiti input strip with the letters | numbers split */
+    /* Graffiti strip: silkscreen buttons flank the writing area, Palm-style:
+     * [Home][Menu] ... abc | 123 ... [Find][Calc] */
     lv_obj_t *graf = panel(scr, 0, PDA_H, LCD_W, GRAFFITI_H, COL_GRAF);
-    lv_obj_t *sep = panel(graf, LCD_W*3/5, 0, 2, GRAFFITI_H, COL_LINE);
+    mk_silk(graf, &silk_home, LV_ALIGN_TOP_LEFT,     3,  3, home_cb);
+    mk_silk(graf, &silk_menu, LV_ALIGN_BOTTOM_LEFT,  3, -3, menu_cb);
+    mk_silk(graf, &silk_find, LV_ALIGN_TOP_RIGHT,   -3,  3, find_cb);
+    mk_silk(graf, &silk_calc, LV_ALIGN_BOTTOM_RIGHT,-3, -3, calc_cb);
+
+    lv_obj_t *sep = panel(graf, LCD_W/2, 6, 2, GRAFFITI_H-12, COL_LINE);
     (void)sep;
     lv_obj_t *gl = lv_label_create(graf);
     lv_label_set_text(gl, "abc");
-    lv_obj_align(gl, LV_ALIGN_LEFT_MID, 20, 0);
+    lv_obj_align(gl, LV_ALIGN_CENTER, -28, 0);
     lv_obj_t *gr = lv_label_create(graf);
     lv_label_set_text(gr, "123");
-    lv_obj_align(gr, LV_ALIGN_RIGHT_MID, -20, 0);
+    lv_obj_align(gr, LV_ALIGN_CENTER, 28, 0);
 
     show_launcher();
 }
