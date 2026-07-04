@@ -41,7 +41,17 @@ GPLv3). Palm fonts are recreated in src/BOOT/font_90NN_72.txt as ASCII bitmaps
   [Find][Calc] right. Home->launcher; Menu = F1 entry (placeholder); Find/Calc
   placeholders. Title bar now just app title (category picker goes here in F2).
   Icon scaling (1.5x/2x) was fuzzy (non-integer A8 upscale) -> reverted to 1x crisp
-  (cells 68x52, 3-across). Launcher/silkscreen DONE. NEXT: F1 menu system.
+  (cells 68x52, 3-across). Launcher/silkscreen DONE (commit 141eadd).
+
+## F1 — menu system   [BUILT, awaiting flash]
+Menu silkscreen button -> menu_open() pull-down overlay on lv_layer_top (dim
+backdrop, tap-outside closes). Grouped by Palm menu categories: Record (New ->
+show_edit(0); Delete -> data_delete + refresh, shown only when a record is
+current via cur_uid) + Options (Categories placeholder=F2, About=lv_msgbox).
+data.c gained data_delete (rewrite w/ nd==NULL drops the record; map still lists
+it so sync propagates). cur_uid tracks the current record. show_edit title = New
+when uid 0. Builds clean. BLOCKED: CYD /dev/ttyUSB0 vanished (USB dropped) — need
+replug to flash + test. NOT committed yet (untested on HW).
 - **DIRECTION SHIFT (user):** prioritize PalmOS FUNCTIONAL/menu/feature design over
   pixel fidelity. Reference = palm.wiki PalmOS Companion UI doc + PumpkinOS app
   sources (src/{DateBook,AddressBook,ToDoList,MemoPad}). New plan section "Palm

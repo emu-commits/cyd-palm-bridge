@@ -61,6 +61,7 @@ static const AppDef APPDEFS[] = {
 };
 #define NAPPDEFS ((int)(sizeof(APPDEFS)/sizeof(APPDEFS[0])))
 static const AppDef *cur_app;   /* the data app whose list/detail is showing */
+static uint32_t cur_uid;        /* the record currently in detail/edit (0 = none) */
 
 /* edit state */
 #define KB_H       150
@@ -99,6 +100,7 @@ static void add_row(uint32_t uid, const char *primary, const char *secondary, vo
 static void list_view(const AppDef *ad){
     kill_kb();
     cur_app = ad;
+    cur_uid = 0;
     lv_obj_clean(content);
     lv_label_set_text(title_lbl, ad->name);
     lv_obj_t *list = lv_list_create(content);
@@ -120,6 +122,7 @@ static void edit_cb(lv_event_t *e){ show_edit((uint32_t)(uintptr_t)lv_event_get_
 /* read-only detail for one record (scrollable text + Done / Edit) */
 static void show_detail(uint32_t uid){
     if(!cur_app) return;
+    cur_uid = uid;
     kill_kb();
     static char buf[720];
     if(!data_detail(cur_app->app, uid, buf, sizeof buf)) snprintf(buf,sizeof buf,"(not found)");
@@ -220,9 +223,9 @@ static void cancel_cb(lv_event_t *e){ (void)e; list_view(cur_app); }
 
 static void show_edit(uint32_t uid){
     if(!cur_app) return;
-    edit_uid = uid; g_nfields = 0;
+    edit_uid = uid; cur_uid = uid; g_nfields = 0;
     lv_obj_clean(content);
-    lv_label_set_text(title_lbl, "Edit");
+    lv_label_set_text(title_lbl, uid ? "Edit" : "New");
 
     lv_obj_t *cancel = lv_button_create(content);
     lv_obj_set_size(cancel, 74, 28); lv_obj_align(cancel, LV_ALIGN_TOP_LEFT, 2, 2);
@@ -283,6 +286,7 @@ static void show_app(const char *name){
 static void show_launcher(void){
     kill_kb();
     cur_app = NULL;
+    cur_uid = 0;
     lv_obj_clean(content);
     lv_label_set_text(title_lbl, "Applications");
 
@@ -320,8 +324,82 @@ static void show_launcher(void){
     }
 }
 
-/* silkscreen button placeholders (Menu -> F1, Find/Calc later) */
-static void menu_cb(lv_event_t *e){ (void)e; /* TODO F1 menu bar */ }
+/* ------------------------- F1: menu bar ------------------------- */
+static lv_obj_t *g_menu;   /* menu overlay root, or NULL */
+static void menu_close(void){ if(g_menu){ lv_obj_del(g_menu); g_menu=NULL; } }
+static void menu_backdrop_cb(lv_event_t *e){ (void)e; menu_close(); }
+
+static void act_new(lv_event_t *e){ (void)e; const AppDef *a=cur_app; menu_close(); if(a){ cur_app=a; show_edit(0); } }
+static void act_delete(lv_event_t *e){ (void)e;
+    const AppDef *a=cur_app; uint32_t u=cur_uid; menu_close();
+    if(a && u){ data_delete(a->app, u); list_view(a); }
+}
+static void act_categories(lv_event_t *e){ (void)e; menu_close(); /* TODO F2 */ }
+static void act_about(lv_event_t *e){ (void)e;
+    menu_close();
+    lv_obj_t *mb = lv_msgbox_create(NULL);
+    lv_msgbox_add_title(mb, "CYD Palm");
+    lv_msgbox_add_text(mb, "A PalmOS-style PDA that\nsyncs to iCloud.\n\nv0.1");
+    lv_msgbox_add_close_button(mb);
+}
+
+static void menu_item(lv_obj_t *par, const char *txt, lv_event_cb_t cb){
+    lv_obj_t *b = lv_button_create(par);
+    lv_obj_set_width(b, lv_pct(100));
+    lv_obj_set_style_radius(b, 0, 0);
+    lv_obj_set_style_pad_ver(b, 4, 0);
+    lv_obj_t *l = lv_label_create(b);
+    lv_label_set_text(l, txt);
+    lv_obj_align(l, LV_ALIGN_LEFT_MID, 2, 0);
+    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
+}
+static void menu_header(lv_obj_t *par, const char *txt){
+    lv_obj_t *l = lv_label_create(par);
+    lv_label_set_text(l, txt);
+    lv_obj_set_style_text_font(l, &lv_font_palm_bold, 0);
+    lv_obj_set_style_pad_top(l, 3, 0);
+}
+
+/* Palm menu: tap Menu (silkscreen) -> pull-down of the context's commands,
+ * grouped by Palm's menu categories (Record / Options). */
+static void menu_open(void){
+    if(g_menu) return;
+    g_menu = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_menu, LCD_W, LCD_H);
+    lv_obj_set_style_bg_color(g_menu, COL_LINE, 0);
+    lv_obj_set_style_bg_opa(g_menu, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(g_menu, 0, 0);
+    lv_obj_set_style_radius(g_menu, 0, 0);
+    lv_obj_set_style_pad_all(g_menu, 0, 0);
+    lv_obj_add_flag(g_menu, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_menu, menu_backdrop_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *panel = lv_obj_create(g_menu);
+    lv_obj_set_width(panel, 150);
+    lv_obj_set_style_max_height(panel, LCD_H - 20, 0);
+    lv_obj_set_height(panel, LV_SIZE_CONTENT);
+    lv_obj_align(panel, LV_ALIGN_TOP_LEFT, 4, TITLE_H);
+    lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
+    lv_obj_set_style_border_width(panel, 1, 0);
+    lv_obj_set_style_border_color(panel, COL_LINE, 0);
+    lv_obj_set_style_radius(panel, 0, 0);
+    lv_obj_set_style_pad_all(panel, 4, 0);
+    lv_obj_set_style_pad_row(panel, 2, 0);
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);   /* absorb clicks (don't close) */
+
+    if(cur_app){
+        menu_header(panel, "Record");
+        menu_item(panel, "New", act_new);
+        if(cur_uid) menu_item(panel, "Delete", act_delete);
+    }
+    menu_header(panel, "Options");
+    menu_item(panel, "Categories", act_categories);
+    menu_item(panel, "About", act_about);
+}
+
+/* silkscreen buttons */
+static void menu_cb(lv_event_t *e){ (void)e; menu_open(); }
 static void find_cb(lv_event_t *e){ (void)e; /* TODO global Find */ }
 static void calc_cb(lv_event_t *e){ (void)e; /* TODO calculator */ }
 

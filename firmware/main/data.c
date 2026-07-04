@@ -205,7 +205,10 @@ int data_get_todo(uint32_t uid, Todo *out){ Get g={uid,out,0}; pdb_read(DB_TODO,
 typedef struct { uint32_t uid; const uint8_t *nd; int nl; uint8_t *arena; int used; PdbRec *recs; int nr; int done; } RW;
 static int rwCb(const PdbRec *r,int i,void *ctx){ (void)i; RW*w=ctx;
     const uint8_t *src=r->data; int len=r->len; uint8_t attr=r->attr;
-    if(r->uniqueID==w->uid){ src=w->nd; len=w->nl; attr|=REC_ATTR_DIRTY; w->done=1; }
+    if(r->uniqueID==w->uid){
+        if(!w->nd){ w->done=1; return 0; }             /* delete: drop this record */
+        src=w->nd; len=w->nl; attr|=REC_ATTR_DIRTY; w->done=1;
+    }
     if(w->used+len>RW_ARENA || w->nr>=RW_MAX) return 1;
     memcpy(w->arena+w->used, src, len);
     w->recs[w->nr]=(PdbRec){.attr=attr,.uniqueID=r->uniqueID,.data=w->arena+w->used,.len=len};
@@ -238,4 +241,15 @@ int data_save_addr(uint32_t uid, const Addr *in){
 int data_save_todo(uint32_t uid, const Todo *in){
     uint8_t pk[1024]; int l=ToDoPack(pk,sizeof pk,in); if(l<=0) return 0;
     return rewrite(DB_TODO,"ToDoDB",0x44415441,0x746F646F,uid,pk,l)>=0;
+}
+
+/* remove a record (rewrite the PDB without it). the map still lists it, so the
+ * next sync propagates the delete to the server. */
+int data_delete(int app, uint32_t uid){
+    switch(app){
+        case APP_CAL:  return rewrite(DB_CAL, "DatebookDB",0x44415441,0x64617465,uid,NULL,0)>=0;
+        case APP_ADDR: return rewrite(DB_ADDR,"AddressDB", 0x44415441,0x61646472,uid,NULL,0)>=0;
+        case APP_TODO: return rewrite(DB_TODO,"ToDoDB",    0x44415441,0x746F646F,uid,NULL,0)>=0;
+    }
+    return 0;
 }

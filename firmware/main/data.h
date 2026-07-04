@@ -30,5 +30,7 @@ int data_get_todo(uint32_t uid, Todo *out);
 int data_save_cal(uint32_t uid, const Appt *in);
 int data_save_addr(uint32_t uid, const Addr *in);
 int data_save_todo(uint32_t uid, const Todo *in);
+/* delete a record by uid (next sync propagates it). */
+int data_delete(int app, uint32_t uid);
 
 #endif
