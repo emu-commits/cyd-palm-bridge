@@ -118,21 +118,68 @@ static esp_err_t sd_mount(void){
     return ESP_OK;
 }
 
+static void dav_from_secrets(DavCtx*d){
+    memset(d,0,sizeof *d);
+    snprintf(d->base,sizeof d->base,"%s",DAV_BASE);
+    snprintf(d->user,sizeof d->user,"%s",DAV_USER);
+    snprintf(d->pass,sizeof d->pass,"%s",DAV_PASS);
+}
+
+/* resolve iCloud's per-user host once (caldav.icloud.com -> pNN-caldav...) */
+static void resolve_host(DavCtx*d){
+    char host[256]="";
+    if(dav_effective_host(d,"/",host,sizeof host)==0 && host[0]){
+        ESP_LOGI(TAG,"effective host: %s",host);
+        snprintf(d->base,sizeof d->base,"%s",host);
+    } else {
+        ESP_LOGW(TAG,"could not resolve effective host (status %d); using %s",dav_last_status,d->base);
+    }
+}
+
+/* If href is an absolute URL, repoint d->base at its origin and return the path;
+ * else return href unchanged. iCloud returns absolute hrefs for home-sets on the
+ * per-user host (mirrors absPath() in the host CLI). */
+static char* abspath(char*href, DavCtx*d){
+    if(strncmp(href,"http",4)==0){
+        char*p=strstr(href,"://");
+        if(p){ char*slash=strchr(p+3,'/');
+            if(slash){ int n=(int)(slash-href);
+                if(n<(int)sizeof d->base){ memcpy(d->base,href,n); d->base[n]=0; }
+                return slash; } }
+    }
+    return href;
+}
+
+/* ---- discovery smoke test (no SD needed): proves WiFi+SNTP+TLS+PROPFIND ---- */
+static void discover_cb(const char*href,int kind,const char*dn,void*ctx){
+    (void)ctx;
+    if(kind!='c' && kind!='a') return;   /* skip home-self, inbox/outbox, notifications */
+    ESP_LOGI(TAG,"  [%c] %-24s %s", kind, dn&&dn[0]?dn:"(unnamed)", href);
+}
+static void run_discovery(void){
+    DavCtx d; dav_from_secrets(&d);
+    ESP_LOGI(TAG,"heap before discovery: %lu",(unsigned long)esp_get_free_heap_size());
+    resolve_host(&d);
+    char principal[512]="";
+    if(dav_prop_href(&d,"/","<d:current-user-principal/>","",principal,sizeof principal)!=0 || !principal[0]){
+        ESP_LOGE(TAG,"principal lookup failed (status %d) -- check DAV_USER/DAV_PASS",dav_last_status);
+        return;
+    }
+    ESP_LOGI(TAG,"principal: %s",principal);
+    char *ppath=abspath(principal,&d);
+    char home[512]="";
+    dav_prop_href(&d,ppath,"<c:calendar-home-set/>","xmlns:c=\"urn:ietf:params:xml:ns:caldav\"",home,sizeof home);
+    if(!home[0]){ ESP_LOGE(TAG,"no calendar-home-set"); return; }
+    char *hpath=abspath(home,&d);
+    ESP_LOGI(TAG,"calendar-home: %s%s\ncalendars:",d.base,hpath);
+    dav_list_collections(&d,hpath,discover_cb,NULL);
+    ESP_LOGI(TAG,"discovery done. heap: %lu",(unsigned long)esp_get_free_heap_size());
+}
+
 /* ---------------- the sync ---------------- */
 static void run_sync(void){
-    DavCtx d; memset(&d,0,sizeof d);
-    snprintf(d.base,sizeof d.base,"%s",DAV_BASE);
-    snprintf(d.user,sizeof d.user,"%s",DAV_USER);
-    snprintf(d.pass,sizeof d.pass,"%s",DAV_PASS);
-
-    /* resolve iCloud's per-user host once (caldav.icloud.com -> pNN-caldav...) */
-    char host[256]="";
-    if(dav_effective_host(&d,"/",host,sizeof host)==0 && host[0]){
-        ESP_LOGI(TAG,"effective host: %s",host);
-        snprintf(d.base,sizeof d.base,"%s",host);
-    } else {
-        ESP_LOGW(TAG,"could not resolve effective host (status %d); using %s",dav_last_status,d.base);
-    }
+    DavCtx d; dav_from_secrets(&d);
+    resolve_host(&d);
 
     ESP_LOGI(TAG,"heap before sync: %lu",(unsigned long)esp_get_free_heap_size());
     SyncStats st={0};
@@ -156,10 +203,14 @@ void app_main(void){
 
     if(wifi_connect()!=ESP_OK){ ESP_LOGE(TAG,"wifi failed; halting"); return; }
     if(clock_sync()!=ESP_OK){ ESP_LOGE(TAG,"clock not set; TLS would fail; halting"); return; }
-    if(sd_mount()!=ESP_OK){ ESP_LOGE(TAG,"no SD; halting"); return; }
 
-    run_sync();
+    if(sd_mount()==ESP_OK){
+        run_sync();
+    } else {
+        ESP_LOGW(TAG,"no SD card -- running discovery smoke test instead (transport check)");
+        run_discovery();
+    }
 
-    ESP_LOGI(TAG,"idle. reset to sync again.");
+    ESP_LOGI(TAG,"idle. reset to run again.");
     while(1) vTaskDelay(pdMS_TO_TICKS(10000));
 }
