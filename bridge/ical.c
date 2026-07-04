@@ -54,7 +54,7 @@ int ical_emit(char *out,int cap,const Appt *a,uint32_t uid){
     textOut(note,sizeof note,a->note);
     const char *tzid = g_tz ? g_tz->id : NULL;
 
-    int n = snprintf(out,cap,"BEGIN:VEVENT\r\nUID:palm-%u@cyd\r\n",uid);
+    int n = snprintf(out,cap,"BEGIN:VEVENT\r\nUID:palm-%u@cyd\r\n",(unsigned)uid);
     if(a->hasTime){
         if(tzid){
             n += snprintf(out+n,cap-n,"DTSTART;TZID=%s:%04d%02d%02dT%02d%02d00\r\n",tzid,a->year,a->month,a->day,a->sH,a->sM);

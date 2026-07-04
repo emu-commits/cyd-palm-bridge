@@ -19,6 +19,23 @@
 #include "appinfo.h"
 #include "sync.h"
 
+/* Working-set sizing. The host proves correctness with big static arenas; the
+ * ESP32 (no PSRAM, ~300KB SRAM) needs them small. Records average a few hundred
+ * bytes, so the record arena is sized in bytes (ARENA_CAP), decoupled from the
+ * index count (MAXR). Override on the device build; host sizes are unchanged. */
+#ifdef ESP_PLATFORM
+  #define MAXR       48
+  #define ARENA_CAP  (16*1024)         /* ~340B/record avg over MAXR; no-PSRAM budget */
+  #define NAMEL_MAX  64
+  #define STATE_DIR  "/sdcard/state"   /* device cwd is "/"; temps live on SD */
+#else
+  #define MAXR       256
+  #define ARENA_CAP  (MAXR*PALM_REC_MAX)
+  #define NAMEL_MAX  256
+  #define STATE_DIR  "state"
+#endif
+#define BODY_TMP STATE_DIR "/.body"    /* PUT body staged here before upload */
+
 /* ---- kind helpers ---- */
 static const char* kindExt(int k){ return k==KIND_CARD?"vcf":"ics"; }
 static const char* kindCType(int k){ return k==KIND_CARD?"text/vcard; charset=utf-8":"text/calendar; charset=utf-8"; }
@@ -57,31 +74,31 @@ static int pushRec(const PdbRec*r,int i,void*ctx){
     (void)i; PushCtx*p=ctx;
     char body[8192]; int bl=emit_object(p->kind,r->data,r->len,r->uniqueID,body,sizeof body);
     if(bl<0) return 0;
-    FILE*f=fopen("state/.body","wb"); fwrite(body,1,strlen(body),f); fclose(f);
-    char name[64]; snprintf(name,sizeof name,"%u.%s",r->uniqueID,kindExt(p->kind));
+    FILE*f=fopen(BODY_TMP,"wb"); fwrite(body,1,strlen(body),f); fclose(f);
+    char name[64]; snprintf(name,sizeof name,"%u.%s",(unsigned)r->uniqueID,kindExt(p->kind));
     char etag[160]=""; int st=0;
-    dav_put(p->d,p->coll,name,kindCType(p->kind),"state/.body",NULL,etag,sizeof etag,&st);
-    fprintf(p->map,"%d\t%u\t%s\t%s\n",p->kind,r->uniqueID,name,etag);
+    dav_put(p->d,p->coll,name,kindCType(p->kind),BODY_TMP,NULL,etag,sizeof etag,&st);
+    fprintf(p->map,"%d\t%u\t%s\t%s\n",p->kind,(unsigned)r->uniqueID,name,etag);
     p->n++;
     return 0;
 }
 
 int sync_push(const DavCtx*d,const char*pdbpath,const char*coll,int kind){
-    FILE*map=fopen("state/sync_map.tsv","a");
+    FILE*map=fopen(STATE_DIR "/sync_map.tsv","a");
     PushCtx p={ .d=d,.coll=coll,.kind=kind,.map=map,.n=0 };
     pdb_read(pdbpath,pushRec,&p);
     if(map) fclose(map);
     return p.n;
 }
 
-typedef struct { char names[256][256]; int n; } NameList;
+typedef struct { char names[NAMEL_MAX][256]; int n; } NameList;
 static void collectName(const char*name,const char*etag,void*ctx){
-    (void)etag; NameList*l=ctx; if(l->n<256) snprintf(l->names[l->n++],256,"%s",name);
+    (void)etag; NameList*l=ctx; if(l->n<NAMEL_MAX) snprintf(l->names[l->n++],256,"%s",name);
 }
 
 int sync_pull(const DavCtx*d,const char*coll,const char*outpdb,int kind){
     NameList nl={0}; dav_list(d,coll,collectName,&nl);
-    static uint8_t arena[256*PALM_REC_MAX]; static PdbRec recs[256];
+    static uint8_t arena[ARENA_CAP]; static PdbRec recs[MAXR];
     int nrec=0, used=0;
     const char*ext=kindExt(kind);
     for(int i=0;i<nl.n;i++){
@@ -92,7 +109,7 @@ int sync_pull(const DavCtx*d,const char*coll,const char*outpdb,int kind){
         uint8_t*dst=arena+used; int l=parse_object(kind,obj,dst,PALM_REC_MAX);
         if(l<=0) continue;
         recs[nrec]=(PdbRec){ .attr=0,.uniqueID=uid,.data=dst,.len=l }; used+=l; nrec++;
-        if(nrec>=256||used+PALM_REC_MAX>(int)sizeof arena) break;
+        if(nrec>=MAXR||used+PALM_REC_MAX>(int)sizeof arena) break;
     }
     for(int i=1;i<nrec;i++){ PdbRec k=recs[i]; int j=i-1;
         while(j>=0 && recs[j].uniqueID>k.uniqueID){ recs[j+1]=recs[j]; j--; } recs[j+1]=k; }
@@ -101,7 +118,6 @@ int sync_pull(const DavCtx*d,const char*coll,const char*outpdb,int kind){
 }
 
 /* ==================== incremental conflict-aware sync =================== */
-#define MAXR 256
 
 static uint64_t fnv1a(const char*s){
     uint64_t h=1469598103934665603ULL;
@@ -127,11 +143,11 @@ typedef struct {                       /* server objects (from PROPFIND / sync R
 
 typedef struct {
     int kind;
-    Loc loc[MAXR]; int nloc; uint8_t locArena[MAXR*PALM_REC_MAX]; int locUsed;
+    Loc loc[MAXR]; int nloc; uint8_t locArena[ARENA_CAP]; int locUsed;
     Map map[MAXR]; int nmap;
     Srv srv[MAXR]; int nsrv;
-    char token[1200];                  /* RFC 6578 sync-token from last run   */
-    char newToken[1200];               /* token to persist after this run     */
+    char token[1408];                  /* RFC 6578 sync-token from last run   */
+    char newToken[1408];               /* token to persist after this run     */
 } S;
 
 static int loadRec(const PdbRec*r,int i,void*ctx){
@@ -152,9 +168,9 @@ static void loadMap(S*s,const char*mapfile){
             char *t=line+11; size_t l=strlen(t); while(l&&(t[l-1]=='\n'||t[l-1]=='\r'))t[--l]=0;
             snprintf(s->token,sizeof s->token,"%s",t); continue;
         }
-        Map m; memset(&m,0,sizeof m); unsigned long long h=0;
-        if(sscanf(line,"%u\t%63[^\t]\t%159[^\t]\t%llu",&m.uid,m.href,m.etag,&h)>=3){
-            m.hash=(uint64_t)h; if(s->nmap<MAXR) s->map[s->nmap++]=m;
+        Map m; memset(&m,0,sizeof m); unsigned long long h=0; unsigned mu=0;
+        if(sscanf(line,"%u\t%63[^\t]\t%159[^\t]\t%llu",&mu,m.href,m.etag,&h)>=3){
+            m.uid=(uint32_t)mu; m.hash=(uint64_t)h; if(s->nmap<MAXR) s->map[s->nmap++]=m;
         }
     }
     fclose(f);
@@ -212,7 +228,7 @@ static Node* nodeFor(Node*nodes,int*nn,uint32_t uid){
 
 /* ---- output accumulator: kept records -> merged PDB ---- */
 typedef struct {
-    PdbRec rec[MAXR]; int nrec; uint8_t arena[MAXR*PALM_REC_MAX]; int used;
+    PdbRec rec[MAXR]; int nrec; uint8_t arena[ARENA_CAP]; int used;
 } Out;
 /* per-collection sink: shared record output + this collection's map rows +
  * the category to stamp on records pulled from the server.                  */
@@ -237,7 +253,11 @@ static void keepBytes(Sink*k,uint32_t uid,uint8_t attr,const uint8_t*data,int le
  * object (no END:VCARD) and it silently fails to parse. Generous on host; the
  * device build (B3, no PSRAM) overrides this small. */
 #ifndef OBJ_FETCH_CAP
+#ifdef ESP_PLATFORM
+#define OBJ_FETCH_CAP (8*1024)       /* no PSRAM: photo-heavy vCards get skipped+warned */
+#else
 #define OBJ_FETCH_CAP (256*1024)
+#endif
 #endif
 static int keepFromServer(const DavCtx*d,const char*coll,int kind,Sink*k,
                           uint32_t uid,const char*name,const char*etag){
@@ -261,9 +281,9 @@ static int pushLocal(const DavCtx*d,const char*coll,int kind,Sink*k,
                      const char*name,const char*ifmatch){
     char body[8192]; int bl=emit_object(kind,arena+L->off,L->len,uid,body,sizeof body);
     if(bl<0) return -1;
-    FILE*f=fopen("state/.body","wb"); fwrite(body,1,strlen(body),f); fclose(f);
+    FILE*f=fopen(BODY_TMP,"wb"); fwrite(body,1,strlen(body),f); fclose(f);
     char etag[160]=""; int st=0;
-    dav_put(d,coll,name,kindCType(kind),"state/.body",ifmatch,etag,sizeof etag,&st);
+    dav_put(d,coll,name,kindCType(kind),BODY_TMP,ifmatch,etag,sizeof etag,&st);
     if(!etag[0]) dav_getetag(d,coll,name,etag,sizeof etag);   /* fallback */
     keepBytes(k,uid,L->attr,arena+L->off,L->len,name,etag,fnv1a(body));
     return st;
@@ -311,7 +331,7 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         else if(strcmp(n->sEtag,n->mEtag)) sc=SMOD;
         else                         sc=SCLEAN;
 
-        char lname[64]; snprintf(lname,sizeof lname,"%u.%s",n->uid,ext);
+        char lname[64]; snprintf(lname,sizeof lname,"%u.%s",(unsigned)n->uid,ext);
         const char*srvName = n->hasSrv?n->sName:(n->hasMap?n->mHref:lname);
 
         int conflict = (lc==LMOD||lc==LDEL||lc==LNEW) && (sc==SMOD||sc==SNEW||sc==SDEL)
@@ -326,7 +346,7 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
                 else if(lc==LDEL){ serverWins=1; }
                 else {
                     if(sc!=SDEL) keepFromServer(d,coll,kind,k,n->uid,srvName,n->sEtag);
-                    if(L && lc!=LDEL){ uint32_t u2=seed++; char n2[64]; snprintf(n2,sizeof n2,"%u.%s",u2,ext);
+                    if(L && lc!=LDEL){ uint32_t u2=seed++; char n2[64]; snprintf(n2,sizeof n2,"%u.%s",(unsigned)u2,ext);
                         pushLocal(d,coll,kind,k,L,s->locArena,u2,n2,NULL); }
                     continue;
                 }
@@ -366,7 +386,7 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
     if(mf){
         if(s->newToken[0]) fprintf(mf,"#synctoken\t%s\n",s->newToken);
         for(int i=0;i<k->nmap;i++) fprintf(mf,"%u\t%s\t%s\t%llu\n",
-                k->map[i].uid,k->map[i].href,k->map[i].etag,(unsigned long long)k->map[i].hash);
+                (unsigned)k->map[i].uid,k->map[i].href,k->map[i].etag,(unsigned long long)k->map[i].hash);
         fclose(mf); }
 }
 

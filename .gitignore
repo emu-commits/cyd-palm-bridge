@@ -19,3 +19,11 @@
 # editor
 *.swp
 /category
+
+# ESP-IDF firmware
+/firmware/build/
+/firmware/sdkconfig
+/firmware/sdkconfig.old
+/firmware/main/secrets.h
+/firmware/dependencies.lock
+/firmware/managed_components/

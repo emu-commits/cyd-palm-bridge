@@ -26,7 +26,7 @@ static const char *internU8(Addr*a,const char*val){
 }
 
 int vcard_emit(char *out,int cap,const Addr *a,uint32_t uid){
-    int n=snprintf(out,cap,"BEGIN:VCARD\r\nVERSION:3.0\r\nUID:palm-%u@cyd\r\n",uid);
+    int n=snprintf(out,cap,"BEGIN:VCARD\r\nVERSION:3.0\r\nUID:palm-%u@cyd\r\n",(unsigned)uid);
     n+=snprintf(out+n,cap-n,"N:%s;%s;;%s;\r\n",u8(S(a->fields[F_name])),u8(S(a->fields[F_firstName])),u8(S(a->fields[F_title])));
     if(a->fields[F_firstName]||a->fields[F_name])
         n+=snprintf(out+n,cap-n,"FN:%s%s%s\r\n",u8(S(a->fields[F_firstName])),

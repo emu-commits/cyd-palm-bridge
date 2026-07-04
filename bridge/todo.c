@@ -62,7 +62,7 @@ int vtodo_emit(char *out,int cap,const Todo *t,uint32_t uid){
     char desc[600], note[1100];
     textOut(desc,sizeof desc,t->description);
     textOut(note,sizeof note,t->note);
-    int n = snprintf(out,cap,"BEGIN:VTODO\r\nUID:palm-%u@cyd\r\n",uid);
+    int n = snprintf(out,cap,"BEGIN:VTODO\r\nUID:palm-%u@cyd\r\n",(unsigned)uid);
     if(t->description[0]) n += snprintf(out+n,cap-n,"SUMMARY:%s\r\n",desc);
     if(t->note[0])        n += snprintf(out+n,cap-n,"DESCRIPTION:%s\r\n",note);
     if(t->hasDue)         n += snprintf(out+n,cap-n,"DUE;VALUE=DATE:%04d%02d%02d\r\n",t->dueY,t->dueM,t->dueD);

@@ -1,69 +1,17 @@
 /* dav.c -- CalDAV/CardDAV over the curl binary (host transport).
  *
- * Deliberately tiny: PUT/GET/PROPFIND are all the sync engine needs. XML is
- * scanned, not DOM-parsed -- we only pull <href> and <getetag> out of the
- * PROPFIND multistatus, which is all a member listing requires.
+ * Deliberately tiny: PUT/GET/PROPFIND/REPORT are all the sync engine needs.
+ * The curl invocation lives here; response parsing is shared with the on-device
+ * mbedTLS transport (dav_esp.c) via dav_xml.c.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include "dav.h"
+#include "dav_xml.h"
 
 int dav_last_status = 0;   /* HTTP status of the most recent discovery request */
-
-/* case-insensitive substring search bounded by [s,end). */
-static const char* strcasestr_range(const char*s,const char*end,const char*needle){
-    size_t nl=strlen(needle);
-    for(const char*p=s; p+nl<=end; p++) if(strncasecmp(p,needle,nl)==0) return p;
-    return NULL;
-}
-
-/* XML value extraction that ignores namespace prefixes AND attributes -- iCloud
- * writes <href xmlns="DAV:">.. so "href>" substring matching fails; match the
- * element by its local name instead. Returns content start (after '>'), NULL if
- * not found. Skips closing tags. */
-static const char* xml_open_e(const char*from,const char*end,const char*name){
-    size_t nl=strlen(name);
-    for(const char*p=from; p && (!end||p<end) && (p=strchr(p,'<')); p++){
-        if(end && p>=end) break;
-        const char*q=p+1; if(*q=='/'||*q=='!'||*q=='?') continue;   /* closing / comment / decl */
-        const char*e=q, *colon=NULL;
-        while(*e && *e!='>' && *e!=' ' && *e!='\t' && *e!='/'){ if(*e==':') colon=e; e++; }
-        const char*loc = colon?colon+1:q; size_t ll=(size_t)(e-loc);
-        if(ll==nl && strncasecmp(loc,name,nl)==0){
-            const char*gt=strchr(e,'>'); if(!gt||(end&&gt>=end)) return NULL;
-            return gt+1;                        /* self-closing yields "" text */
-        }
-    }
-    return NULL;
-}
-/* text content of the first element named `name` in [from,end), trimmed. 1 if found. */
-static int xml_text_e(const char*from,const char*end,const char*name,char*out,int cap){
-    if(out&&cap) out[0]=0;
-    const char*s=xml_open_e(from,end,name); if(!s) return 0;
-    const char*e=strchr(s,'<'); if(!e) e=s+strlen(s);
-    while(s<e && (*s==' '||*s=='\r'||*s=='\n'||*s=='\t')) s++;
-    while(e>s && (e[-1]==' '||e[-1]=='\r'||e[-1]=='\n'||e[-1]=='\t')) e--;
-    int n=(int)(e-s); if(n>cap-1)n=cap-1; if(n<0)n=0; memcpy(out,s,n); out[n]=0;
-    return 1;
-}
-static const char* xml_open(const char*from,const char*name){ return xml_open_e(from,NULL,name); }
-static int xml_text(const char*from,const char*name,char*out,int cap){ return xml_text_e(from,NULL,name,out,cap); }
-static void stripQuotes(char*s){
-    int l=(int)strlen(s); if(l>=2 && s[0]=='"' && s[l-1]=='"'){ memmove(s,s+1,l-2); s[l-2]=0; }
-    /* also strip a leading weak-etag marker W/ */
-    if(!strncmp(s,"W/",2)) memmove(s,s+2,strlen(s+2)+1);
-}
-static void baseName(const char*full,char*out,int cap){
-    const char*e=full+strlen(full); while(e>full && e[-1]=='/') e--;   /* trailing slash */
-    const char*s=e; while(s>full && s[-1]!='/') s--;
-    int n=(int)(e-s); if(n>cap-1)n=cap-1; if(n<0)n=0; memcpy(out,s,n); out[n]=0;
-}
-
-/* an href ending in '/' is a collection (the Depth:1 self-entry), not a member
- * object -- iCloud returns the addressbook/calendar itself as the first response. */
-static int hrefIsColl(const char*h){ int n=(int)strlen(h); return n>0 && h[n-1]=='/'; }
 
 /* run a command, capture stdout into out (cap). returns bytes or -1. */
 static int run(const char*cmd,char*out,int cap){
@@ -72,6 +20,14 @@ static int run(const char*cmd,char*out,int cap){
     else { char sink[4096]; while(fread(sink,1,sizeof sink,p)>0){} }
     pclose(p);
     return n;
+}
+
+static char* slurp(const char*path,int*len){
+    FILE*f=fopen(path,"rb"); if(!f) return NULL;
+    fseek(f,0,SEEK_END); long n=ftell(f); if(n<0)n=0; fseek(f,0,SEEK_SET);
+    char*b=malloc((size_t)n+1); if(!b){ fclose(f); return NULL; }
+    size_t got=fread(b,1,(size_t)n,f); b[got]=0; if(len)*len=(int)got; fclose(f);
+    return b;
 }
 
 /* extract the LAST occurrence of an ETag from a curl -D header dump. */
@@ -127,8 +83,8 @@ int dav_getetag(const DavCtx*d,const char*coll,const char*name,char*etag,int cap
         d->user,d->pass,d->base,coll,name);
     char buf[8192]={0};
     if(run(cmd,buf,sizeof buf)<0){ if(etag&&cap)etag[0]=0; return -1; }
-    if(!xml_text(buf,"getetag",etag,cap)){ if(etag&&cap)etag[0]=0; return -1; }
-    stripQuotes(etag);
+    if(!dav_xml_text(buf,NULL,"getetag",etag,cap)){ if(etag&&cap)etag[0]=0; return -1; }
+    dav_strip_quotes(etag);
     return 0;
 }
 
@@ -147,35 +103,14 @@ int dav_list(const DavCtx*d,const char*coll,dav_list_cb cb,void*ctx){
         d->user,d->pass,d->base,coll);
     char*buf=malloc(1<<20); if(!buf) return -1;
     int n=run(cmd,buf,1<<20); if(n<0){ free(buf); return -1; }
-
-    /* walk each <response>: pull href basename + getetag                    */
-    int count=0;
-    const char*p=buf;
-    while((p=strcasestr(p,"<response"))){
-        const char*end=strcasestr(p,"</response>"); if(!end) break;
-        char href[512]=""; xml_text_e(p,end,"href",href,sizeof href);
-        if(hrefIsColl(href)){ p=end+1; continue; }        /* skip the collection self */
-        char name[256]=""; baseName(href,name,sizeof name);
-        char etag[160]=""; xml_text_e(p,end,"getetag",etag,sizeof etag); stripQuotes(etag);
-        if(name[0] && cb){ cb(name,etag,ctx); count++; }
-        p=end+1;
-    }
+    int count=dav_parse_members(buf,cb,ctx);
     free(buf);
     return count;
 }
 
-/* ---------- shared helpers for REPORT + discovery ---------- */
-static char* slurp(const char*path,int*len){
-    FILE*f=fopen(path,"rb"); if(!f) return NULL;
-    fseek(f,0,SEEK_END); long n=ftell(f); if(n<0)n=0; fseek(f,0,SEEK_SET);
-    char*b=malloc((size_t)n+1); if(!b){ fclose(f); return NULL; }
-    size_t got=fread(b,1,(size_t)n,f); b[got]=0; if(len)*len=(int)got; fclose(f);
-    return b;
-}
 int dav_sync_report(const DavCtx*d,const char*coll,const char*token,
                     dav_sync_cb cb,void*ctx,char*newtoken,int tokcap){
     if(newtoken&&tokcap) newtoken[0]=0;
-    /* build the request body */
     { FILE*f=fopen("state/.sreq","wb"); if(!f) return -1;
       fprintf(f,"<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
         "<d:sync-collection xmlns:d=\"DAV:\">"
@@ -189,28 +124,10 @@ int dav_sync_report(const DavCtx*d,const char*coll,const char*token,
         d->user,d->pass,d->base,coll);
     char code[16]={0}; if(run(cmd,code,sizeof code)<0) return -1;
     int status=atoi(code);
-    int len=0; char*buf=slurp("state/.srep",&len); if(!buf) return -1;
-
-    if(strcasestr(buf,"valid-sync-token")){ free(buf); return 1; }      /* token expired */
-    if(status!=207 || !strcasestr(buf,"multistatus")){ free(buf); return -1; } /* unsupported */
-
-    const char*p=buf;
-    while((p=strcasestr(p,"<response"))){
-        const char*end=strcasestr(p,"</response>"); if(!end) break;
-        char href[512]=""; xml_text_e(p,end,"href",href,sizeof href);
-        if(hrefIsColl(href)){ p=end+1; continue; }        /* skip the collection self */
-        char name[256]=""; baseName(href,name,sizeof name);
-        char etag[160]=""; int hasEtag=xml_text_e(p,end,"getetag",etag,sizeof etag); stripQuotes(etag);
-        /* a removed member has a 404 status and no getetag */
-        const char*f404=strstr(p,"404");
-        int deleted = !hasEtag && f404 && f404<end;
-        if(name[0] && cb) cb(name,etag,deleted,ctx);
-        p=end+1;
-    }
-    /* the new sync-token is a top-level element */
-    if(newtoken && tokcap) xml_text(buf,"sync-token",newtoken,tokcap);
+    char*buf=slurp("state/.srep",NULL); if(!buf) return -1;
+    int rc=dav_parse_report(buf,status,cb,ctx,newtoken,tokcap);
     free(buf);
-    return 0;
+    return rc;
 }
 
 /* ---------------- discovery ---------------- */
@@ -229,17 +146,8 @@ int dav_prop_href(const DavCtx*d,const char*path,const char*propOpen,
         d->user,d->pass,d->base,path);
     char code[16]={0}; if(run(cmd,code,sizeof code)<0) return -1;
     dav_last_status=atoi(code);
-    int len=0; char*buf=slurp("state/.drep",&len); if(!buf) return -1;
-    /* local name of the property element (strip '<' and any ns prefix) */
-    char local[64]={0};
-    { const char*s=propOpen; while(*s=='<') s++;
-      const char*stop=s; while(*stop && *stop!=' '&&*stop!='/'&&*stop!='>') stop++;
-      const char*colon=strchr(s,':'); if(colon && colon<stop) s=colon+1;
-      int i=0; for(; s+i<stop && i<63; i++) local[i]=s[i]; local[i]=0; }
-    /* find the property element, then its inner <href> (ns/attrs tolerant) */
-    const char*el=xml_open(buf,local);
-    int rc=-1;
-    if(el && xml_text(el,"href",out,cap) && out[0]) rc=0;
+    char*buf=slurp("state/.drep",NULL); if(!buf) return -1;
+    int rc=dav_parse_prop_href(buf,propOpen,out,cap);
     free(buf);
     return rc;
 }
@@ -273,21 +181,8 @@ int dav_list_collections(const DavCtx*d,const char*path,dav_coll_cb cb,void*ctx)
         "-H 'Depth: 1' -H 'Content-Type: application/xml' --data-binary @state/.dreq '%s%s'",
         d->user,d->pass,d->base,path);
     char code[16]={0}; if(run(cmd,code,sizeof code)<0) return -1;
-    int len=0; char*buf=slurp("state/.drep",&len); if(!buf) return -1;
-    int count=0; const char*p=buf;
-    while((p=strcasestr(p,"<response"))){
-        const char*end=strcasestr(p,"</response>"); if(!end) break;
-        char href[512]=""; xml_text_e(p,end,"href",href,sizeof href);
-        int kind=0;
-        const char*rt=strcasestr(p,"resourcetype"); if(rt&&rt<end){
-            const char*rte=strcasestr(rt,"/resourcetype"); if(!rte||rte>end) rte=end;
-            if(strcasestr_range(rt,rte,"calendar")) kind='c';
-            else if(strcasestr_range(rt,rte,"addressbook")) kind='a';
-        }
-        char dn[128]=""; xml_text_e(p,end,"displayname",dn,sizeof dn);
-        if(href[0] && cb){ cb(href,kind,dn,ctx); count++; }
-        p=end+1;
-    }
+    char*buf=slurp("state/.drep",NULL); if(!buf) return -1;
+    int count=dav_parse_collections(buf,cb,ctx);
     free(buf);
     return count;
 }

@@ -1,7 +1,7 @@
 CC      = cc
 CFLAGS  = -std=gnu99 -Wall -O2 -g
 CORE    = bridge/pdb.c bridge/datebook.c bridge/address.c bridge/ical.c bridge/vcard.c \
-          bridge/tz.c bridge/charset.c bridge/appinfo.c bridge/todo.c
+          bridge/tz.c bridge/charset.c bridge/appinfo.c bridge/todo.c bridge/dav_xml.c
 
 all: roundtrip bridge_cli incremental synctoken category
 

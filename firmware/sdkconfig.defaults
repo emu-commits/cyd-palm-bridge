@@ -1,0 +1,24 @@
+# --- flash / partitions ---
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# --- build for size (no PSRAM: RAM and flash are both tight) ---
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# --- TLS: Mozilla CA bundle so *.icloud.com verifies without bundled certs ---
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+# iCloud sends full 16 KB TLS records, so keep the inbound content buffer at the
+# max; shrink only the outbound side (our requests are small) to save heap.
+CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384
+CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
+
+# --- FatFs on SD: long filenames for state/*.map ---
+CONFIG_FATFS_LFN_HEAP=y
+
+# --- the sync runs in the main task; give it headroom ---
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288
+
+# --- quieter default log level ---
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
