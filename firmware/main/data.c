@@ -11,9 +11,10 @@
 #define DB_CAL  "/sdcard/DatebookDB.pdb"
 #define DB_ADDR "/sdcard/AddressDB.pdb"
 #define DB_TODO "/sdcard/ToDoDB.pdb"
+#define DB_MEMO "/sdcard/MemoDB.pdb"
 
 static const char *db_path(int app){
-    return app==APP_CAL?DB_CAL : app==APP_ADDR?DB_ADDR : DB_TODO;
+    return app==APP_CAL?DB_CAL : app==APP_ADDR?DB_ADDR : app==APP_TODO?DB_TODO : DB_MEMO;
 }
 static int file_exists(const char *path){
     FILE *f = fopen(path, "rb");
@@ -104,11 +105,31 @@ static void seed_todo(void){
     pdb_write_ai(DB_TODO,"ToDoDB",0x44415441,0x746F646F,ai,al,r,nr);
 }
 
+static void seed_memo(void){
+    static uint8_t arena[SEEDMAX*256]; PdbRec r[SEEDMAX]; int nr=0, used=0;
+    uint8_t ai[APPINFO_SIZE]; int al=build_appinfo(ai);
+    const char *memos[] = {
+        "Shopping list\nMilk\nEggs\nBread\nCoffee",
+        "CYD project ideas\n- Palm-style UI\n- iCloud sync\n- battery + case",
+        "Meeting notes 8/3\n- discuss sync\n- test on device\n- ship it",
+        "Wifi password is on the fridge" };
+    int n=(int)(sizeof(memos)/sizeof(memos[0]));
+    for(int i=0;i<n && nr<SEEDMAX;i++){
+        int len=(int)strlen(memos[i])+1;
+        if(used+len>(int)sizeof arena) break;
+        memcpy(arena+used, memos[i], len);
+        r[nr]=(PdbRec){.attr=(uint8_t)(i%3),.uniqueID=(uint32_t)(i+1),.data=arena+used,.len=len};
+        used+=len; nr++;
+    }
+    pdb_write_ai(DB_MEMO,"MemoDB",0x44415441,0x6D656D6F,ai,al,r,nr);
+}
+
 void data_seed_if_empty(void){
     (void)file_exists;   /* overwrite each boot for now (demo data; U7 replaces) */
     seed_datebook();
     seed_address();
     seed_todo();
+    seed_memo();
 }
 
 /* ------------------------- iteration ------------------------- */
@@ -196,6 +217,7 @@ static int detTodo(const PdbRec *r, int i, void *ctx){
     d->found=1; return 1;
 }
 
+static int getMemo(const PdbRec *r, int i, void *ctx);   /* fwd (also the memo detail) */
 int data_detail(int app, uint32_t uid, char *out, int cap){
     if(cap>0) out[0]=0;
     Det d = { uid, out, cap, 0 };
@@ -203,6 +225,7 @@ int data_detail(int app, uint32_t uid, char *out, int cap){
         case APP_CAL:  pdb_read(DB_CAL,  detCal,  &d); break;
         case APP_ADDR: pdb_read(DB_ADDR, detAddr, &d); break;
         case APP_TODO: pdb_read(DB_TODO, detTodo, &d); break;
+        case APP_MEMO: pdb_read(DB_MEMO, getMemo, &d); break;
     }
     return d.found;
 }
@@ -278,6 +301,35 @@ int data_delete(int app, uint32_t uid){
         case APP_CAL:  return rewrite(DB_CAL, "DatebookDB",0x44415441,0x64617465,uid,NULL,0)>=0;
         case APP_ADDR: return rewrite(DB_ADDR,"AddressDB", 0x44415441,0x61646472,uid,NULL,0)>=0;
         case APP_TODO: return rewrite(DB_TODO,"ToDoDB",    0x44415441,0x746F646F,uid,NULL,0)>=0;
+        case APP_MEMO: return rewrite(DB_MEMO,"MemoDB",    0x44415441,0x6D656D6F,uid,NULL,0)>=0;
     }
     return 0;
+}
+
+/* ---- memo (records are plain text) ---- */
+static int cbMemo(const PdbRec *r, int i, void *ctx){
+    (void)i; It *it=ctx;
+    if(g_catfilter>=0 && (r->attr & 0x0F)!=g_catfilter) return 0;
+    const char *s=(const char *)r->data;
+    char pri[96]; int j=0;
+    while(s[j] && s[j]!='\n' && j<(int)sizeof pri-1){ pri[j]=s[j]; j++; }
+    pri[j]=0;
+    if(!pri[0]) snprintf(pri,sizeof pri,"(empty memo)");
+    it->cb(r->uniqueID, pri, NULL, it->ctx);
+    return 0;
+}
+void data_memo(data_row_cb cb, void *ctx){ It it={cb,ctx}; pdb_read(DB_MEMO,cbMemo,&it); }
+
+static int getMemo(const PdbRec *r, int i, void *ctx){
+    (void)i; Det *g=ctx; if(r->uniqueID!=g->uid) return 0;
+    snprintf(g->out, g->cap, "%.*s", r->len, (const char *)r->data);
+    g->found=1; return 1;
+}
+int data_get_memo(uint32_t uid, char *out, int cap){
+    if(cap>0) out[0]=0;
+    Det g={uid,out,cap,0}; pdb_read(DB_MEMO,getMemo,&g); return g.found;
+}
+int data_save_memo(uint32_t uid, const char *text){
+    int l=(int)strlen(text)+1;
+    return rewrite(DB_MEMO,"MemoDB",0x44415441,0x6D656D6F,uid,(const uint8_t *)text,l)>=0;
 }

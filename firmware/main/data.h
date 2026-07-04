@@ -8,7 +8,7 @@
  * before a HotSync). safe to call every boot. */
 void data_seed_if_empty(void);
 
-enum { APP_CAL, APP_ADDR, APP_TODO };
+enum { APP_CAL, APP_ADDR, APP_TODO, APP_MEMO };
 
 /* per-record display callback: record uid + primary line + optional secondary. */
 typedef void (*data_row_cb)(uint32_t uid, const char *primary, const char *secondary, void *ctx);
@@ -17,6 +17,11 @@ typedef void (*data_row_cb)(uint32_t uid, const char *primary, const char *secon
 void data_datebook(data_row_cb cb, void *ctx);
 void data_address(data_row_cb cb, void *ctx);
 void data_todo(data_row_cb cb, void *ctx);
+void data_memo(data_row_cb cb, void *ctx);
+
+/* Memo records are plain text: read/write the whole memo string. */
+int data_get_memo(uint32_t uid, char *out, int cap);   /* 1 if found */
+int data_save_memo(uint32_t uid, const char *text);     /* uid 0 = new */
 
 /* format the full detail of one record (by app + uid) into out. 1 if found. */
 int data_detail(int app, uint32_t uid, char *out, int cap);

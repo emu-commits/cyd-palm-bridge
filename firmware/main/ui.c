@@ -58,6 +58,7 @@ static const AppDef APPDEFS[] = {
     { "Date Book",  APP_CAL,  data_datebook },
     { "Address",    APP_ADDR, data_address  },
     { "To Do List", APP_TODO, data_todo     },
+    { "Memo Pad",   APP_MEMO, data_memo     },
 };
 #define NAPPDEFS ((int)(sizeof(APPDEFS)/sizeof(APPDEFS[0])))
 static const AppDef *cur_app;   /* the data app whose list/detail is showing */
@@ -219,6 +220,8 @@ static void save_cb(lv_event_t *e){
             a.displayPhone=old.displayPhone;
         }
         data_save_addr(edit_uid,&a);
+    } else if(cur_app->app == APP_MEMO){
+        data_save_memo(edit_uid, fv(0));
     }
     list_view(cur_app);
 }
@@ -263,6 +266,16 @@ static void show_edit(uint32_t uid){
         form_field(form,"Company",a.fields[F_company],60,&y);
         form_field(form,"Phone",a.fields[F_phone1],40,&y);
         form_field(form,"Note",a.fields[F_note],200,&y);
+    } else if(cur_app->app == APP_MEMO){
+        static char mtext[1200];
+        if(!data_get_memo(uid, mtext, sizeof mtext)) mtext[0]=0;
+        lv_obj_t *ta = lv_textarea_create(form);       /* one big multi-line field */
+        lv_textarea_set_text(ta, mtext);
+        lv_textarea_set_max_length(ta, sizeof mtext - 1);
+        lv_obj_set_size(ta, LCD_W - 16, FORM_FULL - 8);
+        lv_obj_set_pos(ta, 2, 2);
+        lv_obj_add_event_cb(ta, ta_click_cb, LV_EVENT_CLICKED, NULL);
+        g_fields[g_nfields++] = ta;
     }
 
     g_kb = lv_keyboard_create(lv_screen_active());
