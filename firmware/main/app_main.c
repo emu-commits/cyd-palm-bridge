@@ -29,6 +29,7 @@
 
 #include "dav.h"
 #include "sync.h"
+#include "display.h"
 #include "secrets.h"
 
 static const char *TAG = "app";
@@ -196,6 +197,11 @@ void app_main(void){
     ESP_LOGI(TAG,"boot: free heap %lu, largest block %lu",
              (unsigned long)esp_get_free_heap_size(),
              (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+
+    /* U1: display bring-up -- draw a diagnostic test pattern first thing. */
+    display_init();
+    display_test_pattern();
+
     esp_err_t e = nvs_flash_init();
     if(e==ESP_ERR_NVS_NO_FREE_PAGES || e==ESP_ERR_NVS_NEW_VERSION_FOUND){
         ESP_ERROR_CHECK(nvs_flash_erase()); ESP_ERROR_CHECK(nvs_flash_init());

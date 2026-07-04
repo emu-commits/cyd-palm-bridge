@@ -5,7 +5,45 @@ can resume cold. Newest phase on top.
 
 ---
 
-## U0 — sync working set: static BSS → heap   [DONE ✓ commit pending]
+## U1 — display bring-up (ILI9341/ST7789)   [DONE ✓]
+
+**RESULT:** ILI9341 works in **portrait 240×320** on SPI3 @ 20 MHz (pins SCLK14
+MOSI13 DC2 CS15 BL21), MADCTL 0x48, no inversion. User confirmed colors +
+orientation correct. Layout zones defined: PDA area 240×208 on top, Graffiti
+input strip 240×112 on the bottom (with letters|numbers split). display.[ch]
+in firmware/main. Next: U2 touch (XPT2046).
+
+
+**Goal:** get pixels on the 2.8" 320×240 panel via a dependency-free SPI driver
+(no managed components), draw a diagnostic test pattern, confirm panel type +
+color order + orientation. Verification needs the USER's eyes (no camera here).
+
+Plan/pins: TFT on **SPI3** (SD is on SPI2 — no bus conflict). Pins SCLK14 MOSI13
+DC2 CS15 RST-1(software reset) BL21. Driver in firmware/main/display.[ch]:
+init + fill_rect via a one-row buffer (RGB565). Test pattern = 4 colored
+quadrants (TL red / TR green / BL blue / BR white) + yellow border, so the user
+report disambiguates: color order (RGB vs BGR = red/blue swap), inversion
+(negative colors), orientation (which quadrant is where), and addressing
+offset (border complete?).
+
+### Step log
+- U1.1: wrote display.[ch] (ILI9341, SPI3, pins 14/13/2/15/BL21), test pattern.
+- U1.2: FIX crash — 40MHz rejected (TFT pins route via GPIO matrix on SPI3, cap
+  ~26.7MHz). Dropped to 20MHz. Panel init + test pattern now run clean (serial
+  confirms). AWAITING user's on-screen report (colors/orientation/border).
+  Tweakables in display.c if wrong: MADCTL_VAL, INVERT, PANEL_ST7789.
+- U1.3: user requires PORTRAIT (Palm PDA on top, Graffiti strip bottom). Switched
+  to 240x320 (LCD_W/H), MADCTL 0x48, GRAFFITI_H=64/PDA_H in display.h. New test
+  pattern previews the layout: blue title bar + gray PDA body (top), gray Graffiti
+  strip (bottom), RED dot TL / GREEN dot TR for orientation, yellow border.
+  Flashed clean. Panel confirmed working in portrait (user could identify regions).
+- U1.4: user feedback "graffiti area too small". Bumped GRAFFITI_H 64→112 (~35%,
+  PDA_H=208), added Palm-style letters|numbers vertical divider in the strip.
+  Re-flashed. AWAITING confirm on size + colors/orientation to close U1.
+
+---
+
+## U0 — sync working set: static BSS → heap   [DONE ✓ d7031ed]
 
 **RESULT (measured on hardware):** static DRAM 174 KB→47 KB (−127 KB); boot free
 heap **129 KB → 256 KB** (+127 KB), largest block 110→127 KB. All 5 host gates

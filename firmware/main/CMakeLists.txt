@@ -1,6 +1,6 @@
 idf_component_register(
-    SRCS "app_main.c"
+    SRCS "app_main.c" "display.c"
     INCLUDE_DIRS "."
     REQUIRES bridge nvs_flash esp_wifi esp_netif esp_event
-             fatfs sdmmc esp_driver_sdspi esp_driver_spi lwip
+             fatfs sdmmc esp_driver_sdspi esp_driver_spi esp_driver_gpio lwip
 )
