@@ -2,6 +2,7 @@
 /roundtrip
 /bridge_cli
 /incremental
+/synctoken
 *.o
 
 # generated / working data
