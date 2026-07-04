@@ -1,17 +1,34 @@
 /* data.h -- PDB data access for the UI (read records from SD as display rows). */
 #ifndef DATA_H
 #define DATA_H
+#include <stdint.h>
 
 /* seed demo PDBs on the SD card for any that are missing (so views have content
  * before a HotSync). safe to call every boot. */
 void data_seed_if_empty(void);
 
-/* per-record display callback: primary line (required) + optional secondary. */
-typedef void (*data_row_cb)(const char *primary, const char *secondary, void *ctx);
+enum { APP_CAL, APP_ADDR, APP_TODO };
+
+/* per-record display callback: record uid + primary line + optional secondary. */
+typedef void (*data_row_cb)(uint32_t uid, const char *primary, const char *secondary, void *ctx);
 
 /* iterate records of each app, decoding to display strings. */
 void data_datebook(data_row_cb cb, void *ctx);
 void data_address(data_row_cb cb, void *ctx);
 void data_todo(data_row_cb cb, void *ctx);
+
+/* format the full detail of one record (by app + uid) into out. 1 if found. */
+int data_detail(int app, uint32_t uid, char *out, int cap);
+
+/* --- editing: load a record into a struct, save it back to the PDB --- */
+#include "palm.h"
+int data_get_cal(uint32_t uid, Appt *out);   /* 1 if found */
+int data_get_addr(uint32_t uid, Addr *out);
+int data_get_todo(uint32_t uid, Todo *out);
+/* write the record back (uid==0 => create new). sets the Palm dirty bit so the
+ * sync engine uploads it. 1 on success. */
+int data_save_cal(uint32_t uid, const Appt *in);
+int data_save_addr(uint32_t uid, const Addr *in);
+int data_save_todo(uint32_t uid, const Todo *in);
 
 #endif

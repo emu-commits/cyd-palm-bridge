@@ -95,7 +95,7 @@ static int cbCal(const PdbRec *r, int i, void *ctx){
     char pri[96];
     if(a.hasTime) snprintf(pri,sizeof pri,"%d/%d %d:%02d  %.72s",a.month,a.day,a.sH,a.sM,a.description);
     else          snprintf(pri,sizeof pri,"%d/%d  %.72s",a.month,a.day,a.description);
-    it->cb(pri, NULL, it->ctx);
+    it->cb(r->uniqueID, pri, NULL, it->ctx);
     return 0;
 }
 void data_datebook(data_row_cb cb, void *ctx){ It it={cb,ctx}; pdb_read(DB_CAL,cbCal,&it); }
@@ -109,7 +109,7 @@ static int cbAddr(const PdbRec *r, int i, void *ctx){
     else if(last)     snprintf(pri,sizeof pri,"%.80s",last);
     else if(co)       snprintf(pri,sizeof pri,"%.80s",co);
     else              snprintf(pri,sizeof pri,"(no name)");
-    it->cb(pri, a.fields[F_phone1], it->ctx);
+    it->cb(r->uniqueID, pri, a.fields[F_phone1], it->ctx);
     return 0;
 }
 void data_address(data_row_cb cb, void *ctx){ It it={cb,ctx}; pdb_read(DB_ADDR,cbAddr,&it); }
@@ -120,7 +120,122 @@ static int cbTodo(const PdbRec *r, int i, void *ctx){
     char pri[96];
     snprintf(pri,sizeof pri,"%s%.80s",t.completed?"[x] ":"[ ] ",t.description);
     char sec[16]; snprintf(sec,sizeof sec,"pri %d",t.priority);
-    it->cb(pri, sec, it->ctx);
+    it->cb(r->uniqueID, pri, sec, it->ctx);
     return 0;
 }
 void data_todo(data_row_cb cb, void *ctx){ It it={cb,ctx}; pdb_read(DB_TODO,cbTodo,&it); }
+
+/* ------------------------- detail (by uid) ------------------------- */
+typedef struct { uint32_t uid; char *out; int cap; int found; } Det;
+
+static int detCal(const PdbRec *r, int i, void *ctx){
+    (void)i; Det *d=ctx; if(r->uniqueID!=d->uid) return 0;
+    Appt a; if(ApptUnpack(r->data,r->len,&a)) return 1;
+    int p=0;
+    p+=snprintf(d->out+p,d->cap-p,"%.100s\n\n",a.description);
+    if(a.hasTime) p+=snprintf(d->out+p,d->cap-p,"%d/%d/%d\n%d:%02d - %d:%02d\n",a.month,a.day,a.year,a.sH,a.sM,a.eH,a.eM);
+    else          p+=snprintf(d->out+p,d->cap-p,"%d/%d/%d  (all day)\n",a.month,a.day,a.year);
+    if(a.note[0]) snprintf(d->out+p,d->cap-p,"\n%.300s",a.note);
+    d->found=1; return 1;
+}
+static int detAddr(const PdbRec *r, int i, void *ctx){
+    (void)i; Det *d=ctx; if(r->uniqueID!=d->uid) return 0;
+    Addr a; if(AddrUnpack(r->data,r->len,&a)) return 1;
+    const char *first=a.fields[F_firstName], *last=a.fields[F_name];
+    int p=0;
+    p+=snprintf(d->out+p,d->cap-p,"%.40s %.40s\n",first?first:"",last?last:"");
+    if(a.fields[F_company]) p+=snprintf(d->out+p,d->cap-p,"%.60s\n",a.fields[F_company]);
+    if(a.fields[F_title])   p+=snprintf(d->out+p,d->cap-p,"%.60s\n",a.fields[F_title]);
+    static const char *plabel[] = {"Work","Home","Fax","Other","Email","Main","Pager","Mobile"};
+    for(int k=0;k<5;k++){
+        const char *ph=a.fields[F_phone1+k]; if(!ph||!ph[0]) continue;
+        int lab=a.phoneLabel[k]; if(lab<0||lab>7)lab=3;
+        p+=snprintf(d->out+p,d->cap-p,"%s: %.40s\n",plabel[lab],ph);
+    }
+    if(a.fields[F_address]) p+=snprintf(d->out+p,d->cap-p,"\n%.60s\n",a.fields[F_address]);
+    if(a.fields[F_city])    p+=snprintf(d->out+p,d->cap-p,"%.40s %.20s %.16s\n",a.fields[F_city],a.fields[F_state]?a.fields[F_state]:"",a.fields[F_zip]?a.fields[F_zip]:"");
+    if(a.fields[F_note])    snprintf(d->out+p,d->cap-p,"\n%.200s",a.fields[F_note]);
+    d->found=1; return 1;
+}
+static int detTodo(const PdbRec *r, int i, void *ctx){
+    (void)i; Det *d=ctx; if(r->uniqueID!=d->uid) return 0;
+    Todo t; if(ToDoUnpack(r->data,r->len,&t)) return 1;
+    int p=0;
+    p+=snprintf(d->out+p,d->cap-p,"%.100s\n\n",t.description);
+    p+=snprintf(d->out+p,d->cap-p,"Priority: %d\nStatus: %s\n",t.priority,t.completed?"Completed":"Open");
+    if(t.hasDue) p+=snprintf(d->out+p,d->cap-p,"Due: %d/%d/%d\n",t.dueM,t.dueD,t.dueY);
+    if(t.note[0]) snprintf(d->out+p,d->cap-p,"\n%.300s",t.note);
+    d->found=1; return 1;
+}
+
+int data_detail(int app, uint32_t uid, char *out, int cap){
+    if(cap>0) out[0]=0;
+    Det d = { uid, out, cap, 0 };
+    switch(app){
+        case APP_CAL:  pdb_read(DB_CAL,  detCal,  &d); break;
+        case APP_ADDR: pdb_read(DB_ADDR, detAddr, &d); break;
+        case APP_TODO: pdb_read(DB_TODO, detTodo, &d); break;
+    }
+    return d.found;
+}
+
+/* ------------------------- get one record ------------------------- */
+#define REC_ATTR_DIRTY 0x40
+typedef struct { uint32_t uid; void *out; int found; } Get;
+static int getCal(const PdbRec *r,int i,void *ctx){ (void)i; Get*g=ctx;
+    if(r->uniqueID!=g->uid) return 0;
+    if(ApptUnpack(r->data,r->len,(Appt*)g->out)==0) g->found=1;
+    return 1; }
+static int getAddr(const PdbRec *r,int i,void *ctx){ (void)i; Get*g=ctx;
+    if(r->uniqueID!=g->uid) return 0;
+    if(AddrUnpack(r->data,r->len,(Addr*)g->out)==0) g->found=1;
+    return 1; }
+static int getTodo(const PdbRec *r,int i,void *ctx){ (void)i; Get*g=ctx;
+    if(r->uniqueID!=g->uid) return 0;
+    if(ToDoUnpack(r->data,r->len,(Todo*)g->out)==0) g->found=1;
+    return 1; }
+
+int data_get_cal(uint32_t uid, Appt *out){ Get g={uid,out,0}; pdb_read(DB_CAL,getCal,&g); return g.found; }
+int data_get_addr(uint32_t uid, Addr *out){ Get g={uid,out,0}; pdb_read(DB_ADDR,getAddr,&g); return g.found; }
+int data_get_todo(uint32_t uid, Todo *out){ Get g={uid,out,0}; pdb_read(DB_TODO,getTodo,&g); return g.found; }
+
+/* ------------------------- rewrite (replace/append one record) ------------------------- */
+#define RW_ARENA (12*1024)
+#define RW_MAX   64
+typedef struct { uint32_t uid; const uint8_t *nd; int nl; uint8_t *arena; int used; PdbRec *recs; int nr; int done; } RW;
+static int rwCb(const PdbRec *r,int i,void *ctx){ (void)i; RW*w=ctx;
+    const uint8_t *src=r->data; int len=r->len; uint8_t attr=r->attr;
+    if(r->uniqueID==w->uid){ src=w->nd; len=w->nl; attr|=REC_ATTR_DIRTY; w->done=1; }
+    if(w->used+len>RW_ARENA || w->nr>=RW_MAX) return 1;
+    memcpy(w->arena+w->used, src, len);
+    w->recs[w->nr]=(PdbRec){.attr=attr,.uniqueID=r->uniqueID,.data=w->arena+w->used,.len=len};
+    w->used+=len; w->nr++; return 0;
+}
+static int rewrite(const char *path,const char *nm,uint32_t type,uint32_t creator,
+                   uint32_t uid,const uint8_t *nd,int nl){
+    static uint8_t arena[RW_ARENA]; static PdbRec recs[RW_MAX];
+    RW w={uid,nd,nl,arena,0,recs,0,0};
+    pdb_read(path,rwCb,&w);
+    if(!w.done){                      /* new record (uid==0 or not found): append */
+        uint32_t nu=1; for(int i=0;i<w.nr;i++) if(recs[i].uniqueID>=nu) nu=recs[i].uniqueID+1;
+        if(w.used+nl<=RW_ARENA && w.nr<RW_MAX){
+            memcpy(arena+w.used,nd,nl);
+            recs[w.nr]=(PdbRec){.attr=REC_ATTR_DIRTY,.uniqueID=nu,.data=arena+w.used,.len=nl};
+            w.used+=nl; w.nr++;
+        }
+    }
+    return pdb_write_ai(path,nm,type,creator,NULL,0,recs,w.nr);
+}
+
+int data_save_cal(uint32_t uid, const Appt *in){
+    uint8_t pk[1024]; int l=ApptPack(pk,sizeof pk,in); if(l<=0) return 0;
+    return rewrite(DB_CAL,"DatebookDB",0x44415441,0x64617465,uid,pk,l)>=0;
+}
+int data_save_addr(uint32_t uid, const Addr *in){
+    uint8_t pk[1024]; int l=AddrPack(pk,sizeof pk,in); if(l<=0) return 0;
+    return rewrite(DB_ADDR,"AddressDB",0x44415441,0x61646472,uid,pk,l)>=0;
+}
+int data_save_todo(uint32_t uid, const Todo *in){
+    uint8_t pk[1024]; int l=ToDoPack(pk,sizeof pk,in); if(l<=0) return 0;
+    return rewrite(DB_TODO,"ToDoDB",0x44415441,0x746F646F,uid,pk,l)>=0;
+}

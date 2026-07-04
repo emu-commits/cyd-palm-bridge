@@ -5,6 +5,33 @@ can resume cold. Newest phase on top.
 
 ---
 
+## U5 — record detail + editing   [IN PROGRESS]
+
+**Goal:** tap a list row -> detail view; then edit forms (keyboard) that write back
+to the PDB with the Palm dirty bit so changes flow through the proven sync engine.
+Steps: U5.1 read-only detail views (rows carry uid -> data_detail formats fields);
+U5.2 edit forms + save (set dirty bit); U5.3 new/delete. Nav: launcher->list->
+detail; Home->launcher, Done->back to list. current_app tracked in ui.c.
+
+### Step log
+- U5.1: uid added to data_row_cb; data_detail(app,uid,out) formats all fields
+  (cal: date/time/desc/note; addr: name/company/labeled phones/address; todo:
+  pri/status/due/note). ui.c: AppDef table + cur_app, rows carry uid -> row_cb ->
+  show_detail (scrollable text box + Done->list). Home->launcher. CONFIRMED by user.
+- U5.2: edit forms. data.c gained data_get_* (uid->struct) + data_save_* (pack +
+  rewrite PDB replacing/appending the record, sets dirty bit 0x40 -> sync uploads).
+  ui.c: Edit button on detail -> show_edit; per-app form_field textareas (cal/todo:
+  desc+note; addr: last/first/company/phone/note, other fields preserved via
+  AddrIntern), shared lv_keyboard overlay (kill_kb on nav; shown on field tap,
+  hidden on kb ready/cancel), Cancel/Save. 166KB free heap. Editing CONFIRMED by
+  user (edit->save->list updates->persists to PDB).
+- U5.2b: auto-scroll — on field tap, shrink form viewport to keyboard top (FORM_KB)
+  + lv_obj_scroll_to_view(field); restore on kb dismiss. Confirmed by user.
+  REMAINING U5: U5.3 new-record + delete (create via uid=0 rewrite already
+  supported in data_save_*; needs UI: New button on list, Delete on detail/edit).
+
+---
+
 ## U4 — read-only data views (stream from PDB on SD)   [DONE ✓]
 
 **RESULT:** launcher apps show real records streamed from .pdb on SD. data.[ch]
