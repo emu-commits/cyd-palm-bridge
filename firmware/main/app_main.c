@@ -33,6 +33,7 @@
 #include "touch.h"
 #include "lvgl_port.h"
 #include "ui.h"
+#include "data.h"
 #include "secrets.h"
 
 static const char *TAG = "app";
@@ -111,7 +112,9 @@ static esp_err_t sd_mount(void){
         .mosi_io_num=SD_PIN_MOSI, .miso_io_num=SD_PIN_MISO, .sclk_io_num=SD_PIN_SCLK,
         .quadwp_io_num=-1, .quadhd_io_num=-1, .max_transfer_sz=4096,
     };
-    esp_err_t e = spi_bus_initialize(SD_SPI_HOST, &bus, SDSPI_DEFAULT_DMA);
+    /* SPI_DMA_CH_AUTO (not the fixed SDSPI_DEFAULT_DMA) so SD grabs the DMA channel
+     * the display's auto-picked one didn't take (ESP32 has two). */
+    esp_err_t e = spi_bus_initialize(SD_SPI_HOST, &bus, SPI_DMA_CH_AUTO);
     if(e!=ESP_OK){ ESP_LOGE(TAG,"spi bus init: %s",esp_err_to_name(e)); return e; }
     sdspi_device_config_t dev = SDSPI_DEVICE_CONFIG_DEFAULT();
     dev.gpio_cs = SD_PIN_CS; dev.host_id = SD_SPI_HOST;
@@ -220,6 +223,13 @@ void app_main(void){
         ESP_LOGI(TAG,"calibration saved to NVS");
     } else {
         ESP_LOGI(TAG,"loaded touch calibration from NVS (hold screen at boot to re-cal)");
+    }
+
+    /* U4: mount the SD card and seed demo PDBs so the views have content. */
+    if(sd_mount()==ESP_OK){
+        data_seed_if_empty();
+    } else {
+        ESP_LOGW(TAG,"no SD card -- data views will be empty");
     }
 
     /* U3: bring up LVGL + the Palm app shell (never returns). */

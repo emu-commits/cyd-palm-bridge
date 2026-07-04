@@ -11,7 +11,10 @@
  */
 #include "ui.h"
 #include "display.h"      /* LCD_W, PDA_H, GRAFFITI_H */
+#include "data.h"
 #include "lvgl.h"
+#include <string.h>
+#include <stdio.h>
 
 #define TITLE_H     24
 #define COL_TITLE   lv_color_hex(0x000080)   /* navy title bar   */
@@ -44,7 +47,37 @@ static lv_obj_t *panel(lv_obj_t *parent, int x, int y, int w, int h, lv_color_t 
 static void home_cb(lv_event_t *e){ (void)e; show_launcher(); }
 static void app_cb(lv_event_t *e){ show_app((const char *)lv_event_get_user_data(e)); }
 
+/* add one row to the active list (primary line, optional secondary in parens) */
+static void add_row(const char *primary, const char *secondary, void *ctx){
+    lv_obj_t *list = (lv_obj_t *)ctx;
+    char buf[128];
+    if(secondary && secondary[0]) snprintf(buf,sizeof buf,"%s  (%s)",primary,secondary);
+    else                          snprintf(buf,sizeof buf,"%s",primary);
+    lv_obj_t *b = lv_list_add_button(list, NULL, buf);
+    lv_obj_set_style_radius(b, 0, 0);
+}
+
+/* build a scrolling list view populated by a data iterator */
+static void list_view(const char *title, void (*iter)(data_row_cb, void *)){
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, title);
+    lv_obj_t *list = lv_list_create(content);
+    lv_obj_set_size(list, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_radius(list, 0, 0);
+    lv_obj_set_style_border_width(list, 0, 0);
+    lv_obj_set_style_pad_all(list, 0, 0);
+    iter(add_row, list);
+    if(lv_obj_get_child_count(list) == 0){
+        lv_obj_t *b = lv_list_add_button(list, NULL, "(no records)");
+        lv_obj_set_style_radius(b, 0, 0);
+    }
+}
+
 static void show_app(const char *name){
+    if(!strcmp(name,"Date Book"))       { list_view(name, data_datebook); return; }
+    if(!strcmp(name,"Address"))         { list_view(name, data_address);  return; }
+    if(!strcmp(name,"To Do List"))      { list_view(name, data_todo);     return; }
+    /* Memo Pad (no codec yet) + HotSync (U7) -> placeholder */
     lv_obj_clean(content);
     lv_label_set_text(title_lbl, name);
     lv_obj_t *l = lv_label_create(content);

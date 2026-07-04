@@ -5,6 +5,38 @@ can resume cold. Newest phase on top.
 
 ---
 
+## U4 — read-only data views (stream from PDB on SD)   [DONE ✓]
+
+**RESULT:** launcher apps show real records streamed from .pdb on SD. data.[ch]
+seeds demo PDBs (15 events / 12 contacts / 10 todos) + iterates via pdb_read ->
+codec -> display rows; ui.c list_view. SD mount fix: SPI_DMA_CH_AUTO (display
+took the fixed DMA ch). Scrolling confirmed on hardware. Memo/HotSync placeholder.
+NEXT: U5 record detail + editing.
+
+
+**Goal:** wire launcher apps to real content from .pdb files on the SD card. User
+inserted an SD card. Steps: mount SD (verify pins now that a card is present),
+seed demo PDBs on-device if absent (device writes via codec), build list views
+for Date Book / Address / To Do List streamed via pdb_read (Memo/HotSync stay
+placeholder — no Memo codec; HotSync=U7). data.[ch] = SD seed + record iteration
+as display strings; ui.c list views call it.
+
+### Step log
+- U4.1: data.[ch] (seed DatebookDB/AddressDB/ToDoDB if absent; iterate via
+  pdb_read -> ApptUnpack/AddrUnpack/ToDoUnpack -> display rows). ui.c list_view +
+  add_row; show_app routes Date Book/Address/To Do List to real data, Memo/
+  HotSync placeholder. Format-truncation fixed w/ %.72s precision.
+- U4.2: SD MOUNT FIX. spi bus init failed ESP_ERR_NOT_FOUND (display SPI3 took a
+  DMA ch; SDSPI_DEFAULT_DMA is a FIXED ch that collided). SPI_DMA_DISABLED let
+  bus init but block reads timed out (0x102 — SD needs DMA). Fix: SD bus init w/
+  SPI_DMA_CH_AUTO -> grabs the other free DMA channel. SD MOUNTED (32GB) on HW.
+  Demo PDBs seed on first boot. Views CONFIRMED showing records by user.
+- U4.3: expanded demo data (15 events, 12 contacts, 10 todos) to overflow the
+  visible rows; seeding now overwrites each boot (demo; U7 replaces). AWAITING:
+  scroll test.
+
+---
+
 ## U3 — app shell (LVGL, Palm-skinned)   [DONE ✓]
 
 **RESULT:** LVGL 9.2 up on the partial-buffer path (lvgl_port.[ch]), bound to
