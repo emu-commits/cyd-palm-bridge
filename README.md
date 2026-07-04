@@ -157,11 +157,15 @@ Proven in `tests/category.c` (`make ctest`): records partition to the right cale
 the merged PDB keeps each category nibble, a server-side add pulls back tagged with the
 owning category, and a second sync is a no-op across all collections.
 
-### Still ahead
-- **Live iCloud validation** — flows verified against Radicale; needs a real Apple ID +
-  app-specific password to confirm iCloud's discovery/quirks.
-- **Port to ESP32** — swap curl for esp_http_client+mbedTLS; PDB files on SD; cap the
-  static reconciliation arenas (host proof uses MAXR=256 × 4 KB).
+### Still ahead — see [docs/ROADMAP.md](docs/ROADMAP.md) for the full resume plan
+- **Contact (CardDAV) sync** — iCloud CardDAV is on a separate host (`contacts.icloud.com`);
+  single address book, category preserved-not-routed. Phase A in the roadmap.
+- **ESP32 firmware port** — replace curl with an on-device mbedTLS HTTP client, PDBs on
+  SD, and (critically) stream reconciliation to kill the ~1 MB static arenas for no-PSRAM.
+  Phase B in the roadmap.
+
+**iCloud calendar + reminder sync is validated live** (discover + `synccat cal`/`todo`
+push/pull against a real account).
 
 ---
 ## Original feasibility spike (superseded by the above, kept for context)
