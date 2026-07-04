@@ -3,9 +3,32 @@
 Running log of the UI build (docs/UI_ROADMAP.md). Updated after each step so work
 can resume cold. Newest phase on top.
 
+## CURRENT STATE (2026-07-04) — read this first
+
+**Where we are:** the host bridge + on-device sync are done and proven on hardware
+(see README + docs/ROADMAP.md). The PalmOS-style **UI is largely built**:
+- DONE + on hardware: U0 static→heap (256 KB free heap), U1 display (ILI9341
+  portrait 240×320), U2 touch (XPT2046, affine cal in NVS), U3 app shell, U3a Palm
+  fonts (largeFont 14px) + real Palm icons (grid launcher) + mono theme +
+  silkscreen buttons (Home/Menu/Find/Calc), U4 data views, U5 detail + edit.
+- BUILT CLEAN, **not yet flashed** (CYD USB was disconnected): F1 menus, F2
+  categories, F3 Memo (all 4 apps), F4 Details, U7 HotSync, U6 Graffiti framework.
+  Commits: F1 29fcefc · F2 39dd903 · F3 27289ee · F4 48beabc · U7 28e27ec · U6 f9ed28b.
+
+**Resume in one line:** reconnect the CYD, then
+`. ~/esp/esp-idf/export.sh && cd firmware && idf.py -p /dev/ttyUSB0 flash monitor`.
+Then test: menu New/Delete, category picker + Details, Memo Pad, HotSync→Sync Now,
+Graffiti strokes. **Two things need on-device work:** HotSync RAM headroom
+(WiFi+TLS+sync while LVGL up ≈166 KB free/169 KB peak → maybe tear down the LVGL
+draw buffer during sync) and Graffiti template/threshold tuning.
+
+**Remaining phases:** U8 power (battery/light-sleep), U9 case — both hardware; plus
+ToDo multi-column/sort polish. Asset converters: scratchpad/{palmfont.py,
+palmicon.py}; PumpkinOS clone at scratchpad/PumpkinOS.
+
 ---
 
-## U3a — convert to authentic PalmOS look   [IN PROGRESS]
+## U3a — convert to authentic PalmOS look   [DONE ✓]
 
 **Source:** PumpkinOS cloned at scratchpad/PumpkinOS (github.com/migueletto/PumpkinOS,
 GPLv3). Palm fonts are recreated in src/BOOT/font_90NN_72.txt as ASCII bitmaps

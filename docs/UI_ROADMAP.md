@@ -5,6 +5,14 @@ a touchscreen with Graffiti text entry, sync to iCloud, run on a battery, live i
 a printed case. This doc answers the up-front question — **does 0 PSRAM block
 this?** — then lays out the build.
 
+> **STATUS (2026-07-04) — most of this is built.** Done + on hardware (or built
+> clean awaiting a batch flash): U0 (static→heap RAM unlock), U1 display, U2 touch
+> (calibrated, NVS), U3 app shell, U3a Palm fonts/icons/theme, U4 data views,
+> U5 detail+edit, **F1 menus, F2 categories, F3 Memo/apps, F4 Details, U6 Graffiti
+> framework, U7 HotSync**. **Remaining:** U8 power, U9 case (hardware); on-device
+> tuning of Graffiti + HotSync RAM; ToDo multi-column/sort polish. The blow-by-blow
+> and exact commit list are in **docs/BUILD_PROGRESS.md** (the cold-resume record).
+
 ## TL;DR verdict
 
 **Not blocked.** The base CYD (ESP32-D0WD, 520 KB SRAM, ~320 KB usable DRAM, no
@@ -262,7 +270,7 @@ the host CLI) so the user picks calendars on the device.
 
 **U8 — Power (for the battery goal).** Light-sleep between touches, dim/off
 backlight on idle, Wi-Fi only during sync, battery gauge from GPIO34, low-battery
-UI. Target: days of standby, hours of active use on a ~1500 mAh LiPo.
+UI. Target: days of standby, hours of active use on a ~1100 mAh LiPo.
 
 **U9 — Case/hardware integration.** Confirm final pin map, expose USB + SD +
 power switch + reset, mount points — folds into the case work you already have
@@ -307,3 +315,16 @@ Build the device. The no-PSRAM limit forces **partial rendering** and a
 a compromise on the experience. The data/sync half is done and proven on
 hardware; the UI half is a well-scoped build with a RAM budget that closes with
 ~70 KB to spare in the tight mode and ~140 KB in the roomy one.
+
+
+
+
+## More to do / backlog - check if not yet completed
+a) Build out Memo Pad, Date Book, Address, and To Do List apps UI's referencing the PumpkinOS versions.
+1) Preferences app with icon from PumpkinOS converted similarly to other icons.  Configure wifi and caldav/carddav settings here.  Configure RSS data sources  by selecting from a preloaded list of 2026-most-popular.  Configure timezone (from list) and clock.  Review PumpkinOS preferences app for Palm UI choices other contents needed here.  Configure screen max brightness and power-saving feature timers.
+2) RSS reader app on homescreen with icon, with data loaded via HotSync that formats each article with swipe-up tiktok-style scrolling/flicking. 
+3) Change behavior of hardware reset switch to instead control on/off toggle.
+4) Clock on top of screen per Palm OS design.
+5) Graffiti-area icons: move search to bottom right, calculator above search - build out calculator and search apps leveraging PumpkinOS and palm original design concepts.  Add the context-sensitive menu to all screens per original Palm functionality.
+6) Battery % graphic in top menu bar.
+7) Stretch goal: dark mode and auto switch at sunset matching timezone/calendar

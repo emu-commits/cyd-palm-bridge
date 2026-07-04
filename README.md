@@ -1,10 +1,33 @@
-# CYD Palm→CalDAV/CardDAV bridge
+# CYD Palm — a PalmOS-style PDA that syncs to iCloud
 
-Goal: a **native ESP32 PDA on the base CYD (`ESP32-2432S028R`, NO PSRAM, 4 MB flash,
-~300 KB usable SRAM)** that reads Palm PIM databases and two-way syncs to
-CalDAV/CardDAV over WiFi. Reuse PumpkinOS as a *donor codebase*, not a runtime.
+A **native PDA on the base CYD** (`ESP32-2432S028R`, **NO PSRAM**, 4 MB flash,
+~300 KB SRAM): a PalmOS-style touchscreen handheld that reads/edits Palm PIM
+databases and two-way syncs them to CalDAV/CardDAV (iCloud). PumpkinOS is a
+*donor codebase* (data formats, fonts, icons, layouts), not a runtime.
 
-## STATUS: end-to-end round trip PROVEN (host build)
+## Status (2026-07-04)
+
+Two halves, both real:
+
+1. **Host bridge — proven.** The Palm↔CalDAV/CardDAV codec + incremental
+   conflict-aware two-way sync, validated against real Radicale **and live iCloud**
+   (calendars, Reminders, contacts). Five green gates. Details below.
+2. **On-device firmware — built + running on hardware.** LVGL UI on the CYD:
+   calibrated touch, an authentic Palm launcher/apps (Date Book, Address, To Do,
+   Memo), menus, categories, Details, HotSync, and a Graffiti recognizer. Boots
+   and runs on the board. See **[docs/UI_ROADMAP.md](docs/UI_ROADMAP.md)** for the
+   plan and **[docs/BUILD_PROGRESS.md](docs/BUILD_PROGRESS.md)** for the per-step
+   log (the cold-resume record). The firmware lives in **`firmware/`** (ESP-IDF).
+
+> **Full disclosure on device state:** phases through U6/F1–F4/U7 are *built clean
+> and committed* but the last batch was **not yet flashed** (the CYD's USB serial
+> was disconnected). HotSync's RAM headroom (Wi-Fi+TLS+sync while LVGL is up) and
+> the Graffiti recognizer's templates/threshold **need on-device validation/tuning**.
+> See docs/BUILD_PROGRESS.md.
+
+---
+
+## Host bridge — proven (host build)
 
 The headless bridge is built and **verified against a real DAV server** (Radicale):
 `Palm PDB <-> CalDAV/CardDAV` incremental two-way sync with conflict resolution.
@@ -157,59 +180,67 @@ Proven in `tests/category.c` (`make ctest`): records partition to the right cale
 the merged PDB keeps each category nibble, a server-side add pulls back tagged with the
 owning category, and a second sync is a no-op across all collections.
 
-### Still ahead — see [docs/ROADMAP.md](docs/ROADMAP.md) for the full resume plan
-- **Contact (CardDAV) sync** — iCloud CardDAV is on a separate host (`contacts.icloud.com`);
-  single address book, category preserved-not-routed. Phase A in the roadmap.
-- **ESP32 firmware port** — replace curl with an on-device mbedTLS HTTP client, PDBs on
-  SD, and (critically) stream reconciliation to kill the ~1 MB static arenas for no-PSRAM.
-  Phase B in the roadmap.
-
-**iCloud calendar + reminder sync is validated live** (discover + `synccat cal`/`todo`
-push/pull against a real account).
+Both the original ROADMAP phases are **done**: **Phase A** (contact/CardDAV sync,
+separate `contacts.icloud.com` host) and **Phase B** (the ESP32 firmware port —
+`dav_esp.c` over `esp_http_client`+mbedTLS, PDBs on SD, the sync working set moved
+from static BSS to heap for no-PSRAM). See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
-## Original feasibility spike (superseded by the above, kept for context)
 
-## Verdicts reached
-- **Emulator paths are dead on this board.** Dragonfruit needs 8 MB PSRAM; porting
-  PumpkinOS whole = desktop-class deps (SDL2, dynamic linking, MMU, malloc-heavy) +
-  a 150 KB full framebuffer. Neither fits no-PSRAM.
-- **Native app + donated data layer = viable, no RAM wall** except the WiFi+TLS sync
-  burst (~80–120 KB transient; manage via no full framebuffer + tuned mbedTLS +
-  stream one record at a time).
-- **PumpkinOS is the best donor:** `DateBook/DateDB.c` (ApptPack/ApptUnpack) and
-  `AddressBook/AddressDB.c` (PrvAddrDBUnpack) are the original Palm SDK sources with
-  the byte layout documented inline. **GPLv3** — lifting code = GPLv3 firmware;
-  clean-room from the struct+format keeps you free.
-- PumpkinOS **has** global Find (`libpumpkin/Find.c`, already a streaming/no-RAM
-  design). PumpkinOS **stubs** Graffiti (`GrfProcessStroke` = "not implemented") —
-  bring your own recognizer ($Q recommended for MCU; all KB-scale, fits budget).
+## On-device firmware — the PDA (`firmware/`, ESP-IDF)
 
-## What these spikes prove (both build with `cc -Wall -O2` and run)
-- `pdb_prototype.c` — generates a real `DatebookDB.pdb`, streams it back with a
-  faithful endianness-corrected **ApptUnpack** port, emits iCalendar. Handles timed,
-  all-day (`VALUE=DATE`), and weekly recurrence (`RRULE;BYDAY=`). Peak RAM = one
-  ~1 KB record buffer; DB never resident.
-- `addr_prototype.c` — same for `AddressDB.pdb` → **vCard 3.0**. Handles the Palm
-  quirk that **email is a phone slot whose label==emailLabel** (not a field), phone
-  type mapping, and company-only cards.
+An ESP-IDF app that turns the CYD into a PalmOS-style handheld. Shares the exact
+codec + sync engine from `bridge/` (compiled unchanged as an IDF component; only
+the DAV transport differs: `dav_esp.c` over mbedTLS instead of `dav.c` over curl).
 
-Seam confirmed: own ~30-line PDB container reader + tiny unpack; **zero** PumpkinOS
-DataMgr/storage/MemHandle (the 8.7k LOC you feared dragging in never came).
+**Proven on hardware:** boots, calibrated resistive touch (persisted in NVS), the
+ILI9341 display in portrait, WiFi→SNTP→TLS→PROPFIND against **live iCloud**
+(the discovery smoke test listed the real calendars). ~256 KB free heap after
+moving the sync arenas to heap.
 
-## Gotcha found
-Original PumpkinOS `ApptUnpack` has a bug in the exceptions loop (`dt[i].month`
-assigned twice, `.day` never set). Ported code needs review, not blind copy.
+**The UI (LVGL, monochrome Palm theme, authentic Palm fonts/icons from PumpkinOS):**
+- **Launcher** — an icon grid of the classic Palm apps (real tAIB icons).
+- **Silkscreen buttons** flanking the Graffiti area: **Home / Menu / Find / Calc**.
+- **Apps** — Date Book, Address, To Do, **Memo Pad** (all four functional): list →
+  detail → edit forms with an on-screen keyboard.
+- **Menus** (F1) — the Menu button opens Palm's **Record** (New/Delete) and
+  **Options** (Categories/About) pull-downs.
+- **Categories** (F2) — the top-right category pop-up filters lists, wired to the
+  Palm AppInfo table.
+- **Details** (F4) — per-record category assignment.
+- **HotSync** (U7) — a background sync to iCloud (WiFi+SNTP+sync engine), defensive
+  so a network/RAM error can't crash the UI.
+- **Graffiti** (U6) — a `$1` unistroke recognizer + writing surface (framework;
+  templates/threshold need on-device tuning).
 
-## Still-missing / the real remaining work (see memory for ranking)
-1. **Two-way sync engine** — uniqueID↔ETag map, dirty/delete tracking, conflict
-   policy, RFC 6578 sync-token. Bigger than all the parsing combined. THE project.
-2. **Download direction** — ICS/vCard *parser* + PDB *writer* (Pack + rebuild index).
-   Spike only does upload.
-3. **Timezones + charset** — Palm = local wall-clock + Palm Latin charset; DAV = UTF-8
-   + VTIMEZONE. Small code, big data-loss risk if skipped.
-4. **Record attributes** — category/dirty/delete/uniqueID live in the record INDEX
-   entry attr byte + AppInfo block; needed for incremental (not full-replace) sync.
-5. Nice-to-have: ToDoDB→VTODO, MemoDB→VJOURNAL/files, alarm→VALARM.
+Config (WiFi + Apple app-specific password + calendar path) lives in
+`firmware/main/secrets.h` (gitignored; copy from `secrets.h.example`).
 
-Board on the bench: CH340 @ /dev/ttyUSB0, ESP32-D0WD-V3 rev3.1, 4 MB flash, no PSRAM.
+### Build + flash the firmware
+```
+. ~/esp/esp-idf/export.sh          # ESP-IDF v5.5
+cd firmware
+idf.py set-target esp32            # first time
+idf.py -p /dev/ttyUSB0 flash monitor
+```
+The device seeds demo PDBs on first boot (only for DBs that don't exist), so the
+apps have content before a HotSync. Firmware is **GPLv3** (it reuses PumpkinOS's
+GPLv3 Palm fonts/icons); the host `bridge/` codecs are clean-room and separable.
+
+### Remaining
+- **On-device validation/tuning:** HotSync RAM headroom (WiFi+TLS+sync while LVGL
+  is up ≈ 166 KB free vs ~169 KB peak — may need to tear down the LVGL draw buffer
+  during sync, the roadmap's mode-switch); Graffiti recognizer accuracy.
+- **U8 power** (battery gauge on GPIO34, light-sleep) and **U9 case** — hardware.
+- ToDo multi-column/sort/show-completed polish (F3).
+
+---
+
+## History (kept for context)
+
+Emulator paths were ruled out (Dragonfruit needs 8 MB PSRAM; a whole-PumpkinOS port
+is desktop-class + a 150 KB framebuffer). The chosen path — native app + PumpkinOS
+as a *donor* — proved out: a ~30-line PDB reader + clean-room codecs, no PumpkinOS
+DataMgr/storage. PumpkinOS's `ApptUnpack` has an exceptions-loop bug (`.month` set
+twice, `.day` never) — fixed in the port. Board on the bench: CH340 @
+`/dev/ttyUSB0`, ESP32-D0WD-V3 rev3.1, 4 MB flash, no PSRAM.

@@ -1,8 +1,14 @@
 # CYD Palm ↔ iCloud bridge — roadmap & resume guide
 
-Written 2026-07-03 so this can be picked up cold. Two things remain: **(A) contact
-(CardDAV) sync**, then **(B) the ESP32 firmware port**. Everything else is done and
-validated against real iCloud.
+> **STATUS (2026-07-04): both phases in this doc are DONE.** Phase A (contact/
+> CardDAV sync) and Phase B (the ESP32 firmware port) are complete and on
+> hardware. The active work is now the **PalmOS-style UI** — see
+> **docs/UI_ROADMAP.md** and the per-step log **docs/BUILD_PROGRESS.md**. This
+> file is kept as the historical sync/port plan and reference.
+
+Written 2026-07-03 so this can be picked up cold. Two things remained then: **(A)
+contact (CardDAV) sync**, then **(B) the ESP32 firmware port** — both since done.
+Everything else was already validated against real iCloud.
 
 ---
 ## 0. Resume in 30 seconds
