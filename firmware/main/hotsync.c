@@ -29,6 +29,49 @@ static volatile int s_busy;
 static char s_status[80] = "Ready";
 static void setst(const char *s){ snprintf(s_status, sizeof s_status, "%s", s); }
 
+/* ---- per-app sync targets ------------------------------------------------
+ * HotSync walks this table, syncing each configured app to its own iCloud
+ * collection. Back-compat: an older secrets.h that only defines SYNC_COLL/
+ * SYNC_KIND still syncs the Date Book exactly as before; To Do / Address stay
+ * off until their collections are filled in. Memo has no iCloud DAV surface. */
+#ifndef SYNC_KIND
+#define SYNC_KIND KIND_CAL
+#endif
+#ifndef SYNC_CAL_COLL
+#define SYNC_CAL_COLL SYNC_COLL
+#endif
+#ifndef SYNC_TODO_COLL
+#define SYNC_TODO_COLL ""
+#endif
+#ifndef SYNC_TODO_PDB
+#define SYNC_TODO_PDB "/sdcard/ToDoDB.pdb"
+#endif
+#ifndef SYNC_CARD_COLL
+#define SYNC_CARD_COLL ""
+#endif
+#ifndef SYNC_CARD_PDB
+#define SYNC_CARD_PDB "/sdcard/AddressDB.pdb"
+#endif
+#ifndef DAV_CARD_BASE
+#define DAV_CARD_BASE "https://contacts.icloud.com"
+#endif
+
+typedef struct {
+    const char *name;     /* label for the status line            */
+    const char *pdb;      /* PDB path on SD                        */
+    const char *coll;     /* iCloud collection ("" => skip)        */
+    int         kind;     /* KIND_CAL | KIND_TODO | KIND_CARD      */
+    const char *map;      /* per-collection state map on SD        */
+    int         card;     /* 1 => CardDAV (uses the contacts host) */
+} SyncTgt;
+
+static const SyncTgt s_tgts[] = {
+    { "Date Book", SYNC_PDB,      SYNC_CAL_COLL,  SYNC_KIND,  "/sdcard/state/cal.map",  0 },
+    { "To Do",     SYNC_TODO_PDB, SYNC_TODO_COLL, KIND_TODO,  "/sdcard/state/todo.map", 0 },
+    { "Address",   SYNC_CARD_PDB, SYNC_CARD_COLL, KIND_CARD,  "/sdcard/state/card.map", 1 },
+};
+#define N_TGTS ((int)(sizeof s_tgts / sizeof s_tgts[0]))
+
 int hotsync_busy(void){ return s_busy; }
 const char *hotsync_status(void){ return s_status; }
 
@@ -137,20 +180,58 @@ static void hotsync_task(void *arg){
     }
     ESP_LOGI(TAG,"principal: %s",principal);
 
-    setst("Syncing Date Book...");
-    ESP_LOGI(TAG,"sync coll=%s pdb=%s heap=%lu largest=%lu",SYNC_COLL,SYNC_PDB,
-             (unsigned long)esp_get_free_heap_size(),
-             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-    SyncStats st={0};
-    int n = sync_collection(&d, SYNC_PDB, SYNC_PDB, SYNC_COLL, SYNC_KIND,
-                            "/sdcard/state/cal.map", POL_SERVER, &st);
-    /* n == -2: guard refused to overwrite a non-empty PDB with an empty result
-     * (data was protected). n == -1: local out-of-memory. n >= 0: records kept. */
-    if(n == -2) snprintf(msg,sizeof msg,"Sync stopped - local data kept (see log)");
-    else if(n < 0) snprintf(msg,sizeof msg,"Sync failed - low memory (heap %lu)",
-                       (unsigned long)esp_get_free_heap_size());
-    else snprintf(msg,sizeof msg,"Done: +%d ~%d -%d up, +%d ~%d -%d down",
-                  st.pushNew,st.pushMod,st.pushDel, st.pullNew,st.pullMod,st.pullDel);
+    /* Address book (CardDAV) lives on a separate iCloud host; resolve it lazily
+     * the first time a card target is reached. Same credentials as caldav. */
+    DavCtx dcard; int card_ready=0;
+
+    SyncStats tot={0};
+    int did=0, failed=0, protec=0;
+    for(int i=0;i<N_TGTS;i++){
+        const SyncTgt *t=&s_tgts[i];
+        if(!t->coll || !t->coll[0]) continue;      /* app not configured -> skip */
+
+        DavCtx *ctx=&d;
+        if(t->card){
+            if(!card_ready){
+                memset(&dcard,0,sizeof dcard);
+                snprintf(dcard.base,sizeof dcard.base,"%s",DAV_CARD_BASE);
+                snprintf(dcard.user,sizeof dcard.user,"%s",DAV_USER);
+                snprintf(dcard.pass,sizeof dcard.pass,"%s",DAV_PASS);
+                char chost[256]="";
+                if(dav_effective_host(&dcard,"/",chost,sizeof chost)==0 && chost[0]){
+                    snprintf(dcard.base,sizeof dcard.base,"%s",chost);
+                    ESP_LOGI(TAG,"contacts host: %s",chost);
+                } else ESP_LOGW(TAG,"contacts host resolve failed (HTTP %d)",dav_last_status);
+                card_ready=1;
+            }
+            ctx=&dcard;
+        }
+
+        snprintf(msg,sizeof msg,"Syncing %s...",t->name); setst(msg);
+        ESP_LOGI(TAG,"sync %s coll=%s pdb=%s heap=%lu largest=%lu",t->name,t->coll,t->pdb,
+                 (unsigned long)esp_get_free_heap_size(),
+                 (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+        SyncStats st={0};
+        int n = sync_collection(ctx, t->pdb, t->pdb, t->coll, t->kind, t->map, POL_SERVER, &st);
+        /* n == -2: guard refused to overwrite a non-empty PDB with an empty result
+         * (data was protected). n == -1: local out-of-memory. n >= 0: records kept. */
+        ESP_LOGI(TAG,"%s: rc=%d up +%d~%d-%d down +%d~%d-%d heap=%lu",t->name,n,
+                 st.pushNew,st.pushMod,st.pushDel, st.pullNew,st.pullMod,st.pullDel,
+                 (unsigned long)esp_get_free_heap_size());
+        if(n == -2) protec++;
+        else if(n < 0) failed++;
+        else { did++;
+            tot.pushNew+=st.pushNew; tot.pushMod+=st.pushMod; tot.pushDel+=st.pushDel;
+            tot.pullNew+=st.pullNew; tot.pullMod+=st.pullMod; tot.pullDel+=st.pullDel; }
+    }
+
+    if(did==0 && failed>0)
+        snprintf(msg,sizeof msg,"Sync failed - low memory (heap %lu)",
+                 (unsigned long)esp_get_free_heap_size());
+    else
+        snprintf(msg,sizeof msg,"Done: +%d~%d-%d up +%d~%d-%d down%s",
+                 tot.pushNew,tot.pushMod,tot.pushDel, tot.pullNew,tot.pullMod,tot.pullDel,
+                 (failed||protec)?" (some skipped)":"");
     ESP_LOGI(TAG,"%s",msg);
     setst(msg);
     wifi_down();
