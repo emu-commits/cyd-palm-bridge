@@ -20,6 +20,8 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
+#include "esp_system.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 
 static const char *TAG = "hotsync";
@@ -95,8 +97,18 @@ static char *abspath(char *href, DavCtx *d){
 
 static void hotsync_task(void *arg){
     (void)arg;
+    /* crank up transport logging so a connect failure names its cause */
+    esp_log_level_set("esp-tls", ESP_LOG_VERBOSE);
+    esp_log_level_set("esp-tls-mbedtls", ESP_LOG_VERBOSE);
+    esp_log_level_set("mbedtls", ESP_LOG_VERBOSE);
+    esp_log_level_set("esp_http_client", ESP_LOG_VERBOSE);
+    esp_log_level_set("transport_base", ESP_LOG_VERBOSE);
+
     setst("Connecting Wi-Fi...");
     if(!wifi_up()){ setst("Wi-Fi failed"); wifi_down(); s_busy=0; vTaskDelete(NULL); return; }
+    ESP_LOGI(TAG,"wifi up: free heap=%lu largest block=%lu",
+             (unsigned long)esp_get_free_heap_size(),
+             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     setst("Setting clock...");
     if(!clock_ok()){ setst("Clock/SNTP failed"); wifi_down(); s_busy=0; vTaskDelete(NULL); return; }
 
@@ -104,17 +116,39 @@ static void hotsync_task(void *arg){
     snprintf(d.base,sizeof d.base,"%s",DAV_BASE);
     snprintf(d.user,sizeof d.user,"%s",DAV_USER);
     snprintf(d.pass,sizeof d.pass,"%s",DAV_PASS);
+    (void)abspath;
+    char msg[80];
+
     setst("Resolving host...");
     char host[256]="";
-    if(dav_effective_host(&d,"/",host,sizeof host)==0 && host[0]) snprintf(d.base,sizeof d.base,"%s",host);
-    (void)abspath;
+    if(dav_effective_host(&d,"/",host,sizeof host)==0 && host[0]){
+        snprintf(d.base,sizeof d.base,"%s",host);
+        ESP_LOGI(TAG,"effective host: %s",host);
+    } else {
+        ESP_LOGW(TAG,"host resolve failed (HTTP %d); using %s",dav_last_status,d.base);
+    }
+
+    /* probe login first so we can tell an auth failure from a bad collection */
+    setst("Checking login...");
+    char principal[256]="";
+    if(dav_prop_href(&d,"/","<d:current-user-principal/>","",principal,sizeof principal)!=0 || !principal[0]){
+        snprintf(msg,sizeof msg,"Login failed (HTTP %d) - check user/pass",dav_last_status);
+        ESP_LOGE(TAG,"%s",msg); setst(msg); wifi_down(); s_busy=0; vTaskDelete(NULL); return;
+    }
+    ESP_LOGI(TAG,"principal: %s",principal);
 
     setst("Syncing Date Book...");
+    ESP_LOGI(TAG,"sync coll=%s pdb=%s heap=%lu largest=%lu",SYNC_COLL,SYNC_PDB,
+             (unsigned long)esp_get_free_heap_size(),
+             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     SyncStats st={0};
     int n = sync_collection(&d, SYNC_PDB, SYNC_PDB, SYNC_COLL, SYNC_KIND,
                             "/sdcard/state/cal.map", POL_SERVER, &st);
-    char msg[80];
-    if(n < 0) snprintf(msg,sizeof msg,"Sync failed (check creds/coll)");
+    /* n == -2: guard refused to overwrite a non-empty PDB with an empty result
+     * (data was protected). n == -1: local out-of-memory. n >= 0: records kept. */
+    if(n == -2) snprintf(msg,sizeof msg,"Sync stopped - local data kept (see log)");
+    else if(n < 0) snprintf(msg,sizeof msg,"Sync failed - low memory (heap %lu)",
+                       (unsigned long)esp_get_free_heap_size());
     else snprintf(msg,sizeof msg,"Done: +%d ~%d -%d up, +%d ~%d -%d down",
                   st.pushNew,st.pushMod,st.pushDel, st.pullNew,st.pullMod,st.pullDel);
     ESP_LOGI(TAG,"%s",msg);
@@ -128,8 +162,12 @@ void hotsync_start(void){
     if(s_busy) return;
     s_busy = 1;
     setst("Starting...");
-    /* generous stack: TLS + sync run here */
-    if(xTaskCreate(hotsync_task, "hotsync", 12288, NULL, 4, NULL) != pdPASS){
+    /* 16 KB stack: the sync engine's big emit buffers now live in .bss (g_body)
+     * and the object-fetch buffer is static, so the deepest path is a TLS
+     * handshake (~8 KB) plus small frames. A 32 KB stack fixed the earlier
+     * overflow but starved the heap of the contiguous block sync_collection needs
+     * for its S/Out structs; 16 KB restores that headroom without overflowing. */
+    if(xTaskCreate(hotsync_task, "hotsync", 20480, NULL, 4, NULL) != pdPASS){
         setst("Could not start sync task"); s_busy = 0;
     }
 }

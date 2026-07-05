@@ -5,13 +5,24 @@ a touchscreen with Graffiti text entry, sync to iCloud, run on a battery, live i
 a printed case. This doc answers the up-front question — **does 0 PSRAM block
 this?** — then lays out the build.
 
-> **STATUS (2026-07-04) — most of this is built.** Done + on hardware (or built
-> clean awaiting a batch flash): U0 (static→heap RAM unlock), U1 display, U2 touch
-> (calibrated, NVS), U3 app shell, U3a Palm fonts/icons/theme, U4 data views,
-> U5 detail+edit, **F1 menus, F2 categories, F3 Memo/apps, F4 Details, U6 Graffiti
-> framework, U7 HotSync**. **Remaining:** U8 power, U9 case (hardware); on-device
-> tuning of Graffiti + HotSync RAM; ToDo multi-column/sort polish. The blow-by-blow
-> and exact commit list are in **docs/BUILD_PROGRESS.md** (the cold-resume record).
+> **STATUS (2026-07-05) — most of this is built and on-device.** Done + on
+> hardware: U0 (static→heap RAM unlock), U1 display, U2 touch (calibrated, NVS),
+> U3 app shell, U3a Palm fonts/icons/theme, U4 data views, U5 detail+edit, **F1
+> menus, F2 categories, F3 Memo/apps, F4 Details, U6 Graffiti, U7 HotSync (live
+> iCloud sync working — TLS fits after LVGL-pool + mbedTLS-dynamic-buffer + sync
+> working-set RAM cuts; sync task needs a 32 KB stack)**. **Remaining:** U8 power,
+> U9 case (hardware); the full Graffiti alphabet + a training-game app (backlog
+> below); ToDo multi-column/sort polish. Blow-by-blow + commit list in
+> **docs/BUILD_PROGRESS.md** (the cold-resume record).
+
+> **BACKLOG — Graffiti training "game" app.** Real Palm Pilots have a Graffiti
+> icon in the launcher; we should too. Make it a light, kanji/Chinese-writing-app
+> style trainer: show the target stroke, user traces it, score against the
+> template, advance. Doubles as a per-user *training* mode — capture the user's
+> own stroke as the template so recognition calibrates to this exact resistive
+> panel. Case model is settled: **one stroke set (26 letters, drawn like
+> capitals), lowercase output, an upstroke = shift-next-char to uppercase** (two =
+> caps lock) — authentic Palm, no separate uppercase templates.
 
 ## TL;DR verdict
 

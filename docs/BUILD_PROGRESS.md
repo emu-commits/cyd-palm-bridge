@@ -3,28 +3,83 @@
 Running log of the UI build (docs/UI_ROADMAP.md). Updated after each step so work
 can resume cold. Newest phase on top.
 
-## CURRENT STATE (2026-07-04) — read this first
+## CURRENT STATE (2026-07-05) — read this first
 
-**Where we are:** the host bridge + on-device sync are done and proven on hardware
-(see README + docs/ROADMAP.md). The PalmOS-style **UI is largely built**:
-- DONE + on hardware: U0 static→heap (256 KB free heap), U1 display (ILI9341
-  portrait 240×320), U2 touch (XPT2046, affine cal in NVS), U3 app shell, U3a Palm
-  fonts (largeFont 14px) + real Palm icons (grid launcher) + mono theme +
-  silkscreen buttons (Home/Menu/Find/Calc), U4 data views, U5 detail + edit.
-- BUILT CLEAN, **not yet flashed** (CYD USB was disconnected): F1 menus, F2
-  categories, F3 Memo (all 4 apps), F4 Details, U7 HotSync, U6 Graffiti framework.
-  Commits: F1 29fcefc · F2 39dd903 · F3 27289ee · F4 48beabc · U7 28e27ec · U6 f9ed28b.
+**Headline: on-device iCloud sync WORKS.** First successful push confirmed on
+hardware — 3 DateBook events uploaded to the iCloud calendar (`push=3/0/0`,
+`Done: +3 up`), no crashes. TLS to caldav.icloud.com now fits in RAM, login +
+collection access succeed, records load and push. The whole device is a working
+PalmOS-style PDA: browse/edit DateBook/Address/ToDo/Memo, Graffiti text entry,
+menus/categories, and HotSync to iCloud.
 
-**Resume in one line:** reconnect the CYD, then
-`. ~/esp/esp-idf/export.sh && cd firmware && idf.py -p /dev/ttyUSB0 flash monitor`.
-Then test: menu New/Delete, category picker + Details, Memo Pad, HotSync→Sync Now,
-Graffiti strokes. **Two things need on-device work:** HotSync RAM headroom
-(WiFi+TLS+sync while LVGL up ≈166 KB free/169 KB peak → maybe tear down the LVGL
-draw buffer during sync) and Graffiti template/threshold tuning.
+**The RAM fight (this is the crux of the no-PSRAM port — don't undo it):**
+TLS + WiFi + LVGL + the sync working set all have to coexist in ~85 KB of heap.
+What made it fit (all in firmware/sdkconfig.defaults + bridge/sync.c):
+- `CONFIG_LV_MEM_SIZE_KILOBYTES=24` (was 64 — LVGL's pool was the biggest hog).
+- `CONFIG_MBEDTLS_DYNAMIC_BUFFER=y` + `DYNAMIC_FREE_CA_CERT` + `DYNAMIC_FREE_CONFIG_DATA`
+  (grow the TLS RX buffer on demand; free the CA cert after handshake).
+- WiFi buffers trimmed (`ESP_WIFI_STATIC_RX_BUFFER_NUM=4`, dynamic RX/TX=16).
+- Sync working set: `MAXR=24`, `ARENA_CAP=8 KB` (device branch in sync.c). The
+  sync holds FOUR big structs at once (S + Out in sync_collection, nodes[MAXR*2] +
+  Sink in sync_one) — all scale with MAXR, so it must stay small.
+- sync.c emit buffers (`body[8192]`) moved OFF the stack into one shared `g_body`
+  (a per-record 8 KB stack frame overflowed the task and corrupted the heap).
+- data.c seed arenas made malloc/free instead of static → reclaimed ~17 KB .bss.
+- hotsync task stack = 20 KB (TLS needs it; but keep the big buffers off-stack).
+- Result: **~86 KB free heap after WiFi up.** Sync peak ~75 KB. Works with margin.
 
-**Remaining phases:** U8 power (battery/light-sleep), U9 case — both hardware; plus
-ToDo multi-column/sort polish. Asset converters: scratchpad/{palmfont.py,
-palmicon.py}; PumpkinOS clone at scratchpad/PumpkinOS.
+**Safety net:** `sync_collection` now REFUSES to overwrite a non-empty local PDB
+with an empty result (returns -2) — this stopped a real data-loss bug where an OOM
+in sync_one produced 0 output and wiped the DateBook. `loadRec` also bounds-checks
+the arena. Both are load-bearing; keep them.
+
+**Graffiti (U6) is real, not a framework anymore.** Full a–z + 0–9 templates,
+recognizer fixed (the killer bug was a broken `resample()` that collapsed sparse
+templates; also switched to uniform scaling + no rotation-invariance). Gestures:
+space = L→R swipe, backspace = R→L, **shift = upstroke (3-state: shift→CAPS
+lock→off)**, **Enter = top-right→bottom-left diagonal**. Output lowercase; shift
+capitalizes. Templates were hand-tuned against the official Palm chart per user
+(B/D start bottom-left, E=reverse-3, G=CCW spiral+tick, M=upside-down W, N=up-down-up,
+Q=top circle+tail, S=real curve, T=top-then-down). **X is a known 2-stroke
+exception** (single-stroke capture can't do it yet — backlog). User: "letters good
+enough for now." Stroke reference chart (rendered FROM the templates) published as
+a Claude artifact: https://claude.ai/code/artifact/d8042fdf-06e2-4cb2-8b8b-1fea75fa45e9
+
+**Other fixes landed this session:** no on-screen keyboard (Graffiti-only input);
+About dialog wrap/clip fixed; **categories** fixed (older PDBs lacked AppInfo — added
+a boot migration `ensure_appinfo` that backfills the category table); new DateBook
+entry now defaults to today + next half-hour with editable Date/Time fields;
+per-record **category assignment** via the edit-form's middle trigger button (opens
+the chooser); richer HotSync diagnostics + `[sync]` stderr logging.
+
+**Known gaps / next steps (priority order):**
+1. **HotSync only syncs ONE collection** (`SYNC_COLL` = the DateBook calendar).
+   Address/ToDo/Memo do NOT sync yet — wire each app to its own iCloud collection
+   (CardDAV for Address; the categorized/multi-collection engine `sync_categorized`
+   already exists in sync.c). This is why "new contact didn't sync."
+2. **ToDo lost its inline checkboxes** — lv_checkbox rows made LVGL's compositor
+   loop forever behind the semi-transparent menu overlay (watchdog reset). Reverted
+   to plain `[x]`/`[ ]` list buttons; "Mark Done/Undo" now lives in the ToDo detail
+   view. Revisit inline check-off with a non-checkbox widget if desired.
+3. **Graffiti training-game app** (BACKLOG, user-requested): launcher icon like the
+   real Palm, a kanji/Chinese-writing-app-style trainer that also captures the
+   user's own strokes as per-device templates. See docs/UI_ROADMAP.md backlog.
+4. MAXR=24 caps sync at 24 items/collection — raise once the engine streams instead
+   of buffering the whole working set.
+5. U8 power (battery gauge GPIO34, light-sleep), U9 case — hardware.
+6. Pre-existing: `category` host test is flaky across back-to-back runs (stale
+   `state/` files; the committed baseline behaves identically — not our bug). Fix
+   its cleanup. Run host gates with a clean `state/` dir: `rm -rf state && mkdir state`.
+
+**Resume in one line:**
+`. ~/esp/esp-idf/export.sh && cd firmware && idf.py -p /dev/ttyUSB0 flash monitor`
+(CYD on /dev/ttyUSB0). Secrets in firmware/main/secrets.h (GITIGNORED — WiFi creds +
+Apple app-specific password; never commit/echo). To capture serial without the
+interactive monitor: a pyserial reader to a logfile works well (see this session's
+scratchpad live*.log approach); `fprintf(stderr,...)` in sync.c reaches the console.
+
+**Asset converters:** scratchpad/{palmfont.py, palmicon.py}; PumpkinOS clone at
+scratchpad/PumpkinOS. Host test gates: `make roundtrip incremental synctoken category`.
 
 ---
 

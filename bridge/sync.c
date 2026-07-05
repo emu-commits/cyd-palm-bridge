@@ -24,8 +24,13 @@
  * bytes, so the record arena is sized in bytes (ARENA_CAP), decoupled from the
  * index count (MAXR). Override on the device build; host sizes are unchanged. */
 #ifdef ESP_PLATFORM
-  #define MAXR       48
-  #define ARENA_CAP  (16*1024)         /* ~340B/record avg over MAXR; no-PSRAM budget */
+  /* The sync holds FOUR big structs resident at once: S + Out (in sync_collection)
+   * and nodes[MAXR*2] + Sink (in sync_one), plus a TLS handshake, all inside a
+   * post-WiFi heap of ~70-85 KB. Everything scales with MAXR, so keep it small.
+   * MAXR=24 keeps the whole working set ~63 KB. A collection with more than 24
+   * items won't fully sync until the engine streams instead of buffering. */
+  #define MAXR       24
+  #define ARENA_CAP  (8*1024)          /* record-byte budget; loadRec stops when full */
   #define NAMEL_MAX  64
   #define STATE_DIR  "/sdcard/state"   /* device cwd is "/"; temps live on SD */
 #else
@@ -35,6 +40,12 @@
   #define STATE_DIR  "state"
 #endif
 #define BODY_TMP STATE_DIR "/.body"    /* PUT body staged here before upload */
+
+/* Shared emit scratch, kept OFF the stack: the sync runs single-threaded and
+ * never holds two bodies at once, so one 8 KB buffer serves every emit site. On
+ * the device an 8 KB stack frame per record (loadRec runs for every record)
+ * overflowed the task stack; this moves it to .bss so the stack stays small. */
+static char g_body[8192];
 
 /* ---- kind helpers ---- */
 static const char* kindExt(int k){ return k==KIND_CARD?"vcf":"ics"; }
@@ -72,9 +83,9 @@ static int parse_object(int kind,const char*obj,uint8_t*out,int cap){
 
 static int pushRec(const PdbRec*r,int i,void*ctx){
     (void)i; PushCtx*p=ctx;
-    char body[8192]; int bl=emit_object(p->kind,r->data,r->len,r->uniqueID,body,sizeof body);
+    int bl=emit_object(p->kind,r->data,r->len,r->uniqueID,g_body,sizeof g_body);
     if(bl<0) return 0;
-    FILE*f=fopen(BODY_TMP,"wb"); fwrite(body,1,strlen(body),f); fclose(f);
+    FILE*f=fopen(BODY_TMP,"wb"); fwrite(g_body,1,strlen(g_body),f); fclose(f);
     char name[64]; snprintf(name,sizeof name,"%u.%s",(unsigned)r->uniqueID,kindExt(p->kind));
     char etag[160]=""; int st=0;
     dav_put(p->d,p->coll,name,kindCType(p->kind),BODY_TMP,NULL,etag,sizeof etag,&st);
@@ -155,12 +166,17 @@ typedef struct {
 } S;
 
 static int loadRec(const PdbRec*r,int i,void*ctx){
-    (void)i; S*s=ctx; if(s->nloc>=MAXR) return 1;
+    (void)i; S*s=ctx;
+    if(s->nloc>=MAXR) return 1;
+    if(s->locUsed + r->len > ARENA_CAP){                 /* arena full: don't overflow */
+        fprintf(stderr,"[sync] locArena full at %d recs -- rest not synced\n",s->nloc);
+        return 1;
+    }
     Loc*L=&s->loc[s->nloc];
     L->uid=r->uniqueID; L->attr=r->attr; L->len=r->len; L->off=s->locUsed;
     memcpy(s->locArena+s->locUsed,r->data,r->len); s->locUsed+=r->len;
-    char body[8192]; if(emit_object(s->kind,r->data,r->len,r->uniqueID,body,sizeof body)<0) L->hash=0;
-    else L->hash=fnv1a(body);
+    if(emit_object(s->kind,r->data,r->len,r->uniqueID,g_body,sizeof g_body)<0) L->hash=0;
+    else L->hash=fnv1a(g_body);
     s->nloc++;
     return 0;
 }
@@ -274,8 +290,8 @@ static int keepFromServer(const DavCtx*d,const char*coll,int kind,Sink*k,
     uint8_t tmp[PALM_REC_MAX];
     int l=parse_object(kind,obj,tmp,sizeof tmp);
     if(l<=0){ fprintf(stderr,"warning: could not parse %s -- dropped\n",name); return -1; }
-    char body[8192]; emit_object(kind,tmp,l,uid,body,sizeof body);
-    keepBytes(k,uid,(uint8_t)k->pullCat,tmp,l,name,etag,fnv1a(body));
+    emit_object(kind,tmp,l,uid,g_body,sizeof g_body);
+    keepBytes(k,uid,(uint8_t)k->pullCat,tmp,l,name,etag,fnv1a(g_body));
     return 0;
 }
 
@@ -283,13 +299,13 @@ static int keepFromServer(const DavCtx*d,const char*coll,int kind,Sink*k,
 static int pushLocal(const DavCtx*d,const char*coll,int kind,Sink*k,
                      const Loc*L,const uint8_t*arena,uint32_t uid,
                      const char*name,const char*ifmatch){
-    char body[8192]; int bl=emit_object(kind,arena+L->off,L->len,uid,body,sizeof body);
+    int bl=emit_object(kind,arena+L->off,L->len,uid,g_body,sizeof g_body);
     if(bl<0) return -1;
-    FILE*f=fopen(BODY_TMP,"wb"); fwrite(body,1,strlen(body),f); fclose(f);
+    FILE*f=fopen(BODY_TMP,"wb"); fwrite(g_body,1,strlen(g_body),f); fclose(f);
     char etag[160]=""; int st=0;
     dav_put(d,coll,name,kindCType(kind),BODY_TMP,ifmatch,etag,sizeof etag,&st);
     if(!etag[0]) dav_getetag(d,coll,name,etag,sizeof etag);   /* fallback */
-    keepBytes(k,uid,L->attr,arena+L->off,L->len,name,etag,fnv1a(body));
+    keepBytes(k,uid,L->attr,arena+L->off,L->len,name,etag,fnv1a(g_body));
     return st;
 }
 
@@ -412,10 +428,21 @@ int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
     if(!s || !o){ free(s); free(o); fprintf(stderr,"sync_collection: out of memory\n"); return -1; }
     s->kind=kind;
     static uint8_t ai[512]; int ailen=pdb_read_appinfo(localpdb,ai,sizeof ai); if(ailen<0)ailen=0;
-    pdb_read(localpdb,loadRec,s);
+    int nin = pdb_read(localpdb,loadRec,s);
+    fprintf(stderr,"[sync] read %s: pdb_read=%d nloc=%d ailen=%d\n",localpdb,nin,s->nloc,ailen);
     SyncStats z={0}; if(!st) st=&z;
     sync_one(d,s,coll,mapfile,pol,o,0,st);
     sortByUid(o);
+    fprintf(stderr,"[sync] %s: out=%d nmap=%d nsrv=%d push=%d/%d/%d pull=%d/%d/%d\n",
+            coll,o->nrec,s->nmap,s->nsrv,st->pushNew,st->pushMod,st->pushDel,
+            st->pullNew,st->pullMod,st->pullDel);
+    /* SAFETY: never overwrite a local PDB that HAD records with an empty result.
+     * A read glitch, a parse failure, or an unexpectedly-empty server must not be
+     * allowed to wipe the on-device data. Keep the local file untouched. */
+    if(nin > 0 && o->nrec == 0){
+        fprintf(stderr,"[sync] REFUSED overwrite of %s (had %d recs) with 0 -- keeping local\n",outpdb,nin);
+        free(s); free(o); return -2;
+    }
     kindWrite(kind,outpdb, ailen?ai:NULL, ailen, o->rec,o->nrec);
     int n=o->nrec; free(s); free(o); return n;
 }

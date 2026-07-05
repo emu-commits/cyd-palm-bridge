@@ -5,25 +5,28 @@ A **native PDA on the base CYD** (`ESP32-2432S028R`, **NO PSRAM**, 4 MB flash,
 databases and two-way syncs them to CalDAV/CardDAV (iCloud). PumpkinOS is a
 *donor codebase* (data formats, fonts, icons, layouts), not a runtime.
 
-## Status (2026-07-04)
+## Status (2026-07-05)
 
-Two halves, both real:
+Two halves, both real — and now joined on hardware:
 
 1. **Host bridge — proven.** The Palm↔CalDAV/CardDAV codec + incremental
    conflict-aware two-way sync, validated against real Radicale **and live iCloud**
-   (calendars, Reminders, contacts). Five green gates. Details below.
-2. **On-device firmware — built + running on hardware.** LVGL UI on the CYD:
-   calibrated touch, an authentic Palm launcher/apps (Date Book, Address, To Do,
-   Memo), menus, categories, Details, HotSync, and a Graffiti recognizer. Boots
-   and runs on the board. See **[docs/UI_ROADMAP.md](docs/UI_ROADMAP.md)** for the
-   plan and **[docs/BUILD_PROGRESS.md](docs/BUILD_PROGRESS.md)** for the per-step
-   log (the cold-resume record). The firmware lives in **`firmware/`** (ESP-IDF).
+   (calendars, Reminders, contacts). Four green gates. Details below.
+2. **On-device firmware — working, including live iCloud sync.** LVGL UI on the
+   CYD: calibrated touch, an authentic Palm launcher/apps (Date Book, Address, To
+   Do, Memo), Graffiti text entry (full a–z + 0–9, shift/caps/space/backspace/enter
+   gestures), menus, categories, Details, and HotSync. **First on-device push to
+   iCloud confirmed** — DateBook events uploaded over TLS from the board itself.
+   See **[docs/BUILD_PROGRESS.md](docs/BUILD_PROGRESS.md)** (the cold-resume record)
+   and **[docs/UI_ROADMAP.md](docs/UI_ROADMAP.md)**. Firmware in **`firmware/`** (ESP-IDF).
 
-> **Full disclosure on device state:** phases through U6/F1–F4/U7 are *built clean
-> and committed* but the last batch was **not yet flashed** (the CYD's USB serial
-> was disconnected). HotSync's RAM headroom (Wi-Fi+TLS+sync while LVGL is up) and
-> the Graffiti recognizer's templates/threshold **need on-device validation/tuning**.
-> See docs/BUILD_PROGRESS.md.
+> **The hard part was RAM** (no PSRAM): TLS + Wi-Fi + LVGL + the sync working set
+> must coexist in ~85 KB of heap. It fits after shrinking the LVGL pool, enabling
+> mbedTLS dynamic buffers, trimming Wi-Fi buffers, and keeping the sync working set
+> small (`MAXR`) with emit buffers off-stack. See docs/BUILD_PROGRESS.md "CURRENT
+> STATE". **Known gaps:** HotSync currently syncs only the one configured calendar
+> (Address/ToDo/Memo collections not wired yet); a Graffiti training-game app is
+> planned; power + case are the remaining hardware phases.
 
 ---
 

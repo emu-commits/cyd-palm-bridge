@@ -13,6 +13,13 @@ CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
 # max; shrink only the outbound side (our requests are small) to save heap.
 CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384
 CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
+# No PSRAM: the handshake must fit in ~35 KB of free heap. Dynamic buffers grow
+# the RX buffer only as records arrive (instead of a static 16 KB up front) and
+# free the CA cert + handshake config once the session is up. This is what makes
+# the TLS connection to iCloud possible while Wi-Fi + LVGL are both resident.
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_CA_CERT=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
 
 # --- FatFs on SD: long filenames for state/*.map ---
 CONFIG_FATFS_LFN_HEAP=y
@@ -22,6 +29,16 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288
 
 # --- LVGL: monochrome theme for the PalmOS grayscale look ---
 CONFIG_LV_USE_THEME_MONO=y
+# Shrink LVGL's heap pool from the 64 KB default -- our UI (lists, buttons, a few
+# labels) fits comfortably in 24 KB, and the freed 40 KB is what the TLS handshake
+# + sync working set need. If the UI ever logs "lv_malloc failed", raise this.
+CONFIG_LV_MEM_SIZE_KILOBYTES=24
+
+# --- Wi-Fi: trim the (generous) default buffer pools to claw back heap for TLS.
+# Sync is low-bandwidth, so fewer RX/TX buffers is fine. ---
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16
 
 # --- quieter default log level ---
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y

@@ -38,6 +38,8 @@ int data_save_addr(uint32_t uid, int cat, const Addr *in);
 int data_save_todo(uint32_t uid, int cat, const Todo *in);
 /* category index of a record (attr nibble), or -1 if not found */
 int data_record_category(int app, uint32_t uid);
+/* toggle a to-do's completed flag (and save). 1 on success. */
+int data_toggle_todo(uint32_t uid);
 /* delete a record by uid (next sync propagates it). */
 int data_delete(int app, uint32_t uid);
 

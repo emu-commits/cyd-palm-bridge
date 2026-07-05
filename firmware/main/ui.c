@@ -19,6 +19,7 @@
 #include "lvgl.h"
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 
 #define TITLE_H     24
 #define COL_TITLE   lv_color_hex(0xFFFFFF)   /* white title bar (Palm) */
@@ -68,12 +69,10 @@ static uint32_t cur_uid;        /* the record currently in detail/edit (0 = none
 
 /* edit state */
 static int edit_cat;            /* category chosen for the record being edited */
-#define KB_H       150
-#define FORM_FULL  ((PDA_H - TITLE_H) - 34)                 /* form height, no keyboard */
-#define FORM_KB    (LCD_H - KB_H - TITLE_H - 34)            /* form height above keyboard */
+#define FORM_FULL  ((PDA_H - TITLE_H) - 34)                 /* form height (Graffiti is the input) */
 static uint32_t edit_uid;
-static lv_obj_t *g_kb;                 /* on-screen keyboard (overlay), or NULL */
 static lv_obj_t *g_form;               /* scrollable field container */
+static lv_obj_t *edit_cat_lbl;         /* label on the edit-form category trigger */
 static lv_obj_t *g_fields[8];          /* edit-form textareas */
 static int g_nfields;
 static lv_obj_t *active_ta;            /* last-focused textarea (Graffiti target) */
@@ -90,15 +89,18 @@ static lv_obj_t *hs_status;
 static lv_timer_t *hs_timer;
 static void kill_hs(void){ if(hs_timer){ lv_timer_delete(hs_timer); hs_timer=NULL; } hs_status=NULL; }
 
-/* the keyboard lives on the screen (overlay), so it survives lv_obj_clean(content);
- * drop it whenever we navigate away from an edit form. */
-static void kill_kb(void){ if(g_kb){ lv_obj_del(g_kb); g_kb=NULL; } g_form=NULL; kill_hs(); }
+/* tear down per-form / per-screen state when navigating away. Text entry is
+ * Graffiti-only (no on-screen keyboard), so there's no overlay to drop here. */
+static void kill_kb(void){ g_form=NULL; active_ta=NULL; edit_cat_lbl=NULL; kill_hs(); }
 
 static void row_cb(lv_event_t *e){
     show_detail((uint32_t)(uintptr_t)lv_event_get_user_data(e));
 }
 
-/* add one tappable row to the active list */
+/* add one tappable row to the active list. To Do rows keep the "[x]"/"[ ]"
+ * prefix from the data layer to show completion; tapping opens the record (where
+ * the done state is toggled). Using plain list buttons for every app -- custom
+ * checkbox rows made LVGL's compositor loop forever behind the menu overlay. */
 static void add_row(uint32_t uid, const char *primary, const char *secondary, void *ctx){
     lv_obj_t *list = (lv_obj_t *)ctx;
     char buf[128];
@@ -133,6 +135,13 @@ static void done_cb(lv_event_t *e){ (void)e; if(cur_app) list_view(cur_app); }
 
 static void edit_cb(lv_event_t *e){ show_edit((uint32_t)(uintptr_t)lv_event_get_user_data(e)); }
 
+/* ToDo detail: flip completed and redraw the detail so the status updates */
+static void todo_toggle_detail_cb(lv_event_t *e){
+    uint32_t u = (uint32_t)(uintptr_t)lv_event_get_user_data(e);
+    data_toggle_todo(u);
+    show_detail(u);
+}
+
 /* read-only detail for one record (scrollable text + Done / Edit) */
 static void show_detail(uint32_t uid){
     if(!cur_app) return;
@@ -154,35 +163,42 @@ static void show_detail(uint32_t uid){
     lv_obj_set_width(l, LCD_W - 16);
     lv_label_set_text(l, buf);
 
+    int istodo = (cur_app->app == APP_TODO);
     lv_obj_t *done = lv_button_create(content);
-    lv_obj_set_size(done, 90, 34);
+    lv_obj_set_size(done, istodo ? 66 : 90, 34);
     lv_obj_align(done, LV_ALIGN_BOTTOM_LEFT, 4, -3);
     lv_obj_t *dl = lv_label_create(done);
     lv_label_set_text(dl, "Done"); lv_obj_center(dl);
     lv_obj_add_event_cb(done, done_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *edit = lv_button_create(content);
-    lv_obj_set_size(edit, 90, 34);
+    lv_obj_set_size(edit, istodo ? 66 : 90, 34);
     lv_obj_align(edit, LV_ALIGN_BOTTOM_RIGHT, -4, -3);
     lv_obj_t *el = lv_label_create(edit);
     lv_label_set_text(el, "Edit"); lv_obj_center(el);
     lv_obj_add_event_cb(edit, edit_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)uid);
+
+    /* ToDo: a middle button toggles completion (replaces the inline checkbox) */
+    if(istodo){
+        Todo t; int isdone = data_get_todo(uid,&t) ? t.completed : 0;
+        lv_obj_t *mk = lv_button_create(content);
+        lv_obj_set_size(mk, 90, 34);
+        lv_obj_align(mk, LV_ALIGN_BOTTOM_MID, 0, -3);
+        lv_obj_t *ml = lv_label_create(mk);
+        lv_label_set_text(ml, isdone ? "Undo" : "Mark Done"); lv_obj_center(ml);
+        lv_obj_add_event_cb(mk, todo_toggle_detail_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)uid);
+    }
 }
 
 /* ------------------------- edit form ------------------------- */
+/* tapping a field just makes it the Graffiti target (and shows its cursor);
+ * there is no on-screen keyboard -- all text entry is via the Graffiti strip. */
 static void ta_click_cb(lv_event_t *e){
     lv_obj_t *ta = (lv_obj_t *)lv_event_get_target(e);
-    active_ta = ta;                    /* Graffiti inserts here */
-    lv_keyboard_set_textarea(g_kb, ta);
-    lv_obj_clear_flag(g_kb, LV_OBJ_FLAG_HIDDEN);
-    if(g_form){                                   /* shrink viewport above the keyboard, */
-        lv_obj_set_height(g_form, FORM_KB);       /* then bring the focused field into view */
-        lv_obj_scroll_to_view(ta, LV_ANIM_ON);
-    }
-}
-static void kb_done_cb(lv_event_t *e){ (void)e;
-    lv_obj_add_flag(g_kb, LV_OBJ_FLAG_HIDDEN);
-    if(g_form) lv_obj_set_height(g_form, FORM_FULL);
+    if(active_ta && active_ta != ta) lv_obj_clear_state(active_ta, LV_STATE_FOCUSED);
+    active_ta = ta;
+    lv_obj_add_state(ta, LV_STATE_FOCUSED);
+    if(g_form) lv_obj_scroll_to_view(ta, LV_ANIM_ON);
 }
 
 /* a labeled one-line textarea; advances *y and records the textarea */
@@ -201,15 +217,29 @@ static void form_field(lv_obj_t *form, const char *label, const char *val, int m
     *y += 52;
 }
 
+/* fill a fresh appointment with today's date + the next half hour (Palm default) */
+static void default_appt(Appt *a){
+    memset(a,0,sizeof *a);
+    time_t now=0; time(&now);
+    struct tm tmv; localtime_r(&now,&tmv);
+    if(tmv.tm_year+1900 < 2024){ tmv.tm_year=2026-1900; tmv.tm_mon=0; tmv.tm_mday=1; tmv.tm_hour=9; tmv.tm_min=0; }
+    int h=tmv.tm_hour, m=tmv.tm_min;
+    if(m<30) m=30; else { m=0; h=(h+1)%24; }          /* round up to next :00/:30 */
+    a->hasTime=1; a->sH=h; a->sM=m; a->eH=(h+1)%24; a->eM=m;
+    a->year=tmv.tm_year+1900; a->month=tmv.tm_mon+1; a->day=tmv.tm_mday;
+}
+
 static const char *fv(int i){ return lv_textarea_get_text(g_fields[i]); }
 static const char *iv(Addr *a, const char *s){ return (s && s[0]) ? AddrIntern(a, s) : NULL; }
 
 static void save_cb(lv_event_t *e){
     (void)e;
     if(cur_app->app == APP_CAL){
-        Appt a; if(!data_get_cal(edit_uid,&a)) memset(&a,0,sizeof a);
+        Appt a; if(!data_get_cal(edit_uid,&a)) default_appt(&a);
         snprintf(a.description,sizeof a.description,"%s",fv(0));
-        snprintf(a.note,sizeof a.note,"%s",fv(1));
+        int mo,dd,yy; if(sscanf(fv(1),"%d/%d/%d",&mo,&dd,&yy)==3){ a.month=mo; a.day=dd; a.year=yy; }
+        int hh,mm; if(sscanf(fv(2),"%d:%d",&hh,&mm)==2){ a.hasTime=1; a.sH=hh; a.sM=mm; a.eH=(hh+1)%24; a.eM=mm; }
+        snprintf(a.note,sizeof a.note,"%s",fv(3));
         data_save_cal(edit_uid,edit_cat,&a);
     } else if(cur_app->app == APP_TODO){
         Todo t; if(!data_get_todo(edit_uid,&t)) memset(&t,0,sizeof t);
@@ -240,6 +270,16 @@ static void cancel_cb(lv_event_t *e){ (void)e; list_view(cur_app); }
 
 static void details_btn_cb(lv_event_t *e){ (void)e; details_open(); }
 
+/* show the record's current category on the edit-form trigger button */
+static void set_editcat_label(void){
+    if(!edit_cat_lbl) return;
+    CatTable t;
+    if(cur_app && data_get_categories(cur_app->app,&t) && edit_cat>=0 && t.name[edit_cat][0])
+        lv_label_set_text_fmt(edit_cat_lbl, "%s", t.name[edit_cat]);
+    else
+        lv_label_set_text(edit_cat_lbl, "Unfiled");
+}
+
 static void show_edit(uint32_t uid){
     if(!cur_app) return;
     edit_uid = uid; cur_uid = uid; g_nfields = 0;
@@ -249,15 +289,19 @@ static void show_edit(uint32_t uid){
     lv_label_set_text(title_lbl, uid ? "Edit" : "New");
 
     lv_obj_t *cancel = lv_button_create(content);
-    lv_obj_set_size(cancel, 66, 28); lv_obj_align(cancel, LV_ALIGN_TOP_LEFT, 2, 2);
+    lv_obj_set_size(cancel, 60, 28); lv_obj_align(cancel, LV_ALIGN_TOP_LEFT, 2, 2);
     lv_obj_t *cl=lv_label_create(cancel); lv_label_set_text(cl,"Cancel"); lv_obj_center(cl);
     lv_obj_add_event_cb(cancel, cancel_cb, LV_EVENT_CLICKED, NULL);
+    /* middle button = category trigger (Palm sets a record's category here). Shows
+     * the current category; tap to choose. */
     lv_obj_t *det = lv_button_create(content);
-    lv_obj_set_size(det, 74, 28); lv_obj_align(det, LV_ALIGN_TOP_MID, 0, 2);
-    lv_obj_t *dtl=lv_label_create(det); lv_label_set_text(dtl,"Details"); lv_obj_center(dtl);
+    lv_obj_set_size(det, 112, 28); lv_obj_align(det, LV_ALIGN_TOP_MID, 0, 2);
+    lv_obj_set_style_pad_hor(det, 2, 0);
+    edit_cat_lbl = lv_label_create(det); lv_obj_center(edit_cat_lbl);
     lv_obj_add_event_cb(det, details_btn_cb, LV_EVENT_CLICKED, NULL);
+    set_editcat_label();
     lv_obj_t *save = lv_button_create(content);
-    lv_obj_set_size(save, 66, 28); lv_obj_align(save, LV_ALIGN_TOP_RIGHT, -2, 2);
+    lv_obj_set_size(save, 60, 28); lv_obj_align(save, LV_ALIGN_TOP_RIGHT, -2, 2);
     lv_obj_t *sl=lv_label_create(save); lv_label_set_text(sl,"Save"); lv_obj_center(sl);
     lv_obj_add_event_cb(save, save_cb, LV_EVENT_CLICKED, NULL);
 
@@ -271,8 +315,12 @@ static void show_edit(uint32_t uid){
 
     int y = 2;
     if(cur_app->app == APP_CAL){
-        Appt a; if(!data_get_cal(uid,&a)) memset(&a,0,sizeof a);
+        Appt a; if(!data_get_cal(uid,&a)) default_appt(&a);
+        char ds[24]; snprintf(ds,sizeof ds,"%d/%d/%d",a.month,a.day,a.year);
+        char ts[16]; snprintf(ts,sizeof ts,"%d:%02d",a.sH,a.sM);
         form_field(form,"Description",a.description,255,&y);
+        form_field(form,"Date (M/D/YYYY)",ds,16,&y);
+        form_field(form,"Time (h:mm)",ts,8,&y);
         form_field(form,"Note",a.note,500,&y);
     } else if(cur_app->app == APP_TODO){
         Todo t; if(!data_get_todo(uid,&t)) memset(&t,0,sizeof t);
@@ -297,12 +345,8 @@ static void show_edit(uint32_t uid){
         g_fields[g_nfields++] = ta;
     }
 
-    g_kb = lv_keyboard_create(lv_screen_active());
-    lv_obj_set_size(g_kb, LCD_W, 150);
-    lv_obj_align(g_kb, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_add_flag(g_kb, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_event_cb(g_kb, kb_done_cb, LV_EVENT_READY, NULL);
-    lv_obj_add_event_cb(g_kb, kb_done_cb, LV_EVENT_CANCEL, NULL);
+    /* focus the first field so Graffiti has a target immediately */
+    if(g_nfields > 0){ active_ta = g_fields[0]; lv_obj_add_state(g_fields[0], LV_STATE_FOCUSED); }
 }
 
 /* U7: HotSync screen (Sync Now + a status line polled from the background task) */
@@ -400,12 +444,43 @@ static void act_delete(lv_event_t *e){ (void)e;
     if(a && u){ data_delete(a->app, u); list_view(a); }
 }
 static void act_categories(lv_event_t *e){ (void)e; menu_close(); cat_trigger_cb(NULL); }
+
+static lv_obj_t *g_about;
+static void about_close(void){ if(g_about){ lv_obj_del(g_about); g_about=NULL; } }
+static void about_backdrop_cb(lv_event_t *e){ (void)e; about_close(); }
 static void act_about(lv_event_t *e){ (void)e;
     menu_close();
-    lv_obj_t *mb = lv_msgbox_create(NULL);
-    lv_msgbox_add_title(mb, "CYD Palm");
-    lv_msgbox_add_text(mb, "A PalmOS-style PDA that\nsyncs to iCloud.\n\nv0.1");
-    lv_msgbox_add_close_button(mb);
+    if(g_about) return;
+    g_about = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_about, LCD_W, LCD_H);
+    lv_obj_set_style_bg_color(g_about, COL_LINE, 0);
+    lv_obj_set_style_bg_opa(g_about, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(g_about, 0, 0);
+    lv_obj_set_style_pad_all(g_about, 0, 0);
+    lv_obj_add_flag(g_about, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_about, about_backdrop_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *panel = lv_obj_create(g_about);
+    lv_obj_set_width(panel, 180);
+    lv_obj_set_height(panel, LV_SIZE_CONTENT);
+    lv_obj_center(panel);
+    lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
+    lv_obj_set_style_border_width(panel, 1, 0);
+    lv_obj_set_style_border_color(panel, COL_LINE, 0);
+    lv_obj_set_style_radius(panel, 0, 0);
+    lv_obj_set_style_pad_all(panel, 10, 0);           /* generous pad -> no glyph clipping */
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *ttl = lv_label_create(panel);
+    lv_label_set_text(ttl, "CYD Palm");
+    lv_obj_set_style_text_font(ttl, &lv_font_palm_bold, 0);
+    lv_obj_align(ttl, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_t *body = lv_label_create(panel);
+    lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(body, 160);                       /* panel(180) - 2*pad(10) */
+    lv_label_set_text(body, "A PalmOS-style PDA that syncs to iCloud.\n\nv0.1 - tap to close");
+    lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 20);
 }
 
 static void menu_item(lv_obj_t *par, const char *txt, lv_event_cb_t cb){
@@ -540,7 +615,7 @@ static void cat_trigger_cb(lv_event_t *e){
 static lv_obj_t *g_details;
 static void details_close(void){ if(g_details){ lv_obj_del(g_details); g_details=NULL; } }
 static void details_backdrop_cb(lv_event_t *e){ (void)e; details_close(); }
-static void details_pick_cb(lv_event_t *e){ edit_cat = (int)(intptr_t)lv_event_get_user_data(e); details_close(); }
+static void details_pick_cb(lv_event_t *e){ edit_cat = (int)(intptr_t)lv_event_get_user_data(e); details_close(); set_editcat_label(); }
 
 /* Details dialog: choose the record's category (Palm's per-record Details). */
 static void details_open(void){
@@ -595,9 +670,46 @@ static void graf_move_cb(lv_event_t *e){ (void)e;
     lv_point_t p; lv_indev_get_point(lv_indev_active(), &p);
     graffiti_add_point(p.x, p.y);
 }
-static void graf_up_cb(lv_event_t *e){ (void)e;
-    char c = graffiti_recognize();
-    if(c && active_ta) lv_textarea_add_char(active_ta, c);
+/* case state armed by the shift upstroke: none -> shift (one letter) -> caps lock
+ * -> none, cycling on each upstroke (Palm's single/double/single shift). */
+enum { CASE_NONE, CASE_SHIFT, CASE_LOCK };
+static int graf_case;
+static lv_obj_t *graf_abc_lbl;    /* case hint on the letter pad */
+static void show_case(void){
+    if(graf_abc_lbl)
+        lv_label_set_text(graf_abc_lbl,
+            graf_case==CASE_NONE ? "abc" : graf_case==CASE_SHIFT ? "Abc" : "ABC");
+}
+/* user_data: 0 = letters (abc pad), 1 = digits (123 pad) */
+static void graf_up_cb(lv_event_t *e){
+    int digits = (int)(intptr_t)lv_event_get_user_data(e);
+    char c = graffiti_recognize(digits);
+    if(!c) return;
+    if(c == GRAF_SHIFT){ graf_case = (graf_case + 1) % 3; show_case(); return; }
+    if(!active_ta){ graf_case = CASE_NONE; show_case(); return; }
+    if(c == '\b'){                                     /* backspace: keep caps lock */
+        lv_textarea_delete_char(active_ta);
+        if(graf_case == CASE_SHIFT){ graf_case = CASE_NONE; show_case(); }
+        return;
+    }
+    if(graf_case != CASE_NONE && c >= 'a' && c <= 'z') c = c - 'a' + 'A';
+    lv_textarea_add_char(active_ta, c);                /* letter, digit, space, or '\n' */
+    if(graf_case == CASE_SHIFT){ graf_case = CASE_NONE; show_case(); }
+}
+
+/* one Graffiti writing pad (letters or digits) inside the strip */
+static void graf_pad(lv_obj_t *parent, int x, int w, int digits){
+    lv_obj_t *surf = lv_obj_create(parent);
+    lv_obj_set_size(surf, w, GRAFFITI_H - 6);
+    lv_obj_set_pos(surf, x, 3);
+    lv_obj_set_style_bg_opa(surf, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(surf, 0, 0);
+    lv_obj_set_style_pad_all(surf, 0, 0);
+    lv_obj_add_flag(surf, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(surf, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(surf, graf_down_cb, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(surf, graf_move_cb, LV_EVENT_PRESSING, NULL);
+    lv_obj_add_event_cb(surf, graf_up_cb,   LV_EVENT_RELEASED, (void *)(intptr_t)digits);
 }
 
 /* a small bordered silkscreen button with a recolored icon */
@@ -662,24 +774,19 @@ void ui_init(void){
     mk_silk(graf, &silk_find, LV_ALIGN_TOP_RIGHT,   -3,  3, find_cb);
     mk_silk(graf, &silk_calc, LV_ALIGN_BOTTOM_RIGHT,-3, -3, calc_cb);
 
-    /* U6: Graffiti writing surface (center); strokes -> $1 -> active field */
-    lv_obj_t *surf = lv_obj_create(graf);
-    lv_obj_set_size(surf, LCD_W - 76, GRAFFITI_H - 4);
-    lv_obj_align(surf, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_opa(surf, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(surf, 0, 0);
-    lv_obj_set_style_pad_all(surf, 0, 0);
-    lv_obj_add_flag(surf, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_clear_flag(surf, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_event_cb(surf, graf_down_cb, LV_EVENT_PRESSED, NULL);
-    lv_obj_add_event_cb(surf, graf_move_cb, LV_EVENT_PRESSING, NULL);
-    lv_obj_add_event_cb(surf, graf_up_cb, LV_EVENT_RELEASED, NULL);
+    /* U6: two Graffiti writing pads between the silkscreen buttons -- abc (left)
+     * writes letters, 123 (right) writes digits; strokes -> $1 -> active field.
+     * Swipe L->R = space, R->L = backspace. There is no on-screen keyboard. */
+    int gx0 = 36, gx1 = LCD_W - 36;          /* clear of the 30px silk buttons */
+    int gw = gx1 - gx0, half = gw / 2;
+    graf_pad(graf, gx0,        half, 0);      /* letters */
+    graf_pad(graf, gx0 + half, gw - half, 1);/* digits */
 
     lv_obj_t *sep = panel(graf, LCD_W/2, 6, 2, GRAFFITI_H-12, COL_LINE);
     (void)sep;
-    lv_obj_t *gl = lv_label_create(graf);
-    lv_label_set_text(gl, "abc");
-    lv_obj_align(gl, LV_ALIGN_CENTER, -28, 0);
+    graf_abc_lbl = lv_label_create(graf);
+    lv_label_set_text(graf_abc_lbl, "abc");
+    lv_obj_align(graf_abc_lbl, LV_ALIGN_CENTER, -28, 0);
     lv_obj_t *gr = lv_label_create(graf);
     lv_label_set_text(gr, "123");
     lv_obj_align(gr, LV_ALIGN_CENTER, 28, 0);

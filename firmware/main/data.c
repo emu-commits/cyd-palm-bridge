@@ -6,6 +6,7 @@
 #include "palm.h"
 #include "appinfo.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define DB_CAL  "/sdcard/DatebookDB.pdb"
@@ -45,7 +46,7 @@ int data_get_categories(int app, CatTable *t){
  * now; U7 HotSync replaces it with real synced data. */
 #define SEEDMAX 32
 static void seed_datebook(void){
-    static uint8_t arena[SEEDMAX*96]; PdbRec r[SEEDMAX]; int nr=0, used=0;
+    uint8_t *arena = malloc(SEEDMAX*96); if(!arena) return; PdbRec r[SEEDMAX]; int nr=0, used=0;
     uint8_t ai[APPINFO_SIZE]; int al=build_appinfo(ai);
     struct { const char *s; int mo, d, h; } ev[] = {
         {"Standup",8,3,9},{"1:1 with Sam",8,3,14},{"Groceries",8,4,18},{"Dentist",8,5,10},
@@ -61,11 +62,11 @@ static void seed_datebook(void){
         int l=ApptPack(arena+used,96,&a);
         if(l>0){ r[nr]=(PdbRec){.attr=(uint8_t)(i%3),.uniqueID=(uint32_t)(i+1),.data=arena+used,.len=l}; used+=l; nr++; }
     }
-    pdb_write_ai(DB_CAL,"DatebookDB",0x44415441,0x64617465,ai,al,r,nr);
+    pdb_write_ai(DB_CAL,"DatebookDB",0x44415441,0x64617465,ai,al,r,nr); free(arena);
 }
 
 static void seed_address(void){
-    static uint8_t arena[SEEDMAX*96]; PdbRec r[SEEDMAX]; int nr=0, used=0;
+    uint8_t *arena = malloc(SEEDMAX*96); if(!arena) return; PdbRec r[SEEDMAX]; int nr=0, used=0;
     uint8_t ai[APPINFO_SIZE]; int al=build_appinfo(ai);
     struct { const char *last,*first,*co,*phone; } pc[] = {
         {"Appleseed","Johnny","Acme Corp","555-0100"},{"Bramble","Rosa","Widgets Inc","555-0200"},
@@ -84,11 +85,11 @@ static void seed_address(void){
         int l=AddrPack(arena+used,96,&a);
         if(l>0){ r[nr]=(PdbRec){.attr=(uint8_t)(i%3),.uniqueID=(uint32_t)(i+1),.data=arena+used,.len=l}; used+=l; nr++; }
     }
-    pdb_write_ai(DB_ADDR,"AddressDB",0x44415441,0x61646472,ai,al,r,nr);
+    pdb_write_ai(DB_ADDR,"AddressDB",0x44415441,0x61646472,ai,al,r,nr); free(arena);
 }
 
 static void seed_todo(void){
-    static uint8_t arena[SEEDMAX*96]; PdbRec r[SEEDMAX]; int nr=0, used=0;
+    uint8_t *arena = malloc(SEEDMAX*96); if(!arena) return; PdbRec r[SEEDMAX]; int nr=0, used=0;
     uint8_t ai[APPINFO_SIZE]; int al=build_appinfo(ai);
     struct { const char *s; int pr, done; } td[] = {
         {"Buy stamps",2,0},{"Renew passport",1,0},{"Call plumber",3,0},{"File taxes",1,1},
@@ -102,11 +103,11 @@ static void seed_todo(void){
         int l=ToDoPack(arena+used,96,&t);
         if(l>0){ r[nr]=(PdbRec){.attr=(uint8_t)(i%3),.uniqueID=(uint32_t)(i+1),.data=arena+used,.len=l}; used+=l; nr++; }
     }
-    pdb_write_ai(DB_TODO,"ToDoDB",0x44415441,0x746F646F,ai,al,r,nr);
+    pdb_write_ai(DB_TODO,"ToDoDB",0x44415441,0x746F646F,ai,al,r,nr); free(arena);
 }
 
 static void seed_memo(void){
-    static uint8_t arena[SEEDMAX*256]; PdbRec r[SEEDMAX]; int nr=0, used=0;
+    uint8_t *arena = malloc(SEEDMAX*256); if(!arena) return; PdbRec r[SEEDMAX]; int nr=0, used=0;
     uint8_t ai[APPINFO_SIZE]; int al=build_appinfo(ai);
     const char *memos[] = {
         "Shopping list\nMilk\nEggs\nBread\nCoffee",
@@ -116,12 +117,36 @@ static void seed_memo(void){
     int n=(int)(sizeof(memos)/sizeof(memos[0]));
     for(int i=0;i<n && nr<SEEDMAX;i++){
         int len=(int)strlen(memos[i])+1;
-        if(used+len>(int)sizeof arena) break;
+        if(used+len > SEEDMAX*256) break;
         memcpy(arena+used, memos[i], len);
         r[nr]=(PdbRec){.attr=(uint8_t)(i%3),.uniqueID=(uint32_t)(i+1),.data=arena+used,.len=len};
         used+=len; nr++;
     }
-    pdb_write_ai(DB_MEMO,"MemoDB",0x44415441,0x6D656D6F,ai,al,r,nr);
+    pdb_write_ai(DB_MEMO,"MemoDB",0x44415441,0x6D656D6F,ai,al,r,nr); free(arena);
+}
+
+/* Migrate PDBs seeded by an older build that had no AppInfo (so the category
+ * table was empty and the picker only offered "All"). Reads the records back,
+ * rewrites the PDB with the demo category table, and preserves the records. */
+#define RW_ARENA (12*1024)
+#define RW_MAX   64
+static uint8_t g_arena[RW_ARENA];
+static PdbRec  g_recs[RW_MAX];
+typedef struct { int used; int nr; } Collect;
+static int collectCb(const PdbRec *r, int i, void *ctx){ (void)i; Collect *c=ctx;
+    if(c->used + r->len > RW_ARENA || c->nr >= RW_MAX) return 1;
+    memcpy(g_arena+c->used, r->data, r->len);
+    g_recs[c->nr]=(PdbRec){.attr=r->attr,.uniqueID=r->uniqueID,.data=g_arena+c->used,.len=r->len};
+    c->used+=r->len; c->nr++; return 0;
+}
+static void ensure_appinfo(const char *path,const char *nm,uint32_t type,uint32_t creator){
+    if(!file_exists(path)) return;
+    uint8_t ai[512]; int al=pdb_read_appinfo(path,ai,sizeof ai);
+    CatTable t;
+    if(al>0 && appinfo_parse(ai,al,&t)==0 && t.name[0][0]) return;   /* already has categories */
+    Collect c={0,0}; pdb_read(path,collectCb,&c);
+    uint8_t nai[APPINFO_SIZE]; int nal=build_appinfo(nai);
+    pdb_write_ai(path,nm,type,creator,nai,nal,g_recs,c.nr);
 }
 
 void data_seed_if_empty(void){
@@ -130,6 +155,11 @@ void data_seed_if_empty(void){
     if(!file_exists(DB_ADDR)) seed_address();
     if(!file_exists(DB_TODO)) seed_todo();
     if(!file_exists(DB_MEMO)) seed_memo();
+    /* backfill categories into PDBs from older builds that lacked AppInfo */
+    ensure_appinfo(DB_CAL, "DatebookDB",0x44415441,0x64617465);
+    ensure_appinfo(DB_ADDR,"AddressDB", 0x44415441,0x61646472);
+    ensure_appinfo(DB_TODO,"ToDoDB",    0x44415441,0x746F646F);
+    ensure_appinfo(DB_MEMO,"MemoDB",    0x44415441,0x6D656D6F);
 }
 
 /* ------------------------- iteration ------------------------- */
@@ -251,8 +281,6 @@ int data_get_addr(uint32_t uid, Addr *out){ Get g={uid,out,0}; pdb_read(DB_ADDR,
 int data_get_todo(uint32_t uid, Todo *out){ Get g={uid,out,0}; pdb_read(DB_TODO,getTodo,&g); return g.found; }
 
 /* ------------------------- rewrite (replace/append one record) ------------------------- */
-#define RW_ARENA (12*1024)
-#define RW_MAX   64
 typedef struct { uint32_t uid; const uint8_t *nd; int nl; int cat; uint8_t *arena; int used; PdbRec *recs; int nr; int done; } RW;
 static int rwCb(const PdbRec *r,int i,void *ctx){ (void)i; RW*w=ctx;
     const uint8_t *src=r->data; int len=r->len; uint8_t attr=r->attr;
@@ -271,20 +299,19 @@ static int rwCb(const PdbRec *r,int i,void *ctx){ (void)i; RW*w=ctx;
  * nd==NULL => delete; cat<0 => keep the record's current category. */
 static int rewrite(const char *path,const char *nm,uint32_t type,uint32_t creator,
                    uint32_t uid,const uint8_t *nd,int nl,int cat){
-    static uint8_t arena[RW_ARENA]; static PdbRec recs[RW_MAX];
     uint8_t ai[512]; int al=pdb_read_appinfo(path,ai,sizeof ai); if(al<0)al=0;
-    RW w={uid,nd,nl,cat,arena,0,recs,0,0};
+    RW w={uid,nd,nl,cat,g_arena,0,g_recs,0,0};
     pdb_read(path,rwCb,&w);
     if(!w.done && nd){                /* new record (uid==0 or not found): append */
-        uint32_t nu=1; for(int i=0;i<w.nr;i++) if(recs[i].uniqueID>=nu) nu=recs[i].uniqueID+1;
+        uint32_t nu=1; for(int i=0;i<w.nr;i++) if(g_recs[i].uniqueID>=nu) nu=g_recs[i].uniqueID+1;
         if(w.used+nl<=RW_ARENA && w.nr<RW_MAX){
-            memcpy(arena+w.used,nd,nl);
+            memcpy(g_arena+w.used,nd,nl);
             uint8_t na=REC_ATTR_DIRTY | (cat>=0 ? (uint8_t)(cat & 0x0F) : 0);
-            recs[w.nr]=(PdbRec){.attr=na,.uniqueID=nu,.data=arena+w.used,.len=nl};
+            g_recs[w.nr]=(PdbRec){.attr=na,.uniqueID=nu,.data=g_arena+w.used,.len=nl};
             w.used+=nl; w.nr++;
         }
     }
-    return pdb_write_ai(path,nm,type,creator, al?ai:NULL, al, recs, w.nr);
+    return pdb_write_ai(path,nm,type,creator, al?ai:NULL, al, g_recs, w.nr);
 }
 
 int data_save_cal(uint32_t uid, int cat, const Appt *in){
@@ -338,6 +365,13 @@ int data_get_memo(uint32_t uid, char *out, int cap){
 int data_save_memo(uint32_t uid, int cat, const char *text){
     int l=(int)strlen(text)+1;
     return rewrite(DB_MEMO,"MemoDB",0x44415441,0x6D656D6F,uid,(const uint8_t *)text,l,cat)>=0;
+}
+
+/* flip a to-do's completed flag and save it (keeps its category). 1 on success. */
+int data_toggle_todo(uint32_t uid){
+    Todo t; if(!data_get_todo(uid,&t)) return 0;
+    t.completed = !t.completed;
+    return data_save_todo(uid, -1, &t);
 }
 
 /* the category index of a record (attr nibble), or -1 if not found */
