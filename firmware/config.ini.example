@@ -1,0 +1,29 @@
+# CYD Palm runtime config -- copy to the SD card as /sdcard/config.ini
+#
+# Parsed by bridge/config.c (config_load). This is the runtime alternative to
+# the compile-time secrets.h: the Preferences app reads/writes these values so
+# Wi-Fi, iCloud, and per-app collections can change without reflashing.
+#
+# Format: `key = value`, one per line. '#' starts a comment. Surrounding
+# whitespace is ignored; unknown keys and malformed lines are skipped.
+#
+# SENSITIVE: holds the Wi-Fi password and the iCloud app-specific password.
+# Keep the card private; the firmware never logs these fields.
+
+wifi_ssid = your-ssid
+wifi_pass = your-wifi-password
+
+dav_user  = you@icloud.com
+dav_pass  = xxxx-xxxx-xxxx-xxxx          # iCloud APP-SPECIFIC password (with dashes)
+dav_base       = https://caldav.icloud.com
+dav_card_base  = https://contacts.icloud.com
+
+# collection paths from `bridge_cli discover` (drop the leading '/'); empty = skip
+cal_coll  = 21226414825/calendars/REPLACE-WITH-CALENDAR-UUID
+todo_coll =
+card_coll =
+
+timezone      = America/New_York          # empty = floating local time
+brightness    = 80                        # backlight 0..100
+backlight_sec = 30                        # dim after N idle seconds (0 = never)
+policy        = server                    # conflict policy: server | local | both

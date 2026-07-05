@@ -540,8 +540,11 @@ static void menu_open(void){
 
 /* silkscreen buttons */
 static void menu_cb(lv_event_t *e){ (void)e; menu_open(); }
-static void find_cb(lv_event_t *e){ (void)e; /* TODO global Find */ }
-static void calc_cb(lv_event_t *e){ (void)e; /* TODO calculator */ }
+/* Find/Calc engines are ready + host-tested (bridge/find.c, bridge/calc.c).
+ * The screens still need building: Find needs a Graffiti query field, Calc a
+ * keypad view. Wire find_in_pdb()/calc_eval() into these once the UI lands. */
+static void find_cb(lv_event_t *e){ (void)e; /* TODO Find UI -> find_in_pdb() over all 4 PDBs */ }
+static void calc_cb(lv_event_t *e){ (void)e; /* TODO Calc UI -> calc_eval() */ }
 
 /* ------------------------- F2: category picker ------------------------- */
 static lv_obj_t *cat_trigger, *cat_label, *g_catpop;

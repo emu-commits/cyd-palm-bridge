@@ -16,6 +16,10 @@
 
 #define PDB_HDR   78
 #define PDB_ENTRY 8
+/* sanity cap on the header's record count: a corrupt/hostile PDB claiming e.g.
+ * 65535 records must not trigger a ~0.6 MB index allocation on a device with no
+ * PSRAM. Real Palm PIM databases are a few hundred to a few thousand records. */
+#define PDB_MAX_RECS 20000
 
 int pdb_read(const char *path, pdb_rec_cb cb, void *ctx){
     FILE *f = fopen(path, "rb");
@@ -23,7 +27,7 @@ int pdb_read(const char *path, pdb_rec_cb cb, void *ctx){
     uint8_t H[PDB_HDR];
     if(fread(H,1,PDB_HDR,f)!=PDB_HDR){ fclose(f); return -1; }
     int nrec = be16(H + 0x4C);
-    if(nrec < 0){ fclose(f); return -1; }
+    if(nrec < 0 || nrec > PDB_MAX_RECS){ fclose(f); return -1; }
 
     /* read the whole record index first (8 bytes each is tiny) so we can
      * compute each record's length from the next offset / EOF.             */
@@ -71,7 +75,7 @@ int pdb_read_one(const char *path, int want, uint8_t *buf, int cap,
     uint8_t H[PDB_HDR];
     if(fread(H,1,PDB_HDR,f)!=PDB_HDR){ fclose(f); return -1; }
     int nrec = be16(H + 0x4C);
-    if(want >= nrec){ fclose(f); return -1; }
+    if(nrec > PDB_MAX_RECS || want >= nrec){ fclose(f); return -1; }
 
     /* we only need offsets[want] and offsets[want+1] (or EOF). Read the index
      * up to want+1; the entry for `want` also carries attr + uid.            */

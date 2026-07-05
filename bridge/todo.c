@@ -95,7 +95,8 @@ int vtodo_parse(const char *ics, Todo *t){
         char*semi=strchr(line,';'); if(semi)*semi=0; char*name=line;
         if(!strcmp(name,"SUMMARY")){ textIn(t->description,sizeof t->description,val,(int)strlen(val)); have=1; }
         else if(!strcmp(name,"DESCRIPTION")){ textIn(t->note,sizeof t->note,val,(int)strlen(val)); }
-        else if(!strcmp(name,"DUE")){ t->hasDue=1; t->dueY=digits(val,4); t->dueM=digits(val+4,2); t->dueD=digits(val+6,2); have=1; }
+        else if(!strcmp(name,"DUE")){ int L=(int)strlen(val); t->hasDue=1;   /* length-guarded: don't read past a short/truncated value */
+            t->dueY=L>=4?digits(val,4):-1; t->dueM=L>=6?digits(val+4,2):-1; t->dueD=L>=8?digits(val+6,2):-1; have=1; }
         else if(!strcmp(name,"PRIORITY")){ t->priority=icalToPalm(atoi(val)); }
         else if(!strcmp(name,"STATUS")){ if(!strcmp(val,"COMPLETED")) t->completed=1; }
         else if(!strcmp(name,"PERCENT-COMPLETE")){ if(atoi(val)>=100) t->completed=1; }

@@ -111,11 +111,17 @@ int ical_emit(char *out,int cap,const Appt *a,uint32_t uid){
     return n;
 }
 
-/* parse ICS date/date-time; if 'Z' suffix, mark utc. */
+/* parse ICS date/date-time; if 'Z' suffix, mark utc. Length-guarded: a short or
+ * truncated value (untrusted server data) must never read past the string. */
 static void parseDT(const char *v,int *y,int *mo,int *d,int *h,int *mi,int *hasT,int *utc){
-    *y=digits(v,4); *mo=digits(v+4,2); *d=digits(v+6,2); *h=0; *mi=0;
-    *hasT = (v[8]=='T');
-    if(*hasT){ *h=digits(v+9,2); *mi=digits(v+11,2); }
+    int L=(int)strlen(v);
+    *y  = L>=4 ? digits(v,4)   : -1;
+    *mo = L>=6 ? digits(v+4,2) : -1;
+    *d  = L>=8 ? digits(v+6,2) : -1;
+    *h=0; *mi=0;
+    *hasT = (L>8 && v[8]=='T');
+    if(*hasT){ *h  = L>=11 ? digits(v+9,2)  : 0;
+               *mi = L>=13 ? digits(v+11,2) : 0; }
     *utc=0; for(const char*p=v;*p;p++) if(*p=='Z'){ *utc=1; break; }  /* value-only, so a 'Z' means UTC */
 }
 

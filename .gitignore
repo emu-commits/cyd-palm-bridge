@@ -5,6 +5,10 @@
 /synctoken
 /bigsync
 /multiapp
+/find_test
+/calc_test
+/config_test
+/fuzz_test
 *.o
 
 # generated / working data

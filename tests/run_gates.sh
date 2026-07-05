@@ -68,6 +68,10 @@ run(){   # run <label> <clean-state?> <command...>
 }
 
 run "roundtrip (codec, offline)" noclean   ./roundtrip
+run "find (global search, offline)" noclean ./find_test
+run "calc (evaluator, offline)"    noclean  ./calc_test
+run "config (prefs, offline)"      noclean  ./config_test
+run "fuzz (parser hardening, ASan)" noclean ./fuzz_test
 run "incremental (two-way + policies)" clean ./incremental
 run "synctoken (RFC 6578 delta)"       clean ./synctoken
 run "category (category->collection)"  clean ./category
