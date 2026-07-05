@@ -24,9 +24,13 @@ Two halves, both real — and now joined on hardware:
 > must coexist in ~85 KB of heap. It fits after shrinking the LVGL pool, enabling
 > mbedTLS dynamic buffers, trimming Wi-Fi buffers, and keeping the sync working set
 > small (`MAXR`) with emit buffers off-stack. See docs/BUILD_PROGRESS.md "CURRENT
-> STATE". **Known gaps:** HotSync currently syncs only the one configured calendar
-> (Address/ToDo/Memo collections not wired yet); a Graffiti training-game app is
-> planned; power + case are the remaining hardware phases.
+> STATE". **Recent (hardware-less) work:** the sync engine now **streams** records
+> to/from disk (no in-RAM arena), lifting the device per-collection cap 24 → 96;
+> HotSync now syncs **Date Book + To Do + Address**, each to its own iCloud
+> collection (Address over CardDAV) — code done, awaiting a flash to confirm
+> on-device. **Known gaps:** Memo has no iCloud DAV surface (stays local); a
+> Graffiti training-game app is planned; power + case are the remaining hardware
+> phases.
 
 ---
 
@@ -69,6 +73,8 @@ bridge/sync.[ch]           push/pull primitives + sync_collection: incremental, 
 bridge/main.c              CLI: discover | push | pull | sync | synccat | dump  (BRIDGE_TZ sets zone)
 tests/                     roundtrip.c (codec) + dav_roundtrip.sh (server) + incremental.c (two-way)
                            + synctoken.c (RFC 6578 delta) + category.c (category->collection routing)
+                           + bigsync.c (device-sized 90-record stream test) + multiapp.c (ToDo/Address)
+                           + run_gates.sh (one command: bring up Radicale, run every gate, tear down)
 ```
 
 ### First-time DAV server setup (for the server-backed tests)
@@ -86,7 +92,8 @@ curl -s -u palm:palm -X MKCOL -H 'Content-Type: application/xml' \
 
 ### Run it
 ```
-make                       # builds ./roundtrip, ./bridge_cli, ./incremental
+./tests/run_gates.sh       # EASIEST: starts Radicale, runs every gate, tears down
+make                       # builds ./roundtrip, ./bridge_cli, ./incremental, ...
 make test                  # codec round-trip (no server)
 # real-server tests (Radicale in ./davvenv, config radicale.conf, creds palm:palm):
 ./davvenv/bin/python -m radicale --config radicale.conf &   # localhost:5232

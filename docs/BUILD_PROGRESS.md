@@ -3,6 +3,53 @@
 Running log of the UI build (docs/UI_ROADMAP.md). Updated after each step so work
 can resume cold. Newest phase on top.
 
+## HARDWARE-LESS SESSION (2026-07-05) — engine streaming + multi-app HotSync
+
+Work done with **no CYD attached** (laptop unavailable), so everything here is
+host-provable; the firmware pieces compiled-by-inspection only and are flagged
+**AWAITING FLASH**. All host gates green via the new one-command harness
+`./tests/run_gates.sh` (spins up Radicale, runs every gate, tears it down).
+
+1. **Streaming sync engine — the MAXR cap is lifted (gap #4 closed on host).**
+   The reconciliation working set no longer holds record *bytes* in RAM:
+   - `bridge/pdb.c` gained a **streaming writer** (`PdbW`/`pdbw_*`): kept records
+     spill to a temp file (`state/.pdbout`); only a 24-byte/record index stays
+     resident; `pdbw_commit` sorts by uniqueID and assembles the final PDB. This
+     replaces the old in-RAM `Out.arena` (8 KB) + `Sink.map[MAXR]`.
+   - `pdb_read_one(path,index,...)` added → local record bytes are read **lazily**
+     from the source PDB during reconciliation instead of buffering them in
+     `locArena` (the other 8 KB arena, now gone).
+   - `Node` now stores **indices** into `map[]/srv[]` (was ~536 B of string copies
+     per node → 16 B). This was the biggest per-MAXR RAM consumer.
+   - Net: resident cost dropped from ~64 KB → ~17 KB at MAXR=24, so **device MAXR
+     raised 24 → 96** (`bridge/sync.c`, `ESP_PLATFORM` branch) *within the old
+     budget*, and there is no longer a record-byte arena wall.
+   - Map file is now written atomically (`.tmp` + rename).
+   - Proof: `tests/bigsync.c` (built `-DSYNC_DEVICE_SIZES` so the host uses the
+     **device** MAXR=96) syncs **90 records** with ~300-byte notes (~27 KB, past
+     both old walls): all push, idempotent, server-add pulls back. `make btest`.
+   - **AWAITING FLASH:** on-device heap headroom at MAXR=96 + the extra SD reopen
+     traffic from lazy reads (per-clean-record `pdb_read_one` reopens the file;
+     an optional optimization is a persistent read handle).
+
+2. **HotSync now syncs Date Book + To Do + Address, each to its own collection
+   (gap #1 closed in code).** `firmware/main/hotsync.c` walks a target table and
+   calls the proven `sync_collection` per app; Address uses the separate CardDAV
+   host (`DAV_CARD_BASE` → contacts.icloud.com, resolved to `pNN-` at boot).
+   Per-app collections live in `secrets.h` (see updated `secrets.h.example`):
+   `SYNC_TODO_COLL` / `SYNC_CARD_COLL` (empty ⇒ skip that app). **Back-compat:**
+   an old secrets.h with only `SYNC_COLL` still builds and syncs just the Date
+   Book. **Memo is intentionally NOT synced** (iCloud Notes has no CalDAV/CardDAV
+   surface). Proof of the engine path: `tests/multiapp.c` runs `sync_collection`
+   for KIND_TODO (VTODO) and KIND_CARD (vCard) — push/idempotent/server-pull all
+   green (`make mtest`). **AWAITING FLASH** for the ESP-IDF glue itself.
+
+3. **Test hygiene (gap #6 fixed).** `tests/category.c` cleaned the wrong map glob
+   (`state/cat_*.map`) but `sync_categorized` writes `state/palm_cat_*.map` — so
+   stale maps leaked and made back-to-back runs flaky. Fixed to the real names;
+   verified stable across repeated runs without wiping `state/`. New harness
+   `tests/run_gates.sh` runs the whole suite from a clean state each time.
+
 ## CURRENT STATE (2026-07-05) — read this first
 
 **Headline: on-device iCloud sync WORKS.** First successful push confirmed on
@@ -53,10 +100,10 @@ per-record **category assignment** via the edit-form's middle trigger button (op
 the chooser); richer HotSync diagnostics + `[sync]` stderr logging.
 
 **Known gaps / next steps (priority order):**
-1. **HotSync only syncs ONE collection** (`SYNC_COLL` = the DateBook calendar).
-   Address/ToDo/Memo do NOT sync yet — wire each app to its own iCloud collection
-   (CardDAV for Address; the categorized/multi-collection engine `sync_categorized`
-   already exists in sync.c). This is why "new contact didn't sync."
+1. **HotSync multi-app: code done, AWAITING FLASH.** `hotsync.c` now syncs Date
+   Book + To Do + Address (each to its own collection; Address over CardDAV on the
+   contacts host). Fill `SYNC_TODO_COLL`/`SYNC_CARD_COLL` in secrets.h, then flash
+   and confirm on-device. Memo stays local-only (no iCloud DAV surface).
 2. **ToDo lost its inline checkboxes** — lv_checkbox rows made LVGL's compositor
    loop forever behind the semi-transparent menu overlay (watchdog reset). Reverted
    to plain `[x]`/`[ ]` list buttons; "Mark Done/Undo" now lives in the ToDo detail
@@ -64,12 +111,14 @@ the chooser); richer HotSync diagnostics + `[sync]` stderr logging.
 3. **Graffiti training-game app** (BACKLOG, user-requested): launcher icon like the
    real Palm, a kanji/Chinese-writing-app-style trainer that also captures the
    user's own strokes as per-device templates. See docs/UI_ROADMAP.md backlog.
-4. MAXR=24 caps sync at 24 items/collection — raise once the engine streams instead
-   of buffering the whole working set.
+4. **MAXR cap lifted 24 → 96 (streaming engine), AWAITING FLASH** for on-device
+   heap confirmation. Records now stream to/from disk (no byte arena); the only
+   per-collection cap is the 96-slot index. Proven on host at device sizing
+   (`make btest`). Raise MAXR further only after measuring heap on the board.
 5. U8 power (battery gauge GPIO34, light-sleep), U9 case — hardware.
-6. Pre-existing: `category` host test is flaky across back-to-back runs (stale
-   `state/` files; the committed baseline behaves identically — not our bug). Fix
-   its cleanup. Run host gates with a clean `state/` dir: `rm -rf state && mkdir state`.
+6. **FIXED:** `category` host-test flakiness was a wrong cleanup glob
+   (`state/cat_*.map` never matched the real `state/palm_cat_*.map`); corrected.
+   Use `./tests/run_gates.sh` to run the whole suite from a clean state.
 
 **Resume in one line:**
 `. ~/esp/esp-idf/export.sh && cd firmware && idf.py -p /dev/ttyUSB0 flash monitor`
