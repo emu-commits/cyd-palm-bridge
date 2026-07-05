@@ -3,7 +3,7 @@ CFLAGS  = -std=gnu99 -Wall -O2 -g
 CORE    = bridge/pdb.c bridge/datebook.c bridge/address.c bridge/ical.c bridge/vcard.c \
           bridge/tz.c bridge/charset.c bridge/appinfo.c bridge/todo.c bridge/dav_xml.c
 
-all: roundtrip bridge_cli incremental synctoken category
+all: roundtrip bridge_cli incremental synctoken category bigsync multiapp
 
 dirs:
 	@mkdir -p pdb state
@@ -23,6 +23,16 @@ synctoken: tests/synctoken.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 category: tests/category.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
+# built with device working-set sizing (MAXR=96) to prove the streaming engine
+# lifts the old 24-record / 8 KB-arena device cap. See tests/bigsync.c.
+bigsync: tests/bigsync.c bridge/dav.c bridge/sync.c $(CORE) | dirs
+	$(CC) $(CFLAGS) -DSYNC_DEVICE_SIZES -o $@ $^
+
+# per-app sync_collection coverage for To Do (VTODO) + Address (vCard) -- the
+# exact per-collection path HotSync uses for each app. See tests/multiapp.c.
+multiapp: tests/multiapp.c bridge/dav.c bridge/sync.c $(CORE) | dirs
+	$(CC) $(CFLAGS) -o $@ $^
+
 test: roundtrip
 	./roundtrip
 
@@ -36,7 +46,15 @@ stest: synctoken
 ctest: category
 	./category
 
-clean:
-	rm -f roundtrip bridge_cli incremental synctoken category pdb/_rt_*.pdb
+# device-sized large-collection stress test (needs Radicale)
+btest: bigsync
+	./bigsync
 
-.PHONY: all dirs test itest stest ctest clean
+# per-app (To Do + Address) sync_collection coverage (needs Radicale)
+mtest: multiapp
+	./multiapp
+
+clean:
+	rm -f roundtrip bridge_cli incremental synctoken category bigsync multiapp pdb/_rt_*.pdb
+
+.PHONY: all dirs test itest stest ctest btest mtest clean

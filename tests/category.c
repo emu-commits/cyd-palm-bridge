@@ -77,7 +77,11 @@ int main(void){
 
     printf("== category routing ==\n");
     fresh(BIZ); fresh(PER); fresh(DEF);
-    if(system("rm -f state/cat_*.map")){}
+    /* clear THIS test's per-collection maps. sync_categorized names them after
+     * the sanitized collection path (slash/colon -> '_'), i.e. palm_cat_biz.map,
+     * not cat_biz.map -- the old glob never matched, so stale maps from a prior
+     * run leaked in and made back-to-back runs flaky. Remove the real names. */
+    if(system("rm -f state/palm_cat_biz.map state/palm_cat_per.map state/palm_cat_def.map")){}
     const char*PDB="pdb/cat.pdb"; buildDB(PDB);
 
     CatRoute rt; memset(&rt,0,sizeof rt);

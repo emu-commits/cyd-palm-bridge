@@ -108,6 +108,26 @@ typedef struct {
 typedef int (*pdb_rec_cb)(const PdbRec *rec, int index, void *ctx);
 int pdb_read(const char *path, pdb_rec_cb cb, void *ctx);
 
+/* random-access read of the record at index `want` (as handed to pdb_read's
+ * callback). Fills buf (up to cap) + optional attr/uid out-params. Returns len
+ * (>=0) or -1. Lets the sync engine load one local record's bytes on demand
+ * instead of holding every record in a big RAM arena.                       */
+int pdb_read_one(const char *path, int want, uint8_t *buf, int cap,
+                 uint8_t *attr, uint32_t *uid);
+
+/* streaming writer: record bytes spill to a temp file as they are added; only
+ * a tiny per-record index stays resident, so the output PDB is bounded by disk
+ * rather than a fixed RAM arena. commit() sorts by uniqueID and assembles the
+ * final file; abort() discards. One temp file per writer.                    */
+typedef struct PdbW PdbW;
+PdbW *pdbw_begin(const char *tmppath);
+int   pdbw_rec(PdbW *w, uint32_t uid, uint8_t attr, const uint8_t *data, int len);
+int   pdbw_count(const PdbW *w);
+int   pdbw_commit(PdbW *w, const char *path, const char *name,
+                  uint32_t type, uint32_t creator,
+                  const uint8_t *appinfo, int ailen);   /* frees w */
+void  pdbw_abort(PdbW *w);                               /* frees w */
+
 /* writer: build a PDB from an array of records (records themselves are the
  * only sizable data; the array of PdbRec is small). type/creator are 4cc.  */
 int pdb_write(const char *path, const char *name,

@@ -3,6 +3,8 @@
 /bridge_cli
 /incremental
 /synctoken
+/bigsync
+/multiapp
 *.o
 
 # generated / working data
