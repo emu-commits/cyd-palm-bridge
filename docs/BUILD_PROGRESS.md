@@ -3,6 +3,47 @@
 Running log of the UI build (docs/UI_ROADMAP.md). Updated after each step so work
 can resume cold. Newest phase on top.
 
+## HARDWARE-LESS SESSION 2 (2026-07-05) — Find, Calc, Preferences, parser hardening
+
+Four new host-tested modules in `bridge/` (shared by the firmware component and
+the host tests — one source of truth). All RAM-conscious for the no-PSRAM board:
+streaming/in-place where possible, bounded stack, no per-record heap churn.
+
+- **Global Find (`bridge/find.c`, `find.h`).** Streaming case-insensitive
+  substring search across DateBook/ToDo/Address (via codecs) + Memo (raw text),
+  one record at a time, callback per hit with a snippet. Zero scratch buffers —
+  memo bodies are matched in place in the reader's record buffer. `make` +
+  `./find_test` (offline). Wired into the firmware build; the **Find UI is
+  AWAITING** a Graffiti query field (deferred), so `find_cb` still just points at
+  the ready `find_in_pdb()`.
+- **Calculator (`bridge/calc.c`, `calc.h`).** Recursive-descent evaluator: + - * /,
+  parens, unary +/-, decimals, precedence; returns CALC_OK / SYNTAX / DIVZERO.
+  Recursion is depth-capped (64) so a pathological "((((…" can't overflow the
+  device stack. `./calc_test`. Firmware `calc_cb` points at `calc_eval()`; the
+  keypad UI is AWAITING FLASH.
+- **Preferences backend (`bridge/config.c`, `config.h`, `firmware/config.ini.example`).**
+  Parses/serialises a runtime `key=value` config on SD (Wi-Fi, iCloud creds,
+  per-app collections, timezone, brightness, backlight timer, conflict policy) so
+  Preferences can change them without a reflash. Line-at-a-time parse (one bounded
+  stack buffer, no heap, no whole-file load); robust to hand-edits (unknown keys /
+  malformed lines skipped, every copy length-bounded). `./config_test`. NOTE: holds
+  passwords — treat as sensitive; never logged. **AWAITING FLASH:** having
+  hotsync/app_main prefer `config.ini` over the compile-time secrets.h macros (kept
+  that wiring out of a blind, untestable change to the working Wi-Fi/sync path).
+- **Parser hardening (`tests/fuzz_test.c`, `make ftest`).** A malformed-input sweep
+  built with **AddressSanitizer + UBSan**: truncate every valid VEVENT/VTODO/vCard
+  and packed record at every byte, adversarial strings, crafted PDB headers, and
+  120k random buffers through every parser (ical/vtodo/vcard, the unpackers,
+  appinfo, and the PDB container). It **found a real heap-buffer-overflow**:
+  `ical.c parseDT` read fixed offsets (v+4/+6/+9/+11) past a short/truncated
+  DTSTART — i.e. an overflow on untrusted iCloud data. Fixed with length guards in
+  `parseDT`; the identical pattern in `todo.c` DUE parsing fixed too. Also added a
+  `PDB_MAX_RECS` cap so a corrupt header's record count can't trigger a ~0.6 MB
+  index malloc on the device. Sweep is clean (no sanitizer report). Added to
+  `run_gates.sh`.
+
+All host gates green (`./tests/run_gates.sh`), clean `-Wall`.
+
 ## HARDWARE-LESS SESSION (2026-07-05) — engine streaming + multi-app HotSync
 
 Work done with **no CYD attached** (laptop unavailable), so everything here is
