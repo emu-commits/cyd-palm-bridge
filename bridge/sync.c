@@ -24,27 +24,16 @@
 #include "appinfo.h"
 #include "sync.h"
 
-/* Working-set sizing. Records are streamed, so what scales with MAXR is only the
- * per-record *index* (loc/map/srv/nodes), not the record bytes. The host proves
- * correctness with a generous MAXR; the ESP32 (no PSRAM, ~85 KB post-WiFi heap)
- * uses a smaller one. Define SYNC_DEVICE_SIZES to force the device sizing on a
- * host build (used by tests/bigsync.c to exercise the device cap on the desktop). */
+/* Working-set sizing. NOTE: as of the streaming reconcile (sync_collection /
+ * sync_one below), MAXR NO LONGER caps a synced collection -- reconciliation is a
+ * disk-backed merge-join whose resident cost during a DAV call is O(1). MAXR now
+ * bounds ONLY the legacy full-sync primitives sync_push/sync_pull (used by the
+ * bridge_cli one-shot commands, not by HotSync). SYNC_DEVICE_SIZES still forces
+ * device sizing on a host build so tests/bigsync.c can prove the streaming engine
+ * scales past the old 24-record wall on the desktop. */
 #if defined(ESP_PLATFORM) || defined(SYNC_DEVICE_SIZES)
-  /* Since the byte arenas are gone (records stream to/from disk), the resident
-   * cost is ~0.56 KB per slot (loc+map+srv indices). BUT struct S is a SINGLE
-   * calloc AND it stays resident while buildServer runs a TLS PROPFIND/REPORT --
-   * so S must coexist with the ~35 KB mbedTLS handshake working set + the list
-   * buffer in the fragmented ~80 KB heap. The hardware-less bump to 96 (S ~57 KB,
-   * calloc failed -> rc=-1) and a later 64 (S ~39 KB, which starved the TLS
-   * handshake -> mbedtls alloc(5140) failed, -0x7F00) both broke this. MAXR=24
-   * (S ~16 KB) is the proven value that leaves room for TLS + list buffer and is
-   * what the first working on-device sync used. This caps a collection at 24
-   * records; larger iCloud collections need the server list streamed to disk
-   * (loc/map/srv split out of S, and paged server enumeration) -- a TODO.
-   * SYNC_DEVICE_SIZES forces this sizing on a host build (tests/bigsync.c) to
-   * exercise the device cap on the desktop -- without moving the temp dir. */
   #define MAXR       24
-  #define ARENA_CAP  (8*1024)          /* sync_pull only; loadRec no longer uses it */
+  #define ARENA_CAP  (8*1024)          /* sync_pull only */
   #define NAMEL_MAX  96
 #else
   #define MAXR       256
@@ -220,25 +209,25 @@ static uint64_t synthHash(uint32_t uid){
     char b[32]; snprintf(b,sizeof b,"palm-%u@cyd",(unsigned)uid); return uidHash(b);
 }
 
-/* ---- state loaded for reconciliation ---- */
-typedef struct {                       /* local records (index only; bytes read lazily) */
+/* ---- streaming reconciliation (no fixed per-record RAM cap) ----------------
+ * The old engine held loc[MAXR]/map[MAXR]/srv[MAXR] resident WHILE making DAV
+ * calls, so the reconcile working set had to coexist with the ~35 KB mbedTLS
+ * handshake in the fragmented no-PSRAM heap -- that coexistence is what capped a
+ * collection at 24 records. This engine instead materializes three index files
+ * on disk, each keyed by the object's UID hash, sorts them (with no handshake
+ * live, so O(N) sorting can use the full free block), then MERGE-JOINS them:
+ * during every DAV op only the current UID's row is resident, so peak RAM during
+ * TLS is O(1) in the record count. See sync_one below.
+ *
+ * `davreq` (dav_esp.c) does init->perform->cleanup per call, so mbedTLS is only
+ * live *inside* a DAV call; the sorts/joins between calls are handshake-free. */
+typedef struct {                       /* local record index row (bytes read lazily) */
     uint32_t uid; uint8_t attr; int pdbIdx; int len; uint64_t hash;
 } Loc;
-typedef struct {                       /* persisted map rows */
-    uint32_t uid; char href[64]; char etag[160]; uint64_t hash;
-    char objuid[48];                   /* the object's own UID (immutable id) */
-} Map;
-typedef struct {                       /* server objects (from PROPFIND / sync REPORT) */
-    char name[128]; char etag[160]; uint32_t uid; int present;
-    uint64_t objhash;                  /* uidHash of this object's UID (resolved) */
-} Srv;
 
 typedef struct {
     int kind;
     char pdbpath[256];                 /* source PDB for lazy local record reads */
-    Loc loc[MAXR]; int nloc;
-    Map map[MAXR]; int nmap;
-    Srv srv[MAXR]; int nsrv;
     char token[1408];                  /* RFC 6578 sync-token from last run   */
     char newToken[1408];               /* token to persist after this run     */
 } S;
@@ -248,134 +237,243 @@ static int locBytes(const S*s,const Loc*L,uint8_t*buf,int cap){
     return pdb_read_one(s->pdbpath,L->pdbIdx,buf,cap,NULL,NULL);
 }
 
-static int loadRec(const PdbRec*r,int i,void*ctx){
-    S*s=ctx;
-    if(s->nloc>=MAXR){ fprintf(stderr,"[sync] loc index full at %d recs -- rest not synced\n",s->nloc); return 1; }
-    Loc*L=&s->loc[s->nloc];
-    L->uid=r->uniqueID; L->attr=r->attr; L->len=r->len; L->pdbIdx=i;
-    /* canonical hash is over the synth-UID body (UID-independent): it flags a
-     * LOCAL content change, and matches the hash keepFromServer stores on pull. */
-    if(emit_object(s->kind,r->data,r->len,r->uniqueID,g_body,sizeof g_body,NULL)<0) L->hash=0;
-    else L->hash=fnv1a(g_body);
-    s->nloc++;
-    return 0;
-}
-static void loadMap(S*s,const char*mapfile){
-    FILE*f=fopen(mapfile,"r"); if(!f) return;
-    char line[1400];
-    while(fgets(line,sizeof line,f)){
-        if(!strncmp(line,"#synctoken\t",11)){
-            char *t=line+11; size_t l=strlen(t); while(l&&(t[l-1]=='\n'||t[l-1]=='\r'))t[--l]=0;
-            snprintf(s->token,sizeof s->token,"%s",t); continue;
-        }
-        Map m; memset(&m,0,sizeof m); unsigned long long h=0; unsigned mu=0;
-        int nf=sscanf(line,"%u\t%63[^\t]\t%159[^\t]\t%llu\t%47[^\t\r\n]",&mu,m.href,m.etag,&h,m.objuid);
-        if(nf>=3){
-            m.uid=(uint32_t)mu; m.hash=(uint64_t)h; if(nf<5) m.objuid[0]=0;
-            if(s->nmap<MAXR) s->map[s->nmap++]=m;
-        }
-    }
-    fclose(f);
-}
-/* find/add a server slot by object name */
-static Srv* srvSlot(S*s,const char*name){
-    for(int i=0;i<s->nsrv;i++) if(!strcmp(s->srv[i].name,name)) return &s->srv[i];
-    if(s->nsrv>=MAXR) return NULL;
-    Srv*v=&s->srv[s->nsrv++]; memset(v,0,sizeof*v);
-    snprintf(v->name,sizeof v->name,"%s",name); v->uid=nameToUid(name); return v;
-}
-static void srvCb(const char*name,const char*etag,void*ctx){   /* full PROPFIND listing */
-    Srv*v=srvSlot((S*)ctx,name); if(!v) return;
-    snprintf(v->etag,sizeof v->etag,"%s",etag); v->present=1;
-}
-static void reportCb(const char*name,const char*etag,int deleted,void*ctx){ /* sync REPORT delta */
-    Srv*v=srvSlot((S*)ctx,name); if(!v) return;
-    if(deleted){ v->present=0; }
-    else { snprintf(v->etag,sizeof v->etag,"%s",etag); v->present=1; }
-}
-
-/* fetch buffer for one server object (see keepFromServer for the sizing note).
- * Defined here so resolveSrvUids can reuse it; the guarded block below is a
- * no-op once this is set. */
+/* fetch buffer for one server object. iCloud contacts can embed a base64 PHOTO
+ * that pushes a vCard well past 16 KB; too small a buffer truncates the object
+ * (no END:VCARD) and it fails to parse. Generous on host; the no-PSRAM device
+ * keeps it small (an over-limit object is skipped with a warning). One shared
+ * static (used by resolveServer + keepFromServer, never concurrently) keeps BSS
+ * flat. */
 #ifndef OBJ_FETCH_CAP
 #ifdef ESP_PLATFORM
-#define OBJ_FETCH_CAP (8*1024)       /* no PSRAM: photo-heavy vCards get skipped+warned */
+#define OBJ_FETCH_CAP (8*1024)
 #else
 #define OBJ_FETCH_CAP (256*1024)
 #endif
 #endif
-/* one shared server-object fetch buffer (too big for the stack). Used by
- * resolveSrvUids (enumeration) and keepFromServer (reconcile) -- never at the
- * same time -- so a single static keeps BSS flat on the no-PSRAM device. */
 static char g_objbuf[OBJ_FETCH_CAP];
 
-/* Resolve each present server object's identity hash (uidHash of its UID). The
- * map is a free cache: a row with the same href AND unchanged etag already knows
- * the UID, so only genuinely new/changed objects cost a GET. Falls back to a
- * name-based hash if the object can't be fetched/parsed (still stable).        */
-static void resolveSrvUids(S*s,const DavCtx*d,const char*coll){
-    for(int i=0;i<s->nsrv;i++){
-        Srv*v=&s->srv[i]; if(!v->present){ v->objhash=0; continue; }
-        char objuid[48]=""; int have=0;
-        for(int j=0;j<s->nmap;j++)
-            if(s->map[j].objuid[0] && !strcmp(s->map[j].href,v->name) && !strcmp(s->map[j].etag,v->etag)){
-                snprintf(objuid,sizeof objuid,"%s",s->map[j].objuid); have=1; break; }
-        if(!have){
-            int got=dav_get(d,coll,v->name,g_objbuf,sizeof g_objbuf);
-            if(got>0 && got<OBJ_FETCH_CAP-1 && objuid_of(g_objbuf,objuid,sizeof objuid)==0) have=1;
-        }
-        v->objhash = have ? uidHash(objuid) : uidHash(v->name);
+/* per-collection index temp files (STATE_DIR). Each is rebuilt per collection;
+ * sync is single-threaded so sharing the names across collections is fine. */
+#define MP_IDX  STATE_DIR "/.mp.idx"   /* map rows,     key=objhash */
+#define MP_HREF STATE_DIR "/.mp.href"  /* href -> objhash,objuid,etag (key=href)     */
+#define MP_PALM STATE_DIR "/.mp.palm"  /* palmuid -> objhash        (key=palmuid)    */
+#define LC_RAW  STATE_DIR "/.lc.raw"   /* local recs,   key=palmuid */
+#define LC_IDX  STATE_DIR "/.lc.idx"   /* local recs,   key=objhash */
+#define SV_RAW  STATE_DIR "/.sv.raw"   /* server enum,  key=href     */
+#define SV_IDX  STATE_DIR "/.sv.idx"   /* server objs,  key=objhash  */
+
+/* compare two lines by their first field (up to the first TAB). Every index
+ * file leads with its sort key zero-padded (objhash %016llx / palmuid %010u) or
+ * an href string, so a lexical first-field sort is the intended order. */
+static int cmpLine(const void*a,const void*b){
+    const char*x=*(const char*const*)a,*y=*(const char*const*)b;
+    for(;;){
+        char cx=*x,cy=*y;
+        int ex=(cx=='\t'||cx=='\n'||cx==0), ey=(cy=='\t'||cy=='\n'||cy==0);
+        if(ex||ey) return ex==ey?0:(ex?-1:1);
+        if(cx!=cy) return (int)(unsigned char)cx-(int)(unsigned char)cy;
+        x++;y++;
     }
 }
+/* sort a line file in place by first field. Loads it whole into RAM -- the only
+ * O(N) step, and it runs with no handshake live so it gets the full free block.
+ * (For collections beyond what free heap can sort, an external merge sort is the
+ * next increment; Palm-scale data is well within an in-RAM sort.) */
+static void sortFile(const char*path){
+    FILE*f=fopen(path,"rb"); if(!f) return;
+    fseek(f,0,SEEK_END); long sz=ftell(f); fseek(f,0,SEEK_SET);
+    if(sz<=0){ fclose(f); return; }
+    char*buf=malloc((size_t)sz+1);
+    if(!buf){ fclose(f); fprintf(stderr,"[sync] sortFile OOM (%ld bytes) for %s\n",sz,path); return; }
+    size_t got=fread(buf,1,(size_t)sz,f); buf[got]=0; fclose(f);
+    int cap=64,n=0; char**lines=malloc((size_t)cap*sizeof*lines);
+    if(!lines){ free(buf); return; }
+    for(char*p=buf;*p;){
+        if(n>=cap){ cap*=2; char**t=realloc(lines,(size_t)cap*sizeof*lines); if(!t){ free(lines); free(buf); return; } lines=t; }
+        lines[n++]=p; char*nl=strchr(p,'\n'); if(!nl) break; *nl=0; p=nl+1;
+    }
+    qsort(lines,n,sizeof*lines,cmpLine);
+    FILE*o=fopen(path,"wb");
+    if(o){ for(int i=0;i<n;i++) fprintf(o,"%s\n",lines[i]); fclose(o); }
+    free(lines); free(buf);
+}
 
-/* Build current server state into s->srv[], preferring RFC 6578 sync-collection.
- * Returns via s->newToken the token to persist (empty if unsupported); every
- * path ends by resolving each object's identity hash (resolveSrvUids).         */
-static void buildServer(S*s,const DavCtx*d,const char*coll){
-    s->newToken[0]=0;
+/* Stream the on-disk map into three sorted views: by objhash (MP_IDX, a reconcile
+ * source), by href (MP_HREF, to resolve server objects without a GET), and by
+ * palmuid (MP_PALM, to give local records their objhash). Reads the persisted
+ * sync-token into *token; tracks the max palmuid for POL_BOTH fork ids. */
+static void buildMapIdx(const char*mapfile,char*token,int tokcap,uint32_t*maxuid){
+    token[0]=0;
+    FILE*f=fopen(mapfile,"r");
+    FILE*a=fopen(MP_IDX,"w"),*b=fopen(MP_HREF,"w"),*c=fopen(MP_PALM,"w");
+    if(f){
+        char line[1400];
+        while(fgets(line,sizeof line,f)){
+            if(!strncmp(line,"#synctoken\t",11)){
+                char*t=line+11; size_t l=strlen(t); while(l&&(t[l-1]=='\n'||t[l-1]=='\r'))t[--l]=0;
+                snprintf(token,tokcap,"%s",t); continue;
+            }
+            unsigned mu=0; char href[64]="",etag[160]="",objuid[48]=""; unsigned long long h=0;
+            int nf=sscanf(line,"%u\t%63[^\t]\t%159[^\t]\t%llu\t%47[^\t\r\n]",&mu,href,etag,&h,objuid);
+            if(nf<3) continue;
+            if(nf<5) objuid[0]=0;
+            uint64_t oh = objuid[0]?uidHash(objuid):synthHash(mu);
+            if(a) fprintf(a,"%016llx\t%u\t%s\t%s\t%llu\t%s\n",(unsigned long long)oh,mu,href,etag,h,objuid);
+            if(b) fprintf(b,"%s\t%016llx\t%s\t%s\n",href,(unsigned long long)oh,objuid,etag);
+            if(c) fprintf(c,"%010u\t%016llx\n",mu,(unsigned long long)oh);
+            if(mu>*maxuid)*maxuid=mu;
+        }
+        fclose(f);
+    }
+    if(a){fclose(a);} if(b){fclose(b);} if(c){fclose(c);}
+    sortFile(MP_IDX); sortFile(MP_HREF); sortFile(MP_PALM);
+}
+
+/* build LC_RAW (key=palmuid) from the source PDB, optionally filtered to records
+ * that route to collection C (category sync). The hash is over the synth-UID
+ * body (UID-independent) so it flags only real local content changes. */
+typedef struct { FILE*f; int kind; const CatRoute*rt; const char*C; uint32_t maxuid; } LcBuild;
+static int lcBuildCb(const PdbRec*r,int i,void*ctx){
+    LcBuild*b=ctx;
+    if(b->rt){
+        int cat=r->attr&REC_ATTR_CAT;
+        const char*dest=b->rt->coll[cat]?b->rt->coll[cat]:b->rt->def;
+        if(!dest||strcmp(dest,b->C)) return 0;      /* not this collection */
+    }
+    uint64_t hash=0;
+    if(emit_object(b->kind,r->data,r->len,r->uniqueID,g_body,sizeof g_body,NULL)>=0) hash=fnv1a(g_body);
+    if(b->f) fprintf(b->f,"%010u\t%d\t%d\t%d\t%llu\n",
+                     (unsigned)r->uniqueID,i,(int)r->attr,r->len,(unsigned long long)hash);
+    if(r->uniqueID>b->maxuid) b->maxuid=r->uniqueID;
+    return 0;
+}
+static void buildLcRaw(const char*pdbpath,int kind,const CatRoute*rt,const char*C,uint32_t*maxuid){
+    LcBuild b={ .kind=kind,.rt=rt,.C=C,.maxuid=*maxuid };
+    b.f=fopen(LC_RAW,"w");
+    pdb_read(pdbpath,lcBuildCb,&b);
+    if(b.f)fclose(b.f);
+    *maxuid=b.maxuid;
+    sortFile(LC_RAW);
+}
+/* join LC_RAW (key palmuid) with MP_PALM (key palmuid) -> LC_IDX (key objhash).
+ * A local record with no map row (never synced) gets synthHash(palmuid). */
+static void joinLcIdx(void){
+    FILE*l=fopen(LC_RAW,"r"),*m=fopen(MP_PALM,"r"),*o=fopen(LC_IDX,"w");
+    char ll[512],ml[64]; int haveL=l&&fgets(ll,sizeof ll,l), haveM=m&&fgets(ml,sizeof ml,m);
+    unsigned mu=0; unsigned long long moh=0; int mok=haveM&&sscanf(ml,"%u\t%llx",&mu,&moh)>=2;
+    while(haveL){
+        unsigned lu=0; int idx=0,attr=0,len=0; unsigned long long h=0;
+        if(sscanf(ll,"%u\t%d\t%d\t%d\t%llu",&lu,&idx,&attr,&len,&h)<5){ haveL=l&&fgets(ll,sizeof ll,l)!=NULL; continue; }
+        while(haveM && mok && mu<lu){ haveM=fgets(ml,sizeof ml,m)!=NULL; mok=haveM&&sscanf(ml,"%u\t%llx",&mu,&moh)>=2; }
+        uint64_t oh = (haveM && mok && mu==lu) ? (uint64_t)moh : synthHash(lu);
+        if(o) fprintf(o,"%016llx\t%u\t%d\t%d\t%d\t%llu\n",(unsigned long long)oh,lu,idx,attr,len,h);
+        haveL=l&&fgets(ll,sizeof ll,l)!=NULL;
+    }
+    if(l){fclose(l);} if(m){fclose(m);} if(o){fclose(o);}
+    sortFile(LC_IDX);
+}
+
+/* enumerate the server into SV_RAW (key=href): "href etag present". Prefers the
+ * RFC 6578 delta (only changed/deleted; the unchanged baseline comes from the
+ * map) and falls back to a full REPORT/PROPFIND. *incremental tells resolveServer
+ * how to read a map row that has no server row (unchanged vs. deleted). */
+typedef struct { FILE*f; } RawEnum;
+static void rawReportCb(const char*name,const char*etag,int deleted,void*ctx){
+    FILE*f=((RawEnum*)ctx)->f; if(f) fprintf(f,"%s\t%s\t%d\n",name,deleted?"":etag,deleted?0:1);
+}
+static void rawListCb(const char*name,const char*etag,void*ctx){
+    FILE*f=((RawEnum*)ctx)->f; if(f) fprintf(f,"%s\t%s\t1\n",name,etag);
+}
+/* truncate-reopen a stream (fclose+fopen, not freopen -- FATFS/VFS on the device
+ * doesn't reliably support freopen). Used to discard a partial enumeration. */
+static FILE* reopenTrunc(FILE*f,const char*path){
+    if(f) fclose(f);
+    return fopen(path,"w");
+}
+static void enumServer(const DavCtx*d,const char*coll,const char*token,
+                       char*newtok,int tokcap,int*incremental){
+    *incremental=0; newtok[0]=0;
+    RawEnum re; re.f=fopen(SV_RAW,"w");
     int done=0;
-    if(s->token[0]){
-        /* incremental: seed baseline from map (unchanged), then apply the delta */
-        for(int i=0;i<s->nmap;i++){ Srv*v=srvSlot(s,s->map[i].href);
-            if(v){ snprintf(v->etag,sizeof v->etag,"%s",s->map[i].etag); v->present=1; } }
-        int rc=dav_sync_report(d,coll,s->token,reportCb,s,s->newToken,sizeof s->newToken);
-        if(rc==0) done=1;                    /* delta applied                     */
-        else { s->nsrv=0; s->token[0]=0; s->newToken[0]=0; } /* token bad -> full */
+    if(token[0]){
+        int rc=dav_sync_report(d,coll,token,rawReportCb,&re,newtok,tokcap);
+        if(rc==0){ done=1; *incremental=1; }
+        else { newtok[0]=0; re.f=reopenTrunc(re.f,SV_RAW); }   /* discard partial delta */
     }
     if(!done){
-        /* full sync: try REPORT with empty token (also yields a fresh token) */
-        int rc=dav_sync_report(d,coll,"",reportCb,s,s->newToken,sizeof s->newToken);
-        if(rc!=0){
-            /* server doesn't support sync-collection: plain PROPFIND, no token */
-            s->nsrv=0; s->newToken[0]=0;
-            dav_list(d,coll,srvCb,s);
+        int rc=dav_sync_report(d,coll,"",rawReportCb,&re,newtok,tokcap);
+        if(rc!=0){ newtok[0]=0; re.f=reopenTrunc(re.f,SV_RAW); dav_list(d,coll,rawListCb,&re); }
+    }
+    if(re.f) fclose(re.f);
+}
+/* Resolve every server object to an objhash and write SV_IDX (key=objhash):
+ * "objhash href etag present". Joins SV_RAW (key href) with MP_HREF (key href):
+ *   both        -> objhash from the map (no GET); etag/present from enumeration.
+ *   map only    -> unchanged (incremental) present w/ map etag, else deleted.
+ *   server only -> a new object: GET it once to read its UID -> objhash.        */
+static void resolveServer(const DavCtx*d,const char*coll,int incremental){
+    sortFile(SV_RAW);                         /* merge-join needs it keyed (by href) */
+    FILE*s=fopen(SV_RAW,"r"),*m=fopen(MP_HREF,"r"),*o=fopen(SV_IDX,"w");
+    char sl[512],ml[512];
+    int haveS=s&&fgets(sl,sizeof sl,s), haveM=m&&fgets(ml,sizeof ml,m);
+    while(haveS||haveM){
+        char sh[128]="",se[160]=""; int sp=0;
+        if(haveS) sscanf(sl,"%127[^\t]\t%159[^\t]\t%d",sh,se,&sp);
+        char mh[128]=""; unsigned long long moh=0; char mou[48]="",me[160]="";
+        if(haveM) sscanf(ml,"%127[^\t]\t%llx\t%47[^\t]\t%159[^\t\r\n]",mh,&moh,mou,me);
+        int cmp = (haveS&&haveM)?strcmp(sh,mh):(haveS?-1:1);
+        if(cmp==0){                       /* in both: map objhash, enum etag/present */
+            if(o) fprintf(o,"%016llx\t%s\t%s\t%d\n",moh,mh,se,sp);
+            haveS=s&&fgets(sl,sizeof sl,s)!=NULL; haveM=m&&fgets(ml,sizeof ml,m)!=NULL;
+        } else if(cmp<0){                 /* server only */
+            if(sp){                       /* a new present object -> GET for its UID */
+                char objuid[48]=""; uint64_t oh;
+                int got=dav_get(d,coll,sh,g_objbuf,sizeof g_objbuf);
+                if(got>0 && got<OBJ_FETCH_CAP-1 && objuid_of(g_objbuf,objuid,sizeof objuid)==0) oh=uidHash(objuid);
+                else oh=uidHash(sh);
+                if(o) fprintf(o,"%016llx\t%s\t%s\t%d\n",(unsigned long long)oh,sh,se,1);
+            }                             /* else: delete of an object we never tracked -> ignore */
+            haveS=s&&fgets(sl,sizeof sl,s)!=NULL;
+        } else {                          /* map only: unchanged (incr) or deleted */
+            if(o) fprintf(o,"%016llx\t%s\t%s\t%d\n",moh,mh, incremental?me:"", incremental?1:0);
+            haveM=m&&fgets(ml,sizeof ml,m)!=NULL;
         }
     }
-    resolveSrvUids(s,d,coll);
+    if(s){fclose(s);} if(m){fclose(m);} if(o){fclose(o);}
+    sortFile(SV_IDX);
 }
 
-/* ---- reconciliation node: one logical record, identified by objhash (the UID
- * hash), holding indices into s->loc/map/srv. Keying on the UID hash (not the
- * href-derived uid) is what unifies a local record with its server object across
- * href relocations and lost map rows. `uid` is the Palm uniqueID to stamp on the
- * kept record / name a new object with. ---- */
-typedef struct {
-    uint64_t key;   /* objhash (uidHash of the record's UID) */
-    uint32_t uid;   /* Palm uniqueID (loc's, else map's, else nameToUid(href))   */
-    int li;   /* index into s->loc, or -1 */
-    int mi;   /* index into s->map, or -1 */
-    int si;   /* index into s->srv, or -1 */
-} Node;
+/* ---- merge-join rows: one parsed line from each sorted index file. A logical
+ * record is the set of rows (at most one per source) sharing an objhash; keying
+ * on the UID hash (not the href-derived uid) unifies a local record with its
+ * server object across href relocations and lost map rows. ---- */
+typedef struct { uint64_t oh; uint32_t uid; int idx,attr,len; uint64_t hash; int v; } LcRow;
+typedef struct { uint64_t oh; uint32_t uid; char href[64],etag[160],objuid[48]; uint64_t hash; int v; } MpRow;
+typedef struct { uint64_t oh; char href[128],etag[160]; int present; int v; } SvRow;
 
-static Node* nodeFor(Node*nodes,int*nn,uint64_t key){
-    for(int i=0;i<*nn;i++) if(nodes[i].key==key) return &nodes[i];
-    Node*n=&nodes[(*nn)++]; n->key=key; n->uid=0; n->li=n->mi=n->si=-1; return n;
+/* Each reader skips malformed lines and only reports v=0 at real EOF, so a stray
+ * line never truncates a source stream mid-merge. A well-formed key line always
+ * begins with a 16-hex-digit objhash. */
+static void lcRead(FILE*f,LcRow*r){
+    char ln[512]; r->v=0; if(!f) return;
+    while(fgets(ln,sizeof ln,f)){
+        unsigned long long oh,h; unsigned u;
+        if(sscanf(ln,"%llx\t%u\t%d\t%d\t%d\t%llu",&oh,&u,&r->idx,&r->attr,&r->len,&h)>=6){ r->oh=oh;r->uid=u;r->hash=h;r->v=1; return; }
+    }
 }
-/* the UID a local record currently carries: its stored map objuid if it has been
- * synced (the real, possibly-foreign UID), else the synth palm-<uid>@cyd. */
-static const char* mapObjuidByUid(const S*s,uint32_t uid){
-    for(int i=0;i<s->nmap;i++) if(s->map[i].uid==uid && s->map[i].objuid[0]) return s->map[i].objuid;
-    return NULL;
+static void mpRead(FILE*f,MpRow*r){
+    char ln[1400]; r->v=0; if(!f) return;
+    while(fgets(ln,sizeof ln,f)){
+        unsigned long long oh,h; unsigned u; r->href[0]=r->etag[0]=r->objuid[0]=0;
+        if(sscanf(ln,"%llx\t%u\t%63[^\t]\t%159[^\t]\t%llu\t%47[^\t\r\n]",&oh,&u,r->href,r->etag,&h,r->objuid)>=5){ r->oh=oh;r->uid=u;r->hash=h;r->v=1; return; }
+    }
+}
+static void svRead(FILE*f,SvRow*r){
+    char ln[512]; r->v=0; if(!f) return;
+    while(fgets(ln,sizeof ln,f)){
+        unsigned long long oh; r->href[0]=r->etag[0]=0; int p=0;
+        if(sscanf(ln,"%llx\t%127[^\t]\t%159[^\t]\t%d",&oh,r->href,r->etag,&p)>=2){ r->oh=oh;r->present=p;r->v=1; return; }
+    }
 }
 
 /* per-collection sink: the shared streamed output writer + this collection's
@@ -462,36 +560,25 @@ static int pushLocal(const DavCtx*d,const char*coll,int kind,Sink*k,
     return st<=0 ? -1 : st;
 }
 
-/* Reconcile one preloaded subset (s->loc filled, s->kind set) against one
- * collection; append kept records to the streamed writer *w; rewrite this
- * collection's map atomically (write to .tmp, rename on completion).         */
+/* Reconcile one collection by streaming merge-join. Builds the three UID-hash
+ * index files (LC_IDX/MP_IDX/SV_IDX -- local / map / server), then walks them in
+ * lockstep: for each distinct objhash it assembles the (loc,map,server) triple,
+ * runs the reconcile matrix, does at most one DAV op, and appends the kept record
+ * to the streamed writer *w plus a fresh row to the .tmp map. Only the current
+ * objhash's rows are ever resident, so peak RAM during a DAV op is O(1) in the
+ * record count. `rt`/`Ccoll` (or NULL) restrict local records to one routed
+ * collection for category sync. */
 static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
-                     ConflictPolicy pol,PdbW*w,int pullCat,SyncStats*st){
-    loadMap(s,mapfile);
-    buildServer(s,d,coll);
+                     ConflictPolicy pol,PdbW*w,int pullCat,SyncStats*st,
+                     const CatRoute*rt,const char*Ccoll){
+    uint32_t maxuid=0; int incremental=0;
+    buildMapIdx(mapfile,s->token,sizeof s->token,&maxuid);   /* MP_IDX/MP_HREF/MP_PALM + token */
+    enumServer(d,coll,s->token,s->newToken,sizeof s->newToken,&incremental); /* SV_RAW */
+    resolveServer(d,coll,incremental);                       /* SV_IDX (GETs new objects) */
+    buildLcRaw(s->pdbpath,s->kind,rt,Ccoll,&maxuid);         /* LC_RAW */
+    joinLcIdx();                                             /* LC_IDX */
+    uint32_t seed=maxuid+1;
 
-    /* heap (not static BSS) so this working set is freed after the sync and the
-     * memory returns to the UI in interactive mode. */
-    Node *nodes = calloc((size_t)MAXR*2, sizeof *nodes);
-    if(!nodes){ fprintf(stderr,"sync_one: out of memory\n"); return; }
-    int nn=0;
-    uint32_t seed=1;
-    /* key every source on the object's UID hash so a local record, its map row,
-     * and its server object collapse into one node even across href relocations. */
-    for(int i=0;i<s->nloc;i++){ uint32_t u=s->loc[i].uid;
-        const char*ou=mapObjuidByUid(s,u);
-        Node*n=nodeFor(nodes,&nn,ou?uidHash(ou):synthHash(u));
-        n->li=i; n->uid=u; if(u>=seed)seed=u+1; }
-    for(int i=0;i<s->nmap;i++){ uint32_t u=s->map[i].uid;
-        Node*n=nodeFor(nodes,&nn,s->map[i].objuid[0]?uidHash(s->map[i].objuid):synthHash(u));
-        n->mi=i; if(!n->uid)n->uid=u; if(u>=seed)seed=u+1; }
-    for(int i=0;i<s->nsrv;i++){ if(!s->srv[i].present) continue;
-        Node*n=nodeFor(nodes,&nn,s->srv[i].objhash); n->si=i;
-        if(!n->uid) n->uid=s->srv[i].uid;
-        if(s->srv[i].uid>=seed) seed=s->srv[i].uid+1; }
-
-    /* open the map for streaming (atomic: write .tmp, rename over mapfile at end).
-     * loadMap already read the old contents into s->map/s->token above.        */
     char mtmp[512]; snprintf(mtmp,sizeof mtmp,"%s.tmp",mapfile);
     FILE*mapf=fopen(mtmp,"w");
     if(mapf && s->newToken[0]) fprintf(mapf,"#synctoken\t%s\n",s->newToken);
@@ -499,116 +586,134 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
     Sink*k=&K;
     const char*ext = kindExt(s->kind); int kind=s->kind;
 
-    for(int i=0;i<nn;i++){
-        Node*n=&nodes[i];
-        const Loc*L   = n->li>=0 ? &s->loc[n->li] : NULL;
-        int hasMap    = n->mi>=0;
-        int hasSrv    = n->si>=0;
-        const char*mHref = hasMap ? s->map[n->mi].href : "";
-        const char*mEtag = hasMap ? s->map[n->mi].etag : "";
-        uint64_t   mHash = hasMap ? s->map[n->mi].hash : 0;
-        const char*mObjuid = hasMap ? s->map[n->mi].objuid : NULL;   /* this record's server UID */
-        const char*sName = hasSrv ? s->srv[n->si].name : "";
-        const char*sEtag = hasSrv ? s->srv[n->si].etag : "";
+    FILE*flc=fopen(LC_IDX,"r"),*fmp=fopen(MP_IDX,"r"),*fsv=fopen(SV_IDX,"r");
+    LcRow lc; MpRow mp; SvRow sv;
+    lcRead(flc,&lc); mpRead(fmp,&mp); svRead(fsv,&sv);
+
+    while(lc.v||mp.v||sv.v){
+        uint64_t mn=~0ULL;
+        if(lc.v&&lc.oh<mn)mn=lc.oh;
+        if(mp.v&&mp.oh<mn)mn=mp.oh;
+        if(sv.v&&sv.oh<mn)mn=sv.oh;
+        int hasL   = lc.v&&lc.oh==mn;
+        int hasMap = mp.v&&mp.oh==mn;
+        /* consume ALL server rows at this objhash, preferring a present one: a
+         * deleted row and its relocated replacement share a UID hash, and only
+         * the present one is the live object. */
+        SvRow se; se.v=0;
+        while(sv.v && sv.oh==mn){
+            if(!se.v || (sv.present && !se.present)) se=sv;
+            svRead(fsv,&sv);
+        }
+        int hasSraw= se.v;
+        int hasSrv = se.v && se.present;         /* a present=0 (deleted) srv row => no server object */
+
+        uint32_t uid = hasL?lc.uid : (hasMap?mp.uid : nameToUid(se.href));
+        Loc Lv; const Loc*L=NULL;
+        if(hasL){ Lv.uid=lc.uid; Lv.attr=(uint8_t)lc.attr; Lv.pdbIdx=lc.idx; Lv.len=lc.len; Lv.hash=lc.hash; L=&Lv; }
+        const char*mHref  = hasMap?mp.href:"";
+        const char*mEtag  = hasMap?mp.etag:"";
+        uint64_t   mHash  = hasMap?mp.hash:0;
+        const char*mObjuid= hasMap?mp.objuid:NULL;
+        const char*sName  = hasSrv?se.href:"";
+        const char*sEtag  = hasSrv?se.etag:"";
         int ldel = L && (L->attr & REC_ATTR_DELETE);
 
-        enum { LABSENT, LNEW, LMOD, LDEL, LCLEAN } lc;
-        if(!L)               lc=LABSENT;
-        else if(ldel)        lc=LDEL;
-        else if(!hasMap)     lc=LNEW;
-        else if(L->hash!=mHash) lc=LMOD;
-        else                 lc=LCLEAN;
+        enum { LABSENT, LNEW, LMOD, LDEL, LCLEAN } lcs;
+        if(!L)               lcs=LABSENT;
+        else if(ldel)        lcs=LDEL;
+        else if(!hasMap)     lcs=LNEW;
+        else if(L->hash!=mHash) lcs=LMOD;
+        else                 lcs=LCLEAN;
 
-        enum { SABSENT, SNEW, SMOD, SDEL, SCLEAN } sc;
-        if(!hasMap &&  hasSrv) sc=SNEW;
-        else if(!hasMap)       sc=SABSENT;
-        else if(!hasSrv)       sc=SDEL;
-        else if(strcmp(sEtag,mEtag)) sc=SMOD;
-        else                   sc=SCLEAN;
+        enum { SABSENT, SNEW, SMOD, SDEL, SCLEAN } scs;
+        if(!hasMap &&  hasSrv) scs=SNEW;
+        else if(!hasMap)       scs=SABSENT;
+        else if(!hasSrv)       scs=SDEL;
+        else if(strcmp(sEtag,mEtag)) scs=SMOD;
+        else                   scs=SCLEAN;
 
-        char lname[64]; snprintf(lname,sizeof lname,"%u.%s",(unsigned)n->uid,ext);
+        char lname[64]; snprintf(lname,sizeof lname,"%u.%s",(unsigned)uid,ext);
         const char*srvName = hasSrv?sName:(hasMap?mHref:lname);
 
-        int conflict = (lc==LMOD||lc==LDEL||lc==LNEW) && (sc==SMOD||sc==SNEW||sc==SDEL)
-                       && !(lc==LNEW&&sc==SABSENT) && !(lc==LDEL&&sc==SDEL);
+        int conflict = (lcs==LMOD||lcs==LDEL||lcs==LNEW) && (scs==SMOD||scs==SNEW||scs==SDEL)
+                       && !(lcs==LNEW&&scs==SABSENT) && !(lcs==LDEL&&scs==SDEL);
 
         if(conflict){
             st->conflicts++;
             int serverWins = (pol==POL_SERVER);
             int localWins  = (pol==POL_LOCAL);
             if(pol==POL_BOTH){
-                if(sc==SDEL){ localWins=1; }
-                else if(lc==LDEL){ serverWins=1; }
+                if(scs==SDEL){ localWins=1; }
+                else if(lcs==LDEL){ serverWins=1; }
                 else {
-                    if(sc!=SDEL) keepFromServer(d,coll,kind,k,n->uid,srvName,sEtag);
-                    if(L && lc!=LDEL){ uint32_t u2=seed++; char n2[64]; snprintf(n2,sizeof n2,"%u.%s",(unsigned)u2,ext);
+                    if(scs!=SDEL) keepFromServer(d,coll,kind,k,uid,srvName,sEtag);
+                    if(L && lcs!=LDEL){ uint32_t u2=seed++; char n2[64]; snprintf(n2,sizeof n2,"%u.%s",(unsigned)u2,ext);
                         pushLocal(d,coll,kind,k,s,L,u2,n2,NULL, NULL,NULL,0, NULL); }  /* fork = brand new */
-                    continue;
                 }
-            }
-            if(serverWins){
-                if(sc!=SDEL) keepFromServer(d,coll,kind,k,n->uid,srvName,sEtag);
+            } else if(serverWins){
+                if(scs!=SDEL) keepFromServer(d,coll,kind,k,uid,srvName,sEtag);
             } else if(localWins){
-                if(lc==LDEL){ dav_delete(d,coll,srvName,NULL); }
-                else pushLocal(d,coll,kind,k,s,L,n->uid,srvName,NULL, mHref,mEtag,mHash, mObjuid);
+                if(lcs==LDEL){ dav_delete(d,coll,srvName,NULL); }
+                else pushLocal(d,coll,kind,k,s,L,uid,srvName,NULL, mHref,mEtag,mHash, mObjuid);
             }
-            continue;
         }
-
-        if(lc==LNEW && sc==SABSENT){
-            int rc=pushLocal(d,coll,kind,k,s,L,n->uid,lname,NULL, NULL,NULL,0, NULL);
+        else if(lcs==LNEW && scs==SABSENT){
+            int rc=pushLocal(d,coll,kind,k,s,L,uid,lname,NULL, NULL,NULL,0, NULL);
             if(rc>=200 && rc<300) st->pushNew++;
             else if(rc==412){
-                /* creating this record failed because its UID already lives on the
-                 * server at another href (created elsewhere, or an orphan from a
-                 * lost mapping). It's a duplicate -> DROP this local copy (it was
-                 * not kept in the PDB); the server's canonical object is pulled
-                 * under its own href as a separate record. */
+                /* the UID already lives on the server at another href (created
+                 * elsewhere / orphaned map). DROP this local copy (not kept in the
+                 * PDB); the server's object is pulled under its own href. */
                 st->conflicts++;
-                fprintf(stderr,"[sync] uid=%u dropped: dup UID already on server (server copy wins)\n",(unsigned)n->uid);
+                fprintf(stderr,"[sync] uid=%u dropped: dup UID already on server (server copy wins)\n",(unsigned)uid);
             }
-        } else if(lc==LMOD && sc==SCLEAN){
-            int rc=pushLocal(d,coll,kind,k,s,L,n->uid,srvName,mEtag, mHref,mEtag,mHash, mObjuid);
+        } else if(lcs==LMOD && scs==SCLEAN){
+            int rc=pushLocal(d,coll,kind,k,s,L,uid,srvName,mEtag, mHref,mEtag,mHash, mObjuid);
             if(rc>=200 && rc<300) st->pushMod++;
-            else if(rc==412){
-                /* our conditional update was rejected: the server copy changed
-                 * under us (or an etag quirk). POL_SERVER -> take the server copy. */
+            else if(rc==412){                    /* server changed under us -> take server copy */
                 st->conflicts++;
-                if(keepFromServer(d,coll,kind,k,n->uid,srvName,sEtag)==0) st->pullMod++;
+                if(keepFromServer(d,coll,kind,k,uid,srvName,sEtag)==0) st->pullMod++;
             }
-        } else if(lc==LCLEAN && sc==SCLEAN){
+        } else if(lcs==LCLEAN && scs==SCLEAN){
             if(locBytes(s,L,g_lrec,sizeof g_lrec)==L->len)
-                keepBytes(k,n->uid,L->attr,g_lrec,L->len,srvName,mEtag,L->hash,mObjuid);
-            else fprintf(stderr,"[sync] lazy read failed for clean uid=%u\n",(unsigned)n->uid);
+                keepBytes(k,uid,L->attr,g_lrec,L->len,srvName,mEtag,L->hash,mObjuid);
+            else fprintf(stderr,"[sync] lazy read failed for clean uid=%u\n",(unsigned)uid);
             st->unchanged++;
-        } else if(lc==LCLEAN && sc==SMOD){
-            if(keepFromServer(d,coll,kind,k,n->uid,srvName,sEtag)==0) st->pullMod++;
-        } else if(lc==LCLEAN && sc==SDEL){
+        } else if(lcs==LCLEAN && scs==SMOD){
+            if(keepFromServer(d,coll,kind,k,uid,srvName,sEtag)==0) st->pullMod++;
+        } else if(lcs==LCLEAN && scs==SDEL){
             st->pullDel++;
-        } else if(lc==LDEL && sc==SCLEAN){
+        } else if(lcs==LDEL && scs==SCLEAN){
             dav_delete(d,coll,srvName,mEtag); st->pushDel++;
-        } else if(lc==LDEL && sc==SDEL){
+        } else if(lcs==LDEL && scs==SDEL){
             st->pushDel++;
-        } else if(lc==LABSENT && sc==SNEW){
-            if(keepFromServer(d,coll,kind,k,n->uid,srvName,sEtag)==0) st->pullNew++;
-        } else if(lc==LABSENT && sc==SCLEAN){
+        } else if(lcs==LABSENT && scs==SNEW){
+            if(keepFromServer(d,coll,kind,k,uid,srvName,sEtag)==0) st->pullNew++;
+        } else if(lcs==LABSENT && scs==SCLEAN){
             dav_delete(d,coll,srvName,mEtag); st->pushDel++;
         }
+
+        if(hasL)    lcRead(flc,&lc);
+        if(hasMap)  mpRead(fmp,&mp);
+        /* server rows at this objhash were already consumed above */
+        (void)hasSraw;
     }
+    if(flc){fclose(flc);} if(fmp){fclose(fmp);} if(fsv){fclose(fsv);}
 
     if(mapf){
         fclose(mapf);
         /* Publish the new map. FATFS rename() FAILS if the target exists (FR_EXIST),
-         * so a plain rename over an existing map silently no-ops -> the map freezes
-         * at its first-ever contents (here: an OLD 3-column "uid href hash" format
-         * with no etag), making every synced record look server-modified forever
-         * -> local edits get discarded as conflicts. Remove the target first. */
+         * so a plain rename over an existing map silently no-ops. Remove first. */
         remove(mapfile);
         if(rename(mtmp,mapfile)!=0)
             fprintf(stderr,"[sync] map publish FAILED for %s (rename errno=%d)\n",mapfile,errno);
     }
-    free(nodes);
 }
+
+/* count records in a PDB (for the empty-overwrite safety check). */
+static int countRecsCb(const PdbRec*r,int i,void*c){ (void)r;(void)i; (*(int*)c)++; return 0; }
+static int countRecs(const char*pdb){ int n=0; pdb_read(pdb,countRecsCb,&n); return n; }
 
 int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
                     const char*coll,int kind,const char*mapfile,
@@ -617,16 +722,16 @@ int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
     if(!s){ fprintf(stderr,"sync_collection: out of memory\n"); return -1; }
     s->kind=kind; snprintf(s->pdbpath,sizeof s->pdbpath,"%s",localpdb);
     static uint8_t ai[512]; int ailen=pdb_read_appinfo(localpdb,ai,sizeof ai); if(ailen<0)ailen=0;
-    int nin = pdb_read(localpdb,loadRec,s);
-    fprintf(stderr,"[sync] read %s: pdb_read=%d nloc=%d ailen=%d\n",localpdb,nin,s->nloc,ailen);
+    int nin = countRecs(localpdb);
+    fprintf(stderr,"[sync] read %s: recs=%d ailen=%d\n",localpdb,nin,ailen);
     SyncStats z={0}; if(!st) st=&z;
 
     PdbW *w = pdbw_begin(OUT_TMP);
     if(!w){ free(s); fprintf(stderr,"sync_collection: cannot open output temp\n"); return -1; }
-    sync_one(d,s,coll,mapfile,pol,w,0,st);
+    sync_one(d,s,coll,mapfile,pol,w,0,st,NULL,NULL);
     int nrec = pdbw_count(w);
-    fprintf(stderr,"[sync] %s: out=%d nmap=%d nsrv=%d push=%d/%d/%d pull=%d/%d/%d\n",
-            coll,nrec,s->nmap,s->nsrv,st->pushNew,st->pushMod,st->pushDel,
+    fprintf(stderr,"[sync] %s: out=%d push=%d/%d/%d pull=%d/%d/%d\n",
+            coll,nrec,st->pushNew,st->pushMod,st->pushDel,
             st->pullNew,st->pullMod,st->pullDel);
     /* SAFETY: never overwrite a local PDB that HAD records with an empty result.
      * A read glitch, a parse failure, or an unexpectedly-empty server must not be
@@ -649,14 +754,13 @@ int sync_categorized(const DavCtx*d,const char*localpdb,const char*outpdb,
                      int kind,const CatRoute*rt,const char*mapdir,
                      ConflictPolicy pol,SyncStats*st){
     static uint8_t ai[512]; int ailen=pdb_read_appinfo(localpdb,ai,sizeof ai); if(ailen<0)ailen=0;
-    S *all = calloc(1,sizeof *all); S *sub = calloc(1,sizeof *sub);
-    if(!all || !sub){ free(all); free(sub); fprintf(stderr,"sync_categorized: out of memory\n"); return -1; }
-    all->kind=kind; snprintf(all->pdbpath,sizeof all->pdbpath,"%s",localpdb);
-    pdb_read(localpdb,loadRec,all);
+    S *s = calloc(1,sizeof *s);
+    if(!s){ fprintf(stderr,"sync_categorized: out of memory\n"); return -1; }
+    s->kind=kind; snprintf(s->pdbpath,sizeof s->pdbpath,"%s",localpdb);
     SyncStats z={0}; if(!st) st=&z;
 
     PdbW *w = pdbw_begin(OUT_TMP);
-    if(!w){ free(all); free(sub); fprintf(stderr,"sync_categorized: cannot open output temp\n"); return -1; }
+    if(!w){ free(s); fprintf(stderr,"sync_categorized: cannot open output temp\n"); return -1; }
 
     /* distinct destination collections + a representative category id each */
     const char* colls[CAT_COUNT+1]; int catOf[CAT_COUNT+1]; int nc=0;
@@ -670,21 +774,13 @@ int sync_categorized(const DavCtx*d,const char*localpdb,const char*outpdb,
 
     for(int ci=0;ci<nc;ci++){
         const char*C=colls[ci];
-        memset(sub,0,sizeof *sub); sub->kind=kind;
-        snprintf(sub->pdbpath,sizeof sub->pdbpath,"%s",localpdb);   /* lazy reads hit the source */
-        for(int i=0;i<all->nloc;i++){
-            int cat = all->loc[i].attr & REC_ATTR_CAT;
-            const char*dest = rt->coll[cat]?rt->coll[cat]:rt->def;
-            if(!dest || strcmp(dest,C)) continue;
-            if(sub->nloc>=MAXR) break;
-            sub->loc[sub->nloc++]=all->loc[i];    /* copy index only; pdbIdx still valid */
-        }
+        s->token[0]=0; s->newToken[0]=0;      /* rebuilt per collection by sync_one */
         char san[300], mapfile[400]; sanitizeColl(C,san,sizeof san);
         snprintf(mapfile,sizeof mapfile,"%s/%s.map",mapdir,san);
-        sync_one(d,sub,C,mapfile,pol,w,catOf[ci],st);
+        sync_one(d,s,C,mapfile,pol,w,catOf[ci],st,rt,C);   /* rt/C filter local records to this coll */
     }
     int nrec = pdbw_count(w);
     int rc = kindCommit(w,kind,outpdb, ailen?ai:NULL, ailen);
-    free(all); free(sub);
+    free(s);
     return rc<0 ? -1 : nrec;
 }
