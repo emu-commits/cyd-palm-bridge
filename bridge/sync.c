@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include "palm.h"
 #include "appinfo.h"
 #include "sync.h"
@@ -216,7 +217,8 @@ static void loadMap(S*s,const char*mapfile){
             snprintf(s->token,sizeof s->token,"%s",t); continue;
         }
         Map m; memset(&m,0,sizeof m); unsigned long long h=0; unsigned mu=0;
-        if(sscanf(line,"%u\t%63[^\t]\t%159[^\t]\t%llu",&mu,m.href,m.etag,&h)>=3){
+        int nf=sscanf(line,"%u\t%63[^\t]\t%159[^\t]\t%llu",&mu,m.href,m.etag,&h);
+        if(nf>=3){
             m.uid=(uint32_t)mu; m.hash=(uint64_t)h; if(s->nmap<MAXR) s->map[s->nmap++]=m;
         }
     }
@@ -439,7 +441,17 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         }
     }
 
-    if(mapf){ fclose(mapf); rename(mtmp,mapfile); }   /* atomically publish the new map */
+    if(mapf){
+        fclose(mapf);
+        /* Publish the new map. FATFS rename() FAILS if the target exists (FR_EXIST),
+         * so a plain rename over an existing map silently no-ops -> the map freezes
+         * at its first-ever contents (here: an OLD 3-column "uid href hash" format
+         * with no etag), making every synced record look server-modified forever
+         * -> local edits get discarded as conflicts. Remove the target first. */
+        remove(mapfile);
+        if(rename(mtmp,mapfile)!=0)
+            fprintf(stderr,"[sync] map publish FAILED for %s (rename errno=%d)\n",mapfile,errno);
+    }
     free(nodes);
 }
 
