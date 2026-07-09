@@ -6,6 +6,27 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-09 — on-device config.ini (chunk 1: runtime loading)
+
+Branch `claude/config-ini` (`c536a19`), compile-verified, **not flashed** (flashing
+would clobber the streaming firmware under test on the device). Delivers
+hand-editable `/sdcard/config.ini`: Wi-Fi, iCloud login, per-app collections, and
+conflict policy can change without a reflash.
+
+- New `firmware/main/appcfg.[ch]`: the active runtime `Config`, loaded with
+  precedence `config_defaults()` (safe iCloud hosts + timers) < a seed from
+  `secrets.h` (a device with no config.ini behaves exactly as before) <
+  `/sdcard/config.ini` (overrides any field it lists). The parser/serialiser
+  (`bridge/config.c`) was already gate-tested; this is the firmware wiring.
+- `hotsync.c` now reads all creds / collections / policy from `appcfg()` instead
+  of the compile-time macros, and logs which source it used. Per-app PDB/map
+  paths stay compile-time (device-local).
+- `DavCtx.user` 64→128 (`bridge/dav.h`): an Apple ID email can exceed 63 chars;
+  the old size would silently truncate → confusing auth failure.
+- TODO chunks (queued until PR #2 merges, so they can be flashed + tested on a
+  clean base): Preferences editor UI (LVGL form + Graffiti + `appcfg_save()`),
+  collection-discovery screen (Wi-Fi → PROPFIND → pick collection).
+
 ## SESSION 2026-07-09 (cont.) — close out sync: UID identity + streaming
 
 Branch `claude/sync-uid-streaming`. Two staged rewrites of `bridge/sync.c`, each

@@ -75,12 +75,22 @@ All commits are on `origin/main` (`254c115`).
 
 ## P1 — Product completeness (usable by someone other than us)
 
-5. **On-device configuration (`config.ini`).** Creds are still compile-time in
-   `secrets.h`. Wire the existing Preferences engine + `config.ini` parser so
-   Wi-Fi, iCloud login, and per-app collections are set on the device — plus an
-   on-device **collection discovery** screen (pick your calendar / reminders /
-   contacts, which today is done by hand via PROPFIND). This is the single
-   biggest gap between "our prototype" and "a PDA someone can set up."
+5. **On-device configuration (`config.ini`).** *In progress on branch
+   `claude/config-ini`.*
+   - **Chunk 1 DONE (`c536a19`, compile-verified, not yet flashed):** the device
+     loads `/sdcard/config.ini` at runtime via `firmware/main/appcfg.[ch]`
+     (precedence: `config_defaults()` < `secrets.h` seed < `config.ini`). HotSync
+     reads Wi-Fi / iCloud / per-app collections / policy from `appcfg()` instead
+     of the compile-time macros. So creds + collections are now editable by
+     hand-editing the SD card — no reflash. `DavCtx.user` grown 64→128.
+   - **Chunk 2 (TODO):** Preferences editor UI — an LVGL form to edit the fields
+     on-device (Graffiti entry) + `appcfg_save()` to write `config.ini`.
+   - **Chunk 3 (TODO):** collection-discovery screen — Wi-Fi up → PROPFIND →
+     pick your calendar / reminders / address book instead of pasting UUIDs.
+   Chunks 2–3 are held until the sync PR merges, so they can be built + flashed +
+   tested on a clean `main` (flashing now would clobber the sync test firmware).
+   This is the single biggest gap between "our prototype" and "a PDA someone can
+   set up."
 
 6. **Graffiti punctuation.** Only `.` exists — no `@`, `,`, `/`, etc., so you
    can't type an email address (half-broken contact entry). Add a
