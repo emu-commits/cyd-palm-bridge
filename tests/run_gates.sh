@@ -75,6 +75,7 @@ run "fuzz (parser hardening, ASan)" noclean ./fuzz_test
 run "incremental (two-way + policies)" clean ./incremental
 run "synctoken (RFC 6578 delta)"       clean ./synctoken
 run "category (category->collection)"  clean ./category
+run "uidmatch (UID identity, reloc+foreign)" clean ./uidmatch
 run "bigsync (device-sized, 90 recs)"  clean ./bigsync
 run "multiapp (To Do + Address sync)"  clean ./multiapp
 run "dav_roundtrip (PDB->server->PDB)" clean ./tests/dav_roundtrip.sh

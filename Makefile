@@ -5,7 +5,7 @@ CORE    = bridge/pdb.c bridge/datebook.c bridge/address.c bridge/ical.c bridge/v
           bridge/find.c
 
 all: roundtrip bridge_cli incremental synctoken category bigsync multiapp \
-     find_test calc_test config_test
+     uidmatch find_test calc_test config_test
 
 dirs:
 	@mkdir -p pdb state
@@ -33,6 +33,11 @@ bigsync: tests/bigsync.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 # per-app sync_collection coverage for To Do (VTODO) + Address (vCard) -- the
 # exact per-collection path HotSync uses for each app. See tests/multiapp.c.
 multiapp: tests/multiapp.c bridge/dav.c bridge/sync.c $(CORE) | dirs
+	$(CC) $(CFLAGS) -o $@ $^
+
+# reconciliation is keyed on the object UID, not the href: href relocation and
+# foreign-object edits round-trip without dups. See tests/uidmatch.c.
+uidmatch: tests/uidmatch.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
 # offline unit tests (no server needed)

@@ -86,20 +86,59 @@ static int kindCommit(PdbW*w,int k,const char*path,const uint8_t*ai,int ailen){
 /* ======================= full-sync primitives ========================== */
 typedef struct { const DavCtx*d; const char*coll; int kind; FILE*map; int n; } PushCtx;
 
-static int emit_object(int kind,const uint8_t*data,int len,uint32_t uid,char*out,int cap){
+/* pull the UID: property value out of a serialized iCal/vCard object. 0/-1.
+ * matches "UID:" only at the start of a line (the object always starts with
+ * BEGIN:, so the leading byte can never be a false hit). */
+static int objuid_of(const char*obj,char*out,int cap){
+    const char*p=obj;
+    while((p=strstr(p,"UID:"))){
+        if(p==obj || p[-1]=='\n'){
+            p+=4; int j=0;
+            while(*p && *p!='\r' && *p!='\n' && j<cap-1) out[j++]=*p++;
+            out[j]=0; return j>0?0:-1;
+        }
+        p+=4;
+    }
+    return -1;
+}
+/* rewrite the (single) UID: line of a serialized object to carry `uid`. The
+ * emitters synthesize UID:palm-<n>@cyd; a record pulled from another client
+ * must be pushed back with its ORIGINAL UID (CalDAV/CardDAV treat a resource's
+ * UID as immutable), so foreign edits don't 412 or duplicate. No-op if the new
+ * uid is NULL/empty or won't fit. */
+static void setUidLine(char*buf,int cap,const char*uid){
+    if(!uid||!uid[0]) return;
+    char*p=buf;
+    for(;;){ p=strstr(p,"UID:"); if(!p) return; if(p==buf||p[-1]=='\n') break; p+=4; }
+    char*val=p+4; char*eol=val; while(*eol && *eol!='\r' && *eol!='\n') eol++;
+    int newlen=(int)strlen(uid), tail=(int)strlen(eol);
+    if((int)(val-buf)+newlen+tail+1>cap) return;   /* won't fit; leave as-is */
+    memmove(val+newlen,eol,tail+1);                /* shift tail incl NUL */
+    memcpy(val,uid,newlen);
+}
+
+/* serialize a Palm record to its iCal/vCard object. uidOverride (or NULL): when
+ * set, the object carries that UID instead of the synthesized palm-<uid>@cyd --
+ * used to preserve a foreign object's own UID on push. Returns byte length or -1. */
+static int emit_object(int kind,const uint8_t*data,int len,uint32_t uid,char*out,int cap,
+                       const char*uidOverride){
+    int n;
     if(kind==KIND_CAL){
         Appt a; if(ApptUnpack(data,len,&a)) return -1;
         char v[4096]; ical_emit(v,sizeof v,&a,uid);
         char vt[1200]; int vl=(a.hasTime)?ical_vtimezone(vt,sizeof vt):0; if(vl<0)vl=0; if(!vl)vt[0]=0;
-        return snprintf(out,cap,"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//CYD-Palm-Bridge//EN\r\n%s%sEND:VCALENDAR\r\n",vt,v);
+        n=snprintf(out,cap,"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//CYD-Palm-Bridge//EN\r\n%s%sEND:VCALENDAR\r\n",vt,v);
     } else if(kind==KIND_TODO){
         Todo t; if(ToDoUnpack(data,len,&t)) return -1;
         char v[2048]; vtodo_emit(v,sizeof v,&t,uid);
-        return snprintf(out,cap,"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//CYD-Palm-Bridge//EN\r\n%sEND:VCALENDAR\r\n",v);
+        n=snprintf(out,cap,"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//CYD-Palm-Bridge//EN\r\n%sEND:VCALENDAR\r\n",v);
     } else {
         Addr a; if(AddrUnpack(data,len,&a)) return -1;
-        return vcard_emit(out,cap,&a,uid);
+        n=vcard_emit(out,cap,&a,uid);
     }
+    if(n<0) return -1;
+    if(uidOverride && uidOverride[0]) setUidLine(out,cap,uidOverride);
+    return (int)strlen(out);
 }
 /* server object bytes -> packed Palm record (inverse of emit_object). len or -1. */
 static int parse_object(int kind,const char*obj,uint8_t*out,int cap){
@@ -110,7 +149,7 @@ static int parse_object(int kind,const char*obj,uint8_t*out,int cap){
 
 static int pushRec(const PdbRec*r,int i,void*ctx){
     (void)i; PushCtx*p=ctx;
-    int bl=emit_object(p->kind,r->data,r->len,r->uniqueID,g_body,sizeof g_body);
+    int bl=emit_object(p->kind,r->data,r->len,r->uniqueID,g_body,sizeof g_body,NULL);
     if(bl<0) return 0;
     FILE*f=fopen(BODY_TMP,"wb"); fwrite(g_body,1,strlen(g_body),f); fclose(f);
     char name[64]; snprintf(name,sizeof name,"%u.%s",(unsigned)r->uniqueID,kindExt(p->kind));
@@ -171,6 +210,15 @@ static uint32_t nameToUid(const char*name){
     if(end!=name && (*end=='.'||*end==0)) return (uint32_t)v;
     return (uint32_t)(fnv1a(name) & 0xFFFFFF);   /* stable id for foreign hrefs */
 }
+/* reconciliation identity: a 64-bit hash of an object's iCal/vCard UID. This
+ * (not the href name) is what matches a local record to its server object, so a
+ * relocated href or a lost map row no longer splits one record into two. */
+static uint64_t uidHash(const char*u){ return fnv1a(u); }
+/* the UID a never-synced local record will carry: palm-<uid>@cyd (what the
+ * emitters synthesize), so its identity is stable from the very first push. */
+static uint64_t synthHash(uint32_t uid){
+    char b[32]; snprintf(b,sizeof b,"palm-%u@cyd",(unsigned)uid); return uidHash(b);
+}
 
 /* ---- state loaded for reconciliation ---- */
 typedef struct {                       /* local records (index only; bytes read lazily) */
@@ -178,9 +226,11 @@ typedef struct {                       /* local records (index only; bytes read 
 } Loc;
 typedef struct {                       /* persisted map rows */
     uint32_t uid; char href[64]; char etag[160]; uint64_t hash;
+    char objuid[48];                   /* the object's own UID (immutable id) */
 } Map;
 typedef struct {                       /* server objects (from PROPFIND / sync REPORT) */
     char name[128]; char etag[160]; uint32_t uid; int present;
+    uint64_t objhash;                  /* uidHash of this object's UID (resolved) */
 } Srv;
 
 typedef struct {
@@ -203,7 +253,9 @@ static int loadRec(const PdbRec*r,int i,void*ctx){
     if(s->nloc>=MAXR){ fprintf(stderr,"[sync] loc index full at %d recs -- rest not synced\n",s->nloc); return 1; }
     Loc*L=&s->loc[s->nloc];
     L->uid=r->uniqueID; L->attr=r->attr; L->len=r->len; L->pdbIdx=i;
-    if(emit_object(s->kind,r->data,r->len,r->uniqueID,g_body,sizeof g_body)<0) L->hash=0;
+    /* canonical hash is over the synth-UID body (UID-independent): it flags a
+     * LOCAL content change, and matches the hash keepFromServer stores on pull. */
+    if(emit_object(s->kind,r->data,r->len,r->uniqueID,g_body,sizeof g_body,NULL)<0) L->hash=0;
     else L->hash=fnv1a(g_body);
     s->nloc++;
     return 0;
@@ -217,9 +269,10 @@ static void loadMap(S*s,const char*mapfile){
             snprintf(s->token,sizeof s->token,"%s",t); continue;
         }
         Map m; memset(&m,0,sizeof m); unsigned long long h=0; unsigned mu=0;
-        int nf=sscanf(line,"%u\t%63[^\t]\t%159[^\t]\t%llu",&mu,m.href,m.etag,&h);
+        int nf=sscanf(line,"%u\t%63[^\t]\t%159[^\t]\t%llu\t%47[^\t\r\n]",&mu,m.href,m.etag,&h,m.objuid);
         if(nf>=3){
-            m.uid=(uint32_t)mu; m.hash=(uint64_t)h; if(s->nmap<MAXR) s->map[s->nmap++]=m;
+            m.uid=(uint32_t)mu; m.hash=(uint64_t)h; if(nf<5) m.objuid[0]=0;
+            if(s->nmap<MAXR) s->map[s->nmap++]=m;
         }
     }
     fclose(f);
@@ -241,58 +294,9 @@ static void reportCb(const char*name,const char*etag,int deleted,void*ctx){ /* s
     else { snprintf(v->etag,sizeof v->etag,"%s",etag); v->present=1; }
 }
 
-/* Build current server state into s->srv[], preferring RFC 6578 sync-collection.
- * Returns via s->newToken the token to persist (empty if unsupported).          */
-static void buildServer(S*s,const DavCtx*d,const char*coll){
-    s->newToken[0]=0;
-    if(s->token[0]){
-        /* incremental: seed baseline from map (unchanged), then apply the delta */
-        for(int i=0;i<s->nmap;i++){ Srv*v=srvSlot(s,s->map[i].href);
-            if(v){ snprintf(v->etag,sizeof v->etag,"%s",s->map[i].etag); v->present=1; } }
-        int rc=dav_sync_report(d,coll,s->token,reportCb,s,s->newToken,sizeof s->newToken);
-        if(rc==0) return;                    /* delta applied                     */
-        /* token invalid or unsupported -> reset and fall through to full */
-        s->nsrv=0; s->token[0]=0; s->newToken[0]=0;
-    }
-    /* full sync: try REPORT with empty token (also yields a fresh token) */
-    int rc=dav_sync_report(d,coll,"",reportCb,s,s->newToken,sizeof s->newToken);
-    if(rc==0) return;
-    /* server doesn't support sync-collection: plain PROPFIND, no token */
-    s->nsrv=0; s->newToken[0]=0;
-    dav_list(d,coll,srvCb,s);
-}
-
-/* ---- reconciliation node: indices into s->loc/map/srv for one uid (no string
- * copies -- keeps the node table tiny so MAXR can be large on the device). ---- */
-typedef struct {
-    uint32_t uid;
-    int li;   /* index into s->loc, or -1 */
-    int mi;   /* index into s->map, or -1 */
-    int si;   /* index into s->srv, or -1 */
-} Node;
-
-static Node* nodeFor(Node*nodes,int*nn,uint32_t uid){
-    for(int i=0;i<*nn;i++) if(nodes[i].uid==uid) return &nodes[i];
-    Node*n=&nodes[(*nn)++]; n->uid=uid; n->li=n->mi=n->si=-1; return n;
-}
-
-/* per-collection sink: the shared streamed output writer + this collection's
- * open map file + the category to stamp on records pulled from the server.   */
-typedef struct { PdbW*w; FILE*mapf; int pullCat; } Sink;
-
-static void keepBytes(Sink*k,uint32_t uid,uint8_t attr,const uint8_t*data,int len,
-                      const char*href,const char*etag,uint64_t hash){
-    pdbw_rec(k->w,uid,(uint8_t)(attr&~REC_ATTR_DIRTY&~REC_ATTR_DELETE),data,len);
-    if(k->mapf) fprintf(k->mapf,"%u\t%s\t%s\t%llu\n",
-                        (unsigned)uid,href,etag,(unsigned long long)hash);
-}
-
-/* GET a server object, parse+pack into a local record, keep it (stamped with
- * the sink's pullCat category). */
-/* fetch buffer for one server object. iCloud contacts can embed a base64 PHOTO
- * that pushes the raw vCard well past 16 KB; too small a buffer truncates the
- * object (no END:VCARD) and it silently fails to parse. Generous on host; the
- * device build (no PSRAM) overrides this small. */
+/* fetch buffer for one server object (see keepFromServer for the sizing note).
+ * Defined here so resolveSrvUids can reuse it; the guarded block below is a
+ * no-op once this is set. */
 #ifndef OBJ_FETCH_CAP
 #ifdef ESP_PLATFORM
 #define OBJ_FETCH_CAP (8*1024)       /* no PSRAM: photo-heavy vCards get skipped+warned */
@@ -300,19 +304,109 @@ static void keepBytes(Sink*k,uint32_t uid,uint8_t attr,const uint8_t*data,int le
 #define OBJ_FETCH_CAP (256*1024)
 #endif
 #endif
+/* one shared server-object fetch buffer (too big for the stack). Used by
+ * resolveSrvUids (enumeration) and keepFromServer (reconcile) -- never at the
+ * same time -- so a single static keeps BSS flat on the no-PSRAM device. */
+static char g_objbuf[OBJ_FETCH_CAP];
+
+/* Resolve each present server object's identity hash (uidHash of its UID). The
+ * map is a free cache: a row with the same href AND unchanged etag already knows
+ * the UID, so only genuinely new/changed objects cost a GET. Falls back to a
+ * name-based hash if the object can't be fetched/parsed (still stable).        */
+static void resolveSrvUids(S*s,const DavCtx*d,const char*coll){
+    for(int i=0;i<s->nsrv;i++){
+        Srv*v=&s->srv[i]; if(!v->present){ v->objhash=0; continue; }
+        char objuid[48]=""; int have=0;
+        for(int j=0;j<s->nmap;j++)
+            if(s->map[j].objuid[0] && !strcmp(s->map[j].href,v->name) && !strcmp(s->map[j].etag,v->etag)){
+                snprintf(objuid,sizeof objuid,"%s",s->map[j].objuid); have=1; break; }
+        if(!have){
+            int got=dav_get(d,coll,v->name,g_objbuf,sizeof g_objbuf);
+            if(got>0 && got<OBJ_FETCH_CAP-1 && objuid_of(g_objbuf,objuid,sizeof objuid)==0) have=1;
+        }
+        v->objhash = have ? uidHash(objuid) : uidHash(v->name);
+    }
+}
+
+/* Build current server state into s->srv[], preferring RFC 6578 sync-collection.
+ * Returns via s->newToken the token to persist (empty if unsupported); every
+ * path ends by resolving each object's identity hash (resolveSrvUids).         */
+static void buildServer(S*s,const DavCtx*d,const char*coll){
+    s->newToken[0]=0;
+    int done=0;
+    if(s->token[0]){
+        /* incremental: seed baseline from map (unchanged), then apply the delta */
+        for(int i=0;i<s->nmap;i++){ Srv*v=srvSlot(s,s->map[i].href);
+            if(v){ snprintf(v->etag,sizeof v->etag,"%s",s->map[i].etag); v->present=1; } }
+        int rc=dav_sync_report(d,coll,s->token,reportCb,s,s->newToken,sizeof s->newToken);
+        if(rc==0) done=1;                    /* delta applied                     */
+        else { s->nsrv=0; s->token[0]=0; s->newToken[0]=0; } /* token bad -> full */
+    }
+    if(!done){
+        /* full sync: try REPORT with empty token (also yields a fresh token) */
+        int rc=dav_sync_report(d,coll,"",reportCb,s,s->newToken,sizeof s->newToken);
+        if(rc!=0){
+            /* server doesn't support sync-collection: plain PROPFIND, no token */
+            s->nsrv=0; s->newToken[0]=0;
+            dav_list(d,coll,srvCb,s);
+        }
+    }
+    resolveSrvUids(s,d,coll);
+}
+
+/* ---- reconciliation node: one logical record, identified by objhash (the UID
+ * hash), holding indices into s->loc/map/srv. Keying on the UID hash (not the
+ * href-derived uid) is what unifies a local record with its server object across
+ * href relocations and lost map rows. `uid` is the Palm uniqueID to stamp on the
+ * kept record / name a new object with. ---- */
+typedef struct {
+    uint64_t key;   /* objhash (uidHash of the record's UID) */
+    uint32_t uid;   /* Palm uniqueID (loc's, else map's, else nameToUid(href))   */
+    int li;   /* index into s->loc, or -1 */
+    int mi;   /* index into s->map, or -1 */
+    int si;   /* index into s->srv, or -1 */
+} Node;
+
+static Node* nodeFor(Node*nodes,int*nn,uint64_t key){
+    for(int i=0;i<*nn;i++) if(nodes[i].key==key) return &nodes[i];
+    Node*n=&nodes[(*nn)++]; n->key=key; n->uid=0; n->li=n->mi=n->si=-1; return n;
+}
+/* the UID a local record currently carries: its stored map objuid if it has been
+ * synced (the real, possibly-foreign UID), else the synth palm-<uid>@cyd. */
+static const char* mapObjuidByUid(const S*s,uint32_t uid){
+    for(int i=0;i<s->nmap;i++) if(s->map[i].uid==uid && s->map[i].objuid[0]) return s->map[i].objuid;
+    return NULL;
+}
+
+/* per-collection sink: the shared streamed output writer + this collection's
+ * open map file + the category to stamp on records pulled from the server.   */
+typedef struct { PdbW*w; FILE*mapf; int pullCat; } Sink;
+
+static void keepBytes(Sink*k,uint32_t uid,uint8_t attr,const uint8_t*data,int len,
+                      const char*href,const char*etag,uint64_t hash,const char*objuid){
+    pdbw_rec(k->w,uid,(uint8_t)(attr&~REC_ATTR_DIRTY&~REC_ATTR_DELETE),data,len);
+    if(k->mapf) fprintf(k->mapf,"%u\t%s\t%s\t%llu\t%s\n",
+                        (unsigned)uid,href,etag,(unsigned long long)hash,objuid?objuid:"");
+}
+
+/* GET a server object, parse+pack into a local record, keep it (stamped with
+ * the sink's pullCat category). The fetch buffer (g_objbuf) is generous on host;
+ * the no-PSRAM device build keeps it small, so a photo-heavy vCard that overruns
+ * it is skipped with a warning rather than silently truncated. */
 static int keepFromServer(const DavCtx*d,const char*coll,int kind,Sink*k,
                           uint32_t uid,const char*name,const char*etag){
-    static char obj[OBJ_FETCH_CAP];       /* static, not stack (too big for stack) */
-    int got=dav_get(d,coll,name,obj,sizeof obj);
+    int got=dav_get(d,coll,name,g_objbuf,sizeof g_objbuf);
     if(got<=0){ fprintf(stderr,"warning: could not fetch %s -- dropped\n",name); return -1; }
     if(got>=OBJ_FETCH_CAP-1){             /* hit the buffer limit => truncated */
         fprintf(stderr,"warning: %s exceeds %d bytes (large PHOTO?) -- dropped\n",name,OBJ_FETCH_CAP);
         return -1; }
     uint8_t tmp[PALM_REC_MAX];
-    int l=parse_object(kind,obj,tmp,sizeof tmp);
+    int l=parse_object(kind,g_objbuf,tmp,sizeof tmp);
     if(l<=0){ fprintf(stderr,"warning: could not parse %s -- dropped\n",name); return -1; }
-    emit_object(kind,tmp,l,uid,g_body,sizeof g_body);
-    keepBytes(k,uid,(uint8_t)k->pullCat,tmp,l,name,etag,fnv1a(g_body));
+    char ouid[48]=""; objuid_of(g_objbuf,ouid,sizeof ouid);   /* preserve the object's own UID */
+    /* hash over the synth-UID body (UID-independent) so it matches loadRec's. */
+    emit_object(kind,tmp,l,uid,g_body,sizeof g_body,NULL);
+    keepBytes(k,uid,(uint8_t)k->pullCat,tmp,l,name,etag,fnv1a(g_body),ouid);
     return 0;
 }
 
@@ -326,20 +420,30 @@ static int keepFromServer(const DavCtx*d,const char*coll,int kind,Sink*k,
  * map with a bad/empty etag (which would make the next sync treat the record as
  * server-deleted -> local data loss). Returns the HTTP status (<=0 -> -1); the
  * caller counts pushNew/pushMod only on a 2xx. */
+/* `objuid` (or NULL): the UID this record already carries on the server (its
+ * immutable id, from the map). When set, the pushed body preserves it and the
+ * fresh/preserved map row records it; when NULL the record is brand-new and gets
+ * the synth palm-<uid>@cyd. */
 static int pushLocal(const DavCtx*d,const char*coll,int kind,Sink*k,
                      const S*s,const Loc*L,uint32_t uid,
                      const char*name,const char*ifmatch,
-                     const char*oldHref,const char*oldEtag,uint64_t oldHash){
+                     const char*oldHref,const char*oldEtag,uint64_t oldHash,
+                     const char*objuid){
     if(locBytes(s,L,g_lrec,sizeof g_lrec)!=L->len){
         fprintf(stderr,"[sync] lazy read failed for local uid=%u -- skipped\n",(unsigned)uid); return -1; }
-    int bl=emit_object(kind,g_lrec,L->len,uid,g_body,sizeof g_body);
+    int bl=emit_object(kind,g_lrec,L->len,uid,g_body,sizeof g_body,objuid);
     if(bl<0) return -1;
+    /* the UID actually stored in the object (override, else the synth default). */
+    char synth[32]; snprintf(synth,sizeof synth,"palm-%u@cyd",(unsigned)uid);
+    const char*storedUid = (objuid&&objuid[0]) ? objuid : synth;
     FILE*f=fopen(BODY_TMP,"wb"); if(!f) return -1; fwrite(g_body,1,strlen(g_body),f); fclose(f);
     char etag[160]=""; int st=0;
     dav_put(d,coll,name,kindCType(kind),BODY_TMP,ifmatch,etag,sizeof etag,&st);
     if(st>=200 && st<300){
         if(!etag[0]) dav_getetag(d,coll,name,etag,sizeof etag);   /* fallback */
-        keepBytes(k,uid,L->attr,g_lrec,L->len,name,etag,fnv1a(g_body));  /* PDB + fresh map row */
+        /* hash over the synth-UID body (UID-independent), matching loadRec. */
+        emit_object(kind,g_lrec,L->len,uid,g_body,sizeof g_body,NULL);
+        keepBytes(k,uid,L->attr,g_lrec,L->len,name,etag,fnv1a(g_body),storedUid); /* PDB + fresh map row */
         return st;
     }
     /* 412 = the UID already exists on the server at a DIFFERENT href (iCloud
@@ -353,7 +457,8 @@ static int pushLocal(const DavCtx*d,const char*coll,int kind,Sink*k,
     fprintf(stderr,"[sync] push FAILED uid=%u (HTTP %d) -- kept local, will retry\n",(unsigned)uid,st);
     pdbw_rec(k->w,uid,(uint8_t)(L->attr&~REC_ATTR_DIRTY&~REC_ATTR_DELETE),g_lrec,L->len); /* keep local */
     if(k->mapf && oldHref && oldHref[0])                                  /* preserve old mapping */
-        fprintf(k->mapf,"%u\t%s\t%s\t%llu\n",(unsigned)uid,oldHref,oldEtag?oldEtag:"",(unsigned long long)oldHash);
+        fprintf(k->mapf,"%u\t%s\t%s\t%llu\t%s\n",(unsigned)uid,oldHref,oldEtag?oldEtag:"",
+                (unsigned long long)oldHash,objuid?objuid:"");
     return st<=0 ? -1 : st;
 }
 
@@ -371,12 +476,19 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
     if(!nodes){ fprintf(stderr,"sync_one: out of memory\n"); return; }
     int nn=0;
     uint32_t seed=1;
-    for(int i=0;i<s->nloc;i++){ Node*n=nodeFor(nodes,&nn,s->loc[i].uid); n->li=i; if(s->loc[i].uid>=seed)seed=s->loc[i].uid+1; }
-    for(int i=0;i<s->nmap;i++){ Node*n=nodeFor(nodes,&nn,s->map[i].uid); n->mi=i;
-        if(s->map[i].uid>=seed)seed=s->map[i].uid+1; }
+    /* key every source on the object's UID hash so a local record, its map row,
+     * and its server object collapse into one node even across href relocations. */
+    for(int i=0;i<s->nloc;i++){ uint32_t u=s->loc[i].uid;
+        const char*ou=mapObjuidByUid(s,u);
+        Node*n=nodeFor(nodes,&nn,ou?uidHash(ou):synthHash(u));
+        n->li=i; n->uid=u; if(u>=seed)seed=u+1; }
+    for(int i=0;i<s->nmap;i++){ uint32_t u=s->map[i].uid;
+        Node*n=nodeFor(nodes,&nn,s->map[i].objuid[0]?uidHash(s->map[i].objuid):synthHash(u));
+        n->mi=i; if(!n->uid)n->uid=u; if(u>=seed)seed=u+1; }
     for(int i=0;i<s->nsrv;i++){ if(!s->srv[i].present) continue;
-        Node*n=nodeFor(nodes,&nn,s->srv[i].uid); n->si=i;
-        if(s->srv[i].uid>=seed)seed=s->srv[i].uid+1; }
+        Node*n=nodeFor(nodes,&nn,s->srv[i].objhash); n->si=i;
+        if(!n->uid) n->uid=s->srv[i].uid;
+        if(s->srv[i].uid>=seed) seed=s->srv[i].uid+1; }
 
     /* open the map for streaming (atomic: write .tmp, rename over mapfile at end).
      * loadMap already read the old contents into s->map/s->token above.        */
@@ -395,6 +507,7 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         const char*mHref = hasMap ? s->map[n->mi].href : "";
         const char*mEtag = hasMap ? s->map[n->mi].etag : "";
         uint64_t   mHash = hasMap ? s->map[n->mi].hash : 0;
+        const char*mObjuid = hasMap ? s->map[n->mi].objuid : NULL;   /* this record's server UID */
         const char*sName = hasSrv ? s->srv[n->si].name : "";
         const char*sEtag = hasSrv ? s->srv[n->si].etag : "";
         int ldel = L && (L->attr & REC_ATTR_DELETE);
@@ -429,7 +542,7 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
                 else {
                     if(sc!=SDEL) keepFromServer(d,coll,kind,k,n->uid,srvName,sEtag);
                     if(L && lc!=LDEL){ uint32_t u2=seed++; char n2[64]; snprintf(n2,sizeof n2,"%u.%s",(unsigned)u2,ext);
-                        pushLocal(d,coll,kind,k,s,L,u2,n2,NULL, NULL,NULL,0); }
+                        pushLocal(d,coll,kind,k,s,L,u2,n2,NULL, NULL,NULL,0, NULL); }  /* fork = brand new */
                     continue;
                 }
             }
@@ -437,13 +550,13 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
                 if(sc!=SDEL) keepFromServer(d,coll,kind,k,n->uid,srvName,sEtag);
             } else if(localWins){
                 if(lc==LDEL){ dav_delete(d,coll,srvName,NULL); }
-                else pushLocal(d,coll,kind,k,s,L,n->uid,lname,NULL, mHref,mEtag,mHash);
+                else pushLocal(d,coll,kind,k,s,L,n->uid,srvName,NULL, mHref,mEtag,mHash, mObjuid);
             }
             continue;
         }
 
         if(lc==LNEW && sc==SABSENT){
-            int rc=pushLocal(d,coll,kind,k,s,L,n->uid,lname,NULL, NULL,NULL,0);
+            int rc=pushLocal(d,coll,kind,k,s,L,n->uid,lname,NULL, NULL,NULL,0, NULL);
             if(rc>=200 && rc<300) st->pushNew++;
             else if(rc==412){
                 /* creating this record failed because its UID already lives on the
@@ -455,7 +568,7 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
                 fprintf(stderr,"[sync] uid=%u dropped: dup UID already on server (server copy wins)\n",(unsigned)n->uid);
             }
         } else if(lc==LMOD && sc==SCLEAN){
-            int rc=pushLocal(d,coll,kind,k,s,L,n->uid,srvName,mEtag, mHref,mEtag,mHash);
+            int rc=pushLocal(d,coll,kind,k,s,L,n->uid,srvName,mEtag, mHref,mEtag,mHash, mObjuid);
             if(rc>=200 && rc<300) st->pushMod++;
             else if(rc==412){
                 /* our conditional update was rejected: the server copy changed
@@ -465,7 +578,7 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
             }
         } else if(lc==LCLEAN && sc==SCLEAN){
             if(locBytes(s,L,g_lrec,sizeof g_lrec)==L->len)
-                keepBytes(k,n->uid,L->attr,g_lrec,L->len,srvName,mEtag,L->hash);
+                keepBytes(k,n->uid,L->attr,g_lrec,L->len,srvName,mEtag,L->hash,mObjuid);
             else fprintf(stderr,"[sync] lazy read failed for clean uid=%u\n",(unsigned)n->uid);
             st->unchanged++;
         } else if(lc==LCLEAN && sc==SMOD){
