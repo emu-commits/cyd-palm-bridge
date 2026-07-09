@@ -186,9 +186,15 @@ static void hotsync_task(void *arg){
 
     SyncStats tot={0};
     int did=0, failed=0, protec=0;
+    /* count configured apps so the status line can show progress [k/M]; with
+     * three collections the per-app step is the coarse progress indicator (a
+     * finer intra-collection bar would need a callback through sync_collection). */
+    int ntgt=0; for(int i=0;i<N_TGTS;i++) if(s_tgts[i].coll && s_tgts[i].coll[0]) ntgt++;
+    int step=0;
     for(int i=0;i<N_TGTS;i++){
         const SyncTgt *t=&s_tgts[i];
         if(!t->coll || !t->coll[0]) continue;      /* app not configured -> skip */
+        step++;
 
         DavCtx *ctx=&d;
         if(t->card){
@@ -207,7 +213,7 @@ static void hotsync_task(void *arg){
             ctx=&dcard;
         }
 
-        snprintf(msg,sizeof msg,"Syncing %s...",t->name); setst(msg);
+        snprintf(msg,sizeof msg,"[%d/%d] Syncing %s...",step,ntgt,t->name); setst(msg);
         ESP_LOGI(TAG,"sync %s coll=%s pdb=%s heap=%lu largest=%lu",t->name,t->coll,t->pdb,
                  (unsigned long)esp_get_free_heap_size(),
                  (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));

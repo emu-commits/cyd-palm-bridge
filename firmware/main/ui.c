@@ -16,6 +16,7 @@
 #include "palm_icons.h"   /* Palm app launcher icons */
 #include "hotsync.h"
 #include "graffiti.h"
+#include "calc.h"
 #include "lvgl.h"
 #include <string.h>
 #include <stdio.h>
@@ -540,11 +541,126 @@ static void menu_open(void){
 
 /* silkscreen buttons */
 static void menu_cb(lv_event_t *e){ (void)e; menu_open(); }
-/* Find/Calc engines are ready + host-tested (bridge/find.c, bridge/calc.c).
- * The screens still need building: Find needs a Graffiti query field, Calc a
- * keypad view. Wire find_in_pdb()/calc_eval() into these once the UI lands. */
+/* Find engine is ready + host-tested (bridge/find.c); its UI still needs a
+ * Graffiti query field, so the silkscreen Find is deferred for now. */
 static void find_cb(lv_event_t *e){ (void)e; /* TODO Find UI -> find_in_pdb() over all 4 PDBs */ }
-static void calc_cb(lv_event_t *e){ (void)e; /* TODO Calc UI -> calc_eval() */ }
+
+/* ------------------------- Calculator (silkscreen accessory) -------------
+ * Full-screen modal keypad feeding the host-tested evaluator (bridge/calc.c).
+ * Self-contained: it covers the silkscreen too, so it's dismissed with its own
+ * Done button. calc_expr holds the entered expression; '=' evaluates in place
+ * so the result can seed the next calculation (Palm behaviour). */
+static lv_obj_t *g_calc, *g_calc_disp;
+static char calc_expr[48];
+static int  calc_isresult;   /* last press showed a result -> next digit restarts */
+
+static void calc_close(void){ if(g_calc){ lv_obj_del(g_calc); g_calc=NULL; g_calc_disp=NULL; } }
+static void calc_done_cb(lv_event_t *e){ (void)e; calc_close(); }
+static void calc_refresh(void){
+    if(g_calc_disp) lv_label_set_text(g_calc_disp, calc_expr[0] ? calc_expr : "0");
+}
+static void calc_key_cb(lv_event_t *e){
+    char k = (char)(intptr_t)lv_event_get_user_data(e);
+    size_t n = strlen(calc_expr);
+    if(k=='C'){ calc_expr[0]=0; calc_isresult=0; }
+    else if(k=='<'){ if(n) calc_expr[n-1]=0; calc_isresult=0; }
+    else if(k=='='){
+        double v; int rc = calc_eval(calc_expr, &v);
+        if(rc==CALC_OK) snprintf(calc_expr,sizeof calc_expr,"%.10g", v);
+        else snprintf(calc_expr,sizeof calc_expr,"%s", rc==CALC_ERR_DIVZERO?"Div by 0":"Error");
+        calc_isresult=1;
+    } else {
+        /* a digit/paren after a result starts fresh; an operator continues it */
+        if(calc_isresult){
+            if((k>='0'&&k<='9')||k=='.'||k=='('){ calc_expr[0]=0; n=0; }
+            calc_isresult=0;
+        }
+        if(n < sizeof calc_expr - 1){ calc_expr[n]=k; calc_expr[n+1]=0; }
+    }
+    calc_refresh();
+}
+static void calc_open(void){
+    if(g_calc) return;
+    calc_expr[0]=0; calc_isresult=0;
+
+    g_calc = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_calc, LCD_W, LCD_H);
+    lv_obj_set_pos(g_calc, 0, 0);
+    lv_obj_set_style_bg_color(g_calc, COL_BODY, 0);
+    lv_obj_set_style_border_width(g_calc, 0, 0);
+    lv_obj_set_style_radius(g_calc, 0, 0);
+    lv_obj_set_style_pad_all(g_calc, 4, 0);
+    lv_obj_clear_flag(g_calc, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(g_calc, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(g_calc, 4, 0);
+
+    /* header: title + Done */
+    lv_obj_t *hdr = lv_obj_create(g_calc);
+    lv_obj_set_size(hdr, lv_pct(100), 24);
+    lv_obj_set_style_bg_opa(hdr, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(hdr, 0, 0);
+    lv_obj_set_style_pad_all(hdr, 0, 0);
+    lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *ttl = lv_label_create(hdr);
+    lv_label_set_text(ttl, "Calculator");
+    lv_obj_set_style_text_font(ttl, &lv_font_palm_bold, 0);
+    lv_obj_align(ttl, LV_ALIGN_LEFT_MID, 2, 0);
+    lv_obj_t *done = lv_button_create(hdr);
+    lv_obj_set_size(done, 56, 24);
+    lv_obj_set_style_radius(done, 0, 0);
+    lv_obj_align(done, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_t *dl = lv_label_create(done);
+    lv_label_set_text(dl, "Done");
+    lv_obj_center(dl);
+    lv_obj_add_event_cb(done, calc_done_cb, LV_EVENT_CLICKED, NULL);
+
+    /* display */
+    lv_obj_t *disp = lv_obj_create(g_calc);
+    lv_obj_set_size(disp, lv_pct(100), 44);
+    lv_obj_set_style_bg_color(disp, COL_BODY, 0);
+    lv_obj_set_style_border_width(disp, 1, 0);
+    lv_obj_set_style_border_color(disp, COL_LINE, 0);
+    lv_obj_set_style_radius(disp, 0, 0);
+    lv_obj_set_style_pad_all(disp, 6, 0);
+    lv_obj_clear_flag(disp, LV_OBJ_FLAG_SCROLLABLE);
+    g_calc_disp = lv_label_create(disp);
+    lv_label_set_long_mode(g_calc_disp, LV_LABEL_LONG_CLIP);
+    lv_obj_set_width(g_calc_disp, lv_pct(100));
+    lv_obj_set_style_text_font(g_calc_disp, &lv_font_palm_bold, 0);
+    lv_obj_set_style_text_align(g_calc_disp, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_align(g_calc_disp, LV_ALIGN_RIGHT_MID, 0, 0);
+    calc_refresh();
+
+    /* keypad: 5 rows x 4 cols */
+    static int32_t col_dsc[] = {LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_TEMPLATE_LAST};
+    static int32_t row_dsc[] = {LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_TEMPLATE_LAST};
+    lv_obj_t *pad = lv_obj_create(g_calc);
+    lv_obj_set_width(pad, lv_pct(100));
+    lv_obj_set_flex_grow(pad, 1);
+    lv_obj_set_style_bg_opa(pad, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(pad, 0, 0);
+    lv_obj_set_style_pad_all(pad, 0, 0);
+    lv_obj_set_style_pad_gap(pad, 4, 0);
+    lv_obj_clear_flag(pad, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_grid_dsc_array(pad, col_dsc, row_dsc);
+    lv_obj_set_layout(pad, LV_LAYOUT_GRID);
+
+    static const char *KEYS = "C()\x7f" "789/" "456*" "123-" "0.=+";
+    for(int r=0;r<5;r++) for(int c=0;c<4;c++){
+        char k = KEYS[r*4+c];
+        lv_obj_t *b = lv_button_create(pad);
+        lv_obj_set_style_radius(b, 0, 0);
+        lv_obj_set_grid_cell(b, LV_GRID_ALIGN_STRETCH, c, 1, LV_GRID_ALIGN_STRETCH, r, 1);
+        lv_obj_t *l = lv_label_create(b);
+        lv_label_set_text(l, k=='\x7f' ? LV_SYMBOL_BACKSPACE : (char[]){k,0});
+        lv_obj_set_style_text_font(l, &lv_font_palm_bold, 0);
+        lv_obj_center(l);
+        /* map the backspace glyph to '<' for the handler */
+        lv_obj_add_event_cb(b, calc_key_cb, LV_EVENT_CLICKED,
+                            (void*)(intptr_t)(k=='\x7f' ? '<' : k));
+    }
+}
+static void calc_cb(lv_event_t *e){ (void)e; calc_open(); }
 
 /* ------------------------- F2: category picker ------------------------- */
 static lv_obj_t *cat_trigger, *cat_label, *g_catpop;
