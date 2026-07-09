@@ -11,6 +11,7 @@
 #include "dav.h"
 #include "sync.h"
 #include "secrets.h"
+#include "appcfg.h"
 #include <string.h>
 #include <time.h>
 #include "freertos/FreeRTOS.h"
@@ -31,46 +32,36 @@ static void setst(const char *s){ snprintf(s_status, sizeof s_status, "%s", s); 
 
 /* ---- per-app sync targets ------------------------------------------------
  * HotSync walks this table, syncing each configured app to its own iCloud
- * collection. Back-compat: an older secrets.h that only defines SYNC_COLL/
- * SYNC_KIND still syncs the Date Book exactly as before; To Do / Address stay
- * off until their collections are filled in. Memo has no iCloud DAV surface. */
-#ifndef SYNC_KIND
-#define SYNC_KIND KIND_CAL
-#endif
-#ifndef SYNC_CAL_COLL
-#define SYNC_CAL_COLL SYNC_COLL
-#endif
-#ifndef SYNC_TODO_COLL
-#define SYNC_TODO_COLL ""
-#endif
+ * collection. The PDB/map paths and kinds are device-local constants; the
+ * COLLECTION for each app is now runtime config (appcfg(): config.ini over the
+ * secrets.h seed), so an app with an empty collection stays off until it's
+ * configured -- exactly the old back-compat behaviour, now editable on-device. */
 #ifndef SYNC_TODO_PDB
 #define SYNC_TODO_PDB "/sdcard/ToDoDB.pdb"
 #endif
-#ifndef SYNC_CARD_COLL
-#define SYNC_CARD_COLL ""
-#endif
 #ifndef SYNC_CARD_PDB
 #define SYNC_CARD_PDB "/sdcard/AddressDB.pdb"
-#endif
-#ifndef DAV_CARD_BASE
-#define DAV_CARD_BASE "https://contacts.icloud.com"
 #endif
 
 typedef struct {
     const char *name;     /* label for the status line            */
     const char *pdb;      /* PDB path on SD                        */
-    const char *coll;     /* iCloud collection ("" => skip)        */
     int         kind;     /* KIND_CAL | KIND_TODO | KIND_CARD      */
     const char *map;      /* per-collection state map on SD        */
     int         card;     /* 1 => CardDAV (uses the contacts host) */
-} SyncTgt;
+} SyncApp;
 
-static const SyncTgt s_tgts[] = {
-    { "Date Book", SYNC_PDB,      SYNC_CAL_COLL,  SYNC_KIND,  "/sdcard/state/cal.map",  0 },
-    { "To Do",     SYNC_TODO_PDB, SYNC_TODO_COLL, KIND_TODO,  "/sdcard/state/todo.map", 0 },
-    { "Address",   SYNC_CARD_PDB, SYNC_CARD_COLL, KIND_CARD,  "/sdcard/state/card.map", 1 },
+static const SyncApp s_apps[] = {
+    { "Date Book", SYNC_PDB,      KIND_CAL,  "/sdcard/state/cal.map",  0 },
+    { "To Do",     SYNC_TODO_PDB, KIND_TODO, "/sdcard/state/todo.map", 0 },
+    { "Address",   SYNC_CARD_PDB, KIND_CARD, "/sdcard/state/card.map", 1 },
 };
-#define N_TGTS ((int)(sizeof s_tgts / sizeof s_tgts[0]))
+#define N_APPS ((int)(sizeof s_apps / sizeof s_apps[0]))
+
+/* the configured collection for app i (index matches s_apps order). */
+static const char* app_coll(const Config *c, int i){
+    return i==0 ? c->cal_coll : i==1 ? c->todo_coll : c->card_coll;
+}
 
 int hotsync_busy(void){ return s_busy; }
 const char *hotsync_status(void){ return s_status; }
@@ -104,9 +95,10 @@ static int wifi_up(void){
     if(esp_wifi_init(&cfg)!=ESP_OK) return 0;
     esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_ev, NULL, &s_h_wifi);
     esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_ev, NULL, &s_h_ip);
+    const Config *pc = appcfg();
     wifi_config_t wc = { 0 };
-    strncpy((char*)wc.sta.ssid, WIFI_SSID, sizeof wc.sta.ssid);
-    strncpy((char*)wc.sta.password, WIFI_PASS, sizeof wc.sta.password);
+    strncpy((char*)wc.sta.ssid, pc->wifi_ssid, sizeof wc.sta.ssid);
+    strncpy((char*)wc.sta.password, pc->wifi_pass, sizeof wc.sta.password);
     if(esp_wifi_set_mode(WIFI_MODE_STA)!=ESP_OK) return 0;
     if(esp_wifi_set_config(WIFI_IF_STA, &wc)!=ESP_OK) return 0;
     if(esp_wifi_start()!=ESP_OK) return 0;
@@ -155,10 +147,13 @@ static void hotsync_task(void *arg){
     setst("Setting clock...");
     if(!clock_ok()){ setst("Clock/SNTP failed"); wifi_down(); s_busy=0; vTaskDelete(NULL); return; }
 
+    const Config *cfg = appcfg();
+    ESP_LOGI(TAG,"config source: %s", appcfg_from_sd() ? "/sdcard/config.ini" : "secrets.h (no config.ini)");
+
     DavCtx d; memset(&d,0,sizeof d);
-    snprintf(d.base,sizeof d.base,"%s",DAV_BASE);
-    snprintf(d.user,sizeof d.user,"%s",DAV_USER);
-    snprintf(d.pass,sizeof d.pass,"%s",DAV_PASS);
+    snprintf(d.base,sizeof d.base,"%s",cfg->dav_base);
+    snprintf(d.user,sizeof d.user,"%s",cfg->dav_user);
+    snprintf(d.pass,sizeof d.pass,"%s",cfg->dav_pass);
     (void)abspath;
     char msg[80];
 
@@ -186,23 +181,25 @@ static void hotsync_task(void *arg){
 
     SyncStats tot={0};
     int did=0, failed=0, protec=0;
+    ConflictPolicy pol = (ConflictPolicy)cfg->policy;
     /* count configured apps so the status line can show progress [k/M]; with
      * three collections the per-app step is the coarse progress indicator (a
      * finer intra-collection bar would need a callback through sync_collection). */
-    int ntgt=0; for(int i=0;i<N_TGTS;i++) if(s_tgts[i].coll && s_tgts[i].coll[0]) ntgt++;
+    int ntgt=0; for(int i=0;i<N_APPS;i++){ const char*c=app_coll(cfg,i); if(c&&c[0]) ntgt++; }
     int step=0;
-    for(int i=0;i<N_TGTS;i++){
-        const SyncTgt *t=&s_tgts[i];
-        if(!t->coll || !t->coll[0]) continue;      /* app not configured -> skip */
+    for(int i=0;i<N_APPS;i++){
+        const SyncApp *t=&s_apps[i];
+        const char *coll=app_coll(cfg,i);
+        if(!coll || !coll[0]) continue;            /* app not configured -> skip */
         step++;
 
         DavCtx *ctx=&d;
         if(t->card){
             if(!card_ready){
                 memset(&dcard,0,sizeof dcard);
-                snprintf(dcard.base,sizeof dcard.base,"%s",DAV_CARD_BASE);
-                snprintf(dcard.user,sizeof dcard.user,"%s",DAV_USER);
-                snprintf(dcard.pass,sizeof dcard.pass,"%s",DAV_PASS);
+                snprintf(dcard.base,sizeof dcard.base,"%s",cfg->dav_card_base);
+                snprintf(dcard.user,sizeof dcard.user,"%s",cfg->dav_user);
+                snprintf(dcard.pass,sizeof dcard.pass,"%s",cfg->dav_pass);
                 char chost[256]="";
                 if(dav_effective_host(&dcard,"/",chost,sizeof chost)==0 && chost[0]){
                     snprintf(dcard.base,sizeof dcard.base,"%s",chost);
@@ -214,11 +211,11 @@ static void hotsync_task(void *arg){
         }
 
         snprintf(msg,sizeof msg,"[%d/%d] Syncing %s...",step,ntgt,t->name); setst(msg);
-        ESP_LOGI(TAG,"sync %s coll=%s pdb=%s heap=%lu largest=%lu",t->name,t->coll,t->pdb,
+        ESP_LOGI(TAG,"sync %s coll=%s pdb=%s heap=%lu largest=%lu",t->name,coll,t->pdb,
                  (unsigned long)esp_get_free_heap_size(),
                  (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
         SyncStats st={0};
-        int n = sync_collection(ctx, t->pdb, t->pdb, t->coll, t->kind, t->map, POL_SERVER, &st);
+        int n = sync_collection(ctx, t->pdb, t->pdb, coll, t->kind, t->map, pol, &st);
         /* n == -2: guard refused to overwrite a non-empty PDB with an empty result
          * (data was protected). n == -1: local out-of-memory. n >= 0: records kept. */
         ESP_LOGI(TAG,"%s: rc=%d up +%d~%d-%d down +%d~%d-%d heap=%lu",t->name,n,

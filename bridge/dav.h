@@ -5,7 +5,7 @@
 #ifndef DAV_H
 #define DAV_H
 
-typedef struct { char base[256]; char user[64]; char pass[64]; } DavCtx;
+typedef struct { char base[256]; char user[128]; char pass[64]; } DavCtx;
 
 extern int dav_last_status;   /* HTTP status of the most recent discovery PROPFIND */
 
