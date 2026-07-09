@@ -638,9 +638,13 @@ static void show_prefs(void){
     form_field(form,"Address collection",     c->card_coll,     sizeof c->card_coll     -1, &y);
     form_field(form,"Time zone",              c->timezone,      sizeof c->timezone      -1, &y);
 
-    /* conflict policy: a cycling button (server / local / both) */
+    /* conflict policy: a cycling button (server / local / both). NOTE: buttons in
+     * the scrollable form MUST be given an explicit height -- a content-sized
+     * (LV_SIZE_CONTENT) child inside a scroll container feeds its size back into
+     * the parent's scroll layout every frame => an infinite layout loop (Task WDT).
+     * The record editor avoids this by only using explicitly-sized textareas. */
     lv_obj_t *pol = lv_button_create(form);
-    lv_obj_set_width(pol, LCD_W - 16); lv_obj_set_pos(pol, 2, y);
+    lv_obj_set_size(pol, LCD_W - 16, 32); lv_obj_set_pos(pol, 2, y);
     lv_obj_set_style_radius(pol, 0, 0);
     pf_pol_lbl = lv_label_create(pol);
     lv_label_set_text_fmt(pf_pol_lbl, "Conflicts: %s", pol_name(pf_pol));
@@ -650,7 +654,7 @@ static void show_prefs(void){
 
     /* discover collections over Wi-Fi -> fills the three collection fields */
     lv_obj_t *disc = lv_button_create(form);
-    lv_obj_set_width(disc, LCD_W - 16); lv_obj_set_pos(disc, 2, y);
+    lv_obj_set_size(disc, LCD_W - 16, 32); lv_obj_set_pos(disc, 2, y);
     lv_obj_set_style_radius(disc, 0, 0);
     lv_obj_t *dl=lv_label_create(disc); lv_label_set_text(dl,"Discover collections..."); lv_obj_center(dl);
     lv_obj_add_event_cb(disc, pf_discover_cb, LV_EVENT_CLICKED, NULL);
@@ -820,6 +824,29 @@ static void act_delete(lv_event_t *e){ (void)e;
 static void act_categories(lv_event_t *e){ (void)e; menu_close(); cat_trigger_cb(NULL); }
 static void act_prefs(lv_event_t *e){ (void)e; menu_close(); show_prefs(); }
 
+/* debug: seed 30 test appointments into the Date Book so a >24-record collection
+ * can be pushed to iCloud to exercise the streaming reconcile. Each is a new
+ * record (uid 0 => data layer assigns a fresh uniqueID); the next HotSync pushes
+ * all of them up. */
+static void act_gentest(lv_event_t *e){ (void)e; menu_close();
+    time_t now=0; time(&now);
+    struct tm base; localtime_r(&now,&base);
+    if(base.tm_year+1900 < 2024){ base.tm_year=2026-1900; base.tm_mon=0; base.tm_mday=1; }
+    base.tm_hour=9; base.tm_min=0; base.tm_sec=0;
+    for(int i=0;i<30;i++){
+        struct tm t=base; t.tm_mday += i;
+        time_t tt=mktime(&t); struct tm nt; localtime_r(&tt,&nt);
+        Appt a; memset(&a,0,sizeof a);
+        a.year=nt.tm_year+1900; a.month=nt.tm_mon+1; a.day=nt.tm_mday;
+        a.hasTime=1; a.sH=9; a.sM=0; a.eH=10; a.eM=0;
+        snprintf(a.description,sizeof a.description,"Test event %d",i+1);
+        snprintf(a.note,sizeof a.note,"generated for streaming-sync test");
+        data_save_cal(0, 0, &a);
+    }
+    if(cur_app && cur_app->app==APP_CAL) list_view(cur_app);
+    alert_show("Added 30 test events to Date Book.\nHotSync to push them to iCloud.");
+}
+
 static lv_obj_t *g_about;
 static void about_close(void){ if(g_about){ lv_obj_del(g_about); g_about=NULL; } }
 static void about_backdrop_cb(lv_event_t *e){ (void)e; about_close(); }
@@ -911,6 +938,7 @@ static void menu_open(void){
     menu_header(panel, "Options");
     if(cur_app) menu_item(panel, "Categories", act_categories);
     menu_item(panel, "Preferences", act_prefs);
+    menu_item(panel, "Add test events", act_gentest);
     menu_item(panel, "About", act_about);
 }
 
