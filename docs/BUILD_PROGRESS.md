@@ -3,6 +3,78 @@
 Running log of the UI build (docs/UI_ROADMAP.md). Updated after each step so work
 can resume cold. Newest phase on top.
 
+> **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
+> This file is the historical log; that file is what to do next.
+
+## SESSION 2026-07-09 — sync is finally correct end-to-end (on device)
+
+Started from "multi-collection sync + Calculator flashed" and drove real on-device
+testing. Each fix below was diagnosed from serial captures (`fprintf(stderr)` —
+note the `dav` ESP_LOG tag does NOT reach the console here) and confirmed on the
+CYD against live iCloud. **All commits on `origin/main` (through `638a838`).**
+
+Chronological chain of bugs (each exposed the next):
+
+1. **Calculator hung the UI** (`5e6583c`). 20 buttons in an FR-grid inside a
+   flex-grow (indefinite-size) parent = LVGL auto-size layout recursion → Task WDT
+   on the LVGL task (decoded via addr2line). Fixed with a single `lv_buttonmatrix`
+   (also far lighter on the 24 KB LVGL pool). **Rule: avoid FR-grid + flex-grow
+   parent + auto-sizing children on this build.**
+
+2. **Per-record Delete** (`9ce429f`). Detail view now `Done | Delete | Edit`
+   (To Do's Mark Done moved to its own row) + a PalmOS-style confirm alert; the
+   menu Delete routes through the same dialog. (Dialog panel needs a FIXED height
+   — `LV_SIZE_CONTENT` collapsed the prompt under the buttons.)
+
+3. **Multi-collection sync enabled** — To Do → Reminders VTODO list, Address →
+   `carddavhome/card` (CardDAV), discovered via PROPFIND, added to `secrets.h`.
+   `[k/M]` progress in the status line.
+
+4. **Pull had NEVER worked (every sync was push-only)** (`ec878b8`). The
+   hardware-less `MAXR 24→96` bump made the single-`calloc` `S` struct too big to
+   coexist with the mbedTLS handshake: at 96 the calloc failed (rc=-1); at 64 it
+   starved TLS (`alloc(5140) failed`, `ssl_handshake -0x7F00`, ESP_ERR_HTTP_CONNECT
+   on every request) so `buildServer` returned `nsrv=0` → reconciler thought the
+   server was empty. **Reverted to the proven `MAXR=24`** (S ≈ 16 KB) + trimmed
+   `DAV_LIST_CAP` 24→12 KB. Result: first real bidirectional sync —
+   Date Book pull=5, To Do pull=2, Address pull=11, all `st=207`.
+
+5. **Editing a record erased it on sync** (`8bd53da`). The per-collection sync
+   map was FROZEN on the SD card: `sync_one` published it with
+   `rename(tmp, mapfile)`, but **FATFS `rename()` fails if the target exists
+   (FR_EXIST)** and the result was unchecked → the map stuck at its first-ever
+   contents (an OLD 3-column `uid\thref\thash` format, no etag). The 4-column
+   reader then read the hash into the etag slot → every record looked
+   server-modified → every local edit became an LMOD+SMOD conflict → POL_SERVER
+   discarded it. Fix: `remove(mapfile)` before `rename` (+ log failure). Self-heals
+   to a correct 4-column map with real etags. **Rule: on this FATFS SD card,
+   atomic-write-via-rename must `remove()` the target first.** (`pdbw_commit`
+   writes the PDB directly, so the DB itself was never affected — only the map.)
+
+6. **Failed pushes counted + poisoned the map** (`afc3f25`). `pushLocal` called
+   `keepBytes` (PDB + map) and the callers did `pushNew++/pushMod++` regardless of
+   status, so a failed PUT (a) inflated `+N up` and (b) wrote a bad-etag map row
+   the next sync read as "server-deleted" → data loss. Now: fresh row + count only
+   on 2xx; transient failures keep-local + preserve the OLD map row (retry).
+
+7. **412 duplicate-UID loop resolved** (`254c115`). iCloud enforces one UID per
+   collection (curl-verified: fresh UID → 201, same UID at a new href → 412).
+   Records pulled from iOS/Mac (UUID href+UID) that lost their linkage got
+   re-pushed to `<palmuid>.ics` → permanent 412. Fix: `pushLocal` returns 412
+   without keeping; callers resolve per POL_SERVER — `LNEW`+412 drops the local
+   orphan (server copy pulled under its own href), `LMOD`+412 pulls the server
+   copy. Safe: a 412 proves the event is on the server.
+
+**Verified on device:** bidirectional sync of all three collections; an edited
+Address contact reconciles `LMOD+SCLEAN` (`sEtag==mEtag`) and pushes up (survives);
+clean idempotent re-syncs (`Done: +0~0-0`). **Still to confirm next session:** the
+412 de-dup converging Date Book to 5 records with no duplicates.
+
+**Deeper root cause still open (see NEXT_STEPS P0):** local↔server matching uses a
+uid derived from the href *name* (`nameToUid`), which doesn't align Palm uniqueIDs
+with iCloud UUID hrefs — the source of the whole orphan/dup-UID class. Proper fix
+is to match by the iCal/vCard UID.
+
 ## HARDWARE-LESS SESSION 2 (2026-07-05) — Find, Calc, Preferences, parser hardening
 
 Four new host-tested modules in `bridge/` (shared by the firmware component and

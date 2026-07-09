@@ -5,32 +5,33 @@ A **native PDA on the base CYD** (`ESP32-2432S028R`, **NO PSRAM**, 4 MB flash,
 databases and two-way syncs them to CalDAV/CardDAV (iCloud). PumpkinOS is a
 *donor codebase* (data formats, fonts, icons, layouts), not a runtime.
 
-## Status (2026-07-05)
+## Status (2026-07-09)
 
-Two halves, both real — and now joined on hardware:
+Two halves, both real — and joined on hardware with **bidirectional** iCloud sync:
 
 1. **Host bridge — proven.** The Palm↔CalDAV/CardDAV codec + incremental
-   conflict-aware two-way sync, validated against real Radicale **and live iCloud**
-   (calendars, Reminders, contacts). Four green gates. Details below.
-2. **On-device firmware — working, including live iCloud sync.** LVGL UI on the
+   conflict-aware two-way sync. Details below.
+2. **On-device firmware — working, with two-way iCloud sync.** LVGL UI on the
    CYD: calibrated touch, an authentic Palm launcher/apps (Date Book, Address, To
    Do, Memo), Graffiti text entry (full a–z + 0–9, shift/caps/space/backspace/enter
-   gestures), menus, categories, Details, and HotSync. **First on-device push to
-   iCloud confirmed** — DateBook events uploaded over TLS from the board itself.
-   See **[docs/BUILD_PROGRESS.md](docs/BUILD_PROGRESS.md)** (the cold-resume record)
-   and **[docs/UI_ROADMAP.md](docs/UI_ROADMAP.md)**. Firmware in **`firmware/`** (ESP-IDF).
+   gestures), menus, categories, Details, per-record **Delete** (with confirm), a
+   **Calculator**, and HotSync. **Bidirectional sync confirmed on device** —
+   Date Book + To Do + Address each sync to their own iCloud collection (Address
+   over CardDAV); records push *and* pull, edits survive, deletes propagate.
+   See **[docs/BUILD_PROGRESS.md](docs/BUILD_PROGRESS.md)** (cold-resume log) and
+   **[docs/NEXT_STEPS.md](docs/NEXT_STEPS.md)** (what to do next). Firmware in
+   **`firmware/`** (ESP-IDF).
 
 > **The hard part was RAM** (no PSRAM): TLS + Wi-Fi + LVGL + the sync working set
-> must coexist in ~85 KB of heap. It fits after shrinking the LVGL pool, enabling
+> must coexist in ~80 KB of heap. It fits after shrinking the LVGL pool, enabling
 > mbedTLS dynamic buffers, trimming Wi-Fi buffers, and keeping the sync working set
-> small (`MAXR`) with emit buffers off-stack. See docs/BUILD_PROGRESS.md "CURRENT
-> STATE". **Recent (hardware-less) work:** the sync engine now **streams** records
-> to/from disk (no in-RAM arena), lifting the device per-collection cap 24 → 96;
-> HotSync now syncs **Date Book + To Do + Address**, each to its own iCloud
-> collection (Address over CardDAV) — code done, awaiting a flash to confirm
-> on-device. **Known gaps:** Memo has no iCloud DAV surface (stays local); a
-> Graffiti training-game app is planned; power + case are the remaining hardware
-> phases.
+> small. The reconcile struct `S` is a single `calloc` that must sit *beside* the
+> mbedTLS handshake, so **`MAXR` stays at 24** (an earlier 24→96 bump broke sync:
+> `S` starved the TLS handshake and pulls silently failed). This **caps a
+> collection at 24 records** — see NEXT_STEPS for the streaming rework to lift it.
+> **Known gaps:** Memo has no iCloud DAV surface (stays local); creds are still
+> compile-time in `secrets.h` (on-device `config.ini` is planned); Graffiti has no
+> punctuation yet; power + case are the remaining hardware phases.
 
 ---
 
