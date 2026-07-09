@@ -98,15 +98,19 @@ All commits are on `origin/main` (`254c115`).
      href is normalised to the no-slash form sync expects and written into the
      in-memory config. **Back** returns to Preferences, where **Save** persists.
    - **Not yet done — on device:** flash `main` and verify the form edits + a live
-     discovery round-trip against a real iCloud account. Note the Apple ID field
-     needs Graffiti `@` (item 6) to be typed on-device; until then seed it via
-     `config.ini`/`secrets.h` (discovery still fills the collections).
+     discovery round-trip against a real iCloud account. (The Apple ID `@` is now
+     typable on-device — item 6 done.)
    This is the single biggest gap between "our prototype" and "a PDA someone can
    set up."
 
-6. **Graffiti punctuation.** Only `.` exists — no `@`, `,`, `/`, etc., so you
-   can't type an email address (half-broken contact entry). Add a
-   punctuation-shift mode like real Graffiti.
+6. **Graffiti punctuation. — DONE.** PalmOS-style punctuation shift: a single tap
+   arms punctuation mode (a "PUNC" indicator lights in the strip), and the next
+   stroke is matched against a dedicated punctuation set (`PTMPL` in
+   `graffiti.c`); period is the tap that follows the shift (two taps), exactly
+   like real Graffiti. Starter strokes for `@ , / - ' ( ) ?` (plus `.`); `_` is
+   shape-identical to `-` under the size-normalizing $1 matcher so it's omitted.
+   Like the letters, the strokes are a coarse starter — tune on-device from the
+   `graf pnc` telemetry. *(Compile-verified; on-device stroke tuning pending.)*
 
 7. **Find UI.** Engine (`bridge/find.c`) is done; it needs a Graffiti query
    field and a results list.

@@ -1171,12 +1171,20 @@ static void show_case(void){
         lv_label_set_text(graf_abc_lbl,
             graf_case==CASE_NONE ? "abc" : graf_case==CASE_SHIFT ? "Abc" : "ABC");
 }
+/* punctuation-shift indicator: a tap arms "the next stroke is punctuation", shown
+ * here so the user knows the mode is active (like PalmOS's shift dot). */
+static lv_obj_t *graf_punct_lbl;
+static void show_punct(int on){
+    if(graf_punct_lbl) lv_label_set_text(graf_punct_lbl, on ? "PUNC" : "");
+}
 /* user_data: 0 = letters (abc pad), 1 = digits (123 pad) */
 static void graf_up_cb(lv_event_t *e){
     int digits = (int)(intptr_t)lv_event_get_user_data(e);
     char c = graffiti_recognize(digits);
-    if(!c) return;
+    if(!c){ show_punct(0); return; }                   /* nothing / punct rejected */
     if(c == GRAF_SHIFT){ graf_case = (graf_case + 1) % 3; show_case(); return; }
+    if(c == GRAF_PUNCT){ show_punct(1); return; }       /* tap: arm punctuation */
+    show_punct(0);                                      /* any real char clears it */
     if(!active_ta){ graf_case = CASE_NONE; show_case(); return; }
     if(c == '\b'){                                     /* backspace: keep caps lock */
         lv_textarea_delete_char(active_ta);
@@ -1184,7 +1192,7 @@ static void graf_up_cb(lv_event_t *e){
         return;
     }
     if(graf_case != CASE_NONE && c >= 'a' && c <= 'z') c = c - 'a' + 'A';
-    lv_textarea_add_char(active_ta, c);                /* letter, digit, space, or '\n' */
+    lv_textarea_add_char(active_ta, c);                /* letter, digit, punct, space, '\n' */
     if(graf_case == CASE_SHIFT){ graf_case = CASE_NONE; show_case(); }
 }
 
@@ -1281,6 +1289,12 @@ void ui_init(void){
     lv_obj_t *gr = lv_label_create(graf);
     lv_label_set_text(gr, "123");
     lv_obj_align(gr, LV_ALIGN_CENTER, 28, 0);
+
+    /* punctuation-shift indicator (top-centre of the strip; empty until armed) */
+    graf_punct_lbl = lv_label_create(graf);
+    lv_label_set_text(graf_punct_lbl, "");
+    lv_obj_set_style_text_font(graf_punct_lbl, &lv_font_palm_bold, 0);
+    lv_obj_align(graf_punct_lbl, LV_ALIGN_TOP_MID, 0, 1);
 
     show_launcher();
 }

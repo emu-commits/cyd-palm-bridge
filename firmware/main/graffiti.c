@@ -16,11 +16,15 @@
 #define SQSIZE   100.0f
 #define ANGLE_R  (0.15f)     /* +-~8.5 deg; small, so it doesn't help wrong templates fit */
 #define PHI      0.6180339887f
+#define TAP_PX   16.0f       /* a stroke whose bbox is smaller than this both ways = a tap */
+#define LET_THRESH 32.0f     /* accept distance for letters/digits (noisy resistive strip) */
+#define PNC_THRESH 34.0f     /* punctuation is a smaller, curvier set -> a touch looser */
 
 typedef struct { float x, y; } Pt;
 
 static Pt s_buf[MAXPTS];
 static int s_n;
+static int s_punct;          /* punctuation shift armed: next stroke is punctuation */
 
 void graffiti_clear(void){ s_n = 0; }
 void graffiti_add_point(int x, int y){
@@ -127,14 +131,13 @@ T(t_w,'w', 0,0, 3,10, 5,4, 7,10, 10,0)                       /* W */
 T(t_x,'x', 1,1, 9,9, 5,5, 9,1, 1,9)                          /* cross (2-stroke; see backlog) */
 T(t_y,'y', 2,0, 5,6, 8,0, 5,6, 4,10)                         /* Y w/ tail */
 T(t_z,'z', 0,0, 9,0, 0,9, 9,9)                               /* Z */
-T(t_dot,'.', 4,8, 5,8, 6,9)                                  /* tap dot */
 #undef T
 static const Tmpl LTMPL[] = {
     {'a',t_a,3},{'b',t_b,6},{'c',t_c,5},{'d',t_d,5},{'e',t_e,5},{'f',t_f,3},
     {'g',t_g,7},{'h',t_h,6},{'i',t_i,2},{'j',t_j,4},{'k',t_k,6},{'l',t_l,3},
     {'m',t_m,5},{'n',t_n,4},{'o',t_o,8},{'p',t_p,6},{'q',t_q,8},{'r',t_r,5},
     {'s',t_s,6},{'t',t_t,3},{'u',t_u,5},{'v',t_v,3},{'w',t_w,5},{'x',t_x,5},
-    {'y',t_y,5},{'z',t_z,4},{'.',t_dot,3},
+    {'y',t_y,5},{'z',t_z,4},
 };
 #define NLTMPL ((int)(sizeof(LTMPL)/sizeof(LTMPL[0])))
 
@@ -156,6 +159,30 @@ static const Tmpl DTMPL[] = {
     {'5',d_5,6},{'6',d_6,7},{'7',d_7,3},{'8',d_8,8},{'9',d_9,7},
 };
 #define NDTMPL ((int)(sizeof(DTMPL)/sizeof(DTMPL[0])))
+
+/* ---- punctuation set (drawn AFTER the punctuation shift = a single tap) -------
+ * PalmOS enters punctuation via a punct-shift then one stroke; period is the tap
+ * that follows the shift (two taps). The $1 normalizer scales every stroke to a
+ * unit box, so only SHAPE survives -- straight lines of the same orientation are
+ * indistinguishable, hence at most one horizontal (`-`), one vertical (`'`), and
+ * one of each diagonal live here. `_` is shape-identical to `-` (both horizontal)
+ * so it is intentionally omitted. Coarse starter, like the letters: tune on-device
+ * from the `graf pnc` telemetry. Draw direction matters (not rotation-invariant). */
+#define T(name,ch,...) static const float name[]={__VA_ARGS__};
+T(p_at,  '@', 8,3, 5,1, 2,4, 3,7, 6,8, 7,5, 5,4)   /* CCW spiral (a-like) */
+T(p_com, ',', 5,2, 5,6, 3,9)                        /* down, then hook to lower-left */
+T(p_sla, '/', 2,9, 8,1)                             /* diagonal, up to the right */
+T(p_dsh, '-', 2,5, 8,5)                             /* horizontal, left to right */
+T(p_apo, '\'',5,1, 5,8)                             /* short vertical, top down */
+T(p_lp,  '(', 7,1, 3,5, 7,9)                        /* left paren (open right) */
+T(p_rp,  ')', 3,1, 7,5, 3,9)                        /* right paren (open left) */
+T(p_qm,  '?', 2,3, 5,1, 8,4, 5,7)                   /* question hook */
+#undef T
+static const Tmpl PTMPL[] = {
+    {'@',p_at,7},{',',p_com,3},{'/',p_sla,2},{'-',p_dsh,2},
+    {'\'',p_apo,2},{'(',p_lp,3},{')',p_rp,3},{'?',p_qm,4},
+};
+#define NPTMPL ((int)(sizeof(PTMPL)/sizeof(PTMPL[0])))
 
 /* horizontal swipe -> space (L->R) / backspace (R->L), else 0 */
 static char gesture(void){
@@ -188,21 +215,24 @@ static char gesture(void){
     return 0;
 }
 
-char graffiti_recognize(int digits){
-    char g = gesture();
-    if(g){ graffiti_clear(); return g; }
-    if(s_n < 4){ graffiti_clear(); return 0; } /* too short: ignore */
-    const Tmpl *set = digits ? DTMPL : LTMPL;
-    int nset = digits ? NDTMPL : NLTMPL;
-    int npts = s_n;
-    /* raw bounding box (pre-normalize) -- tells us what the touch really delivered */
-    float rx0=s_buf[0].x,rx1=rx0,ry0=s_buf[0].y,ry1=ry0;
+/* raw bounding box of the captured stroke (pre-normalize). Returns 0 if empty. */
+static int stroke_bbox(float *w, float *h){
+    if(s_n < 1){ *w=*h=0; return 0; }
+    float x0=s_buf[0].x,x1=x0,y0=s_buf[0].y,y1=y0;
     for(int i=1;i<s_n;i++){
-        if(s_buf[i].x<rx0)rx0=s_buf[i].x;
-        if(s_buf[i].x>rx1)rx1=s_buf[i].x;
-        if(s_buf[i].y<ry0)ry0=s_buf[i].y;
-        if(s_buf[i].y>ry1)ry1=s_buf[i].y;
+        if(s_buf[i].x<x0) x0=s_buf[i].x;
+        if(s_buf[i].x>x1) x1=s_buf[i].x;
+        if(s_buf[i].y<y0) y0=s_buf[i].y;
+        if(s_buf[i].y>y1) y1=s_buf[i].y;
     }
+    *w=x1-x0; *h=y1-y0; return 1;
+}
+
+/* $1 nearest-template match of the captured stroke against `set`; returns the
+ * best character if within `thresh`, else 0. `label` names the set in telemetry. */
+static char match_set(const Tmpl *set, int nset, float thresh, const char *label){
+    int npts = s_n;
+    float rw=0, rh=0; stroke_bbox(&rw,&rh);
     Pt cand[N]; resample(s_buf, s_n, cand); normalize(cand);
     float best = 1e9f, second = 1e9f; char bc = 0, sc = 0;
     for(int i=0;i<nset;i++){
@@ -214,13 +244,37 @@ char graffiti_recognize(int digits){
         else if(d < second){ second=d; sc=set[i].c; }
     }
     /* per-stroke telemetry for on-device tuning (watch `idf.py monitor`) */
-    ESP_LOGI("graf","%s pts=%d bbox=%.0fx%.0f (%.0f,%.0f)->(%.0f,%.0f) -> '%c' d=%.1f (2nd '%c' %.1f)%s",
-             digits?"123":"abc", npts, rx1-rx0, ry1-ry0,
-             s_buf[0].x,s_buf[0].y, s_buf[s_n-1].x,s_buf[s_n-1].y,
-             bc?bc:'?', best, sc?sc:'?', second,
-             best<32.0f?"":"  [rejected]");
+    ESP_LOGI("graf","%s pts=%d bbox=%.0fx%.0f -> '%c' d=%.1f (2nd '%c' %.1f)%s",
+             label, npts, rw, rh, bc?bc:'?', best, sc?sc:'?', second,
+             best<thresh?"":"  [rejected]");
+    return (best < thresh) ? bc : 0;
+}
+
+char graffiti_recognize(int digits){
+    /* Punctuation shift armed (a prior tap): this stroke is punctuation, and a tap
+     * is the period. The swipe/backspace gestures do NOT apply while armed -- that
+     * is what lets '-' (a horizontal stroke) through instead of reading as a space. */
+    if(s_punct){
+        s_punct = 0;
+        float w=0,h=0; int have = stroke_bbox(&w,&h);
+        if(have && w < TAP_PX && h < TAP_PX){ graffiti_clear(); return '.'; }
+        char pc = (s_n >= 4) ? match_set(PTMPL, NPTMPL, PNC_THRESH, "pnc") : 0;
+        graffiti_clear();
+        return pc;
+    }
+
+    char g = gesture();
+    if(g){ graffiti_clear(); return g; }
+
+    /* a single tap arms the punctuation shift for the next stroke (PalmOS) */
+    { float w=0,h=0;
+      if(stroke_bbox(&w,&h) && w < TAP_PX && h < TAP_PX){
+          s_punct = 1; graffiti_clear(); return GRAF_PUNCT;
+      } }
+
+    if(s_n < 4){ graffiti_clear(); return 0; } /* too short: ignore */
+    char c = match_set(digits ? DTMPL : LTMPL, digits ? NDTMPL : NLTMPL,
+                       LET_THRESH, digits ? "123" : "abc");
     graffiti_clear();
-    /* accept threshold (avg normalized point distance over a 0..100 box). Looser
-     * than textbook $1 because the CYD resistive strip is noisy. Tune on-device. */
-    return (best < 32.0f) ? bc : 0;
+    return c;
 }

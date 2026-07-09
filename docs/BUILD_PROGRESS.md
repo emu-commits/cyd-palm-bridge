@@ -6,6 +6,26 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-09 — branch consolidation + Graffiti punctuation
+
+**Branches consolidated onto `main`.** Assuming the streaming sync is good: PR #2
+(`claude/sync-uid-streaming`) rebase-merged to `main`; `claude/config-ini` rebased
+on top (only the two docs files conflicted — code was disjoint) and fast-forwarded
+in; both feature branches + a stale plan branch deleted and pruned. `main` now
+carries streaming sync **and** all three config chunks; config + streaming compile
+together for the first time (`idf.py build`, clean).
+
+**Graffiti punctuation (P1.6) — PalmOS punctuation-shift.** A single tap arms
+punctuation mode (returns new `GRAF_PUNCT`; the strip lights a "PUNC" indicator),
+and the next stroke is matched against a dedicated set (`PTMPL` in `graffiti.c`);
+period is the tap that follows the shift (two taps) like real Graffiti. While
+armed, the swipe/backspace gestures are bypassed so a horizontal stroke reads as
+`-` not space. Refactored the $1 matcher into a shared `match_set()` (letters,
+digits, punctuation all use it). Starter strokes for `@ , / - ' ( ) ?` (+ `.`);
+`_` omitted (shape-identical to `-` under the size-normalizing matcher). The letter
+set's old tap `.` template was removed (period is now the punct tap). Strokes are a
+coarse starter — tune on-device from `graf pnc` telemetry, same as the letters.
+
 ## SESSION 2026-07-09 — on-device config.ini (chunks 2+3: Preferences UI + discovery)
 
 Compile-verified (`idf.py build`, 58% flash free). Finishes the config story: the
