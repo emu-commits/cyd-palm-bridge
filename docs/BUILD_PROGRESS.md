@@ -6,6 +6,39 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-09 — on-device config.ini (chunks 2+3: Preferences UI + discovery)
+
+Compile-verified (`idf.py build`, 58% flash free). Finishes the config story: the
+device is now configurable end-to-end without a reflash or a host tool. Landed on
+`main` alongside the streaming sync (PR #2 merged, `claude/config-ini` rebased +
+merged) — one branch now carries both.
+
+- **Preferences editor** (`ui.c` `show_prefs`, reached from **Options →
+  Preferences**): a scrollable Graffiti form over the whole `Config` — Wi-Fi
+  SSID/pass, Apple ID + app-specific password, CalDAV/CardDAV hosts, the three
+  collection paths, and time zone — plus a cycling **Conflicts** button
+  (iCloud/device/both). **Save** copies the fields into `appcfg_mut()` and writes
+  `/sdcard/config.ini` via `appcfg_save()`, with a tap-to-dismiss alert reporting
+  success or an SD-write failure. Reuses the record-editor `form_field` plumbing;
+  `g_fields[]` grown 8→12 to hold the 10 text fields.
+- **Collection discovery** (`ui.c` `show_discover` + `hotsync.c` `discover_task`,
+  API in `hotsync.h`): the Preferences **"Discover collections…"** button (guarded
+  against running mid-sync) brings Wi-Fi up on the shared background-task slot and
+  walks *both* iCloud homes — `current-user-principal` → `calendar-home-set` and
+  `addressbook-home-set` → `dav_list_collections` — collecting every calendar,
+  reminders list, and address book into a small fixed array (`DiscColl[12]`). The
+  `disc_prop` helper reuses `abspath` to follow iCloud's partition-host redirects
+  (full-URL home-sets retarget `d.base`). Each found href is normalised to the
+  no-leading/trailing-slash form sync stores. The UI polls `hotsync_status()`;
+  when done it lists the results — tap one to assign it a role (Calendar /
+  Reminders / Address, both offered for CalDAV kind since iCloud reports
+  reminders as calendars). Assignments land in the in-memory config; **Back** →
+  Preferences → **Save** persists them.
+- Also: the menu's **Categories** item is now hidden when no data app is open (it
+  was a no-op there).
+- **Next:** flash + on-device verify (form round-trip + a live discovery against
+  real iCloud).
+
 ## SESSION 2026-07-09 — on-device config.ini (chunk 1: runtime loading)
 
 Branch `claude/config-ini` (`c536a19`), compile-verified, **not flashed** (flashing

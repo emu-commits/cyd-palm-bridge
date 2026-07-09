@@ -17,6 +17,7 @@
 #include "hotsync.h"
 #include "graffiti.h"
 #include "calc.h"
+#include "appcfg.h"
 #include "lvgl.h"
 #include <string.h>
 #include <stdio.h>
@@ -74,13 +75,15 @@ static int edit_cat;            /* category chosen for the record being edited *
 static uint32_t edit_uid;
 static lv_obj_t *g_form;               /* scrollable field container */
 static lv_obj_t *edit_cat_lbl;         /* label on the edit-form category trigger */
-static lv_obj_t *g_fields[8];          /* edit-form textareas */
+static lv_obj_t *g_fields[12];         /* edit-form textareas (also the Preferences form) */
 static int g_nfields;
 static lv_obj_t *active_ta;            /* last-focused textarea (Graffiti target) */
 
 static void list_view(const AppDef *ad);
 static void show_detail(uint32_t uid);
 static void show_edit(uint32_t uid);
+static void show_prefs(void);
+static void show_discover(void);
 static void update_cat_trigger(void);
 static void cat_trigger_cb(lv_event_t *e);
 static void details_open(void);
@@ -90,9 +93,19 @@ static lv_obj_t *hs_status;
 static lv_timer_t *hs_timer;
 static void kill_hs(void){ if(hs_timer){ lv_timer_delete(hs_timer); hs_timer=NULL; } hs_status=NULL; }
 
+/* Discovery screen state (a status label + polling timer, like HotSync) */
+static lv_obj_t *disc_status;
+static lv_timer_t *disc_timer;
+static int disc_built;
+
 /* tear down per-form / per-screen state when navigating away. Text entry is
  * Graffiti-only (no on-screen keyboard), so there's no overlay to drop here. */
-static void kill_kb(void){ g_form=NULL; active_ta=NULL; edit_cat_lbl=NULL; kill_hs(); }
+static void kill_kb(void){
+    g_form=NULL; active_ta=NULL; edit_cat_lbl=NULL;
+    kill_hs();
+    if(disc_timer){ lv_timer_delete(disc_timer); disc_timer=NULL; }
+    disc_status=NULL;
+}
 
 static void row_cb(lv_event_t *e){
     show_detail((uint32_t)(uintptr_t)lv_event_get_user_data(e));
@@ -506,6 +519,294 @@ static void show_launcher(void){
     }
 }
 
+/* ============ P1.5: Preferences + collection discovery ============ */
+
+/* A dismissable one-shot alert (Save feedback, discovery errors). Tapping
+ * anywhere closes it. */
+static lv_obj_t *g_alert;
+static void alert_close(void){ if(g_alert){ lv_obj_del(g_alert); g_alert=NULL; } }
+static void alert_ok_cb(lv_event_t *e){ (void)e; alert_close(); }
+static void alert_show(const char *msg){
+    if(g_alert) return;
+    g_alert = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_alert, LCD_W, LCD_H);
+    lv_obj_set_style_bg_color(g_alert, COL_LINE, 0);
+    lv_obj_set_style_bg_opa(g_alert, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(g_alert, 0, 0);
+    lv_obj_set_style_pad_all(g_alert, 0, 0);
+    lv_obj_add_flag(g_alert, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_alert, alert_ok_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *panel = lv_obj_create(g_alert);
+    lv_obj_set_width(panel, 200);
+    lv_obj_set_height(panel, LV_SIZE_CONTENT);
+    lv_obj_center(panel);
+    lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
+    lv_obj_set_style_border_width(panel, 1, 0);
+    lv_obj_set_style_border_color(panel, COL_LINE, 0);
+    lv_obj_set_style_radius(panel, 0, 0);
+    lv_obj_set_style_pad_all(panel, 10, 0);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(panel, alert_ok_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *l = lv_label_create(panel);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(l, 180);
+    lv_label_set_text(l, msg);
+}
+
+/* ---- Preferences: edit the config.ini fields on-device (Graffiti entry) ----
+ * Field order is fixed so the save/collect handlers can read g_fields[] by
+ * index. The three collection paths are hard to type; the "Discover" button
+ * fills them from iCloud over Wi-Fi (chunk 3). Passwords are shown in the clear
+ * -- it's the owner's device, and masking makes Graffiti entry unverifiable. */
+enum { PF_SSID, PF_WPASS, PF_USER, PF_PASS, PF_CALB, PF_CARDB,
+       PF_CAL, PF_TODO, PF_CARD, PF_TZ, PF_N };
+static lv_obj_t *pf_pol_lbl;
+static int pf_pol;
+static const char *pol_name(int p){
+    return p==CFG_POL_LOCAL ? "device wins"
+         : p==CFG_POL_BOTH  ? "keep both"
+         :                    "iCloud wins";
+}
+/* copy the visible form fields into the in-memory config (no file write). */
+static void pf_collect(void){
+    Config *c = appcfg_mut();
+    snprintf(c->wifi_ssid,     sizeof c->wifi_ssid,     "%s", fv(PF_SSID));
+    snprintf(c->wifi_pass,     sizeof c->wifi_pass,     "%s", fv(PF_WPASS));
+    snprintf(c->dav_user,      sizeof c->dav_user,      "%s", fv(PF_USER));
+    snprintf(c->dav_pass,      sizeof c->dav_pass,      "%s", fv(PF_PASS));
+    snprintf(c->dav_base,      sizeof c->dav_base,      "%s", fv(PF_CALB));
+    snprintf(c->dav_card_base, sizeof c->dav_card_base, "%s", fv(PF_CARDB));
+    snprintf(c->cal_coll,      sizeof c->cal_coll,      "%s", fv(PF_CAL));
+    snprintf(c->todo_coll,     sizeof c->todo_coll,     "%s", fv(PF_TODO));
+    snprintf(c->card_coll,     sizeof c->card_coll,     "%s", fv(PF_CARD));
+    snprintf(c->timezone,      sizeof c->timezone,      "%s", fv(PF_TZ));
+    c->policy = pf_pol;
+}
+static void pf_cancel_cb(lv_event_t *e){ (void)e; show_launcher(); }
+static void pf_save_cb(lv_event_t *e){ (void)e;
+    pf_collect();                 /* read fields while they still exist */
+    int rc = appcfg_save();
+    show_launcher();
+    alert_show(rc==0 ? "Saved to config.ini" : "Could not write config.ini (SD card?)");
+}
+static void pf_pol_cb(lv_event_t *e){ (void)e;
+    pf_pol = (pf_pol+1)%3;
+    if(pf_pol_lbl) lv_label_set_text_fmt(pf_pol_lbl, "Conflicts: %s", pol_name(pf_pol));
+}
+static void pf_discover_cb(lv_event_t *e){ (void)e;
+    if(hotsync_busy()){ alert_show("A sync is in progress; try again in a moment."); return; }
+    pf_collect(); show_discover();
+}
+
+static void show_prefs(void){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, "Preferences");
+    update_cat_trigger();   /* hides the category picker (no data app) */
+
+    lv_obj_t *cancel = lv_button_create(content);
+    lv_obj_set_size(cancel, 60, 28); lv_obj_align(cancel, LV_ALIGN_TOP_LEFT, 2, 2);
+    lv_obj_t *cl=lv_label_create(cancel); lv_label_set_text(cl,"Cancel"); lv_obj_center(cl);
+    lv_obj_add_event_cb(cancel, pf_cancel_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *save = lv_button_create(content);
+    lv_obj_set_size(save, 60, 28); lv_obj_align(save, LV_ALIGN_TOP_RIGHT, -2, 2);
+    lv_obj_t *sl=lv_label_create(save); lv_label_set_text(sl,"Save"); lv_obj_center(sl);
+    lv_obj_add_event_cb(save, pf_save_cb, LV_EVENT_CLICKED, NULL);
+
+    g_form = lv_obj_create(content);
+    lv_obj_t *form = g_form;
+    lv_obj_set_size(form, LCD_W, FORM_FULL);
+    lv_obj_set_pos(form, 0, 34);
+    lv_obj_set_style_radius(form, 0, 0);
+    lv_obj_set_style_border_width(form, 0, 0);
+    lv_obj_set_style_bg_color(form, COL_BODY, 0);
+
+    const Config *c = appcfg();
+    pf_pol = c->policy;
+    int y = 2;
+    form_field(form,"Wi-Fi network (SSID)",   c->wifi_ssid,     sizeof c->wifi_ssid     -1, &y);
+    form_field(form,"Wi-Fi password",         c->wifi_pass,     sizeof c->wifi_pass     -1, &y);
+    form_field(form,"Apple ID (email)",       c->dav_user,      sizeof c->dav_user      -1, &y);
+    form_field(form,"App-specific password",  c->dav_pass,      sizeof c->dav_pass      -1, &y);
+    form_field(form,"CalDAV host",            c->dav_base,      sizeof c->dav_base      -1, &y);
+    form_field(form,"CardDAV host",           c->dav_card_base, sizeof c->dav_card_base -1, &y);
+    form_field(form,"Calendar collection",    c->cal_coll,      sizeof c->cal_coll      -1, &y);
+    form_field(form,"Reminders collection",   c->todo_coll,     sizeof c->todo_coll     -1, &y);
+    form_field(form,"Address collection",     c->card_coll,     sizeof c->card_coll     -1, &y);
+    form_field(form,"Time zone",              c->timezone,      sizeof c->timezone      -1, &y);
+
+    /* conflict policy: a cycling button (server / local / both) */
+    lv_obj_t *pol = lv_button_create(form);
+    lv_obj_set_width(pol, LCD_W - 16); lv_obj_set_pos(pol, 2, y);
+    lv_obj_set_style_radius(pol, 0, 0);
+    pf_pol_lbl = lv_label_create(pol);
+    lv_label_set_text_fmt(pf_pol_lbl, "Conflicts: %s", pol_name(pf_pol));
+    lv_obj_center(pf_pol_lbl);
+    lv_obj_add_event_cb(pol, pf_pol_cb, LV_EVENT_CLICKED, NULL);
+    y += 40;
+
+    /* discover collections over Wi-Fi -> fills the three collection fields */
+    lv_obj_t *disc = lv_button_create(form);
+    lv_obj_set_width(disc, LCD_W - 16); lv_obj_set_pos(disc, 2, y);
+    lv_obj_set_style_radius(disc, 0, 0);
+    lv_obj_t *dl=lv_label_create(disc); lv_label_set_text(dl,"Discover collections..."); lv_obj_center(dl);
+    lv_obj_add_event_cb(disc, pf_discover_cb, LV_EVENT_CLICKED, NULL);
+    y += 44;
+
+    if(g_nfields > 0){ active_ta = g_fields[0]; lv_obj_add_state(g_fields[0], LV_STATE_FOCUSED); }
+}
+
+/* ---- collection discovery screen (chunk 3) ----
+ * Kicks off hotsync_discover_start() and polls hotsync_status(); when the run
+ * finishes it lists the found collections. Tapping one assigns it to a role
+ * (Calendar / Reminders / Address) in the in-memory config; the assignment is
+ * persisted when the user taps Save back on the Preferences form. */
+static lv_obj_t *g_rolepop;
+static void rolepop_close(void){ if(g_rolepop){ lv_obj_del(g_rolepop); g_rolepop=NULL; } }
+static void rolepop_backdrop_cb(lv_event_t *e){ (void)e; rolepop_close(); }
+static void disc_show_results(void);
+
+/* user_data packs (index<<8)|role, role in {'c'=cal,'t'=todo,'a'=addr} */
+static void role_pick_cb(lv_event_t *e){
+    intptr_t v = (intptr_t)lv_event_get_user_data(e);
+    int idx = (int)(v>>8); char role = (char)(v & 0xff);
+    const DiscColl *dc = hotsync_discover_get(idx);
+    rolepop_close();
+    if(!dc) return;
+    Config *c = appcfg_mut();
+    if(role=='c')      snprintf(c->cal_coll,  sizeof c->cal_coll,  "%s", dc->href);
+    else if(role=='t') snprintf(c->todo_coll, sizeof c->todo_coll, "%s", dc->href);
+    else if(role=='a') snprintf(c->card_coll, sizeof c->card_coll, "%s", dc->href);
+    disc_show_results();   /* redraw so the new [role] tag shows */
+}
+static void role_btn(lv_obj_t *par, const char *txt, int idx, char role){
+    lv_obj_t *b = lv_button_create(par);
+    lv_obj_set_width(b, lv_pct(100));
+    lv_obj_set_style_radius(b, 0, 0);
+    lv_obj_set_style_pad_ver(b, 4, 0);
+    lv_obj_t *l=lv_label_create(b); lv_label_set_text(l,txt); lv_obj_align(l,LV_ALIGN_LEFT_MID,2,0);
+    lv_obj_add_event_cb(b, role_pick_cb, LV_EVENT_CLICKED,
+                        (void*)(intptr_t)((idx<<8)|(unsigned char)role));
+}
+static void disc_row_cb(lv_event_t *e){
+    int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    const DiscColl *dc = hotsync_discover_get(idx);
+    if(!dc || g_rolepop) return;
+
+    g_rolepop = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_rolepop, LCD_W, LCD_H);
+    lv_obj_set_style_bg_color(g_rolepop, COL_LINE, 0);
+    lv_obj_set_style_bg_opa(g_rolepop, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(g_rolepop, 0, 0);
+    lv_obj_set_style_pad_all(g_rolepop, 0, 0);
+    lv_obj_add_flag(g_rolepop, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_rolepop, rolepop_backdrop_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *panel = lv_obj_create(g_rolepop);
+    lv_obj_set_width(panel, 180);
+    lv_obj_set_height(panel, LV_SIZE_CONTENT);
+    lv_obj_center(panel);
+    lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
+    lv_obj_set_style_border_width(panel, 1, 0);
+    lv_obj_set_style_border_color(panel, COL_LINE, 0);
+    lv_obj_set_style_radius(panel, 0, 0);
+    lv_obj_set_style_pad_all(panel, 4, 0);
+    lv_obj_set_style_pad_row(panel, 2, 0);
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *hdr = lv_label_create(panel);
+    lv_label_set_long_mode(hdr, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(hdr, 172);
+    lv_label_set_text_fmt(hdr, "Use \"%s\" as:", dc->name);
+    lv_obj_set_style_text_font(hdr, &lv_font_palm_bold, 0);
+
+    if(dc->kind=='c'){
+        role_btn(panel, "Calendar (Date Book)", idx, 'c');
+        role_btn(panel, "Reminders (To Do)",    idx, 't');
+    } else {
+        role_btn(panel, "Address book",         idx, 'a');
+    }
+}
+static void disc_back_cb(lv_event_t *e){ (void)e; show_prefs(); }
+
+static void disc_show_results(void){
+    disc_built = 1;
+    if(disc_timer){ lv_timer_delete(disc_timer); disc_timer=NULL; }
+    lv_obj_clean(content);
+    disc_status = NULL;
+    int n = hotsync_discover_count();
+
+    lv_obj_t *back = lv_button_create(content);
+    lv_obj_set_size(back, 60, 28); lv_obj_align(back, LV_ALIGN_TOP_LEFT, 2, 2);
+    lv_obj_t *bl=lv_label_create(back); lv_label_set_text(bl,"Back"); lv_obj_center(bl);
+    lv_obj_add_event_cb(back, disc_back_cb, LV_EVENT_CLICKED, NULL);
+
+    if(n==0){
+        lv_obj_t *l = lv_label_create(content);
+        lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(l, LCD_W - 16);
+        lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+        lv_label_set_text(l, hotsync_status());
+        lv_obj_align(l, LV_ALIGN_CENTER, 0, 0);
+        return;
+    }
+
+    lv_obj_t *hint = lv_label_create(content);
+    lv_obj_align(hint, LV_ALIGN_TOP_RIGHT, -6, 8);
+    lv_label_set_text(hint, "tap to assign");
+
+    lv_obj_t *list = lv_list_create(content);
+    lv_obj_set_size(list, LCD_W, FORM_FULL);
+    lv_obj_set_pos(list, 0, 34);
+    lv_obj_set_style_radius(list, 0, 0);
+    lv_obj_set_style_border_width(list, 0, 0);
+    lv_obj_set_style_pad_all(list, 0, 0);
+
+    const Config *c = appcfg();
+    for(int i=0;i<n;i++){
+        const DiscColl *dc = hotsync_discover_get(i);
+        const char *tag = "";
+        if(dc->href[0] && !strcmp(dc->href, c->cal_coll))       tag = "  [Calendar]";
+        else if(dc->href[0] && !strcmp(dc->href, c->todo_coll)) tag = "  [Reminders]";
+        else if(dc->href[0] && !strcmp(dc->href, c->card_coll)) tag = "  [Address]";
+        char buf[128];
+        snprintf(buf,sizeof buf, "%s %s%s", dc->kind=='a'?"(A)":"(C)", dc->name, tag);
+        lv_obj_t *b = lv_list_add_button(list, NULL, buf);
+        lv_obj_set_style_radius(b, 0, 0);
+        lv_obj_add_event_cb(b, disc_row_cb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
+    }
+}
+
+static void disc_tick(lv_timer_t *t){ (void)t;
+    if(hotsync_discover_busy()){
+        if(disc_status) lv_label_set_text(disc_status, hotsync_status());
+        return;
+    }
+    if(!disc_built) disc_show_results();   /* run finished -> show the list */
+}
+
+static void show_discover(void){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; disc_built = 0;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, "Discover");
+    update_cat_trigger();
+
+    hotsync_discover_start();
+
+    disc_status = lv_label_create(content);
+    lv_label_set_long_mode(disc_status, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(disc_status, LCD_W - 16);
+    lv_obj_set_style_text_align(disc_status, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(disc_status, LV_ALIGN_CENTER, 0, 0);
+    lv_label_set_text(disc_status, "Discovering...");
+    disc_timer = lv_timer_create(disc_tick, 400, NULL);
+}
+
 /* ------------------------- F1: menu bar ------------------------- */
 static lv_obj_t *g_menu;   /* menu overlay root, or NULL */
 static void menu_close(void){ if(g_menu){ lv_obj_del(g_menu); g_menu=NULL; } }
@@ -517,6 +818,7 @@ static void act_delete(lv_event_t *e){ (void)e;
     if(u) ask_delete(u);   /* shared confirm dialog */
 }
 static void act_categories(lv_event_t *e){ (void)e; menu_close(); cat_trigger_cb(NULL); }
+static void act_prefs(lv_event_t *e){ (void)e; menu_close(); show_prefs(); }
 
 static lv_obj_t *g_about;
 static void about_close(void){ if(g_about){ lv_obj_del(g_about); g_about=NULL; } }
@@ -607,7 +909,8 @@ static void menu_open(void){
         if(cur_uid) menu_item(panel, "Delete", act_delete);
     }
     menu_header(panel, "Options");
-    menu_item(panel, "Categories", act_categories);
+    if(cur_app) menu_item(panel, "Categories", act_categories);
+    menu_item(panel, "Preferences", act_prefs);
     menu_item(panel, "About", act_about);
 }
 

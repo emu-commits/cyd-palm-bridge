@@ -75,20 +75,32 @@ All commits are on `origin/main` (`254c115`).
 
 ## P1 — Product completeness (usable by someone other than us)
 
-5. **On-device configuration (`config.ini`).** *In progress on branch
-   `claude/config-ini`.*
-   - **Chunk 1 DONE (`c536a19`, compile-verified, not yet flashed):** the device
-     loads `/sdcard/config.ini` at runtime via `firmware/main/appcfg.[ch]`
-     (precedence: `config_defaults()` < `secrets.h` seed < `config.ini`). HotSync
-     reads Wi-Fi / iCloud / per-app collections / policy from `appcfg()` instead
-     of the compile-time macros. So creds + collections are now editable by
-     hand-editing the SD card — no reflash. `DavCtx.user` grown 64→128.
-   - **Chunk 2 (TODO):** Preferences editor UI — an LVGL form to edit the fields
-     on-device (Graffiti entry) + `appcfg_save()` to write `config.ini`.
-   - **Chunk 3 (TODO):** collection-discovery screen — Wi-Fi up → PROPFIND →
-     pick your calendar / reminders / address book instead of pasting UUIDs.
-   Chunks 2–3 are held until the sync PR merges, so they can be built + flashed +
-   tested on a clean `main` (flashing now would clobber the sync test firmware).
+5. **On-device configuration (`config.ini`).** *All three chunks DONE and on
+   `main` (alongside the streaming sync); compile-verified (`idf.py build`), NOT
+   yet flashed.*
+   - **Chunk 1 DONE (`c536a19`):** the device loads `/sdcard/config.ini` at
+     runtime via `firmware/main/appcfg.[ch]` (precedence: `config_defaults()` <
+     `secrets.h` seed < `config.ini`). HotSync reads Wi-Fi / iCloud / per-app
+     collections / policy from `appcfg()` instead of the compile-time macros. So
+     creds + collections are editable by hand-editing the SD card — no reflash.
+     `DavCtx.user` grown 64→128.
+   - **Chunk 2 DONE:** Preferences editor UI (`ui.c` `show_prefs`) — reached from
+     the **Options → Preferences** menu. A scrollable Graffiti form over all the
+     config fields (Wi-Fi, Apple ID + app password, CalDAV/CardDAV hosts, the
+     three collections, time zone) plus a cycling **Conflicts** policy button;
+     **Save** writes `config.ini` via `appcfg_save()` (toast on success/fail).
+   - **Chunk 3 DONE:** collection-discovery screen (`ui.c` `show_discover` +
+     `hotsync.c` `discover_task`) — the Preferences **"Discover collections…"**
+     button brings Wi-Fi up, walks the iCloud CalDAV **and** CardDAV homes
+     (`current-user-principal` → `calendar-home-set` / `addressbook-home-set` →
+     `dav_list_collections`), and lists every calendar / reminders list / address
+     book. Tap one → assign it to a role (Calendar / Reminders / Address); the
+     href is normalised to the no-slash form sync expects and written into the
+     in-memory config. **Back** returns to Preferences, where **Save** persists.
+   - **Not yet done — on device:** flash `main` and verify the form edits + a live
+     discovery round-trip against a real iCloud account. Note the Apple ID field
+     needs Graffiti `@` (item 6) to be typed on-device; until then seed it via
+     `config.ini`/`secrets.h` (discovery still fills the collections).
    This is the single biggest gap between "our prototype" and "a PDA someone can
    set up."
 
@@ -121,6 +133,9 @@ All commits are on `origin/main` (`254c115`).
 
 ## Suggested order
 
-P0.1 (confirm de-dup) → P1.5 (on-device config, unblocks real use) →
-P0.2 (UID matching, unblocks trustworthy sync) → P0.3 (large collections) →
+P0.2 (UID matching) + P0.3 (streaming/large collections) — DONE, merged to `main`
+(PR #2), awaiting on-device verify of a large collection.
+P1.5 (on-device config: runtime load + Preferences UI + discovery) — DONE, merged
+to `main`, awaiting flash + on-device verify.
+Next: flash `main` and verify config on device →
 P1.6/7 (Graffiti punctuation, Find UI) → P2 (hardware).

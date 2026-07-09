@@ -242,6 +242,110 @@ static void hotsync_task(void *arg){
     vTaskDelete(NULL);
 }
 
+/* ---- collection discovery (Preferences) ----------------------------------
+ * Same background-task slot as the sync (guarded by s_busy). Results land in a
+ * small fixed array; the UI reads them after hotsync_discover_done(). */
+#define MAX_DISC 12
+static DiscColl s_disc[MAX_DISC];
+static volatile int s_disc_n;
+static volatile int s_disc_done;
+
+int hotsync_discover_busy(void){ return s_busy; }
+int hotsync_discover_done(void){ return s_disc_done; }
+int hotsync_discover_count(void){ return s_disc_n; }
+const DiscColl *hotsync_discover_get(int i){ return (i>=0 && i<s_disc_n) ? &s_disc[i] : NULL; }
+
+/* dav_list_collections callback: keep calendars + address books, normalise the
+ * href to the "no leading/trailing slash" form sync expects (secrets.h note). */
+static void disc_add(const char *href, int kind, const char *dn, void *ctx){
+    (void)ctx;
+    if((kind!='c' && kind!='a') || !href || !href[0]) return;
+    if(s_disc_n >= MAX_DISC) return;
+    const char *s = href; while(*s=='/') s++;
+    char tmp[192]; snprintf(tmp,sizeof tmp,"%s",s);
+    size_t n = strlen(tmp); while(n && tmp[n-1]=='/') tmp[--n]=0;
+    if(!tmp[0]) return;
+    DiscColl *e = &s_disc[s_disc_n++];
+    snprintf(e->href,sizeof e->href,"%s",tmp);
+    snprintf(e->name,sizeof e->name,"%s",(dn&&dn[0])?dn:"(unnamed)");
+    e->kind = kind;
+}
+
+/* PROPFIND `prop` at `path` (which itself may be an absolute URL); retarget
+ * d->base if either the request path or the returned href is a full URL, and
+ * hand back the host-relative path portion. 0 on success, -1 on failure. */
+static int disc_prop(DavCtx *d, const char *path, const char *prop,
+                     const char *ns, char *out, int cap){
+    char pbuf[512]; snprintf(pbuf,sizeof pbuf,"%s",(path&&path[0])?path:"/");
+    char *rel = abspath(pbuf, d);
+    char href[512]="";
+    if(dav_prop_href(d, rel, prop, ns, href, sizeof href)!=0 || !href[0]) return -1;
+    char *hp = abspath(href, d);            /* retargets d->base when href is a URL */
+    snprintf(out, cap, "%s", hp);
+    return 0;
+}
+
+static void discover_task(void *arg){
+    (void)arg;
+    s_disc_n = 0; s_disc_done = 0;
+    setst("Connecting Wi-Fi...");
+    if(!wifi_up()){ setst("Wi-Fi failed"); s_disc_done=1; wifi_down(); s_busy=0; vTaskDelete(NULL); return; }
+    const Config *cfg = appcfg();
+
+    /* --- CalDAV: calendars + reminders lists --- */
+    DavCtx d; memset(&d,0,sizeof d);
+    snprintf(d.base,sizeof d.base,"%s",cfg->dav_base);
+    snprintf(d.user,sizeof d.user,"%s",cfg->dav_user);
+    snprintf(d.pass,sizeof d.pass,"%s",cfg->dav_pass);
+    char host[256]="";
+    if(dav_effective_host(&d,"/",host,sizeof host)==0 && host[0]) snprintf(d.base,sizeof d.base,"%s",host);
+    setst("Finding calendars...");
+    char principal[512]="";
+    if(disc_prop(&d,"/","<d:current-user-principal/>","",principal,sizeof principal)==0){
+        char home[512]="";
+        if(disc_prop(&d,principal,"<c:calendar-home-set/>",
+                     "xmlns:c=\"urn:ietf:params:xml:ns:caldav\"",home,sizeof home)==0){
+            ESP_LOGI(TAG,"calendar-home: %s",home);
+            dav_list_collections(&d,home,disc_add,NULL);
+        } else ESP_LOGW(TAG,"calendar-home-set failed (HTTP %d)",dav_last_status);
+    } else ESP_LOGW(TAG,"caldav principal failed (HTTP %d)",dav_last_status);
+    int ncal = s_disc_n;
+
+    /* --- CardDAV: address books (separate iCloud host) --- */
+    setst("Finding address books...");
+    DavCtx dc; memset(&dc,0,sizeof dc);
+    snprintf(dc.base,sizeof dc.base,"%s",cfg->dav_card_base);
+    snprintf(dc.user,sizeof dc.user,"%s",cfg->dav_user);
+    snprintf(dc.pass,sizeof dc.pass,"%s",cfg->dav_pass);
+    char chost[256]="";
+    if(dav_effective_host(&dc,"/",chost,sizeof chost)==0 && chost[0]) snprintf(dc.base,sizeof dc.base,"%s",chost);
+    char cprin[512]="";
+    if(disc_prop(&dc,"/","<d:current-user-principal/>","",cprin,sizeof cprin)==0){
+        char chome[512]="";
+        if(disc_prop(&dc,cprin,"<c:addressbook-home-set/>",
+                     "xmlns:c=\"urn:ietf:params:xml:ns:carddav\"",chome,sizeof chome)==0){
+            ESP_LOGI(TAG,"addressbook-home: %s",chome);
+            dav_list_collections(&dc,chome,disc_add,NULL);
+        } else ESP_LOGW(TAG,"addressbook-home-set failed (HTTP %d)",dav_last_status);
+    } else ESP_LOGW(TAG,"carddav principal failed (HTTP %d)",dav_last_status);
+
+    s_disc_done = 1;
+    if(s_disc_n==0) setst("No collections found - check login");
+    else { char m[80]; snprintf(m,sizeof m,"Found %d (%d cal, %d addr)",s_disc_n,ncal,s_disc_n-ncal); setst(m); }
+    wifi_down();
+    s_busy = 0;
+    vTaskDelete(NULL);
+}
+
+void hotsync_discover_start(void){
+    if(s_busy) return;
+    s_busy = 1; s_disc_done = 0; s_disc_n = 0;
+    setst("Starting...");
+    if(xTaskCreate(discover_task, "discover", 20480, NULL, 4, NULL) != pdPASS){
+        setst("Could not start discovery"); s_disc_done=1; s_busy = 0;
+    }
+}
+
 void hotsync_start(void){
     if(s_busy) return;
     s_busy = 1;
