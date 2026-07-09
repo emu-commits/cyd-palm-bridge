@@ -559,8 +559,7 @@ static void calc_done_cb(lv_event_t *e){ (void)e; calc_close(); }
 static void calc_refresh(void){
     if(g_calc_disp) lv_label_set_text(g_calc_disp, calc_expr[0] ? calc_expr : "0");
 }
-static void calc_key_cb(lv_event_t *e){
-    char k = (char)(intptr_t)lv_event_get_user_data(e);
+static void calc_apply(char k){
     size_t n = strlen(calc_expr);
     if(k=='C'){ calc_expr[0]=0; calc_isresult=0; }
     else if(k=='<'){ if(n) calc_expr[n-1]=0; calc_isresult=0; }
@@ -578,6 +577,16 @@ static void calc_key_cb(lv_event_t *e){
         if(n < sizeof calc_expr - 1){ calc_expr[n]=k; calc_expr[n+1]=0; }
     }
     calc_refresh();
+}
+/* One button matrix drives the whole keypad (a single LVGL object -- far lighter
+ * than 20 buttons and, crucially, it sizes its own cells so there's no grid-FR
+ * auto-size layout recursion). "<-" is the backspace key. */
+static void calc_bm_cb(lv_event_t *e){
+    lv_obj_t *bm = lv_event_get_target(e);
+    uint32_t id = lv_buttonmatrix_get_selected_button(bm);
+    const char *txt = lv_buttonmatrix_get_button_text(bm, id);
+    if(!txt) return;
+    calc_apply(txt[0]=='<' ? '<' : txt[0]);
 }
 static void calc_open(void){
     if(g_calc) return;
@@ -631,34 +640,22 @@ static void calc_open(void){
     lv_obj_align(g_calc_disp, LV_ALIGN_RIGHT_MID, 0, 0);
     calc_refresh();
 
-    /* keypad: 5 rows x 4 cols */
-    static int32_t col_dsc[] = {LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_TEMPLATE_LAST};
-    static int32_t row_dsc[] = {LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_TEMPLATE_LAST};
-    lv_obj_t *pad = lv_obj_create(g_calc);
-    lv_obj_set_width(pad, lv_pct(100));
-    lv_obj_set_flex_grow(pad, 1);
-    lv_obj_set_style_bg_opa(pad, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(pad, 0, 0);
-    lv_obj_set_style_pad_all(pad, 0, 0);
-    lv_obj_set_style_pad_gap(pad, 4, 0);
-    lv_obj_clear_flag(pad, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_grid_dsc_array(pad, col_dsc, row_dsc);
-    lv_obj_set_layout(pad, LV_LAYOUT_GRID);
-
-    static const char *KEYS = "C()\x7f" "789/" "456*" "123-" "0.=+";
-    for(int r=0;r<5;r++) for(int c=0;c<4;c++){
-        char k = KEYS[r*4+c];
-        lv_obj_t *b = lv_button_create(pad);
-        lv_obj_set_style_radius(b, 0, 0);
-        lv_obj_set_grid_cell(b, LV_GRID_ALIGN_STRETCH, c, 1, LV_GRID_ALIGN_STRETCH, r, 1);
-        lv_obj_t *l = lv_label_create(b);
-        lv_label_set_text(l, k=='\x7f' ? LV_SYMBOL_BACKSPACE : (char[]){k,0});
-        lv_obj_set_style_text_font(l, &lv_font_palm_bold, 0);
-        lv_obj_center(l);
-        /* map the backspace glyph to '<' for the handler */
-        lv_obj_add_event_cb(b, calc_key_cb, LV_EVENT_CLICKED,
-                            (void*)(intptr_t)(k=='\x7f' ? '<' : k));
-    }
+    /* keypad: one button matrix (map is static -- LVGL keeps the pointer) */
+    static const char *km[] = {
+        "C","(",")","<-","\n",
+        "7","8","9","/","\n",
+        "4","5","6","*","\n",
+        "1","2","3","-","\n",
+        "0",".","=","+","" };
+    lv_obj_t *bm = lv_buttonmatrix_create(g_calc);
+    lv_obj_set_width(bm, lv_pct(100));
+    lv_obj_set_flex_grow(bm, 1);                 /* fills remaining height */
+    lv_buttonmatrix_set_map(bm, km);
+    lv_obj_set_style_text_font(bm, &lv_font_palm_bold, 0);
+    lv_obj_set_style_radius(bm, 0, 0);
+    lv_obj_set_style_radius(bm, 0, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(bm, 0, 0);
+    lv_obj_add_event_cb(bm, calc_bm_cb, LV_EVENT_VALUE_CHANGED, NULL);
 }
 static void calc_cb(lv_event_t *e){ (void)e; calc_open(); }
 
