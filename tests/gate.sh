@@ -42,9 +42,18 @@ done
 make >/dev/null || { echo "build failed"; exit 1; }
 GATES="${*:-incremental synctoken category uidmatch bigsync multiapp}"
 rc=0
+# empty every collection (objects only) so one gate can't pollute the next --
+# bigsync leaves 200 objects in palm/cal, which multiapp's To Do test reuses.
+clearcolls(){
+  for c in cal todo card; do
+    curl -s -u "$U:$P" -X PROPFIND -H 'Depth: 1' "$BASE/palm/$c/" \
+      | grep -o "/palm/$c/[^<]*\.\(ics\|vcf\)" | sort -u \
+      | while read -r href; do curl -s -o /dev/null -u "$U:$P" -X DELETE "$BASE$href"; done
+  done
+}
 for g in $GATES; do
   rm -rf state; mkdir -p state
-  # collections were wiped with state? no -- radicale-collections is separate. keep them.
+  clearcolls
   echo "===== $g ====="
   if ./"$g"; then echo "  -> PASS"; else echo "  -> FAIL"; rc=1; fi
 done
