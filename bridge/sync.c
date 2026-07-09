@@ -30,12 +30,19 @@
  * host build (used by tests/bigsync.c to exercise the device cap on the desktop). */
 #if defined(ESP_PLATFORM) || defined(SYNC_DEVICE_SIZES)
   /* Since the byte arenas are gone (records stream to/from disk), the resident
-   * cost is ~0.6 KB per slot (loc+map+srv+2*node index). MAXR=96 keeps the whole
-   * working set well under the old ~63 KB while lifting the per-collection cap
-   * from 24 to 96 items. Raise further only after measuring heap on-device.
+   * cost is ~0.56 KB per slot (loc+map+srv indices). BUT struct S is a SINGLE
+   * calloc AND it stays resident while buildServer runs a TLS PROPFIND/REPORT --
+   * so S must coexist with the ~35 KB mbedTLS handshake working set + the list
+   * buffer in the fragmented ~80 KB heap. The hardware-less bump to 96 (S ~57 KB,
+   * calloc failed -> rc=-1) and a later 64 (S ~39 KB, which starved the TLS
+   * handshake -> mbedtls alloc(5140) failed, -0x7F00) both broke this. MAXR=24
+   * (S ~16 KB) is the proven value that leaves room for TLS + list buffer and is
+   * what the first working on-device sync used. This caps a collection at 24
+   * records; larger iCloud collections need the server list streamed to disk
+   * (loc/map/srv split out of S, and paged server enumeration) -- a TODO.
    * SYNC_DEVICE_SIZES forces this sizing on a host build (tests/bigsync.c) to
    * exercise the device cap on the desktop -- without moving the temp dir. */
-  #define MAXR       96
+  #define MAXR       24
   #define ARENA_CAP  (8*1024)          /* sync_pull only; loadRec no longer uses it */
   #define NAMEL_MAX  96
 #else

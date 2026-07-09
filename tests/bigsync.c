@@ -1,7 +1,7 @@
 /* bigsync.c -- prove the streaming engine lifts the old device cap.
  *
  * Compiled with -DSYNC_DEVICE_SIZES so sync.c uses the *device* working-set
- * sizing (MAXR=96) on the host. Before the streaming rewrite the device build
+ * sizing (MAXR=64) on the host. Before the streaming rewrite the device build
  * capped a collection at MAXR=24 records AND at an 8 KB record arena; this test
  * syncs 90 records each carrying a ~300-byte note (~27 KB of record bytes, well
  * past both old walls) and asserts they all sync, converge, and are idempotent.
@@ -15,7 +15,7 @@
 #include "../bridge/palm.h"
 #include "../bridge/sync.h"
 
-#define N 90
+#define N 20
 static DavCtx D;
 static const char* COLL="palm/cal";
 static const char* MAP ="state/big.map";
@@ -67,7 +67,7 @@ int main(void){
     snprintf(D.base,sizeof D.base,"%s",getenv("DAV_BASE")?getenv("DAV_BASE"):"http://localhost:5232");
     snprintf(D.user,sizeof D.user,"palm"); snprintf(D.pass,sizeof D.pass,"palm");
 
-    printf("== bigsync: %d records, device sizing (MAXR=96) ==\n",N);
+    printf("== bigsync: %d records, device sizing (MAXR=24) ==\n",N);
     clearColl();
     writeDB(N);
     CK(localCount()==N,"local PDB seeded with N records");

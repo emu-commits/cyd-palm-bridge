@@ -165,7 +165,9 @@ int dav_get(const DavCtx*d,const char*coll,const char*name,char*out,int cap){
  * the ~40KB TLS handshake for long. A personal calendar's etag-only REPORT is a
  * few KB; oversize responses log a truncation warning. */
 #ifndef DAV_LIST_CAP
-#define DAV_LIST_CAP (24*1024)
+#define DAV_LIST_CAP (12*1024)   /* malloc'd + freed per call; kept small so it
+                                    doesn't crowd the ~35 KB mbedTLS handshake
+                                    working set while S is also resident */
 #endif
 
 int dav_list(const DavCtx*d,const char*coll,dav_list_cb cb,void*ctx){
@@ -176,6 +178,7 @@ int dav_list(const DavCtx*d,const char*coll,dav_list_cb cb,void*ctx){
     int st=davreq(d,HTTP_METHOD_PROPFIND,url,1,"application/xml",NULL,body,bl,
                   buf,DAV_LIST_CAP,&rn, NULL,0, NULL,0);
     int count = st<0 ? -1 : dav_parse_members(buf,cb,ctx);
+    fprintf(stderr,"[dav] PROPFIND %s -> st=%d rn=%d members=%d\n",coll,st,rn,count);
     free(buf);
     return count;
 }
@@ -195,6 +198,7 @@ int dav_sync_report(const DavCtx*d,const char*coll,const char*token,
     int st=davreq(d,HTTP_METHOD_REPORT,url,1,"application/xml",NULL,body,bl,
                   buf,DAV_LIST_CAP,&rn, NULL,0, NULL,0);
     int rc = st<0 ? -1 : dav_parse_report(buf,st,cb,ctx,newtoken,tokcap);
+    fprintf(stderr,"[dav] REPORT %s tok=%s -> st=%d rn=%d rc=%d\n",coll,token&&token[0]?"incr":"full",st,rn,rc);
     free(buf);
     return rc;
 }

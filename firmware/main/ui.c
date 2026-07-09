@@ -175,7 +175,7 @@ static void ask_delete(uint32_t uid){
 
     lv_obj_t *panel = lv_obj_create(g_confirm);
     lv_obj_set_width(panel, 200);
-    lv_obj_set_height(panel, LV_SIZE_CONTENT);
+    lv_obj_set_height(panel, 96);   /* fixed: LV_SIZE_CONTENT collapses under the bottom-aligned buttons */
     lv_obj_center(panel);
     lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
     lv_obj_set_style_border_width(panel, 1, 0);
