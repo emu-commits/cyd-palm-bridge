@@ -25,6 +25,7 @@
 # editor
 *.swp
 /category
+/uidmatch
 
 # ESP-IDF firmware
 /firmware/build/
