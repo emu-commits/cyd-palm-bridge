@@ -316,10 +316,20 @@ static int keepFromServer(const DavCtx*d,const char*coll,int kind,Sink*k,
     return 0;
 }
 
-/* PUT a local record (bytes read lazily); ifmatch NULL = unconditional. keep it. */
+/* PUT a local record (bytes read lazily); ifmatch NULL = unconditional.
+ * On 2xx: keep the record + write a FRESH map row (new href/etag/hash).
+ * On failure (network or non-2xx HTTP): the record was NOT accepted by the
+ * server, so keep it locally but DO NOT write the fresh row -- re-emit the OLD
+ * map row (old* args; pass NULL/"" href when there is none, e.g. a brand-new
+ * record) so the record stays mapped and dirty and is RETRIED next sync. This
+ * stops a failed push from (a) being counted as a success and (b) poisoning the
+ * map with a bad/empty etag (which would make the next sync treat the record as
+ * server-deleted -> local data loss). Returns the HTTP status (<=0 -> -1); the
+ * caller counts pushNew/pushMod only on a 2xx. */
 static int pushLocal(const DavCtx*d,const char*coll,int kind,Sink*k,
                      const S*s,const Loc*L,uint32_t uid,
-                     const char*name,const char*ifmatch){
+                     const char*name,const char*ifmatch,
+                     const char*oldHref,const char*oldEtag,uint64_t oldHash){
     if(locBytes(s,L,g_lrec,sizeof g_lrec)!=L->len){
         fprintf(stderr,"[sync] lazy read failed for local uid=%u -- skipped\n",(unsigned)uid); return -1; }
     int bl=emit_object(kind,g_lrec,L->len,uid,g_body,sizeof g_body);
@@ -327,9 +337,16 @@ static int pushLocal(const DavCtx*d,const char*coll,int kind,Sink*k,
     FILE*f=fopen(BODY_TMP,"wb"); if(!f) return -1; fwrite(g_body,1,strlen(g_body),f); fclose(f);
     char etag[160]=""; int st=0;
     dav_put(d,coll,name,kindCType(kind),BODY_TMP,ifmatch,etag,sizeof etag,&st);
-    if(!etag[0]) dav_getetag(d,coll,name,etag,sizeof etag);   /* fallback */
-    keepBytes(k,uid,L->attr,g_lrec,L->len,name,etag,fnv1a(g_body));
-    return st;
+    if(st>=200 && st<300){
+        if(!etag[0]) dav_getetag(d,coll,name,etag,sizeof etag);   /* fallback */
+        keepBytes(k,uid,L->attr,g_lrec,L->len,name,etag,fnv1a(g_body));  /* PDB + fresh map row */
+        return st;
+    }
+    fprintf(stderr,"[sync] push FAILED uid=%u (HTTP %d) -- kept local, will retry\n",(unsigned)uid,st);
+    pdbw_rec(k->w,uid,(uint8_t)(L->attr&~REC_ATTR_DIRTY&~REC_ATTR_DELETE),g_lrec,L->len); /* keep local */
+    if(k->mapf && oldHref && oldHref[0])                                  /* preserve old mapping */
+        fprintf(k->mapf,"%u\t%s\t%s\t%llu\n",(unsigned)uid,oldHref,oldEtag?oldEtag:"",(unsigned long long)oldHash);
+    return st<=0 ? -1 : st;
 }
 
 /* Reconcile one preloaded subset (s->loc filled, s->kind set) against one
@@ -404,7 +421,7 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
                 else {
                     if(sc!=SDEL) keepFromServer(d,coll,kind,k,n->uid,srvName,sEtag);
                     if(L && lc!=LDEL){ uint32_t u2=seed++; char n2[64]; snprintf(n2,sizeof n2,"%u.%s",(unsigned)u2,ext);
-                        pushLocal(d,coll,kind,k,s,L,u2,n2,NULL); }
+                        pushLocal(d,coll,kind,k,s,L,u2,n2,NULL, NULL,NULL,0); }
                     continue;
                 }
             }
@@ -412,15 +429,17 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
                 if(sc!=SDEL) keepFromServer(d,coll,kind,k,n->uid,srvName,sEtag);
             } else if(localWins){
                 if(lc==LDEL){ dav_delete(d,coll,srvName,NULL); }
-                else pushLocal(d,coll,kind,k,s,L,n->uid,lname,NULL);
+                else pushLocal(d,coll,kind,k,s,L,n->uid,lname,NULL, mHref,mEtag,mHash);
             }
             continue;
         }
 
         if(lc==LNEW && sc==SABSENT){
-            pushLocal(d,coll,kind,k,s,L,n->uid,lname,NULL); st->pushNew++;
+            int rc=pushLocal(d,coll,kind,k,s,L,n->uid,lname,NULL, NULL,NULL,0);
+            if(rc>=200 && rc<300) st->pushNew++;
         } else if(lc==LMOD && sc==SCLEAN){
-            pushLocal(d,coll,kind,k,s,L,n->uid,srvName,mEtag); st->pushMod++;
+            int rc=pushLocal(d,coll,kind,k,s,L,n->uid,srvName,mEtag, mHref,mEtag,mHash);
+            if(rc>=200 && rc<300) st->pushMod++;
         } else if(lc==LCLEAN && sc==SCLEAN){
             if(locBytes(s,L,g_lrec,sizeof g_lrec)==L->len)
                 keepBytes(k,n->uid,L->attr,g_lrec,L->len,srvName,mEtag,L->hash);
