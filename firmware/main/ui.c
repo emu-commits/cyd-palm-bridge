@@ -143,7 +143,70 @@ static void todo_toggle_detail_cb(lv_event_t *e){
     show_detail(u);
 }
 
-/* read-only detail for one record (scrollable text + Done / Edit) */
+/* ---- delete a record (with confirmation, like PalmOS) ----
+ * PalmOS never deletes without a "Delete <record>?" alert; we mirror that so a
+ * mis-tap can't destroy data. On confirm the record is removed and the list
+ * redraws. (data_delete rewrites the PDB without the record; its uid stays in
+ * the sync map, so the next HotSync detects the deletion and pushes it up.) */
+static uint32_t del_uid;
+static lv_obj_t *g_confirm;
+static void confirm_close(void){ if(g_confirm){ lv_obj_del(g_confirm); g_confirm=NULL; } }
+static void confirm_cancel_cb(lv_event_t *e){ (void)e; confirm_close(); }
+static void confirm_delete_cb(lv_event_t *e){ (void)e;
+    const AppDef *a = cur_app; uint32_t u = del_uid;
+    confirm_close();
+    if(a && u){ data_delete(a->app, u); cur_uid = 0; list_view(a); }
+}
+static void ask_delete(uint32_t uid){
+    if(g_confirm || !cur_app) return;
+    del_uid = uid;
+    const char *what = cur_app->app==APP_CAL ? "event"
+                     : cur_app->app==APP_ADDR ? "address"
+                     : cur_app->app==APP_TODO ? "item" : "memo";
+
+    g_confirm = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_confirm, LCD_W, LCD_H);
+    lv_obj_set_style_bg_color(g_confirm, COL_LINE, 0);
+    lv_obj_set_style_bg_opa(g_confirm, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(g_confirm, 0, 0);
+    lv_obj_set_style_pad_all(g_confirm, 0, 0);
+    lv_obj_add_flag(g_confirm, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_confirm, confirm_cancel_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *panel = lv_obj_create(g_confirm);
+    lv_obj_set_width(panel, 200);
+    lv_obj_set_height(panel, LV_SIZE_CONTENT);
+    lv_obj_center(panel);
+    lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
+    lv_obj_set_style_border_width(panel, 1, 0);
+    lv_obj_set_style_border_color(panel, COL_LINE, 0);
+    lv_obj_set_style_radius(panel, 0, 0);
+    lv_obj_set_style_pad_all(panel, 10, 0);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);   /* absorb clicks */
+
+    lv_obj_t *q = lv_label_create(panel);
+    lv_label_set_long_mode(q, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(q, 180);
+    lv_label_set_text_fmt(q, "Delete this %s?", what);
+    lv_obj_set_style_text_font(q, &lv_font_palm_bold, 0);
+    lv_obj_align(q, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    lv_obj_t *cancel = lv_button_create(panel);
+    lv_obj_set_size(cancel, 82, 30);
+    lv_obj_align(cancel, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_t *cl = lv_label_create(cancel); lv_label_set_text(cl, "Cancel"); lv_obj_center(cl);
+    lv_obj_add_event_cb(cancel, confirm_cancel_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *del = lv_button_create(panel);
+    lv_obj_set_size(del, 82, 30);
+    lv_obj_align(del, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_t *dll = lv_label_create(del); lv_label_set_text(dll, "Delete"); lv_obj_center(dll);
+    lv_obj_add_event_cb(del, confirm_delete_cb, LV_EVENT_CLICKED, NULL);
+}
+static void del_btn_cb(lv_event_t *e){ ask_delete((uint32_t)(uintptr_t)lv_event_get_user_data(e)); }
+
+/* read-only detail for one record (scrollable text + Done / Delete / Edit) */
 static void show_detail(uint32_t uid){
     if(!cur_app) return;
     cur_uid = uid;
@@ -153,8 +216,10 @@ static void show_detail(uint32_t uid){
 
     lv_obj_clean(content);
     int ch = PDA_H - TITLE_H;
+    int istodo = (cur_app->app == APP_TODO);
+    /* leave room for the action row (and a second row for ToDo's Mark Done) */
     lv_obj_t *box = lv_obj_create(content);       /* scrolls if text overflows */
-    lv_obj_set_size(box, LCD_W, ch - 40);
+    lv_obj_set_size(box, LCD_W, ch - (istodo ? 78 : 40));
     lv_obj_set_pos(box, 0, 0);
     lv_obj_set_style_radius(box, 0, 0);
     lv_obj_set_style_border_width(box, 0, 0);
@@ -164,29 +229,36 @@ static void show_detail(uint32_t uid){
     lv_obj_set_width(l, LCD_W - 16);
     lv_label_set_text(l, buf);
 
-    int istodo = (cur_app->app == APP_TODO);
+    /* primary actions, three across: Done | Delete | Edit */
     lv_obj_t *done = lv_button_create(content);
-    lv_obj_set_size(done, istodo ? 66 : 90, 34);
+    lv_obj_set_size(done, 72, 34);
     lv_obj_align(done, LV_ALIGN_BOTTOM_LEFT, 4, -3);
     lv_obj_t *dl = lv_label_create(done);
     lv_label_set_text(dl, "Done"); lv_obj_center(dl);
     lv_obj_add_event_cb(done, done_cb, LV_EVENT_CLICKED, NULL);
 
+    lv_obj_t *del = lv_button_create(content);
+    lv_obj_set_size(del, 72, 34);
+    lv_obj_align(del, LV_ALIGN_BOTTOM_MID, 0, -3);
+    lv_obj_t *dell = lv_label_create(del);
+    lv_label_set_text(dell, "Delete"); lv_obj_center(dell);
+    lv_obj_add_event_cb(del, del_btn_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)uid);
+
     lv_obj_t *edit = lv_button_create(content);
-    lv_obj_set_size(edit, istodo ? 66 : 90, 34);
+    lv_obj_set_size(edit, 72, 34);
     lv_obj_align(edit, LV_ALIGN_BOTTOM_RIGHT, -4, -3);
     lv_obj_t *el = lv_label_create(edit);
     lv_label_set_text(el, "Edit"); lv_obj_center(el);
     lv_obj_add_event_cb(edit, edit_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)uid);
 
-    /* ToDo: a middle button toggles completion (replaces the inline checkbox) */
+    /* ToDo: a full-width row above toggles completion (replaces the inline checkbox) */
     if(istodo){
         Todo t; int isdone = data_get_todo(uid,&t) ? t.completed : 0;
         lv_obj_t *mk = lv_button_create(content);
-        lv_obj_set_size(mk, 90, 34);
-        lv_obj_align(mk, LV_ALIGN_BOTTOM_MID, 0, -3);
+        lv_obj_set_size(mk, LCD_W - 8, 34);
+        lv_obj_align(mk, LV_ALIGN_BOTTOM_MID, 0, -41);
         lv_obj_t *ml = lv_label_create(mk);
-        lv_label_set_text(ml, isdone ? "Undo" : "Mark Done"); lv_obj_center(ml);
+        lv_label_set_text(ml, isdone ? "Mark Not Done" : "Mark Done"); lv_obj_center(ml);
         lv_obj_add_event_cb(mk, todo_toggle_detail_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)uid);
     }
 }
@@ -441,8 +513,8 @@ static void menu_backdrop_cb(lv_event_t *e){ (void)e; menu_close(); }
 
 static void act_new(lv_event_t *e){ (void)e; const AppDef *a=cur_app; menu_close(); if(a){ cur_app=a; show_edit(0); } }
 static void act_delete(lv_event_t *e){ (void)e;
-    const AppDef *a=cur_app; uint32_t u=cur_uid; menu_close();
-    if(a && u){ data_delete(a->app, u); list_view(a); }
+    uint32_t u=cur_uid; menu_close();
+    if(u) ask_delete(u);   /* shared confirm dialog */
 }
 static void act_categories(lv_event_t *e){ (void)e; menu_close(); cat_trigger_cb(NULL); }
 
