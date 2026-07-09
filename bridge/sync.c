@@ -342,6 +342,14 @@ static int pushLocal(const DavCtx*d,const char*coll,int kind,Sink*k,
         keepBytes(k,uid,L->attr,g_lrec,L->len,name,etag,fnv1a(g_body));  /* PDB + fresh map row */
         return st;
     }
+    /* 412 = the UID already exists on the server at a DIFFERENT href (iCloud
+     * enforces one-UID-per-collection). This is a conflict, not a transient
+     * failure -- the caller resolves it per case (drop an orphan / pull the
+     * server copy). Do NOT keep or re-map here, so the caller has a clean slate. */
+    if(st==412) return st;
+    /* transient failure (network / 5xx): keep the record locally + preserve the
+     * OLD map row so it stays dirty and is retried next sync (never poison the
+     * map with a bad etag). */
     fprintf(stderr,"[sync] push FAILED uid=%u (HTTP %d) -- kept local, will retry\n",(unsigned)uid,st);
     pdbw_rec(k->w,uid,(uint8_t)(L->attr&~REC_ATTR_DIRTY&~REC_ATTR_DELETE),g_lrec,L->len); /* keep local */
     if(k->mapf && oldHref && oldHref[0])                                  /* preserve old mapping */
@@ -437,9 +445,24 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         if(lc==LNEW && sc==SABSENT){
             int rc=pushLocal(d,coll,kind,k,s,L,n->uid,lname,NULL, NULL,NULL,0);
             if(rc>=200 && rc<300) st->pushNew++;
+            else if(rc==412){
+                /* creating this record failed because its UID already lives on the
+                 * server at another href (created elsewhere, or an orphan from a
+                 * lost mapping). It's a duplicate -> DROP this local copy (it was
+                 * not kept in the PDB); the server's canonical object is pulled
+                 * under its own href as a separate record. */
+                st->conflicts++;
+                fprintf(stderr,"[sync] uid=%u dropped: dup UID already on server (server copy wins)\n",(unsigned)n->uid);
+            }
         } else if(lc==LMOD && sc==SCLEAN){
             int rc=pushLocal(d,coll,kind,k,s,L,n->uid,srvName,mEtag, mHref,mEtag,mHash);
             if(rc>=200 && rc<300) st->pushMod++;
+            else if(rc==412){
+                /* our conditional update was rejected: the server copy changed
+                 * under us (or an etag quirk). POL_SERVER -> take the server copy. */
+                st->conflicts++;
+                if(keepFromServer(d,coll,kind,k,n->uid,srvName,sEtag)==0) st->pullMod++;
+            }
         } else if(lc==LCLEAN && sc==SCLEAN){
             if(locBytes(s,L,g_lrec,sizeof g_lrec)==L->len)
                 keepBytes(k,n->uid,L->attr,g_lrec,L->len,srvName,mEtag,L->hash);
