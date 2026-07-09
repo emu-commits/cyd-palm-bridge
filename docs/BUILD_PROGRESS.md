@@ -6,6 +6,38 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-09 (cont.) — close out sync: UID identity + streaming
+
+Branch `claude/sync-uid-streaming`. Two staged rewrites of `bridge/sync.c`, each
+host-verified against Radicale via the new reliable harness `tests/gate.sh`.
+
+**Stage 1 — reconcile by object UID, not href (`e9eb288`).** Identity was derived
+from the href name (`nameToUid`); iCloud relocating an object to a new href, or a
+lost map row, split one record into two → spurious deletes, uid churn, 412
+duplicate-UID conflicts. Now reconciliation keys on a 64-bit hash of the object's
+iCal/vCard UID, bridged through the map (new 5th column = the object UID). Foreign
+objects re-push with their own immutable UID (a one-line UID rewrite in
+`emit_object`). New gate `tests/uidmatch.c` (relocation + foreign-edit round-trip).
+Map format v2 is back-compatible. **Verified on device** (sync "looks ok").
+
+**Stage 2 — streaming merge-join reconcile (`e9d12cd`).** The array reconcile held
+`loc/map/srv[MAXR]` resident during DAV calls, so it had to coexist with the
+~35 KB mbedTLS handshake — the real reason a collection capped at 24. Now three
+UID-hash index files are built on disk, sorted with no handshake live, then
+merge-joined: only the current objhash's rows are resident during a DAV op, so
+peak RAM is O(1) in record count and the cap is gone. `davreq` does
+init/perform/cleanup per call, so mbedTLS is only live *inside* a call — the
+sorts/joins between calls are handshake-free. `tests/bigsync.c` now runs 200
+records under device sizing (was 24). Bugs squashed bringing it up: unsorted
+`sv.raw` before the href join (dup record), untracked server-deletes polluting
+`sv.idx`, a malformed index line truncating a whole source mid-merge (→ every row
+SDEL), `freopen` (FATFS lacks it → `fclose`+`fopen`). **On-device confirmation of
+a >24-record collection still pending.**
+
+All host gates green (incremental, synctoken, category, uidmatch, bigsync@200,
+multiapp) + offline (roundtrip/find/calc/config/fuzz). Firmware builds; sync RAM
+is now much lower (no resident per-record arrays during TLS).
+
 ## SESSION 2026-07-09 — sync is finally correct end-to-end (on device)
 
 Started from "multi-collection sync + Calculator flashed" and drove real on-device

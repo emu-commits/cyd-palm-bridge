@@ -3,6 +3,26 @@
 Snapshot after the sync-correctness session. Newest state on top; see
 `docs/BUILD_PROGRESS.md` for the running build log and the deep-dive on each fix.
 
+## UPDATE — sync closed out (branch `claude/sync-uid-streaming`)
+
+Two structural gaps below are now DONE (host-green; on-device verification of
+Stage 2 pending):
+
+- **P0.2 UID-based identity — DONE.** Reconciliation keys on the object's
+  iCal/vCard UID hash (bridged through the map), not the href name. Kills the
+  relocation / lost-map dup-UID class. Foreign objects push back with their own
+  immutable UID. New gate `tests/uidmatch.c`. Commit `e9eb288`. *(Verified on
+  hardware.)*
+- **P0.3 large collections — DONE.** Reconcile is a disk-backed 3-way merge-join
+  (streaming); peak RAM during a DAV op is O(1) in record count, so the MAXR=24
+  hard cap is gone. `tests/bigsync.c` runs 200 records under device sizing.
+  Commit `e9d12cd`. *(Awaiting on-device confirmation with a large collection.)*
+- Host harness `tests/gate.sh` added (reliable Radicale) — resolves the
+  "Radicale doesn't work in the sandbox" blocker (old item 13).
+
+Remaining P0: **idempotency audit on real iCloud** (etag round-trip) and the
+on-device confirmations above. Then P1 below.
+
 ## Where we are
 
 On-device iCloud sync is now **bidirectional and durable** for all three
