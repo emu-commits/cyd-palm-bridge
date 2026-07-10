@@ -152,6 +152,7 @@ static void free_rowuids(void){ free(g_rowuids); g_rowuids=NULL; g_rowuid_n=0; }
  * just the table without tearing down the Look Up field. */
 static char      g_lookup[24];        /* Address Look Up prefix (Graffiti) */
 static int       g_todo_show_done = 1;/* To Do: include completed items      */
+static int       g_todo_sort_due  = 0;/* To Do: 0 = by priority, 1 = by due  */
 
 /* used by the Date Book day view, whose list is bounded to one day's events */
 static void row_cb(lv_event_t *e){
@@ -192,6 +193,7 @@ typedef struct {
     uint32_t uid;
     int      done;        /* To Do completed (sorts incomplete first) */
     int      pri;         /* To Do priority 1..5 (1 = highest)         */
+    int      due;         /* To Do due date YYYYMMDD (0 = none)         */
     char     c0[8];       /* col-0 text (To Do checkbox), else empty    */
     char     c1[96];      /* main display text                          */
     char     sort[48];    /* case-folded sort key                       */
@@ -202,14 +204,20 @@ static void collect_cb(uint32_t uid,const char*primary,const char*secondary,void
     Collect *co = (Collect*)ctx;
     if(!row_keep(primary) || co->n >= co->cap) return;
     SRow *r = &co->rows[co->n++];
-    r->uid=uid; r->done=0; r->pri=99; r->c0[0]=0;
+    r->uid=uid; r->done=0; r->pri=99; r->due=0; r->c0[0]=0;
     if(cur_app && cur_app->app==APP_TODO){
         r->done = (primary[0]=='[' && primary[1]=='x');
         const char *txt = (primary[0]=='[') ? primary+4 : primary;
         snprintf(r->c0, sizeof r->c0, "%s", r->done ? "[x]" : "[ ]");
-        if(secondary && secondary[0]) snprintf(r->c1,sizeof r->c1,"%s  (%s)",txt,secondary);
-        else                          snprintf(r->c1,sizeof r->c1,"%s",txt);
-        if(!secondary || sscanf(secondary,"pri %d",&r->pri)!=1) r->pri=99;
+        if(!secondary || sscanf(secondary,"pri %d due %d",&r->pri,&r->due)<1){ r->pri=99; r->due=0; }
+        /* Palm To Do row: "<pri> description        <due>". Show the due date
+         * (M/D) at the right when set; priority as a leading digit. */
+        if(r->due){
+            int dm=(r->due/100)%100, dd=r->due%100;
+            snprintf(r->c1,sizeof r->c1,"%d %.72s   %d/%d",r->pri,txt,dm,dd);
+        } else {
+            snprintf(r->c1,sizeof r->c1,"%d %.80s",r->pri,txt);
+        }
         snprintf(r->sort, sizeof r->sort, "%s", txt);
     } else {
         if(secondary && secondary[0]) snprintf(r->c1,sizeof r->c1,"%s  (%s)",primary,secondary);
@@ -224,6 +232,16 @@ static int cmp_todo(const void *a,const void *b){        /* incomplete, then pri
     const SRow *x=a, *y=b;
     if(x->done != y->done) return x->done - y->done;
     if(x->pri  != y->pri ) return x->pri  - y->pri;
+    return strcasecmp(x->sort, y->sort);
+}
+/* due-date sort: incomplete first, then earliest due (undated last), then priority. */
+static int cmp_todo_due(const void *a,const void *b){
+    const SRow *x=a, *y=b;
+    if(x->done != y->done) return x->done - y->done;
+    int xd = x->due ? x->due : 99999999;     /* undated sinks to the bottom */
+    int yd = y->due ? y->due : 99999999;
+    if(xd != yd) return xd - yd;
+    if(x->pri != y->pri) return x->pri - y->pri;
     return strcasecmp(x->sort, y->sort);
 }
 static void tbl_click_cb(lv_event_t *e){
@@ -279,7 +297,8 @@ static void build_record_table(void){
     }
     Collect co = { rows, 0, n };
     cur_app->iter(collect_cb, &co);             /* pass 2: collect rows */
-    qsort(rows, co.n, sizeof *rows, todo ? cmp_todo : cmp_name);
+    qsort(rows, co.n, sizeof *rows,
+          todo ? (g_todo_sort_due ? cmp_todo_due : cmp_todo) : cmp_name);
 
     g_rowuid_n = co.n;
     for(int i=0;i<co.n;i++){
@@ -1236,6 +1255,8 @@ static void act_categories(lv_event_t *e){ (void)e; menu_close(); cat_trigger_cb
 static void act_prefs(lv_event_t *e){ (void)e; menu_close(); show_prefs(); }
 static void act_toggle_done(lv_event_t *e){ (void)e; menu_close();
     g_todo_show_done = !g_todo_show_done; if(cur_app) app_reopen(cur_app); }
+static void act_toggle_sort(lv_event_t *e){ (void)e; menu_close();
+    g_todo_sort_due = !g_todo_sort_due; if(cur_app) app_reopen(cur_app); }
 
 /* debug: seed 30 test appointments into the Date Book so a >24-record collection
  * can be pushed to iCloud to exercise the streaming reconcile. Each is a new
@@ -1350,8 +1371,10 @@ static void menu_open(void){
     }
     menu_header(panel, "Options");
     if(cur_app) menu_item(panel, "Categories", act_categories);
-    if(cur_app && cur_app->app==APP_TODO)
+    if(cur_app && cur_app->app==APP_TODO){
         menu_item(panel, g_todo_show_done ? "Hide Completed" : "Show Completed", act_toggle_done);
+        menu_item(panel, g_todo_sort_due ? "Sort by Priority" : "Sort by Due Date", act_toggle_sort);
+    }
     menu_item(panel, "Preferences", act_prefs);
     menu_item(panel, "Add test events", act_gentest);
     menu_item(panel, "About", act_about);

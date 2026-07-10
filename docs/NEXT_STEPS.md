@@ -66,9 +66,12 @@ truncation path live).
 
 ### What's next
 
-- **To Do "due date" sort + Details.** Sorting currently keys on priority then
-  text; the data layer's `Todo.due*` isn't surfaced to the row. Thread due into
-  the row (secondary or a 3rd column) and offer a due/priority sort choice.
+- **To Do "due date" sort + Details — DONE (2026-07-10 part 5).** Due date is
+  threaded through the row (`data.c` secondary `"pri %d due %d"`), rendered
+  Palm-style with a right-aligned M/D, and an Options "Sort by Due Date" /
+  "Sort by Priority" toggle (`g_todo_sort_due` + `cmp_todo_due`) picks the order.
+  Detail already showed `Due: M/D/Y`. *Follow-up:* editing a due date needs a
+  date picker in the To Do edit form.
 - **Finer sync progress** (per-record bar) via a `sync_collection` callback.
 - **P2 hardware:** U8 power / battery gauge (GPIO34) + light-sleep, U9 case.
 - **Backlog (`UI_ROADMAP.md`):** battery % in the title bar (next to the new

@@ -6,6 +6,21 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-10 (part 5) — To Do due-date sort + row display
+
+The To Do list now threads the **due date** through the row and offers a sort
+choice. `data.c` `cbTodo` extends the `secondary` string to `"pri %d due %d"`
+(due = YYYYMMDD, 0 = none; priority stays leading so it's back-compatible). In
+`ui.c`, `SRow` gains a `due` field; `collect_cb` parses it and renders the row
+Palm-style — `"<pri> description        M/D"` with the due date right-aligned when
+set. A new `cmp_todo_due` comparator sorts incomplete-first → earliest due
+(undated sinks last) → priority → text, selected by a `g_todo_sort_due` toggle
+added to the **Options** menu ("Sort by Due Date" / "Sort by Priority"). The
+detail view already surfaced `Due: M/D/Y` (data.c `detTodo`), so no change there.
+Firmware builds clean (57% free). **Not yet flashed** (on-device testing deferred).
+*Follow-up:* the To Do edit form still can't SET a due date (needs a date picker);
+sorting/among-existing-dates works today.
+
 ## SESSION 2026-07-10 (part 4) — sync idempotency: defer unresolvable relocations
 
 **The bug (on-device, against real iCloud; host gates missed it).** iCloud

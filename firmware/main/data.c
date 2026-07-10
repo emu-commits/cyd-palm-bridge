@@ -232,7 +232,11 @@ static int cbTodo(const PdbRec *r, int i, void *ctx){
     if(ToDoUnpack(r->data,r->len,&t)) return 0;
     char pri[96];
     snprintf(pri,sizeof pri,"%s%.80s",t.completed?"[x] ":"[ ] ",t.description);
-    char sec[16]; snprintf(sec,sizeof sec,"pri %d",t.priority);
+    /* secondary carries structured fields the list UI parses: priority and the
+     * due date as YYYYMMDD (0 = no due). Keep "pri %d" leading so older parsers
+     * still read the priority. */
+    int due = t.hasDue ? (t.dueY*10000 + t.dueM*100 + t.dueD) : 0;
+    char sec[32]; snprintf(sec,sizeof sec,"pri %d due %d",t.priority,due);
     it->cb(r->uniqueID, pri, sec, it->ctx);
     return 0;
 }
