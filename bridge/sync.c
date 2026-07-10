@@ -189,6 +189,15 @@ int sync_pull(const DavCtx*d,const char*coll,const char*outpdb,int kind){
 
 /* ==================== incremental conflict-aware sync =================== */
 
+/* optional progress hook (see sync.h). done increments per reconciled record. */
+static SyncProgressFn g_progFn; static void *g_progCtx;
+static int g_progTotal, g_progDone;
+void sync_set_progress(SyncProgressFn fn,void*ctx){ g_progFn=fn; g_progCtx=ctx; }
+static void progReset(int total){ g_progTotal=total; g_progDone=0;
+    if(g_progFn) g_progFn(0,total,g_progCtx); }
+static void progTick(void){ g_progDone++;
+    if(g_progFn) g_progFn(g_progDone,g_progTotal,g_progCtx); }
+
 static uint64_t fnv1a(const char*s){
     uint64_t h=1469598103934665603ULL;
     for(;*s;s++){ h^=(uint8_t)*s; h*=1099511628211ULL; }
@@ -770,6 +779,7 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
             dav_delete(d,coll,srvName,mEtag); st->pushDel++;
         }
 
+        progTick();                             /* one reconciled record */
         if(hasL)    lcRead(flc,&lc);
         if(hasMap)  mpRead(fmp,&mp);
         /* server rows at this objhash were already consumed above */
@@ -804,6 +814,7 @@ int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
 
     PdbW *w = pdbw_begin(OUT_TMP);
     if(!w){ free(s); fprintf(stderr,"sync_collection: cannot open output temp\n"); return -1; }
+    progReset(nin);
     sync_one(d,s,coll,mapfile,pol,w,0,st,NULL,NULL);
     int nrec = pdbw_count(w);
     fprintf(stderr,"[sync] %s: out=%d push=%d/%d/%d pull=%d/%d/%d\n",
@@ -837,6 +848,7 @@ int sync_categorized(const DavCtx*d,const char*localpdb,const char*outpdb,
 
     PdbW *w = pdbw_begin(OUT_TMP);
     if(!w){ free(s); fprintf(stderr,"sync_categorized: cannot open output temp\n"); return -1; }
+    progReset(countRecs(localpdb));
 
     /* distinct destination collections + a representative category id each */
     const char* colls[CAT_COUNT+1]; int catOf[CAT_COUNT+1]; int nc=0;

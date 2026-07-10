@@ -72,7 +72,10 @@ truncation path live).
   "Sort by Priority" toggle (`g_todo_sort_due` + `cmp_todo_due`) picks the order.
   Detail already showed `Due: M/D/Y`. *Follow-up:* editing a due date needs a
   date picker in the To Do edit form.
-- **Finer sync progress** (per-record bar) via a `sync_collection` callback.
+- **Finer sync progress — DONE (2026-07-10 part 6).** Engine progress hook
+  (`sync_set_progress`) ticks per reconciled record; `hotsync` maps it into each
+  collection's band, so the `%` climbs within a collection. Stays text (no
+  `lv_bar`, per the layer-alloc WDT rule).
 - **P2 hardware:** U8 power / battery gauge (GPIO34) + light-sleep, U9 case.
 - **Backlog (`UI_ROADMAP.md`):** battery % in the title bar (next to the new
   clock), RSS reader, Preferences app icon, power/reset-button remap, dark mode.

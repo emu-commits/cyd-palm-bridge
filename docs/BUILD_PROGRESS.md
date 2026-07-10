@@ -6,6 +6,23 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-10 (part 6) — finer sync progress (per-record, intra-collection)
+
+The status line's `%` now advances WITHIN a collection, not just as each of the
+three starts. Added an optional progress hook to the sync engine
+(`sync_set_progress(fn,ctx)` in `sync.h`): the engine calls `fn(done,total,ctx)`
+once per reconciled record (`progTick` in the `sync_one` merge loop) with
+`total` = the local record count (`progReset(nin)` in `sync_collection` /
+`countRecs` in `sync_categorized`). Registered globally, so the ~15
+`sync_collection` callers (tests) are untouched and remain no-ops. `hotsync.c`
+registers `hs_prog_cb`, which maps `done/total` into the current collection's
+band `[(step-1)/ntgt .. step/ntgt]`, so e.g. contact 40/120 of app 3/3 shows a
+smoothly climbing number. **Stays text** — `hs_tick` still renders the number in
+a label; no `lv_bar`/layer-compositing widget touches the fragmented heap during
+the sync window (the WDT-freeze rule from part 2 holds). Server-only pulls can
+push `done` past `total`, so the fraction is clamped to 100. Host gates + firmware
+build clean. **Not yet flashed** (on-device testing deferred).
+
 ## SESSION 2026-07-10 (part 5) — To Do due-date sort + row display
 
 The To Do list now threads the **due date** through the row and offers a sort

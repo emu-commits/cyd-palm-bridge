@@ -38,4 +38,14 @@ int sync_categorized(const DavCtx*d,const char*localpdb,const char*outpdb,
                      int kind,const CatRoute*rt,const char*mapdir,
                      ConflictPolicy pol,SyncStats*st);
 
+/* Optional progress hook: the engine calls fn(done,total,ctx) once as each
+ * collection starts (done=0) and once per reconciled record thereafter, so a
+ * caller can drive an intra-collection progress indicator. `total` is the local
+ * record count (a live estimate; server-only pulls can push done past it, so
+ * clamp). Registered globally (not per-call) so the many sync_collection callers
+ * are untouched; pass NULL to disable. Not thread-safe against a concurrent sync
+ * -- set it before starting the sync task. */
+typedef void (*SyncProgressFn)(int done,int total,void*ctx);
+void sync_set_progress(SyncProgressFn fn,void*ctx);
+
 #endif

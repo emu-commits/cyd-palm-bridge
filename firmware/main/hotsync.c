@@ -31,12 +31,22 @@ static volatile int s_busy;
 static char s_status[80] = "Ready";
 static void setst(const char *s){ snprintf(s_status, sizeof s_status, "%s", s); }
 
-/* coarse sync progress 0..100 for the UI's progress bar. Collection-level (the
- * per-app step); a finer intra-collection bar would need a callback threaded
- * through sync_collection. -1 = idle/not started. */
+/* sync progress 0..100 for the UI status line. Each configured collection owns a
+ * band [s_band_lo, s_band_lo+s_band_span]; the engine's per-record progress hook
+ * (hs_prog_cb) fills that band, so the bar advances WITHIN a collection, not just
+ * as each starts. -1 = idle/not started. */
 static volatile int s_prog = -1;
+static int s_band_lo, s_band_span;
 static void setprog(int p){ s_prog = p; }
 int hotsync_progress(void){ return s_prog; }
+/* engine progress hook: map done/total into the current collection's band. Runs
+ * on the sync task; s_prog is a plain int read by the LVGL task (atomic write). */
+static void hs_prog_cb(int done,int total,void *ctx){
+    (void)ctx;
+    int frac = (total > 0) ? (done * 100 / total) : 0;
+    if(frac > 100) frac = 100;                 /* server-only pulls can exceed total */
+    s_prog = s_band_lo + frac * s_band_span / 100;
+}
 
 /* ---- per-app sync targets ------------------------------------------------
  * HotSync walks this table, syncing each configured app to its own iCloud
@@ -198,12 +208,16 @@ static void hotsync_task(void *arg){
     int ntgt=0; for(int i=0;i<N_APPS;i++){ const char*c=app_coll(cfg,i); if(c&&c[0]) ntgt++; }
     int step=0;
     setprog(0);
+    sync_set_progress(hs_prog_cb, NULL);           /* engine drives the intra-collection bar */
     for(int i=0;i<N_APPS;i++){
         const SyncApp *t=&s_apps[i];
         const char *coll=app_coll(cfg,i);
         if(!coll || !coll[0]) continue;            /* app not configured -> skip */
         step++;
-        setprog(ntgt ? (step-1)*100/ntgt : 0);     /* advance the bar as each collection starts */
+        /* this collection fills the band [(step-1)/ntgt .. step/ntgt] of the bar */
+        s_band_lo   = ntgt ? (step-1)*100/ntgt : 0;
+        s_band_span = ntgt ? 100/ntgt : 100;
+        setprog(s_band_lo);
 
         DavCtx *ctx=&d;
         if(t->card){
@@ -240,6 +254,7 @@ static void hotsync_task(void *arg){
             tot.pullNew+=st.pullNew; tot.pullMod+=st.pullMod; tot.pullDel+=st.pullDel; }
     }
 
+    sync_set_progress(NULL, NULL);                 /* detach the hook */
     setprog(100);
     if(did==0 && failed>0)
         snprintf(msg,sizeof msg,"Sync failed - low memory (heap %lu)",
