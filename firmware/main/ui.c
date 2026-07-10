@@ -556,50 +556,98 @@ static void alert_show(const char *msg){
 }
 
 /* ---- Preferences: edit the config.ini fields on-device (Graffiti entry) ----
- * Field order is fixed so the save/collect handlers can read g_fields[] by
- * index. The three collection paths are hard to type; the "Discover" button
- * fills them from iCloud over Wi-Fi (chunk 3). Passwords are shown in the clear
- * -- it's the owner's device, and masking makes Graffiti entry unverifiable. */
+ * Rendered as an lv_list (the app-list pattern, which is rock-solid here) rather
+ * than one big scrollable form: a form holding 10 textareas + buttons both
+ * strained LVGL's 24 KB pool AND drove an infinite scroll-relayout loop (Task
+ * WDT) once the content grew past the viewport. Each field is a list row
+ * "Label: value"; tapping opens a single-field editor with ONE textarea (light,
+ * and the proven-safe widget). Edits land in the in-memory config immediately;
+ * the "Save to config.ini" row persists them (also picks up Discover's writes). */
 enum { PF_SSID, PF_WPASS, PF_USER, PF_PASS, PF_CALB, PF_CARDB,
        PF_CAL, PF_TODO, PF_CARD, PF_TZ, PF_N };
-static lv_obj_t *pf_pol_lbl;
-static int pf_pol;
+static const char *PF_LABELS[PF_N] = {
+    "Wi-Fi SSID", "Wi-Fi pass", "Apple ID", "App pass", "CalDAV host",
+    "CardDAV host", "Calendar coll", "Reminders coll", "Address coll", "Time zone",
+};
 static const char *pol_name(int p){
     return p==CFG_POL_LOCAL ? "device wins"
          : p==CFG_POL_BOTH  ? "keep both"
          :                    "iCloud wins";
 }
-/* copy the visible form fields into the in-memory config (no file write). */
-static void pf_collect(void){
-    Config *c = appcfg_mut();
-    snprintf(c->wifi_ssid,     sizeof c->wifi_ssid,     "%s", fv(PF_SSID));
-    snprintf(c->wifi_pass,     sizeof c->wifi_pass,     "%s", fv(PF_WPASS));
-    snprintf(c->dav_user,      sizeof c->dav_user,      "%s", fv(PF_USER));
-    snprintf(c->dav_pass,      sizeof c->dav_pass,      "%s", fv(PF_PASS));
-    snprintf(c->dav_base,      sizeof c->dav_base,      "%s", fv(PF_CALB));
-    snprintf(c->dav_card_base, sizeof c->dav_card_base, "%s", fv(PF_CARDB));
-    snprintf(c->cal_coll,      sizeof c->cal_coll,      "%s", fv(PF_CAL));
-    snprintf(c->todo_coll,     sizeof c->todo_coll,     "%s", fv(PF_TODO));
-    snprintf(c->card_coll,     sizeof c->card_coll,     "%s", fv(PF_CARD));
-    snprintf(c->timezone,      sizeof c->timezone,      "%s", fv(PF_TZ));
-    c->policy = pf_pol;
-}
-static void pf_cancel_cb(lv_event_t *e){ (void)e; show_launcher(); }
-static void pf_save_cb(lv_event_t *e){ (void)e;
-    pf_collect();                 /* read fields while they still exist */
-    int rc = appcfg_save();
-    show_launcher();
-    alert_show(rc==0 ? "Saved to config.ini" : "Could not write config.ini (SD card?)");
-}
-static void pf_pol_cb(lv_event_t *e){ (void)e;
-    pf_pol = (pf_pol+1)%3;
-    if(pf_pol_lbl) lv_label_set_text_fmt(pf_pol_lbl, "Conflicts: %s", pol_name(pf_pol));
-}
-static void pf_discover_cb(lv_event_t *e){ (void)e;
-    if(hotsync_busy()){ alert_show("A sync is in progress; try again in a moment."); return; }
-    pf_collect(); show_discover();
+/* the config buffer + capacity for field i (both read and write go through this) */
+static char *pf_buf(Config *c, int i, int *cap){
+    switch(i){
+        case PF_SSID:  *cap=sizeof c->wifi_ssid;     return c->wifi_ssid;
+        case PF_WPASS: *cap=sizeof c->wifi_pass;     return c->wifi_pass;
+        case PF_USER:  *cap=sizeof c->dav_user;      return c->dav_user;
+        case PF_PASS:  *cap=sizeof c->dav_pass;      return c->dav_pass;
+        case PF_CALB:  *cap=sizeof c->dav_base;      return c->dav_base;
+        case PF_CARDB: *cap=sizeof c->dav_card_base; return c->dav_card_base;
+        case PF_CAL:   *cap=sizeof c->cal_coll;      return c->cal_coll;
+        case PF_TODO:  *cap=sizeof c->todo_coll;     return c->todo_coll;
+        case PF_CARD:  *cap=sizeof c->card_coll;     return c->card_coll;
+        case PF_TZ:    *cap=sizeof c->timezone;      return c->timezone;
+    }
+    *cap=0; return NULL;
 }
 
+/* ---- single-field editor (one textarea at a time) ---- */
+static int pf_edit_idx;
+static void pf_edit_cancel_cb(lv_event_t *e){ (void)e; show_prefs(); }
+static void pf_edit_save_cb(lv_event_t *e){ (void)e;
+    int cap=0; char *dst = pf_buf(appcfg_mut(), pf_edit_idx, &cap);
+    if(dst && cap) snprintf(dst, cap, "%s", lv_textarea_get_text(g_fields[0]));
+    show_prefs();
+}
+static void show_pref_edit(int i){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0; pf_edit_idx = i;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, PF_LABELS[i]);
+    update_cat_trigger();
+
+    lv_obj_t *cancel = lv_button_create(content);
+    lv_obj_set_size(cancel, 60, 28); lv_obj_align(cancel, LV_ALIGN_TOP_LEFT, 2, 2);
+    lv_obj_t *cl=lv_label_create(cancel); lv_label_set_text(cl,"Cancel"); lv_obj_center(cl);
+    lv_obj_add_event_cb(cancel, pf_edit_cancel_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *save = lv_button_create(content);
+    lv_obj_set_size(save, 60, 28); lv_obj_align(save, LV_ALIGN_TOP_RIGHT, -2, 2);
+    lv_obj_t *sl=lv_label_create(save); lv_label_set_text(sl,"Save"); lv_obj_center(sl);
+    lv_obj_add_event_cb(save, pf_edit_save_cb, LV_EVENT_CLICKED, NULL);
+
+    int cap=0; const char *val = pf_buf(appcfg_mut(), i, &cap);
+    lv_obj_t *lb = lv_label_create(content);
+    lv_label_set_text(lb, PF_LABELS[i]);
+    lv_obj_set_pos(lb, 4, 40);
+    lv_obj_t *ta = lv_textarea_create(content);       /* ONE textarea -> light + safe */
+    lv_textarea_set_one_line(ta, true);
+    lv_textarea_set_max_length(ta, cap>0 ? cap-1 : 63);
+    lv_textarea_set_text(ta, val ? val : "");
+    lv_obj_set_width(ta, LCD_W - 16);
+    lv_obj_set_pos(ta, 4, 58);
+    lv_obj_add_event_cb(ta, ta_click_cb, LV_EVENT_CLICKED, NULL);
+    g_fields[0] = ta; g_nfields = 1; active_ta = ta;
+    lv_obj_add_state(ta, LV_STATE_FOCUSED);
+}
+
+/* ---- the Preferences list ---- */
+static void pf_row_open_cb(lv_event_t *e){ show_pref_edit((int)(intptr_t)lv_event_get_user_data(e)); }
+static void pf_pol_row_cb(lv_event_t *e){ (void)e;
+    Config *c = appcfg_mut(); c->policy = (c->policy + 1) % 3; show_prefs();
+}
+static void pf_disc_row_cb(lv_event_t *e){ (void)e;
+    if(hotsync_busy()){ alert_show("A sync is in progress; try again in a moment."); return; }
+    show_discover();
+}
+static void pf_saverow_cb(lv_event_t *e){ (void)e;
+    int rc = appcfg_save();
+    alert_show(rc==0 ? "Saved to config.ini" : "Could not write config.ini (SD card?)");
+}
+static void pf_add(lv_obj_t *list, const char *text, lv_event_cb_t cb, int ud){
+    lv_obj_t *b = lv_list_add_button(list, NULL, text);
+    lv_obj_set_style_radius(b, 0, 0);
+    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, (void *)(intptr_t)ud);
+}
 static void show_prefs(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
@@ -607,60 +655,30 @@ static void show_prefs(void){
     lv_label_set_text(title_lbl, "Preferences");
     update_cat_trigger();   /* hides the category picker (no data app) */
 
-    lv_obj_t *cancel = lv_button_create(content);
-    lv_obj_set_size(cancel, 60, 28); lv_obj_align(cancel, LV_ALIGN_TOP_LEFT, 2, 2);
-    lv_obj_t *cl=lv_label_create(cancel); lv_label_set_text(cl,"Cancel"); lv_obj_center(cl);
-    lv_obj_add_event_cb(cancel, pf_cancel_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *save = lv_button_create(content);
-    lv_obj_set_size(save, 60, 28); lv_obj_align(save, LV_ALIGN_TOP_RIGHT, -2, 2);
-    lv_obj_t *sl=lv_label_create(save); lv_label_set_text(sl,"Save"); lv_obj_center(sl);
-    lv_obj_add_event_cb(save, pf_save_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *list = lv_list_create(content);
+    lv_obj_set_size(list, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_radius(list, 0, 0);
+    lv_obj_set_style_border_width(list, 0, 0);
+    lv_obj_set_style_pad_all(list, 0, 0);
 
-    g_form = lv_obj_create(content);
-    lv_obj_t *form = g_form;
-    lv_obj_set_size(form, LCD_W, FORM_FULL);
-    lv_obj_set_pos(form, 0, 34);
-    lv_obj_set_style_radius(form, 0, 0);
-    lv_obj_set_style_border_width(form, 0, 0);
-    lv_obj_set_style_bg_color(form, COL_BODY, 0);
-
-    const Config *c = appcfg();
-    pf_pol = c->policy;
-    int y = 2;
-    form_field(form,"Wi-Fi network (SSID)",   c->wifi_ssid,     sizeof c->wifi_ssid     -1, &y);
-    form_field(form,"Wi-Fi password",         c->wifi_pass,     sizeof c->wifi_pass     -1, &y);
-    form_field(form,"Apple ID (email)",       c->dav_user,      sizeof c->dav_user      -1, &y);
-    form_field(form,"App-specific password",  c->dav_pass,      sizeof c->dav_pass      -1, &y);
-    form_field(form,"CalDAV host",            c->dav_base,      sizeof c->dav_base      -1, &y);
-    form_field(form,"CardDAV host",           c->dav_card_base, sizeof c->dav_card_base -1, &y);
-    form_field(form,"Calendar collection",    c->cal_coll,      sizeof c->cal_coll      -1, &y);
-    form_field(form,"Reminders collection",   c->todo_coll,     sizeof c->todo_coll     -1, &y);
-    form_field(form,"Address collection",     c->card_coll,     sizeof c->card_coll     -1, &y);
-    form_field(form,"Time zone",              c->timezone,      sizeof c->timezone      -1, &y);
-
-    /* conflict policy: a cycling button (server / local / both). NOTE: buttons in
-     * the scrollable form MUST be given an explicit height -- a content-sized
-     * (LV_SIZE_CONTENT) child inside a scroll container feeds its size back into
-     * the parent's scroll layout every frame => an infinite layout loop (Task WDT).
-     * The record editor avoids this by only using explicitly-sized textareas. */
-    lv_obj_t *pol = lv_button_create(form);
-    lv_obj_set_size(pol, LCD_W - 16, 32); lv_obj_set_pos(pol, 2, y);
-    lv_obj_set_style_radius(pol, 0, 0);
-    pf_pol_lbl = lv_label_create(pol);
-    lv_label_set_text_fmt(pf_pol_lbl, "Conflicts: %s", pol_name(pf_pol));
-    lv_obj_center(pf_pol_lbl);
-    lv_obj_add_event_cb(pol, pf_pol_cb, LV_EVENT_CLICKED, NULL);
-    y += 40;
-
-    /* discover collections over Wi-Fi -> fills the three collection fields */
-    lv_obj_t *disc = lv_button_create(form);
-    lv_obj_set_size(disc, LCD_W - 16, 32); lv_obj_set_pos(disc, 2, y);
-    lv_obj_set_style_radius(disc, 0, 0);
-    lv_obj_t *dl=lv_label_create(disc); lv_label_set_text(dl,"Discover collections..."); lv_obj_center(dl);
-    lv_obj_add_event_cb(disc, pf_discover_cb, LV_EVENT_CLICKED, NULL);
-    y += 44;
-
-    if(g_nfields > 0){ active_ta = g_fields[0]; lv_obj_add_state(g_fields[0], LV_STATE_FOCUSED); }
+    Config *c = appcfg_mut();
+    char row[80];
+    for(int i=0;i<PF_N;i++){
+        int cap=0; const char *v = pf_buf(c, i, &cap);
+        char shown[28];
+        if(i==PF_WPASS || i==PF_PASS)
+            snprintf(shown, sizeof shown, "%s", (v && v[0]) ? "********" : "(unset)");
+        else if(v && v[0])
+            snprintf(shown, sizeof shown, "%.20s%s", v, strlen(v)>20 ? "..." : "");
+        else
+            snprintf(shown, sizeof shown, "(unset)");
+        snprintf(row, sizeof row, "%s: %s", PF_LABELS[i], shown);
+        pf_add(list, row, pf_row_open_cb, i);
+    }
+    snprintf(row, sizeof row, "Conflicts: %s", pol_name(c->policy));
+    pf_add(list, row, pf_pol_row_cb, 0);
+    pf_add(list, "Discover collections...", pf_disc_row_cb, 0);
+    pf_add(list, "Save to config.ini", pf_saverow_cb, 0);
 }
 
 /* ---- collection discovery screen (chunk 3) ----
