@@ -111,13 +111,16 @@ static void row_cb(lv_event_t *e){
     show_detail((uint32_t)(uintptr_t)lv_event_get_user_data(e));
 }
 
-/* Each list row is a full LVGL button+label, drawn from the fixed LVGL object
- * pool (LV_MEM_SIZE). lv_list is NOT virtualized, so a collection with hundreds
- * of records would exhaust the pool mid-build and panic (StoreProhibited when the
- * failed alloc is dereferenced). Cap the number of rows we materialize and show a
- * "N more" footer instead; every record still syncs (sync reads the PDB, not the
- * list). TODO: a virtualized/paged list to browse arbitrarily large collections. */
-#define LIST_MAX 40
+/* Each list row is a full LVGL button+label, drawn from the fixed 24 KB LVGL
+ * object pool (LV_MEM_SIZE). lv_list is NOT virtualized, so too many records
+ * exhaust the pool mid-build and panic (StoreProhibited when the failed alloc is
+ * dereferenced) -- ~35 rows was enough to crash. Cap the rows we materialize and
+ * show a "N more" footer instead; every record still syncs (sync reads the PDB,
+ * not the list). The pool is kept at 24 KB (not enlarged) because the no-PSRAM
+ * heap must leave a contiguous block for the mbedTLS handshake during sync --
+ * enlarging it starved the second sync's TLS. TODO: a virtualized/paged list (or
+ * lv_table, ~1 obj total) to browse arbitrarily large collections. */
+#define LIST_MAX 20
 typedef struct { lv_obj_t *list; int shown; } RowCtx;
 
 /* add one tappable row to the active list. To Do rows keep the "[x]"/"[ ]"

@@ -32,7 +32,7 @@ CONFIG_LV_USE_THEME_MONO=y
 # Shrink LVGL's heap pool from the 64 KB default -- our UI (lists, buttons, a few
 # labels) fits comfortably in 24 KB, and the freed 40 KB is what the TLS handshake
 # + sync working set need. If the UI ever logs "lv_malloc failed", raise this.
-CONFIG_LV_MEM_SIZE_KILOBYTES=48
+CONFIG_LV_MEM_SIZE_KILOBYTES=24
 
 # --- Wi-Fi: trim the (generous) default buffer pools to claw back heap for TLS.
 # Sync is low-bandwidth, so fewer RX/TX buffers is fine. ---
