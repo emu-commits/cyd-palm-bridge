@@ -19,11 +19,33 @@ Three-part pass on the UI, docs updated between each:
    *Deferred:* record sorting (Address by last name, To Do by priority/due) — needs
    row buffering; revisit after on-device performance check.
 
-All three build clean; **not yet flashed** — next device session flashes and
-verifies: TZ picker + live DST readout, browsing a >12-record collection (cap
-gone), Address Look Up, To Do checkbox toggle + Show Completed.
+**VERIFIED ON DEVICE + COMMITTED (`7dead10`, pushed to origin/main).** TZ picker
+selects + shows live DST, Address Look Up filters by first/last name, record
+tap-to-detail and To Do checkbox toggle work, >12-record lists browse (cap gone).
+Two device-found bugs fixed in the same commit: the TZ picker froze as a 24-button
+`lv_list` (rebuilt on `lv_table`); and `lv_table` tap read nothing because LVGL
+9.2 clears the selected cell on RELEASED before `LV_EVENT_CLICKED` — now read on
+`LV_EVENT_VALUE_CHANGED`.
 
-The real open sync item (idempotency on live iCloud href relocation) stays parked.
+### What's next (after the UI-polish sprint)
+
+Deferred from the sprint, do first when UI work resumes:
+- **Record sorting.** Lists still show PDB order. Palm sorts Address by last name,
+  To Do by priority then due, Memo alphabetical/manual. Needs buffering the rows
+  (uid + sort key) then ordering the table — do it now that the `lv_table` cost is
+  known to be flat. Address especially benefits (Look Up + sorted = fast finding).
+- **Find UI (P1.7).** Engine `bridge/find.c` is done + host-tested; it needs a
+  Graffiti query field + a results list. The `lv_table` backbone + the Look Up
+  field pattern are now both in place to build on. Silkscreen Find button is
+  already stubbed (`find_cb`).
+
+Then the previously-planned order (P1 → P2): finer sync progress bar, then P2
+hardware (U8 power / battery gauge on GPIO34, U9 case). Backlog from
+`UI_ROADMAP.md`: top-bar clock + battery %, RSS reader, Preferences app icon,
+power/reset-button remap, dark mode.
+
+The real open sync item (idempotency on live iCloud href relocation) stays parked
+under "sync + Date Book are ok for now."
 
 ## UPDATE — sync closed out (branch `claude/sync-uid-streaming`)
 
