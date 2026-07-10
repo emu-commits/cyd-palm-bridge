@@ -5,6 +5,7 @@
 #include "touch.h"
 #include "power.h"
 #include "appcfg.h"
+#include "hotsync.h"
 #include "lv_font_palm.h"
 #include "lvgl.h"
 #include "esp_heap_caps.h"
@@ -58,6 +59,15 @@ static void indev_cb(lv_indev_t *indev, lv_indev_data_t *data){
  * the caller can idle more slowly (deeper light-sleep, slower wake polling). */
 static int idle_step(void){
     int secs = appcfg()->backlight_sec;
+    /* never blank during a sync: the user is watching the progress line, and the
+     * priority-4 sync task can starve this wake-poll -- a screen that blanked
+     * mid-sync wouldn't relight on a tap until the sync finished. Keep it lit and
+     * hold the idle timer at zero so it can't trip while syncing. */
+    if(hotsync_busy()){
+        if(power_screen_off()) power_backlight(1);
+        lv_display_trigger_activity(NULL);
+        return 0;
+    }
     if(power_screen_off()){
         if(tp_pressed()){ power_backlight(1); g_swallow_tap = 1; }
         return power_screen_off();
