@@ -6,6 +6,37 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-10 (part 8) — on-device: light-sleep off, sync-awake, due picker, brightness slider
+
+First on-device run of the part-3–7 sprint. Flashed `b302531`, then fixed what
+hardware showed:
+
+- **Automatic light-sleep disabled (`e821054`).** On this CYD the SoC light-sleep
+  gates the APB clock between LVGL frames and the display+backlight glitch every
+  cycle → the screen visibly **flashes on/off**. Commented out `CONFIG_PM_ENABLE`
+  + `CONFIG_FREERTOS_USE_TICKLESS_IDLE` (the documented disable path) and rebuilt
+  (`rm -f sdkconfig` so defaults re-apply). PWM backlight + idle screen-off are
+  unaffected and still work. Light-sleep stays off unless a board tolerates APB
+  gating during LVGL.
+- **Screen no longer sleeps mid-sync (`d1d899a`).** The idle-blank timer kept
+  running during a HotSync, so the display slept and — because the priority-4
+  sync task starves the touch wake-poll — wouldn't relight on a tap until the
+  sync finished. `idle_step()` now holds inactivity at zero (relighting if
+  already blanked) whenever `hotsync_busy()`, keeping the progress line visible.
+- **To Do due-date picker (`ef1a0d0`).** The edit form gained a **Due** trigger
+  button opening a Palm-style popup: quick options (Today / Tomorrow / 1 Week /
+  No Date) + an `lv_calendar` for an arbitrary day. Modal overlay over the form
+  (same pattern as the category Details dialog) so typed Description/Note survive
+  the pick; the chosen date writes `Todo.hasDue/dueY/dueM/dueD` on Save. Closes
+  the part-5 "editing a due date needs a date picker" follow-up.
+- **Preferences brightness slider (`ef1a0d0`).** A **Brightness: NN%** row opens
+  a slider popup that live-drives `power_set_brightness()` as it's dragged and
+  persists to `config.ini` on release (floor 10% so it can't blank fully).
+
+All build clean (no warnings), flashed, boot clean at ~193 KB free heap. On-device
+verification of the due picker + brightness UX and the sync-awake behaviour during
+a real HotSync is the next hands-on check.
+
 ## SESSION 2026-07-10 (part 7) — U8 power: PWM backlight + light-sleep
 
 New `firmware/main/power.c` / `power.h` wires the two `config.ini` fields that

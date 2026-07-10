@@ -3,6 +3,25 @@
 Snapshot after the sync-correctness session. Newest state on top; see
 `docs/BUILD_PROGRESS.md` for the running build log and the deep-dive on each fix.
 
+## UPDATE 2026-07-10 (part 8) — first on-device run of the part-3–7 sprint
+
+Flashed `b302531` and fixed what hardware surfaced (all pushed):
+- **Light-sleep DISABLED (`e821054`).** Automatic SoC light-sleep flashes the
+  display on this CYD (APB clock gates between LVGL frames). Commented out the two
+  `CONFIG_PM_*` lines; PWM backlight + idle screen-off still work. Not pursuing
+  light-sleep further on this board.
+- **Screen stays lit during a sync (`d1d899a`).** `idle_step()` holds the idle
+  timer at zero while `hotsync_busy()`.
+- **To Do due-date picker DONE (`ef1a0d0`).** Edit-form **Due** button → popup
+  (Today/Tomorrow/1 Week/No Date + calendar). Closes the part-5 follow-up.
+- **Brightness slider DONE (`ef1a0d0`).** Preferences **Brightness** row → live
+  slider, persists to `config.ini`.
+
+Remaining hands-on checks: due-picker + brightness UX and sync-awake against a
+real HotSync; plus the still-pending live-iCloud idempotency / >24-record verifies
+and Graffiti punctuation stroke tuning. Un-started backlog item now: **battery
+gauge (GPIO34)**.
+
 ## UPDATE 2026-07-10 — UI polish sprint (sync/Date Book parked as "ok for now")
 
 Three-part pass on the UI, docs updated between each:
