@@ -49,5 +49,9 @@ CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 # hold PM locks while active so a sync is never interrupted. To disable
 # light-sleep (e.g. if it disturbs touch/display on a given board), comment out
 # these two lines and rebuild -- the PWM backlight + idle screen-off still work.
-CONFIG_PM_ENABLE=y
-CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+# DISABLED 2026-07-10: on this CYD, automatic light-sleep stops the APB clock
+# between LVGL frames and the display/backlight glitches every cycle -- the
+# screen visibly flashes on/off. PWM backlight + idle screen-off are unaffected
+# and remain active. Re-enable only with a board that tolerates APB gating.
+#CONFIG_PM_ENABLE=y
+#CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
