@@ -3,6 +3,8 @@
 #include "lvgl_port.h"
 #include "display.h"
 #include "touch.h"
+#include "power.h"
+#include "appcfg.h"
 #include "lv_font_palm.h"
 #include "lvgl.h"
 #include "esp_heap_caps.h"
@@ -12,6 +14,10 @@
 #include "freertos/task.h"
 
 static const char *TAG = "lvgl";
+
+/* set for one touch-stroke right after a wake, so the tap that lights the screen
+ * back up is swallowed (not delivered to a button) -- PalmOS wake-tap behavior. */
+static volatile int g_swallow_tap = 0;
 
 /* partial draw buffer: 40 rows. ~19KB, DMA-capable. */
 #define BUF_ROWS 40
@@ -32,12 +38,35 @@ static void indev_cb(lv_indev_t *indev, lv_indev_data_t *data){
     int x, y;
     if(tp_read(&x, &y)){
         lx = x; ly = y;
+        /* swallow the wake tap: while the finger that woke the screen is still
+         * down, report RELEASED so it never activates a widget. */
+        if(g_swallow_tap){ data->point.x = lx; data->point.y = ly;
+                           data->state = LV_INDEV_STATE_RELEASED; return; }
         data->point.x = x; data->point.y = y;
         data->state = LV_INDEV_STATE_PRESSED;
     } else {
+        g_swallow_tap = 0;               /* finger lifted -> next tap is real */
         data->point.x = lx; data->point.y = ly;
         data->state = LV_INDEV_STATE_RELEASED;
     }
+}
+
+/* idle backlight management, called once per run-loop iteration. When the screen
+ * is on, blank it after cfg->backlight_sec of LVGL inactivity; when it's off,
+ * poll the raw touch panel (LVGL inactivity won't advance with the display idle)
+ * and wake on the first press, swallowing that tap. Returns 1 while blanked so
+ * the caller can idle more slowly (deeper light-sleep, slower wake polling). */
+static int idle_step(void){
+    int secs = appcfg()->backlight_sec;
+    if(power_screen_off()){
+        if(tp_pressed()){ power_backlight(1); g_swallow_tap = 1; }
+        return power_screen_off();
+    }
+    if(secs > 0){
+        uint32_t idle = lv_display_get_inactive_time(NULL);   /* ms since activity */
+        if(idle > (uint32_t)secs * 1000){ power_backlight(0); return 1; }
+    }
+    return 0;
 }
 
 void lvgl_port_init(void){
@@ -64,7 +93,15 @@ void lvgl_port_init(void){
 void lvgl_port_run(void){
     while(1){
         uint32_t next = lv_timer_handler();      /* ms until next work */
-        if(next > 30) next = 30;
-        vTaskDelay(pdMS_TO_TICKS(next ? next : 5));
+        int off = idle_step();                   /* backlight off/on + wake */
+        if(off){
+            /* screen blanked: nothing to draw. Idle in ~120 ms slices so the SoC
+             * light-sleeps deeply between wake-polls (120 ms touch latency is
+             * imperceptible for waking a PDA). */
+            vTaskDelay(pdMS_TO_TICKS(120));
+        } else {
+            if(next > 30) next = 30;
+            vTaskDelay(pdMS_TO_TICKS(next ? next : 5));
+        }
     }
 }

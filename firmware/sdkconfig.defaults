@@ -42,3 +42,12 @@ CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16
 
 # --- quieter default log level ---
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# --- power: automatic light-sleep for battery life (power.c) ---
+# DFS + tickless idle let the SoC light-sleep during the idle delays between LVGL
+# frames; power.c calls esp_pm_configure(light_sleep_enable). Wi-Fi/SD drivers
+# hold PM locks while active so a sync is never interrupted. To disable
+# light-sleep (e.g. if it disturbs touch/display on a given board), comment out
+# these two lines and rebuild -- the PWM backlight + idle screen-off still work.
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y

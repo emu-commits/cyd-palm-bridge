@@ -6,6 +6,34 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-10 (part 7) — U8 power: PWM backlight + light-sleep
+
+New `firmware/main/power.c` / `power.h` wires the two `config.ini` fields that
+existed but were dead (`brightness`, `backlight_sec`) and adds SoC light-sleep.
+- **PWM backlight** on GPIO21 via LEDC, clocked from **RC_FAST/RTC8M** so the PWM
+  keeps running through light-sleep (an APB-sourced LEDC would freeze the LED when
+  the APB clock stops). `power_set_brightness()` sets the configured level;
+  replaces display.c's plain always-on GPIO.
+- **Idle screen-off** (the dominant battery lever on an always-on TFT): the LVGL
+  run loop's `idle_step()` blanks the backlight after `backlight_sec` of LVGL
+  inactivity; when off, it polls the raw touch panel (LVGL inactivity won't
+  advance with the display idle) and wakes on the first press. The wake tap is
+  **swallowed** (`g_swallow_tap` → `indev_cb` reports RELEASED until the finger
+  lifts) so it can't fire a button — PalmOS wake behavior. Blanked, the loop idles
+  in 120 ms slices for deeper sleep.
+- **Automatic light-sleep** via `esp_pm_configure(light_sleep_enable)` (DFS
+  `default→40 MHz`), enabled by `CONFIG_PM_ENABLE` + `CONFIG_FREERTOS_USE_TICKLESS_IDLE`
+  in `sdkconfig.defaults`. Wi-Fi/SD drivers hold PM locks while active, so a sync
+  is never interrupted. **Disable path documented** in `sdkconfig.defaults` (comment
+  the two lines; backlight + screen-off still work).
+
+CMake: added `power.c` + `esp_driver_ledc`/`esp_pm`. Builds clean, 56% flash free.
+**Not yet flashed / UNVERIFIED on hardware** — tickless idle + the bit-banged
+touch/SPI display is exactly the kind of timing interaction that needs on-device
+confirmation; watch for touch or display glitches and back the two sdkconfig
+lines out if they appear. *Follow-up:* expose `brightness` as a live Preferences
+slider (calls `power_set_brightness`).
+
 ## SESSION 2026-07-10 (part 6) — finer sync progress (per-record, intra-collection)
 
 The status line's `%` now advances WITHIN a collection, not just as each of the

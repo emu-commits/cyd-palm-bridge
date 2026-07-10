@@ -76,7 +76,12 @@ truncation path live).
   (`sync_set_progress`) ticks per reconciled record; `hotsync` maps it into each
   collection's band, so the `%` climbs within a collection. Stays text (no
   `lv_bar`, per the layer-alloc WDT rule).
-- **P2 hardware:** U8 power / battery gauge (GPIO34) + light-sleep, U9 case.
+- **P2 hardware:** U8 **light-sleep + PWM backlight DONE (2026-07-10 part 7,
+  `power.c`)** — automatic esp_pm light-sleep + idle screen-off (touch-to-wake,
+  wake-tap swallowed) + configured brightness; UNVERIFIED on hardware (tickless
+  idle vs. bit-banged touch/SPI needs a device check; disable path in
+  `sdkconfig.defaults`). Still TODO: **battery gauge** (GPIO34 ADC → battery %
+  next to the clock) and a live **brightness** slider in Preferences; U9 case.
 - **Backlog (`UI_ROADMAP.md`):** battery % in the title bar (next to the new
   clock), RSS reader, Preferences app icon, power/reset-button remap, dark mode.
 

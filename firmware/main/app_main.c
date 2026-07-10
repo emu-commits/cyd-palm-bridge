@@ -32,6 +32,7 @@
 #include "display.h"
 #include "touch.h"
 #include "lvgl_port.h"
+#include "power.h"
 #include "ui.h"
 #include "data.h"
 #include "secrets.h"
@@ -247,6 +248,9 @@ void app_main(void){
     /* U3: bring up LVGL + the Palm app shell (never returns). */
     lvgl_port_init();
     ui_init();
+    /* U8 power: PWM backlight (configured brightness) + automatic light-sleep.
+     * After LVGL/config are up so it can read appcfg() and own the backlight. */
+    power_init();
     lvgl_port_run();
 
     if(wifi_connect()!=ESP_OK){ ESP_LOGE(TAG,"wifi failed; halting"); return; }
