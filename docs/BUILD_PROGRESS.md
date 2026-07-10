@@ -6,6 +6,21 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-10 (part 3) — Preferences persistence bug
+
+**Bug:** the timezone (and every other Preference) did not survive a reboot.
+Root cause: the Preferences editor mutated `appcfg_mut()` in RAM only; the sole
+write to `/sdcard/config.ini` was the explicit **Save** row. Picking a zone,
+editing a field, toggling the conflict policy, or assigning a discovered
+collection to a role never touched the SD card, so anything not followed by a
+manual Save was lost at power-off.
+
+**Fix:** call `appcfg_save()` at every edit-commit point so each change is
+persisted immediately — `tz_tbl_click_cb` (timezone), `pf_edit_save_cb`
+(single-field editor), `pf_pol_row_cb` (policy toggle), and `role_pick_cb`
+(discovery role assignment). The manual **Save** row stays (harmless, and still
+gives the toast). Flashed to /dev/ttyUSB0.
+
 ## SESSION 2026-07-10 (part 2) — sorting, Find UI, top-bar clock, sync progress
 
 Four features on top of the UI-polish sprint; all build clean, flashed to

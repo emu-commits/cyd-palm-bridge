@@ -930,6 +930,7 @@ static void pf_edit_cancel_cb(lv_event_t *e){ (void)e; show_prefs(); }
 static void pf_edit_save_cb(lv_event_t *e){ (void)e;
     int cap=0; char *dst = pf_buf(appcfg_mut(), pf_edit_idx, &cap);
     if(dst && cap) snprintf(dst, cap, "%s", lv_textarea_get_text(g_fields[0]));
+    appcfg_save();            /* persist to SD now -> survives reboot */
     show_prefs();
 }
 static void show_pref_edit(int i){
@@ -980,6 +981,7 @@ static void tz_tbl_click_cb(lv_event_t *e){
     Config *cfg = appcfg_mut();
     snprintf(cfg->timezone, sizeof cfg->timezone, "%s", z);
     clock_set_tz(z);          /* apply now so the clock/desc update immediately */
+    appcfg_save();            /* persist to SD now -> survives reboot */
     show_prefs();
 }
 static void show_tz_picker(void){
@@ -1023,7 +1025,7 @@ static void pf_row_open_cb(lv_event_t *e){
     show_pref_edit(i);
 }
 static void pf_pol_row_cb(lv_event_t *e){ (void)e;
-    Config *c = appcfg_mut(); c->policy = (c->policy + 1) % 3; show_prefs();
+    Config *c = appcfg_mut(); c->policy = (c->policy + 1) % 3; appcfg_save(); show_prefs();
 }
 static void pf_disc_row_cb(lv_event_t *e){ (void)e;
     if(hotsync_busy()){ alert_show("A sync is in progress; try again in a moment."); return; }
@@ -1092,6 +1094,7 @@ static void role_pick_cb(lv_event_t *e){
     if(role=='c')      snprintf(c->cal_coll,  sizeof c->cal_coll,  "%s", dc->href);
     else if(role=='t') snprintf(c->todo_coll, sizeof c->todo_coll, "%s", dc->href);
     else if(role=='a') snprintf(c->card_coll, sizeof c->card_coll, "%s", dc->href);
+    appcfg_save();         /* persist to SD now -> survives reboot */
     disc_show_results();   /* redraw so the new [role] tag shows */
 }
 static void role_btn(lv_obj_t *par, const char *txt, int idx, char role){
