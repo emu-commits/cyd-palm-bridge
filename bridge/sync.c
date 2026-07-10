@@ -390,21 +390,30 @@ static FILE* reopenTrunc(FILE*f,const char*path){
     if(f) fclose(f);
     return fopen(path,"w");
 }
-static void enumServer(const DavCtx*d,const char*coll,const char*token,
-                       char*newtok,int tokcap,int*incremental){
+/* Returns 0 if SV_RAW is an AUTHORITATIVE server view (a delta, a full report, or
+ * a PROPFIND all succeeded), or -1 if every attempt failed/was truncated. On -1
+ * the caller must NOT treat the (empty/partial) SV_RAW as "the server deleted
+ * everything" -- see sync_one. */
+static int enumServer(const DavCtx*d,const char*coll,const char*token,
+                      char*newtok,int tokcap,int*incremental){
     *incremental=0; newtok[0]=0;
     RawEnum re; re.f=fopen(SV_RAW,"w");
-    int done=0;
+    int done=0, ok=0;
     if(token[0]){
         int rc=dav_sync_report(d,coll,token,rawReportCb,&re,newtok,tokcap);
-        if(rc==0){ done=1; *incremental=1; }
+        if(rc==0){ done=1; ok=1; *incremental=1; }
         else { newtok[0]=0; re.f=reopenTrunc(re.f,SV_RAW); }   /* discard partial delta */
     }
     if(!done){
         int rc=dav_sync_report(d,coll,"",rawReportCb,&re,newtok,tokcap);
-        if(rc!=0){ newtok[0]=0; re.f=reopenTrunc(re.f,SV_RAW); dav_list(d,coll,rawListCb,&re); }
+        if(rc==0) ok=1;                                        /* full report authoritative */
+        else {                                                 /* fall back to PROPFIND (lighter: etags, no bodies) */
+            newtok[0]=0; re.f=reopenTrunc(re.f,SV_RAW);
+            if(dav_list(d,coll,rawListCb,&re)>=0) ok=1;
+        }
     }
     if(re.f) fclose(re.f);
+    return ok ? 0 : -1;
 }
 /* Resolve every server object to an objhash and write SV_IDX (key=objhash):
  * "objhash href etag present". Joins SV_RAW (key href) with MP_HREF (key href):
@@ -573,7 +582,18 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
                      const CatRoute*rt,const char*Ccoll){
     uint32_t maxuid=0; int incremental=0;
     buildMapIdx(mapfile,s->token,sizeof s->token,&maxuid);   /* MP_IDX/MP_HREF/MP_PALM + token */
-    enumServer(d,coll,s->token,s->newToken,sizeof s->newToken,&incremental); /* SV_RAW */
+    int enumOk = enumServer(d,coll,s->token,s->newToken,sizeof s->newToken,&incremental); /* SV_RAW */
+    if(enumOk!=0){
+        /* The server could not be enumerated (all reports/PROPFIND failed or were
+         * truncated). SV_RAW is empty/partial and MUST NOT be read as "the server
+         * deleted everything" -- that would wipe every mapped local record. Force
+         * incremental semantics so resolveServer emits each mapped record as
+         * PRESENT+unchanged (SCLEAN); with an empty SV_RAW there are no server
+         * changes, so every record is kept as-is and the collection is a no-op
+         * this round (it retries next sync). Also drop any stale new token. */
+        fprintf(stderr,"[sync] %s: server enumeration failed -- keeping all local records (no deletes)\n",coll);
+        incremental=1; s->newToken[0]=0;
+    }
     resolveServer(d,coll,incremental);                       /* SV_IDX (GETs new objects) */
     buildLcRaw(s->pdbpath,s->kind,rt,Ccoll,&maxuid);         /* LC_RAW */
     joinLcIdx();                                             /* LC_IDX */

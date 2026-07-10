@@ -165,10 +165,16 @@ int dav_get(const DavCtx*d,const char*coll,const char*name,char*out,int cap){
  * the ~40KB TLS handshake for long. A personal calendar's etag-only REPORT is a
  * few KB; oversize responses log a truncation warning. */
 #ifndef DAV_LIST_CAP
-#define DAV_LIST_CAP (12*1024)   /* malloc'd + freed per call; kept small so it
+#define DAV_LIST_CAP (16*1024)   /* malloc'd + freed per call; kept modest so it
                                     doesn't crowd the ~35 KB mbedTLS handshake
-                                    working set while S is also resident */
+                                    working set. A response that fills it is
+                                    TRUNCATED (incomplete) -> the caller treats
+                                    that as a failure, never as an authoritative
+                                    (possibly empty) server view. */
 #endif
+/* a response that reached cap-1 bytes was cut off: the parse saw only part of the
+ * collection, so it must NOT be trusted (acting on a partial view mass-deletes). */
+#define DAV_TRUNCATED(rn) ((rn) >= DAV_LIST_CAP-1)
 
 int dav_list(const DavCtx*d,const char*coll,dav_list_cb cb,void*ctx){
     char url[512]; snprintf(url,sizeof url,"%s/%s/",d->base,coll);
@@ -178,6 +184,7 @@ int dav_list(const DavCtx*d,const char*coll,dav_list_cb cb,void*ctx){
     int st=davreq(d,HTTP_METHOD_PROPFIND,url,1,"application/xml",NULL,body,bl,
                   buf,DAV_LIST_CAP,&rn, NULL,0, NULL,0);
     int count = st<0 ? -1 : dav_parse_members(buf,cb,ctx);
+    if(count>=0 && DAV_TRUNCATED(rn)){ count=-1; ESP_LOGW(TAG,"PROPFIND %s truncated at %d bytes -> failed",coll,rn); }
     fprintf(stderr,"[dav] PROPFIND %s -> st=%d rn=%d members=%d\n",coll,st,rn,count);
     free(buf);
     return count;
@@ -198,6 +205,11 @@ int dav_sync_report(const DavCtx*d,const char*coll,const char*token,
     int st=davreq(d,HTTP_METHOD_REPORT,url,1,"application/xml",NULL,body,bl,
                   buf,DAV_LIST_CAP,&rn, NULL,0, NULL,0);
     int rc = st<0 ? -1 : dav_parse_report(buf,st,cb,ctx,newtoken,tokcap);
+    /* truncated => incomplete view + the trailing sync-token wasn't received, so
+     * fail: the caller falls back to the lighter PROPFIND (etags only, no bodies)
+     * or, failing that, skips the collection rather than acting on partial data. */
+    if(rc==0 && DAV_TRUNCATED(rn)){ rc=-1; if(newtoken&&tokcap)newtoken[0]=0;
+        ESP_LOGW(TAG,"REPORT %s truncated at %d bytes -> failed (fall back to PROPFIND)",coll,rn); }
     fprintf(stderr,"[dav] REPORT %s tok=%s -> st=%d rn=%d rc=%d\n",coll,token&&token[0]?"incr":"full",st,rn,rc);
     free(buf);
     return rc;

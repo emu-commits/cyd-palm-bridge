@@ -119,8 +119,11 @@ static void row_cb(lv_event_t *e){
  * not the list). The pool is kept at 24 KB (not enlarged) because the no-PSRAM
  * heap must leave a contiguous block for the mbedTLS handshake during sync --
  * enlarging it starved the second sync's TLS. TODO: a virtualized/paged list (or
- * lv_table, ~1 obj total) to browse arbitrarily large collections. */
-#define LIST_MAX 20
+ * lv_table, ~1 obj total) to browse arbitrarily large collections. NOTE: the cap
+ * bounds not just the button OBJECTS but the LVGL draw tasks needed to render
+ * them -- both come from the same 24 KB pool, and ~20 rows exhausted it mid-draw
+ * (the refresh timer then spun -> Task WDT). 12 leaves headroom for the draw. */
+#define LIST_MAX 12
 typedef struct { lv_obj_t *list; int shown; } RowCtx;
 
 /* add one tappable row to the active list. To Do rows keep the "[x]"/"[ ]"
