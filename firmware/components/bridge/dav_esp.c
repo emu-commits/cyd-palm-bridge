@@ -165,12 +165,19 @@ int dav_get(const DavCtx*d,const char*coll,const char*name,char*out,int cap){
  * the ~40KB TLS handshake for long. A personal calendar's etag-only REPORT is a
  * few KB; oversize responses log a truncation warning. */
 #ifndef DAV_LIST_CAP
-#define DAV_LIST_CAP (16*1024)   /* malloc'd + freed per call; kept modest so it
-                                    doesn't crowd the ~35 KB mbedTLS handshake
-                                    working set. A response that fills it is
-                                    TRUNCATED (incomplete) -> the caller treats
-                                    that as a failure, never as an authoritative
-                                    (possibly empty) server view. */
+#define DAV_LIST_CAP (8*1024)    /* malloc'd + freed per call. DELIBERATELY SMALL:
+                                    on the no-PSRAM heap this buffer competes with
+                                    mbedTLS's ~16.7 KB per-record INPUT buffer
+                                    (DYNAMIC_BUFFER reallocs it each read) -- a
+                                    12/16 KB list buffer fragmented the heap so the
+                                    TLS alloc(16749) failed (ESP_ERR_HTTP_FETCH_
+                                    HEADER) on the first/full REPORT. 8 KB leaves
+                                    room. A response that fills it is TRUNCATED
+                                    (incomplete) -> the caller treats that as a
+                                    failure and falls back to the lighter PROPFIND
+                                    (etags only), which fits far more records/KB.
+                                    (A collection whose etag list exceeds 8 KB
+                                    still needs true streaming -- see NEXT_STEPS.) */
 #endif
 /* a response that reached cap-1 bytes was cut off: the parse saw only part of the
  * collection, so it must NOT be trusted (acting on a partial view mass-deletes). */
