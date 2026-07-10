@@ -19,6 +19,7 @@
 #include "calc.h"
 #include "find.h"         /* global search engine (bridge/find.c) */
 #include "appcfg.h"
+#include "power.h"        /* live backlight brightness for the Preferences slider */
 #include "clock.h"        /* timezone picker + DST-aware zone list */
 #include "lvgl.h"
 #include <string.h>
@@ -84,6 +85,10 @@ static lv_obj_t *g_fields[12];         /* edit-form textareas (also the Preferen
 static int g_nfields;
 static lv_obj_t *active_ta;            /* last-focused textarea (Graffiti target) */
 
+/* To Do due-date picker state: edited via the due popup, written on Save. */
+static int g_due_has, g_due_y, g_due_m, g_due_d;
+static lv_obj_t *g_due_lbl;            /* label on the edit-form Due trigger */
+
 static void list_view(const AppDef *ad);
 static void show_detail(uint32_t uid);
 static void show_edit(uint32_t uid);
@@ -92,6 +97,10 @@ static void show_discover(void);
 static void update_cat_trigger(void);
 static void cat_trigger_cb(lv_event_t *e);
 static void details_open(void);
+static void due_open(void);
+static void due_btn_cb(lv_event_t *e);
+static void due_set_label(void);
+static void br_open(void);
 
 /* Date Book uses PalmOS's date-centric views (Day + Month) instead of a flat list
  * of every event -- see show_datebook_day / show_datebook_month. g_cal_* holds the
@@ -533,6 +542,8 @@ static void save_cb(lv_event_t *e){
         Todo t; if(!data_get_todo(edit_uid,&t)) memset(&t,0,sizeof t);
         snprintf(t.description,sizeof t.description,"%s",fv(0));
         snprintf(t.note,sizeof t.note,"%s",fv(1));
+        t.hasDue = g_due_has;
+        if(g_due_has){ t.dueY=g_due_y; t.dueM=g_due_m; t.dueD=g_due_d; }
         data_save_todo(edit_uid,edit_cat,&t);
     } else if(cur_app->app == APP_ADDR){
         Addr old; int have=data_get_addr(edit_uid,&old);
@@ -612,8 +623,22 @@ static void show_edit(uint32_t uid){
         form_field(form,"Note",a.note,500,&y);
     } else if(cur_app->app == APP_TODO){
         Todo t; if(!data_get_todo(uid,&t)) memset(&t,0,sizeof t);
+        g_due_has=t.hasDue; g_due_y=t.dueY; g_due_m=t.dueM; g_due_d=t.dueD;
         form_field(form,"Description",t.description,255,&y);
         form_field(form,"Note",t.note,500,&y);
+        /* Due-date trigger (Palm's To Do due popup). A button, not a text field,
+         * so it isn't in g_fields; the picked date lives in g_due_* until Save. */
+        lv_obj_t *dlab = lv_label_create(form);
+        lv_label_set_text(dlab, "Due"); lv_obj_set_pos(dlab, 2, y);
+        lv_obj_t *db = lv_button_create(form);
+        lv_obj_set_size(db, LCD_W - 16, 30);
+        lv_obj_set_pos(db, 2, y + 15);
+        lv_obj_set_style_radius(db, 0, 0);
+        g_due_lbl = lv_label_create(db);
+        lv_obj_align(g_due_lbl, LV_ALIGN_LEFT_MID, 4, 0);
+        lv_obj_add_event_cb(db, due_btn_cb, LV_EVENT_CLICKED, NULL);
+        due_set_label();
+        y += 52;
     } else if(cur_app->app == APP_ADDR){
         Addr a; if(!data_get_addr(uid,&a)) memset(&a,0,sizeof a);
         form_field(form,"Last",a.fields[F_name],40,&y);
@@ -1050,6 +1075,7 @@ static void pf_disc_row_cb(lv_event_t *e){ (void)e;
     if(hotsync_busy()){ alert_show("A sync is in progress; try again in a moment."); return; }
     show_discover();
 }
+static void pf_bright_row_cb(lv_event_t *e){ (void)e; br_open(); }
 static void pf_saverow_cb(lv_event_t *e){ (void)e;
     int rc = appcfg_save();
     alert_show(rc==0 ? "Saved to config.ini" : "Could not write config.ini (SD card?)");
@@ -1088,6 +1114,8 @@ static void show_prefs(void){
     }
     snprintf(row, sizeof row, "Conflicts: %s", pol_name(c->policy));
     pf_add(list, row, pf_pol_row_cb, 0);
+    snprintf(row, sizeof row, "Brightness: %d%%", c->brightness);
+    pf_add(list, row, pf_bright_row_cb, 0);
     pf_add(list, "Discover collections...", pf_disc_row_cb, 0);
     pf_add(list, "Save to config.ini", pf_saverow_cb, 0);
 }
@@ -1708,6 +1736,167 @@ static void details_open(void){
             lv_obj_add_event_cb(b, details_pick_cb, LV_EVENT_CLICKED, (void *)(intptr_t)c);
         }
     }
+}
+
+/* ------------------------- To Do due-date picker ------------------------- */
+/* Palm's To Do due popup: quick options (Today / Tomorrow / One week / No Date)
+ * plus a calendar for an arbitrary day. Modal overlay over the edit form (like
+ * Details) so the typed Description/Note underneath survive the pick. */
+static lv_obj_t *g_duepop;
+static void due_close(void){ if(g_duepop){ lv_obj_del(g_duepop); g_duepop=NULL; } }
+static void due_backdrop_cb(lv_event_t *e){ (void)e; due_close(); }
+
+void due_set_label(void){
+    if(!g_due_lbl) return;
+    if(g_due_has) lv_label_set_text_fmt(g_due_lbl, "%d/%d/%d", g_due_m, g_due_d, g_due_y);
+    else          lv_label_set_text(g_due_lbl, "No Date");
+}
+
+/* quick options: 0=today 1=tomorrow 2=one week 3=no date */
+static void due_quick_cb(lv_event_t *e){
+    int which = (int)(intptr_t)lv_event_get_user_data(e);
+    if(which == 3){ g_due_has = 0; }
+    else {
+        time_t now = 0; time(&now);
+        struct tm tmv; localtime_r(&now, &tmv);
+        if(tmv.tm_year + 1900 < 2024){          /* clock unset: anchor to a sane date */
+            tmv.tm_year = 2026 - 1900; tmv.tm_mon = 0; tmv.tm_mday = 1;
+        }
+        now = mktime(&tmv);
+        now += (time_t)(which == 1 ? 1 : which == 2 ? 7 : 0) * 86400;
+        localtime_r(&now, &tmv);
+        g_due_has = 1;
+        g_due_y = tmv.tm_year + 1900; g_due_m = tmv.tm_mon + 1; g_due_d = tmv.tm_mday;
+    }
+    due_set_label(); due_close();
+}
+
+static void due_cal_cb(lv_event_t *e){
+    lv_obj_t *cal = (lv_obj_t *)lv_event_get_target(e);
+    lv_calendar_date_t d;
+    if(lv_calendar_get_pressed_date(cal, &d) == LV_RESULT_OK){
+        g_due_has = 1; g_due_y = d.year; g_due_m = d.month; g_due_d = d.day;
+        due_set_label(); due_close();
+    }
+}
+
+static void due_quick_btn(lv_obj_t *par, const char *txt, int which){
+    lv_obj_t *b = lv_button_create(par);
+    lv_obj_set_width(b, lv_pct(48));
+    lv_obj_set_style_radius(b, 0, 0);
+    lv_obj_set_style_pad_ver(b, 4, 0);
+    lv_obj_t *l = lv_label_create(b); lv_label_set_text(l, txt); lv_obj_center(l);
+    lv_obj_add_event_cb(b, due_quick_cb, LV_EVENT_CLICKED, (void *)(intptr_t)which);
+}
+
+void due_open(void){
+    if(g_duepop) return;
+    g_duepop = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_duepop, LCD_W, LCD_H);
+    lv_obj_set_style_bg_color(g_duepop, COL_LINE, 0);
+    lv_obj_set_style_bg_opa(g_duepop, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(g_duepop, 0, 0);
+    lv_obj_set_style_pad_all(g_duepop, 0, 0);
+    lv_obj_add_flag(g_duepop, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_duepop, due_backdrop_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *panel = lv_obj_create(g_duepop);
+    lv_obj_set_width(panel, LCD_W - 20);
+    lv_obj_set_height(panel, LV_SIZE_CONTENT);
+    lv_obj_set_style_max_height(panel, LCD_H - 16, 0);
+    lv_obj_center(panel);
+    lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_style_flex_main_place(panel, LV_FLEX_ALIGN_SPACE_BETWEEN, 0);
+    lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
+    lv_obj_set_style_border_width(panel, 1, 0);
+    lv_obj_set_style_border_color(panel, COL_LINE, 0);
+    lv_obj_set_style_radius(panel, 0, 0);
+    lv_obj_set_style_pad_all(panel, 4, 0);
+    lv_obj_set_style_pad_row(panel, 3, 0);
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *hdr = lv_label_create(panel);
+    lv_obj_set_width(hdr, lv_pct(100));
+    lv_label_set_text(hdr, "Due Date:");
+    lv_obj_set_style_text_font(hdr, &lv_font_palm_bold, 0);
+
+    due_quick_btn(panel, "Today",    0);
+    due_quick_btn(panel, "Tomorrow", 1);
+    due_quick_btn(panel, "1 Week",   2);
+    due_quick_btn(panel, "No Date",  3);
+
+    /* calendar for an arbitrary day, seeded to the current due (or today) */
+    lv_obj_t *cal = lv_calendar_create(panel);
+    lv_obj_set_width(cal, lv_pct(100));
+    lv_obj_set_height(cal, 180);
+    int sy = g_due_has ? g_due_y : 2026, sm = g_due_has ? g_due_m : 1, sd = g_due_has ? g_due_d : 1;
+    time_t now = 0; time(&now); struct tm tmv;
+    localtime_r(&now, &tmv);
+    if(tmv.tm_year + 1900 >= 2024){
+        lv_calendar_set_today_date(cal, tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday);
+        if(!g_due_has){ sy = tmv.tm_year + 1900; sm = tmv.tm_mon + 1; sd = tmv.tm_mday; }
+    }
+    lv_calendar_set_showed_date(cal, sy, sm);
+    lv_calendar_header_arrow_create(cal);
+    lv_obj_add_event_cb(cal, due_cal_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    (void)sd;
+}
+static void due_btn_cb(lv_event_t *e){ (void)e; due_open(); }
+
+/* ------------------------- Preferences: brightness slider ------------------------- */
+/* A slider popup that live-adjusts the backlight as it's dragged and persists the
+ * value to config.ini on release. */
+static lv_obj_t *g_brpop, *g_br_val;
+static void br_close(void){ if(g_brpop){ lv_obj_del(g_brpop); g_brpop=NULL; g_br_val=NULL; } }
+static void br_backdrop_cb(lv_event_t *e){ (void)e; br_close(); }
+static void br_slider_cb(lv_event_t *e){
+    lv_obj_t *s = (lv_obj_t *)lv_event_get_target(e);
+    int v = (int)lv_slider_get_value(s);
+    power_set_brightness(v);                         /* live preview */
+    if(g_br_val) lv_label_set_text_fmt(g_br_val, "%d%%", v);
+    if(lv_event_get_code(e) == LV_EVENT_RELEASED){
+        appcfg_mut()->brightness = v; appcfg_save();  /* persist -> survives reboot */
+    }
+}
+void br_open(void){
+    if(g_brpop) return;
+    int cur = appcfg()->brightness;
+    g_brpop = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_brpop, LCD_W, LCD_H);
+    lv_obj_set_style_bg_color(g_brpop, COL_LINE, 0);
+    lv_obj_set_style_bg_opa(g_brpop, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(g_brpop, 0, 0);
+    lv_obj_set_style_pad_all(g_brpop, 0, 0);
+    lv_obj_add_flag(g_brpop, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_brpop, br_backdrop_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *panel = lv_obj_create(g_brpop);
+    lv_obj_set_width(panel, LCD_W - 30);
+    lv_obj_set_height(panel, LV_SIZE_CONTENT);
+    lv_obj_center(panel);
+    lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_flex_cross_place(panel, LV_FLEX_ALIGN_CENTER, 0);
+    lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
+    lv_obj_set_style_border_width(panel, 1, 0);
+    lv_obj_set_style_border_color(panel, COL_LINE, 0);
+    lv_obj_set_style_radius(panel, 0, 0);
+    lv_obj_set_style_pad_all(panel, 10, 0);
+    lv_obj_set_style_pad_row(panel, 10, 0);
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *hdr = lv_label_create(panel);
+    lv_label_set_text(hdr, "Brightness");
+    lv_obj_set_style_text_font(hdr, &lv_font_palm_bold, 0);
+
+    lv_obj_t *sl = lv_slider_create(panel);
+    lv_obj_set_width(sl, LCD_W - 70);
+    lv_slider_set_range(sl, 10, 100);   /* floor at 10% so it can't go fully dark */
+    lv_slider_set_value(sl, cur < 10 ? 10 : cur, LV_ANIM_OFF);
+    lv_obj_add_event_cb(sl, br_slider_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(sl, br_slider_cb, LV_EVENT_RELEASED, NULL);
+
+    g_br_val = lv_label_create(panel);
+    lv_label_set_text_fmt(g_br_val, "%d%%", cur);
 }
 
 /* ------------------------- U6: Graffiti stroke capture ------------------------- */
