@@ -111,16 +111,26 @@ static void row_cb(lv_event_t *e){
     show_detail((uint32_t)(uintptr_t)lv_event_get_user_data(e));
 }
 
+/* Each list row is a full LVGL button+label, drawn from the fixed LVGL object
+ * pool (LV_MEM_SIZE). lv_list is NOT virtualized, so a collection with hundreds
+ * of records would exhaust the pool mid-build and panic (StoreProhibited when the
+ * failed alloc is dereferenced). Cap the number of rows we materialize and show a
+ * "N more" footer instead; every record still syncs (sync reads the PDB, not the
+ * list). TODO: a virtualized/paged list to browse arbitrarily large collections. */
+#define LIST_MAX 40
+typedef struct { lv_obj_t *list; int shown; } RowCtx;
+
 /* add one tappable row to the active list. To Do rows keep the "[x]"/"[ ]"
  * prefix from the data layer to show completion; tapping opens the record (where
  * the done state is toggled). Using plain list buttons for every app -- custom
  * checkbox rows made LVGL's compositor loop forever behind the menu overlay. */
 static void add_row(uint32_t uid, const char *primary, const char *secondary, void *ctx){
-    lv_obj_t *list = (lv_obj_t *)ctx;
+    RowCtx *rc = (RowCtx *)ctx;
+    if(rc->shown++ >= LIST_MAX) return;   /* still count the record, don't materialize it */
     char buf[128];
     if(secondary && secondary[0]) snprintf(buf,sizeof buf,"%s  (%s)",primary,secondary);
     else                          snprintf(buf,sizeof buf,"%s",primary);
-    lv_obj_t *b = lv_list_add_button(list, NULL, buf);
+    lv_obj_t *b = lv_list_add_button(rc->list, NULL, buf);
     lv_obj_set_style_radius(b, 0, 0);
     lv_obj_add_event_cb(b, row_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)uid);
 }
@@ -137,9 +147,14 @@ static void list_view(const AppDef *ad){
     lv_obj_set_style_radius(list, 0, 0);
     lv_obj_set_style_border_width(list, 0, 0);
     lv_obj_set_style_pad_all(list, 0, 0);
-    ad->iter(add_row, list);
-    if(lv_obj_get_child_count(list) == 0){
+    RowCtx rc = { list, 0 };
+    ad->iter(add_row, &rc);
+    if(rc.shown == 0){
         lv_obj_t *b = lv_list_add_button(list, NULL, "(no records)");
+        lv_obj_set_style_radius(b, 0, 0);
+    } else if(rc.shown > LIST_MAX){
+        char m[48]; snprintf(m, sizeof m, "... %d more (not shown)", rc.shown - LIST_MAX);
+        lv_obj_t *b = lv_list_add_button(list, NULL, m);
         lv_obj_set_style_radius(b, 0, 0);
     }
     update_cat_trigger();
