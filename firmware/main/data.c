@@ -177,6 +177,39 @@ static int cbCal(const PdbRec *r, int i, void *ctx){
 }
 void data_datebook(data_row_cb cb, void *ctx){ It it={cb,ctx}; pdb_read(DB_CAL,cbCal,&it); }
 
+/* one day's appointments (PalmOS Day view). Primary is "HH:MM  desc" (zero-padded
+ * so a lexical sort == chronological; untimed events use "--:--" which sorts to
+ * the top, like Palm). Honors the active category filter. */
+typedef struct { data_row_cb cb; void *ctx; int y,m,d; } DayIt;
+static int cbCalDay(const PdbRec *r, int i, void *ctx){
+    (void)i; DayIt *it=ctx; Appt a;
+    if(g_catfilter>=0 && (r->attr & 0x0F)!=g_catfilter) return 0;
+    if(ApptUnpack(r->data,r->len,&a)) return 0;
+    if(a.year!=it->y || a.month!=it->m || a.day!=it->d) return 0;
+    char pri[96];
+    if(a.hasTime) snprintf(pri,sizeof pri,"%02d:%02d  %.80s",a.sH,a.sM,a.description);
+    else          snprintf(pri,sizeof pri,"--:--  %.80s",a.description);
+    it->cb(r->uniqueID, pri, NULL, it->ctx);
+    return 0;
+}
+void data_cal_day(int y,int m,int d, data_row_cb cb, void *ctx){
+    DayIt it={cb,ctx,y,m,d}; pdb_read(DB_CAL,cbCalDay,&it);
+}
+
+/* mark which day-of-month (1..31) has >=1 appointment in month y/m (Month view
+ * dots). marks[0] unused; ignores the category filter (whole-month overview). */
+typedef struct { int y,m; uint8_t *marks; } MarkIt;
+static int cbCalMark(const PdbRec *r, int i, void *ctx){
+    (void)i; MarkIt *mk=ctx; Appt a;
+    if(ApptUnpack(r->data,r->len,&a)) return 0;
+    if(a.year==mk->y && a.month==mk->m && a.day>=1 && a.day<=31) mk->marks[a.day]=1;
+    return 0;
+}
+void data_cal_month_marks(int y,int m, uint8_t marks[32]){
+    for(int i=0;i<32;i++) marks[i]=0;
+    MarkIt mk={y,m,marks}; pdb_read(DB_CAL,cbCalMark,&mk);
+}
+
 static int cbAddr(const PdbRec *r, int i, void *ctx){
     (void)i; It *it=ctx; Addr a;
     if(g_catfilter>=0 && (r->attr & 0x0F)!=g_catfilter) return 0;

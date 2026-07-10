@@ -15,6 +15,10 @@ typedef void (*data_row_cb)(uint32_t uid, const char *primary, const char *secon
 
 /* iterate records of each app, decoding to display strings. */
 void data_datebook(data_row_cb cb, void *ctx);
+/* PalmOS Day view: only appointments on y/m/d, primary "HH:MM  desc" (sortable). */
+void data_cal_day(int y, int m, int d, data_row_cb cb, void *ctx);
+/* PalmOS Month view: marks[1..31]=1 for each day in month y/m that has an event. */
+void data_cal_month_marks(int y, int m, uint8_t marks[32]);
 void data_address(data_row_cb cb, void *ctx);
 void data_todo(data_row_cb cb, void *ctx);
 void data_memo(data_row_cb cb, void *ctx);

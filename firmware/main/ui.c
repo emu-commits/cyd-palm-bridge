@@ -88,6 +88,14 @@ static void update_cat_trigger(void);
 static void cat_trigger_cb(lv_event_t *e);
 static void details_open(void);
 
+/* Date Book uses PalmOS's date-centric views (Day + Month) instead of a flat list
+ * of every event -- see show_datebook_day / show_datebook_month. g_cal_* holds the
+ * currently-viewed day so navigation + "return from a record" land back on it. */
+static void show_datebook_day(int y, int m, int d);
+static void show_datebook_month(int y, int m);
+static void app_reopen(const AppDef *a);   /* back to an app's main view (Day view for Date Book) */
+static int  g_cal_y, g_cal_m, g_cal_d;
+
 /* HotSync screen state (status label + polling timer live in `content`) */
 static lv_obj_t *hs_status;
 static lv_timer_t *hs_timer;
@@ -166,7 +174,7 @@ static void list_view(const AppDef *ad){
     update_cat_trigger();
 }
 
-static void done_cb(lv_event_t *e){ (void)e; if(cur_app) list_view(cur_app); }
+static void done_cb(lv_event_t *e){ (void)e; if(cur_app) app_reopen(cur_app); }
 
 static void edit_cb(lv_event_t *e){ show_edit((uint32_t)(uintptr_t)lv_event_get_user_data(e)); }
 
@@ -189,7 +197,7 @@ static void confirm_cancel_cb(lv_event_t *e){ (void)e; confirm_close(); }
 static void confirm_delete_cb(lv_event_t *e){ (void)e;
     const AppDef *a = cur_app; uint32_t u = del_uid;
     confirm_close();
-    if(a && u){ data_delete(a->app, u); cur_uid = 0; list_view(a); }
+    if(a && u){ data_delete(a->app, u); cur_uid = 0; app_reopen(a); }
 }
 static void ask_delete(uint32_t uid){
     if(g_confirm || !cur_app) return;
@@ -334,6 +342,8 @@ static void default_appt(Appt *a){
     if(m<30) m=30; else { m=0; h=(h+1)%24; }          /* round up to next :00/:30 */
     a->hasTime=1; a->sH=h; a->sM=m; a->eH=(h+1)%24; a->eM=m;
     a->year=tmv.tm_year+1900; a->month=tmv.tm_mon+1; a->day=tmv.tm_mday;
+    /* a new event defaults to the day the user is looking at (Palm "New" on a day) */
+    if(g_cal_y >= 2024){ a->year=g_cal_y; a->month=g_cal_m; a->day=g_cal_d; }
 }
 
 static const char *fv(int i){ return lv_textarea_get_text(g_fields[i]); }
@@ -371,9 +381,9 @@ static void save_cb(lv_event_t *e){
     } else if(cur_app->app == APP_MEMO){
         data_save_memo(edit_uid,edit_cat,fv(0));
     }
-    list_view(cur_app);
+    app_reopen(cur_app);
 }
-static void cancel_cb(lv_event_t *e){ (void)e; list_view(cur_app); }
+static void cancel_cb(lv_event_t *e){ (void)e; app_reopen(cur_app); }
 
 static void details_btn_cb(lv_event_t *e){ (void)e; details_open(); }
 
@@ -485,7 +495,143 @@ static void show_hotsync(void){
     hs_timer = lv_timer_create(hs_tick, 400, NULL);
 }
 
+/* ===================== Date Book: PalmOS Day + Month views =====================
+ * A flat list of every event doesn't scale (and isn't how Palm works). Instead the
+ * Date Book opens on a Day view -- one day's time-sorted agenda, naturally bounded
+ * -- with prev/next-day nav and a Month view (a calendar grid, days-with-events
+ * dotted) to jump anywhere. This mirrors DateBook's Day/Week/Month views. */
+static const char *CAL_MON[] = {"","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+static const char *CAL_WD[]  = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+
+static void cal_today(int *y,int *m,int *d){
+    time_t now=0; time(&now); struct tm t; localtime_r(&now,&t);
+    if(t.tm_year+1900 < 2024){ *y=2026; *m=1; *d=1; return; }
+    *y=t.tm_year+1900; *m=t.tm_mon+1; *d=t.tm_mday;
+}
+static int cal_wday(int y,int m,int d){
+    struct tm t={0}; t.tm_year=y-1900; t.tm_mon=m-1; t.tm_mday=d; t.tm_hour=12;
+    mktime(&t); return t.tm_wday;
+}
+static void cal_add_days(int *y,int *m,int *d,int delta){
+    struct tm t={0}; t.tm_year=*y-1900; t.tm_mon=*m-1; t.tm_mday=*d+delta; t.tm_hour=12;
+    time_t tt=mktime(&t); struct tm n; localtime_r(&tt,&n);
+    *y=n.tm_year+1900; *m=n.tm_mon+1; *d=n.tm_mday;
+}
+
+/* --- Day view --- */
+#define DAY_MAX 24                              /* events/day materialized (bounded) */
+typedef struct { uint32_t uid; char txt[92]; } DayRow;
+static DayRow g_dayrows[DAY_MAX];
+static int    g_ndayrows;
+static void day_collect(uint32_t uid,const char *primary,const char *secondary,void *ctx){
+    (void)secondary;(void)ctx;
+    if(g_ndayrows>=DAY_MAX) return;
+    g_dayrows[g_ndayrows].uid=uid;
+    snprintf(g_dayrows[g_ndayrows].txt,sizeof g_dayrows[0].txt,"%s",primary);
+    g_ndayrows++;
+}
+static int day_cmp(const void *a,const void *b){
+    return strcmp(((const DayRow*)a)->txt,((const DayRow*)b)->txt);   /* "HH:MM " prefix => chrono */
+}
+static void day_prev_cb(lv_event_t *e){ (void)e; cal_add_days(&g_cal_y,&g_cal_m,&g_cal_d,-1); show_datebook_day(g_cal_y,g_cal_m,g_cal_d); }
+static void day_next_cb(lv_event_t *e){ (void)e; cal_add_days(&g_cal_y,&g_cal_m,&g_cal_d, 1); show_datebook_day(g_cal_y,g_cal_m,g_cal_d); }
+static void day_month_cb(lv_event_t *e){ (void)e; show_datebook_month(g_cal_y,g_cal_m); }
+
+static void show_datebook_day(int y,int m,int d){
+    kill_kb();
+    g_cal_y=y; g_cal_m=m; g_cal_d=d;
+    cur_app=&APPDEFS[0]; cur_uid=0;     /* Date Book context (menu New/Categories) */
+    lv_obj_clean(content);
+    char t[36]; snprintf(t,sizeof t,"%s %d/%d",CAL_WD[cal_wday(y,m,d)],m,d);
+    lv_label_set_text(title_lbl,t);
+    update_cat_trigger();
+
+    lv_obj_t *prev=lv_button_create(content); lv_obj_set_size(prev,40,28); lv_obj_align(prev,LV_ALIGN_TOP_LEFT,2,2);
+    lv_obj_t *pl=lv_label_create(prev); lv_label_set_text(pl,"<"); lv_obj_center(pl);
+    lv_obj_add_event_cb(prev,day_prev_cb,LV_EVENT_CLICKED,NULL);
+    lv_obj_t *next=lv_button_create(content); lv_obj_set_size(next,40,28); lv_obj_align(next,LV_ALIGN_TOP_RIGHT,-2,2);
+    lv_obj_t *nl=lv_label_create(next); lv_label_set_text(nl,">"); lv_obj_center(nl);
+    lv_obj_add_event_cb(next,day_next_cb,LV_EVENT_CLICKED,NULL);
+    lv_obj_t *mon=lv_button_create(content); lv_obj_set_size(mon,130,28); lv_obj_align(mon,LV_ALIGN_TOP_MID,0,2);
+    lv_obj_t *ml=lv_label_create(mon); lv_label_set_text_fmt(ml,"%s %d, %d",CAL_MON[m],d,y); lv_obj_center(ml);
+    lv_obj_add_event_cb(mon,day_month_cb,LV_EVENT_CLICKED,NULL);   /* tap the date -> Month view */
+
+    g_ndayrows=0;
+    data_cal_day(y,m,d,day_collect,NULL);
+    qsort(g_dayrows,g_ndayrows,sizeof g_dayrows[0],day_cmp);
+
+    lv_obj_t *list=lv_list_create(content);
+    lv_obj_set_size(list,LCD_W,FORM_FULL);
+    lv_obj_set_pos(list,0,34);
+    lv_obj_set_style_radius(list,0,0); lv_obj_set_style_border_width(list,0,0); lv_obj_set_style_pad_all(list,0,0);
+    if(g_ndayrows==0){
+        lv_obj_t *b=lv_list_add_button(list,NULL,"(no events)"); lv_obj_set_style_radius(b,0,0);
+    } else for(int i=0;i<g_ndayrows;i++){
+        lv_obj_t *b=lv_list_add_button(list,NULL,g_dayrows[i].txt);
+        lv_obj_set_style_radius(b,0,0);
+        lv_obj_add_event_cb(b,row_cb,LV_EVENT_CLICKED,(void*)(uintptr_t)g_dayrows[i].uid);
+    }
+}
+
+/* --- Month view (lv_calendar: one light widget, days-with-events highlighted) --- */
+static lv_calendar_date_t g_cal_hl[31];   /* persists: LVGL keeps the pointer */
+static void month_pick_cb(lv_event_t *e){
+    lv_obj_t *cal=(lv_obj_t*)lv_event_get_current_target(e);
+    lv_calendar_date_t dd;
+    if(lv_calendar_get_pressed_date(cal,&dd)==LV_RESULT_OK)
+        show_datebook_day(dd.year,dd.month,dd.day);
+}
+static void month_prev_cb(lv_event_t *e){ (void)e; if(--g_cal_m<1){ g_cal_m=12; g_cal_y--; } show_datebook_month(g_cal_y,g_cal_m); }
+static void month_next_cb(lv_event_t *e){ (void)e; if(++g_cal_m>12){ g_cal_m=1;  g_cal_y++; } show_datebook_month(g_cal_y,g_cal_m); }
+static void month_today_cb(lv_event_t *e){ (void)e; int y,m,d; cal_today(&y,&m,&d); show_datebook_day(y,m,d); }
+
+static void show_datebook_month(int y,int m){
+    kill_kb();
+    g_cal_y=y; g_cal_m=m;
+    cur_app=&APPDEFS[0]; cur_uid=0;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl,"Date Book");
+    update_cat_trigger();
+
+    lv_obj_t *prev=lv_button_create(content); lv_obj_set_size(prev,38,26); lv_obj_align(prev,LV_ALIGN_TOP_LEFT,2,2);
+    lv_obj_t *pl=lv_label_create(prev); lv_label_set_text(pl,"<"); lv_obj_center(pl);
+    lv_obj_add_event_cb(prev,month_prev_cb,LV_EVENT_CLICKED,NULL);
+    lv_obj_t *next=lv_button_create(content); lv_obj_set_size(next,38,26); lv_obj_align(next,LV_ALIGN_TOP_RIGHT,-2,2);
+    lv_obj_t *nl=lv_label_create(next); lv_label_set_text(nl,">"); lv_obj_center(nl);
+    lv_obj_add_event_cb(next,month_next_cb,LV_EVENT_CLICKED,NULL);
+    lv_obj_t *lbl=lv_label_create(content); lv_label_set_text_fmt(lbl,"%s %d",CAL_MON[m],y);
+    lv_obj_set_style_text_font(lbl,&lv_font_palm_bold,0); lv_obj_align(lbl,LV_ALIGN_TOP_MID,0,8);
+
+    lv_obj_t *cal=lv_calendar_create(content);
+    lv_obj_set_size(cal, LCD_W-6, FORM_FULL-30);
+    lv_obj_align(cal, LV_ALIGN_TOP_MID, 0, 32);
+    int ty,tm,td; cal_today(&ty,&tm,&td);
+    lv_calendar_set_today_date(cal,ty,tm,td);
+    lv_calendar_set_showed_date(cal,y,m);
+    uint8_t marks[32]; data_cal_month_marks(y,m,marks);
+    int n=0; for(int dd=1; dd<=31 && n<31; dd++) if(marks[dd]){ g_cal_hl[n].year=y; g_cal_hl[n].month=m; g_cal_hl[n].day=dd; n++; }
+    lv_calendar_set_highlighted_dates(cal, g_cal_hl, n);
+    lv_obj_add_event_cb(cal, month_pick_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_obj_t *tb=lv_button_create(content); lv_obj_set_size(tb,70,26); lv_obj_align(tb,LV_ALIGN_BOTTOM_MID,0,-2);
+    lv_obj_t *tl=lv_label_create(tb); lv_label_set_text(tl,"Today"); lv_obj_center(tl);
+    lv_obj_add_event_cb(tb,month_today_cb,LV_EVENT_CLICKED,NULL);
+}
+
+/* return to an app's main view after a record action (Day view for Date Book). */
+static void app_reopen(const AppDef *a){
+    if(a && a->app==APP_CAL) show_datebook_day(g_cal_y,g_cal_m,g_cal_d);
+    else if(a)               list_view(a);
+    else                     show_launcher();
+}
+
 static void show_app(const char *name){
+    if(!strcmp(name, "Date Book")){                 /* PalmOS Day view, not a flat list */
+        data_set_category(-1);
+        int y,m,d; cal_today(&y,&m,&d);
+        show_datebook_day(y,m,d);
+        return;
+    }
     for(int i=0;i<NAPPDEFS;i++)
         if(!strcmp(name, APPDEFS[i].name)){ data_set_category(-1); list_view(&APPDEFS[i]); return; }
     if(!strcmp(name, "HotSync")){ show_hotsync(); return; }
