@@ -48,6 +48,22 @@ Two device-found bugs fixed in the same commit: the TZ picker froze as a 24-butt
 
 All four build clean + flashed to /dev/ttyUSB0 (boots clean, ~193 KB free heap).
 
+## UPDATE 2026-07-10 (part 4) — sync idempotency on iCloud relocation (DONE, host-green)
+
+The parked "idempotency on live iCloud href relocation" item is fixed at the
+engine level. Root cause: when iCloud relocated an object and its GET-for-UID
+truncated on the 8 KB no-PSRAM fetch buffer, `resolveServer` fell back to
+`uidHash(href)`, minting a divergent identity → spurious delete + phantom pull =
+duplicate + local loss. Now an unresolvable object is **deferred** (never gets an
+href identity) and **all deletes are suppressed** that round (delete-candidate
+rows staged to `SV_MO`, `present` decided post-enumeration; any `unresolved`
+forces present+unchanged). New gate `tests/idempotent.c` (`-DOBJ_FETCH_CAP=4096`)
+reproduces the truncation on the host and proves: etag churn converges, and an
+unresolvable relocation causes no delete/dup/loss and converges when resolvable.
+Added relocation telemetry for the on-device iCloud trace. **On-device verify
+against real iCloud still pending** (needs a photo-heavy contact to exercise the
+truncation path live).
+
 ### What's next
 
 - **To Do "due date" sort + Details.** Sorting currently keys on priority then

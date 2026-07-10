@@ -6,6 +6,42 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-10 (part 4) — sync idempotency: defer unresolvable relocations
+
+**The bug (on-device, against real iCloud; host gates missed it).** iCloud
+relocates an object to a UUID href and, when we then GET it to read its `UID:`
+for identity matching, the no-PSRAM fetch buffer (8 KB) is too small for a
+photo-heavy vCard, so the GET truncates and the UID can't be parsed. The old
+`resolveServer` fell back to `uidHash(href)` — a *divergent* identity for what is
+really an already-mapped record. Result: the mapped copy looked server-deleted
+(spurious delete) **and** the object looked brand-new (phantom pull) = a
+**duplicate + a lost local record**. Repeated syncs never converged. Radicale's
+happy path never reproduced it because its GET always returns the full object.
+
+**The fix (`bridge/sync.c`).** `resolveServer` no longer invents an href identity
+when a UID can't be read. It **defers** the object (skips it this round) and
+returns an `unresolved` flag; `sync_one` then **suppresses all deletes** for that
+collection that round and drops the new sync-token so the deferred object is
+re-reported next delta. To do this safely, delete-candidate rows (both map-only
+absences and delta-reported deletes) are *staged* to `SV_MO` and their `present`
+flag is decided only after the whole enumeration is known:
+  - `'m'` map-only: unchanged if incremental, deleted if a full report;
+  - `'d'` delta-delete: a real delete;
+  - **any `unresolved` ⇒ every staged row forced present+unchanged** (no data loss).
+A transient GET failure can now never delete or duplicate a record — worst case
+it's a no-op that retries. Added **relocation telemetry**: `[sync] reloc uid=…:
+map href=… -> server href=… (UID match)` and the `UID-resolve FAILED …` line, so
+the next on-device iCloud sync is diagnosable over serial.
+
+**New host gate `tests/idempotent.c`** (built with `-DOBJ_FETCH_CAP=4096` so a
+bloated object overflows the fetch buffer on the host, reproducing the device
+truncation deterministically). Two cases, both GREEN: (A) server-side etag churn
+converges to a no-op with no re-pull loop / dup; (B) an unresolvable relocation is
+deferred — no delete, no dup, no loss — and converges once the object is
+resolvable again. Wired into `tests/gate.sh` + the `all`/`clean` Makefile targets.
+Full gate suite + offline units GREEN; device firmware compiles clean.
+**Not yet flashed** (device attached but on-device testing deferred to later).
+
 ## SESSION 2026-07-10 (part 3) — Preferences persistence bug
 
 **Bug:** the timezone (and every other Preference) did not survive a reboot.

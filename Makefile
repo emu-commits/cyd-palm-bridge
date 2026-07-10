@@ -5,7 +5,7 @@ CORE    = bridge/pdb.c bridge/datebook.c bridge/address.c bridge/ical.c bridge/v
           bridge/find.c
 
 all: roundtrip bridge_cli incremental synctoken category bigsync multiapp \
-     uidmatch find_test calc_test config_test
+     uidmatch idempotent find_test calc_test config_test
 
 dirs:
 	@mkdir -p pdb state
@@ -39,6 +39,13 @@ multiapp: tests/multiapp.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 # foreign-object edits round-trip without dups. See tests/uidmatch.c.
 uidmatch: tests/uidmatch.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
+
+# idempotency under real-iCloud behaviors Radicale's happy path misses: etag
+# churn + an unresolvable relocation. Built with a TINY OBJ_FETCH_CAP so a bloated
+# object overflows the fetch buffer on the host, reproducing the no-PSRAM device
+# truncation that used to duplicate records. See tests/idempotent.c.
+idempotent: tests/idempotent.c bridge/dav.c bridge/sync.c $(CORE) | dirs
+	$(CC) $(CFLAGS) -DOBJ_FETCH_CAP=4096 -o $@ $^
 
 # offline unit tests (no server needed)
 find_test: tests/find_test.c $(CORE) | dirs
@@ -84,6 +91,6 @@ mtest: multiapp
 
 clean:
 	rm -f roundtrip bridge_cli incremental synctoken category bigsync multiapp \
-	      find_test calc_test config_test pdb/_rt_*.pdb
+	      uidmatch idempotent find_test calc_test config_test pdb/_rt_*.pdb
 
 .PHONY: all dirs test itest stest ctest btest mtest clean

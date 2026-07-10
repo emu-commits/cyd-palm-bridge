@@ -40,7 +40,7 @@ done
 [ "$ok" = 1 ] || { echo "collections never became writable (last PUT=$st)"; tail -20 state/radicale.log; exit 2; }
 
 make >/dev/null || { echo "build failed"; exit 1; }
-GATES="${*:-incremental synctoken category uidmatch bigsync multiapp}"
+GATES="${*:-incremental synctoken category uidmatch idempotent bigsync multiapp}"
 rc=0
 # empty every collection (objects only) so one gate can't pollute the next --
 # bigsync leaves 200 objects in palm/cal, which multiapp's To Do test reuses.

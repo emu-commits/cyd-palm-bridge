@@ -26,6 +26,7 @@
 *.swp
 /category
 /uidmatch
+/idempotent
 
 # ESP-IDF firmware
 /firmware/build/

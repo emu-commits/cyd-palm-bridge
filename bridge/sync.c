@@ -261,6 +261,7 @@ static char g_objbuf[OBJ_FETCH_CAP];
 #define LC_IDX  STATE_DIR "/.lc.idx"   /* local recs,   key=objhash */
 #define SV_RAW  STATE_DIR "/.sv.raw"   /* server enum,  key=href     */
 #define SV_IDX  STATE_DIR "/.sv.idx"   /* server objs,  key=objhash  */
+#define SV_MO   STATE_DIR "/.sv.mo"    /* map-only rows, flushed once trust is known */
 
 /* compare two lines by their first field (up to the first TAB). Every index
  * file leads with its sort key zero-padded (objhash %016llx / palmuid %010u) or
@@ -419,10 +420,24 @@ static int enumServer(const DavCtx*d,const char*coll,const char*token,
  * "objhash href etag present". Joins SV_RAW (key href) with MP_HREF (key href):
  *   both        -> objhash from the map (no GET); etag/present from enumeration.
  *   map only    -> unchanged (incremental) present w/ map etag, else deleted.
- *   server only -> a new object: GET it once to read its UID -> objhash.        */
-static void resolveServer(const DavCtx*d,const char*coll,int incremental){
+ *   server only -> a new object: GET it once to read its UID -> objhash.
+ *
+ * Returns 1 if ANY server-only object could NOT be UID-resolved (its GET failed,
+ * truncated on the small no-PSRAM fetch buffer, or was unparseable), else 0.
+ * Such an object is DEFERRED, not force-identified: the old code fell back to
+ * uidHash(href), which minted a divergent identity for what is really an already
+ * mapped record -- so the mapped copy looked server-deleted (spurious delete) AND
+ * the object looked brand-new (phantom pull). That split is the on-device
+ * duplication seen against iCloud (relocated photo-vCards overflow the 8 KB
+ * buffer). Instead we skip the object this round and tell the caller to SUPPRESS
+ * DELETES (so a transient GET failure can never delete the mapped local record),
+ * and it retries cleanly next sync. Map-only rows are therefore staged to SV_MO
+ * and only flushed as deletes once we know the enumeration was fully resolved. */
+static int resolveServer(const DavCtx*d,const char*coll,int incremental){
     sortFile(SV_RAW);                         /* merge-join needs it keyed (by href) */
     FILE*s=fopen(SV_RAW,"r"),*m=fopen(MP_HREF,"r"),*o=fopen(SV_IDX,"w");
+    FILE*mo=fopen(SV_MO,"w");                  /* map-only rows, present decided after merge */
+    int unresolved=0;
     char sl[512],ml[512];
     int haveS=s&&fgets(sl,sizeof sl,s), haveM=m&&fgets(ml,sizeof ml,m);
     while(haveS||haveM){
@@ -432,24 +447,52 @@ static void resolveServer(const DavCtx*d,const char*coll,int incremental){
         if(haveM) sscanf(ml,"%127[^\t]\t%llx\t%47[^\t]\t%159[^\t\r\n]",mh,&moh,mou,me);
         int cmp = (haveS&&haveM)?strcmp(sh,mh):(haveS?-1:1);
         if(cmp==0){                       /* in both: map objhash, enum etag/present */
-            if(o) fprintf(o,"%016llx\t%s\t%s\t%d\n",moh,mh,se,sp);
+            if(sp){ if(o) fprintf(o,"%016llx\t%s\t%s\t%d\n",moh,mh,se,1); }
+            else if(mo) fprintf(mo,"d\t%016llx\t%s\t%s\n",moh,mh,me);  /* delta-DELETE: stage */
             haveS=s&&fgets(sl,sizeof sl,s)!=NULL; haveM=m&&fgets(ml,sizeof ml,m)!=NULL;
         } else if(cmp<0){                 /* server only */
             if(sp){                       /* a new present object -> GET for its UID */
                 char objuid[48]=""; uint64_t oh;
                 int got=dav_get(d,coll,sh,g_objbuf,sizeof g_objbuf);
-                if(got>0 && got<OBJ_FETCH_CAP-1 && objuid_of(g_objbuf,objuid,sizeof objuid)==0) oh=uidHash(objuid);
-                else oh=uidHash(sh);
-                if(o) fprintf(o,"%016llx\t%s\t%s\t%d\n",(unsigned long long)oh,sh,se,1);
+                if(got>0 && got<OBJ_FETCH_CAP-1 && objuid_of(g_objbuf,objuid,sizeof objuid)==0){
+                    oh=uidHash(objuid);
+                    if(o) fprintf(o,"%016llx\t%s\t%s\t%d\n",(unsigned long long)oh,sh,se,1);
+                } else {                  /* UID unreadable -> DEFER (never mint an href identity) */
+                    fprintf(stderr,"[sync] UID-resolve FAILED for server href=%s (got=%d) -- deferring, suppressing deletes this round\n",sh,got);
+                    unresolved=1;
+                }
             }                             /* else: delete of an object we never tracked -> ignore */
             haveS=s&&fgets(sl,sizeof sl,s)!=NULL;
-        } else {                          /* map only: unchanged (incr) or deleted */
-            if(o) fprintf(o,"%016llx\t%s\t%s\t%d\n",moh,mh, incremental?me:"", incremental?1:0);
+        } else {                          /* map only: stage ('m'); present decided post-merge */
+            if(mo) fprintf(mo,"m\t%016llx\t%s\t%s\n",moh,mh,me);
             haveM=m&&fgets(ml,sizeof ml,m)!=NULL;
         }
     }
-    if(s){fclose(s);} if(m){fclose(m);} if(o){fclose(o);}
+    if(s){fclose(s);} if(m){fclose(m);}
+    if(mo) fclose(mo);
+    /* Flush staged rows. Two kinds, different "is it really gone?" semantics:
+     *   'm' map-only  : absent from the enumeration. In an incremental delta that
+     *                   means UNCHANGED (present); in a full report it means DELETED.
+     *   'd' delta-del : the delta explicitly reported this href deleted (only ever
+     *                   happens incrementally) -> a real DELETE.
+     * BUT if ANY object was deferred (unresolved) this round, no delete can be
+     * trusted -- the "deleted" href may be the relocation source of the deferred
+     * object -- so force every staged row present+unchanged and retry next sync. */
+    FILE*mr=fopen(SV_MO,"r");
+    if(mr && o){
+        char l[512];
+        while(fgets(l,sizeof l,mr)){
+            char ty=0; unsigned long long moh=0; char mh[128]="",me[160]="";
+            if(sscanf(l,"%c\t%llx\t%127[^\t]\t%159[^\t\r\n]",&ty,&moh,mh,me)>=3){
+                int present = unresolved ? 1 : (ty=='m' ? incremental : 0);
+                fprintf(o,"%016llx\t%s\t%s\t%d\n",moh,mh, present?me:"", present);
+            }
+        }
+    }
+    if(mr) fclose(mr);
+    if(o){fclose(o);}
     sortFile(SV_IDX);
+    return unresolved;
 }
 
 /* ---- merge-join rows: one parsed line from each sorted index file. A logical
@@ -594,7 +637,13 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         fprintf(stderr,"[sync] %s: server enumeration failed -- keeping all local records (no deletes)\n",coll);
         incremental=1; s->newToken[0]=0;
     }
-    resolveServer(d,coll,incremental);                       /* SV_IDX (GETs new objects) */
+    int unresolved = resolveServer(d,coll,incremental);      /* SV_IDX (GETs new objects) */
+    if(unresolved){
+        /* Some server object's UID could not be read this round; resolveServer
+         * already suppressed deletes. Don't advance the sync-token either, so the
+         * deferred object is re-reported by the next incremental delta. */
+        s->newToken[0]=0;
+    }
     buildLcRaw(s->pdbpath,s->kind,rt,Ccoll,&maxuid);         /* LC_RAW */
     joinLcIdx();                                             /* LC_IDX */
     uint32_t seed=maxuid+1;
@@ -655,6 +704,13 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
 
         char lname[64]; snprintf(lname,sizeof lname,"%u.%s",(unsigned)uid,ext);
         const char*srvName = hasSrv?sName:(hasMap?mHref:lname);
+
+        /* relocation telemetry: the object is still one record (matched by UID)
+         * but the server moved it to a new href -- the exact iCloud behavior we
+         * need to observe on-device. Logged only when the hrefs actually differ. */
+        if(hasMap && hasSrv && mHref[0] && sName[0] && strcmp(mHref,sName))
+            fprintf(stderr,"[sync] reloc uid=%u: map href=%s -> server href=%s (UID match)\n",
+                    (unsigned)uid,mHref,sName);
 
         int conflict = (lcs==LMOD||lcs==LDEL||lcs==LNEW) && (scs==SMOD||scs==SNEW||scs==SDEL)
                        && !(lcs==LNEW&&scs==SABSENT) && !(lcs==LDEL&&scs==SDEL);
