@@ -341,7 +341,7 @@ void hotsync_discover_start(void){
     if(s_busy) return;
     s_busy = 1; s_disc_done = 0; s_disc_n = 0;
     setst("Starting...");
-    if(xTaskCreate(discover_task, "discover", 20480, NULL, 4, NULL) != pdPASS){
+    if(xTaskCreate(discover_task, "discover", 32768, NULL, 4, NULL) != pdPASS){
         setst("Could not start discovery"); s_disc_done=1; s_busy = 0;
     }
 }
@@ -350,12 +350,16 @@ void hotsync_start(void){
     if(s_busy) return;
     s_busy = 1;
     setst("Starting...");
-    /* 16 KB stack: the sync engine's big emit buffers now live in .bss (g_body)
-     * and the object-fetch buffer is static, so the deepest path is a TLS
-     * handshake (~8 KB) plus small frames. A 32 KB stack fixed the earlier
-     * overflow but starved the heap of the contiguous block sync_collection needs
-     * for its S/Out structs; 16 KB restores that headroom without overflowing. */
-    if(xTaskCreate(hotsync_task, "hotsync", 20480, NULL, 4, NULL) != pdPASS){
+    /* 32 KB stack. The task stack is malloc'd from the DRAM heap, so an overflow
+     * corrupts adjacent heap metadata -> a later alloc crashes deep in tlsf
+     * (block_locate_free) rather than a clean stack-canary trip. The streaming
+     * reconcile's merge loop calls DAV ops (each a full mbedTLS handshake, whose
+     * stack spikes past the ~8 KB estimate on iCloud's cert chain) from a frame
+     * that also holds the row structs + line buffers, and resolveServer nests a
+     * GET per relocated object -- 20 KB overflowed at ~30 records. The old worry
+     * that 32 KB starves the heap no longer holds: streaming shrank the S struct
+     * from ~16 KB to ~3 KB, so the contiguous block it needs is tiny now. */
+    if(xTaskCreate(hotsync_task, "hotsync", 32768, NULL, 4, NULL) != pdPASS){
         setst("Could not start sync task"); s_busy = 0;
     }
 }
