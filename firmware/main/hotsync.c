@@ -12,6 +12,7 @@
 #include "sync.h"
 #include "secrets.h"
 #include "appcfg.h"
+#include "clock.h"
 #include <string.h>
 #include <time.h>
 #include "freertos/FreeRTOS.h"
@@ -120,7 +121,9 @@ static int clock_ok(void){
     for(int i=0;i<15;i++) if(esp_netif_sntp_sync_wait(pdMS_TO_TICKS(2000))==ESP_OK) break;
     esp_netif_sntp_deinit();
     time_t now=0; time(&now); struct tm ti; gmtime_r(&now,&ti);
-    return (ti.tm_year+1900) >= 2024;
+    if((ti.tm_year+1900) < 2024) return 0;
+    clock_checkpoint();   /* SNTP just set real time -> persist it durably (survives power-off) */
+    return 1;
 }
 
 static char *abspath(char *href, DavCtx *d){

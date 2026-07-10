@@ -35,6 +35,8 @@
 #include "ui.h"
 #include "data.h"
 #include "secrets.h"
+#include "clock.h"
+#include "appcfg.h"
 
 static const char *TAG = "app";
 
@@ -209,6 +211,10 @@ void app_main(void){
         ESP_ERROR_CHECK(nvs_flash_erase()); ESP_ERROR_CHECK(nvs_flash_init());
     }
 
+    /* No RTC on this board: restore the wall clock from NVS so the date/time
+     * survive a power cycle (a HotSync's SNTP later corrects it exactly). */
+    clock_restore();
+
     /* U1: display bring-up -- draw a diagnostic test pattern first thing. */
     display_init();
     display_test_pattern();
@@ -231,6 +237,12 @@ void app_main(void){
     } else {
         ESP_LOGW(TAG,"no SD card -- data views will be empty");
     }
+
+    /* now that config.ini is readable, set the local timezone (so the Day view
+     * shows the user's wall clock, not UTC) and start periodic clock checkpoints
+     * so an abrupt power-off loses only ~2 min of accuracy. */
+    clock_set_tz(appcfg()->timezone);
+    clock_start_autosave();
 
     /* U3: bring up LVGL + the Palm app shell (never returns). */
     lvgl_port_init();
