@@ -31,6 +31,13 @@ static volatile int s_busy;
 static char s_status[80] = "Ready";
 static void setst(const char *s){ snprintf(s_status, sizeof s_status, "%s", s); }
 
+/* coarse sync progress 0..100 for the UI's progress bar. Collection-level (the
+ * per-app step); a finer intra-collection bar would need a callback threaded
+ * through sync_collection. -1 = idle/not started. */
+static volatile int s_prog = -1;
+static void setprog(int p){ s_prog = p; }
+int hotsync_progress(void){ return s_prog; }
+
 /* ---- per-app sync targets ------------------------------------------------
  * HotSync walks this table, syncing each configured app to its own iCloud
  * collection. The PDB/map paths and kinds are device-local constants; the
@@ -190,11 +197,13 @@ static void hotsync_task(void *arg){
      * finer intra-collection bar would need a callback through sync_collection). */
     int ntgt=0; for(int i=0;i<N_APPS;i++){ const char*c=app_coll(cfg,i); if(c&&c[0]) ntgt++; }
     int step=0;
+    setprog(0);
     for(int i=0;i<N_APPS;i++){
         const SyncApp *t=&s_apps[i];
         const char *coll=app_coll(cfg,i);
         if(!coll || !coll[0]) continue;            /* app not configured -> skip */
         step++;
+        setprog(ntgt ? (step-1)*100/ntgt : 0);     /* advance the bar as each collection starts */
 
         DavCtx *ctx=&d;
         if(t->card){
@@ -231,6 +240,7 @@ static void hotsync_task(void *arg){
             tot.pullNew+=st.pullNew; tot.pullMod+=st.pullMod; tot.pullDel+=st.pullDel; }
     }
 
+    setprog(100);
     if(did==0 && failed>0)
         snprintf(msg,sizeof msg,"Sync failed - low memory (heap %lu)",
                  (unsigned long)esp_get_free_heap_size());

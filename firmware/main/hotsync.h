@@ -6,6 +6,7 @@
 void        hotsync_start(void);     /* kick off a sync if not already running */
 int         hotsync_busy(void);      /* 1 while a sync is in progress */
 const char *hotsync_status(void);    /* latest status/result line */
+int         hotsync_progress(void);  /* coarse 0..100, or -1 when idle */
 
 /* ---- collection discovery (Preferences "Discover collections") -----------
  * Brings Wi-Fi up, walks the iCloud CalDAV + CardDAV homes, and collects the

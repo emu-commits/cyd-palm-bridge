@@ -29,20 +29,34 @@ Two device-found bugs fixed in the same commit: the TZ picker froze as a 24-butt
 
 ### What's next (after the UI-polish sprint)
 
-Deferred from the sprint, do first when UI work resumes:
-- **Record sorting.** Lists still show PDB order. Palm sorts Address by last name,
-  To Do by priority then due, Memo alphabetical/manual. Needs buffering the rows
-  (uid + sort key) then ordering the table — do it now that the `lv_table` cost is
-  known to be flat. Address especially benefits (Look Up + sorted = fast finding).
-- **Find UI (P1.7).** Engine `bridge/find.c` is done + host-tested; it needs a
-  Graffiti query field + a results list. The `lv_table` backbone + the Look Up
-  field pattern are now both in place to build on. Silkscreen Find button is
-  already stubbed (`find_cb`).
+### DONE 2026-07-10 (part 2) — sorting, Find, top-bar clock, sync progress (flashed)
 
-Then the previously-planned order (P1 → P2): finer sync progress bar, then P2
-hardware (U8 power / battery gauge on GPIO34, U9 case). Backlog from
-`UI_ROADMAP.md`: top-bar clock + battery %, RSS reader, Preferences app icon,
-power/reset-button remap, dark mode.
+- **Record sorting — DONE.** `build_record_table` collects rows into a malloc'd
+  `SRow[]`, `qsort`s (Address/Memo by name via `strcasecmp`; To Do incomplete →
+  priority → text), fills the table in order. Transient buffer, interactive mode.
+- **Find UI (P1.7) — DONE.** Silkscreen Find opens `show_find()`: Graffiti query
+  field + results `lv_table` over `find_in_pdb` across all four PDBs; tap a hit
+  opens the record in its app. Added `data_db_path()`.
+- **Top-bar clock — DONE.** 12h `clock_lbl` centered in the title bar, 15 s
+  `lv_timer`; persists across screens.
+- **Sync progress — DONE (coarse, TEXT).** `hotsync_progress()` (0..100 per
+  collection) is shown as a `<p>%` line in the status label. NOT an `lv_bar`: a bar
+  froze the screen at 66% because it forces an LVGL draw-layer alloc that can't be
+  satisfied mid-sync (fragmented heap) → LVGL live-locks → Task WDT. A finer
+  *intra*-collection bar still needs a `sync_collection` callback, and any future
+  graphical progress must avoid layer-compositing widgets during the sync window.
+
+All four build clean + flashed to /dev/ttyUSB0 (boots clean, ~193 KB free heap).
+
+### What's next
+
+- **To Do "due date" sort + Details.** Sorting currently keys on priority then
+  text; the data layer's `Todo.due*` isn't surfaced to the row. Thread due into
+  the row (secondary or a 3rd column) and offer a due/priority sort choice.
+- **Finer sync progress** (per-record bar) via a `sync_collection` callback.
+- **P2 hardware:** U8 power / battery gauge (GPIO34) + light-sleep, U9 case.
+- **Backlog (`UI_ROADMAP.md`):** battery % in the title bar (next to the new
+  clock), RSS reader, Preferences app icon, power/reset-button remap, dark mode.
 
 The real open sync item (idempotency on live iCloud href relocation) stays parked
 under "sync + Date Book are ok for now."

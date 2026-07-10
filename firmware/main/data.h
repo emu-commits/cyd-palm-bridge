@@ -13,6 +13,9 @@ enum { APP_CAL, APP_ADDR, APP_TODO, APP_MEMO };
 /* per-record display callback: record uid + primary line + optional secondary. */
 typedef void (*data_row_cb)(uint32_t uid, const char *primary, const char *secondary, void *ctx);
 
+/* absolute SD path of an app's PDB (for global Find over the raw files). */
+const char *data_db_path(int app);
+
 /* iterate records of each app, decoding to display strings. */
 void data_datebook(data_row_cb cb, void *ctx);
 /* PalmOS Day view: only appointments on y/m/d, primary "HH:MM  desc" (sortable). */

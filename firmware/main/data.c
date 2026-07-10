@@ -17,6 +17,7 @@
 static const char *db_path(int app){
     return app==APP_CAL?DB_CAL : app==APP_ADDR?DB_ADDR : app==APP_TODO?DB_TODO : DB_MEMO;
 }
+const char *data_db_path(int app){ return db_path(app); }
 static int file_exists(const char *path){
     FILE *f = fopen(path, "rb");
     if(f){ fclose(f); return 1; }

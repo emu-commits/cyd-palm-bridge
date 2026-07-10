@@ -6,6 +6,55 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-10 (part 2) — sorting, Find UI, top-bar clock, sync progress
+
+Four features on top of the UI-polish sprint; all build clean, flashed to
+/dev/ttyUSB0 (boots clean, free heap ~193 KB, no panic).
+
+**(1) Record sorting.** Lists were raw PDB order; now Palm-sorted. `build_record_table`
+gained a collect→qsort→fill pass: `collect_cb` buffers each kept row (`SRow`:
+uid + display text + case-folded sort key + To Do done/priority) into a malloc'd
+array, `qsort` with `cmp_name` (Address + Memo, `strcasecmp` on the name — the
+"Last, First" primary sorts by last name) or `cmp_todo` (incomplete first, then
+priority 1..5, then text), then the table is filled in order and freed. Transient
+buffer only, interactive mode (no TLS competing). Date Book day view already
+sorted by time — untouched.
+
+**(2) Find UI (P1.7 — engine `bridge/find.c` was already host-tested).** New
+`show_find()` on the silkscreen **Find** button (was a stub): a `Find:` Graffiti
+query field + a results `lv_table`. Each keystroke re-runs `find_in_pdb` over all
+four PDBs (small files, interactive mode) into a capped (60) `FindHit` buffer;
+rows show `"<app>: <snippet>"`, tap opens the record in its app (sets `cur_app`
+from a FIND_*→AppDef map, then `show_detail`). Added `data_db_path(app)` so Find
+can reach the raw PDB files. `free_finds()` + `g_findtbl` reset in `kill_kb`.
+NOTE the FIND_* enum order differs from APP_* — mapped explicitly (`FIND_DBS`,
+`find_appdef`).
+
+**(3) Top-bar clock + date (Palm shows the time up top).** A `clock_lbl` centered
+in the title bar, refreshed every 15 s by an `lv_timer` (`clock_tick`): 12h time
+with the date to its right, `"12:34p  Jul 10"` (`CAL_MON[]` abbrev + day). Lives
+on the title bar (not `content`) so it persists across screen swaps. Center stays
+clear of the left title + right category trigger.
+
+**(4) Sync progress — TEXT percentage (not an lv_bar).** `hotsync.c` exposes
+`hotsync_progress()` (coarse 0..100, -1 idle) set at the per-collection step
+(`setprog`); a finer intra-collection bar would still need a callback through
+`sync_collection`. `hs_tick` appends `"\n<p>%"` to the status label while a sync
+runs.
+  - **WHY NOT AN lv_bar (device WDT, fixed):** the first cut used an `lv_bar`; it
+    **froze the screen at 66%** (during the 3rd collection). addr2line on the Task
+    WDT backtrace: `lv_timer_handler → lv_display_refr_timer → draw_buf_flush →
+    lv_draw_dispatch → lv_draw_layer_alloc_buf → lv_draw_buf_create → lv_tlsf_malloc`
+    with **CPU0 running `main`** (the LVGL task) starving IDLE0. Root cause: an
+    `lv_bar` makes LVGL allocate a draw-**layer** buffer to composite its
+    indicator; during a sync the heap is fragmented (Wi-Fi+TLS hold the big
+    blocks) so that alloc can't be satisfied, and LVGL **spins retrying the draw
+    every refresh** → WDT → frozen. A label needs no layer, so progress is text.
+    **RULE: don't repaint layer-compositing widgets (lv_bar, opacity/transform,
+    rounded-mask) during a sync on this no-PSRAM device — the layer alloc fails
+    and LVGL live-locks. Use plain labels/rects for anything that redraws while
+    Wi-Fi+TLS are up.**
+
 ## SESSION 2026-07-10 — UI polish pass (TZ picker → lv_table → app overhauls)
 
 Three-part sprint after the user called sync + Date Book "ok for now". Working

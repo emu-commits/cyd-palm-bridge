@@ -17,6 +17,7 @@
 #include "hotsync.h"
 #include "graffiti.h"
 #include "calc.h"
+#include "find.h"         /* global search engine (bridge/find.c) */
 #include "appcfg.h"
 #include "clock.h"        /* timezone picker + DST-aware zone list */
 #include "lvgl.h"
@@ -34,6 +35,7 @@
 
 static lv_obj_t *content;      /* the swappable view area */
 static lv_obj_t *title_lbl;
+static lv_obj_t *clock_lbl;    /* live clock in the title bar (Palm) */
 
 static const char *APPS[] = { "Date Book", "Address", "To Do List", "Memo Pad", "HotSync" };
 /* authentic Palm app launcher icons (from PumpkinOS) */
@@ -112,10 +114,13 @@ static int disc_built;
 /* tear down per-form / per-screen state when navigating away. Text entry is
  * Graffiti-only (no on-screen keyboard), so there's no overlay to drop here. */
 static void free_rowuids(void);
+static void free_finds(void);
 static lv_obj_t *g_listtbl;           /* current record table (partial rebuild) */
+static lv_obj_t *g_findtbl;           /* Find results table                     */
 static void kill_kb(void){
-    g_form=NULL; active_ta=NULL; edit_cat_lbl=NULL; g_listtbl=NULL;
+    g_form=NULL; active_ta=NULL; edit_cat_lbl=NULL; g_listtbl=NULL; g_findtbl=NULL;
     free_rowuids();
+    free_finds();
     kill_hs();
     if(disc_timer){ lv_timer_delete(disc_timer); disc_timer=NULL; }
     disc_status=NULL;
@@ -174,29 +179,52 @@ static int row_keep(const char *primary){
     return 1;
 }
 
-typedef struct { lv_obj_t *tbl; int row; int cap; } TblCtx;
 static void tbl_count_cb(uint32_t uid,const char*p,const char*s,void*ctx){
     (void)uid;(void)s; if(row_keep(p)) (*(int*)ctx)++;
 }
-static void tbl_fill_cb(uint32_t uid,const char*primary,const char*secondary,void*ctx){
-    TblCtx *tc = (TblCtx*)ctx;
-    if(!row_keep(primary) || tc->row >= tc->cap) return;
-    char buf[128];
+
+/* Collected row for sorting. Palm sorts these lists (Address by name, To Do by
+ * priority, Memo alphabetically) rather than showing raw PDB order, so we buffer
+ * the display text + a sort key, qsort, then fill the table in order. The buffer
+ * is transient (freed after fill) and only lives in interactive mode (no TLS), so
+ * the RAM is available. */
+typedef struct {
+    uint32_t uid;
+    int      done;        /* To Do completed (sorts incomplete first) */
+    int      pri;         /* To Do priority 1..5 (1 = highest)         */
+    char     c0[8];       /* col-0 text (To Do checkbox), else empty    */
+    char     c1[96];      /* main display text                          */
+    char     sort[48];    /* case-folded sort key                       */
+} SRow;
+typedef struct { SRow *rows; int n; int cap; } Collect;
+
+static void collect_cb(uint32_t uid,const char*primary,const char*secondary,void*ctx){
+    Collect *co = (Collect*)ctx;
+    if(!row_keep(primary) || co->n >= co->cap) return;
+    SRow *r = &co->rows[co->n++];
+    r->uid=uid; r->done=0; r->pri=99; r->c0[0]=0;
     if(cur_app && cur_app->app==APP_TODO){
-        /* data layer emits "[x] desc" / "[ ] desc"; split into checkbox + text */
-        int done = (primary[0]=='[' && primary[1]=='x');
+        r->done = (primary[0]=='[' && primary[1]=='x');
         const char *txt = (primary[0]=='[') ? primary+4 : primary;
-        lv_table_set_cell_value(tc->tbl, tc->row, 0, done ? "[x]" : "[ ]");
-        if(secondary && secondary[0]) snprintf(buf,sizeof buf,"%s  (%s)",txt,secondary);
-        else                          snprintf(buf,sizeof buf,"%s",txt);
-        lv_table_set_cell_value(tc->tbl, tc->row, 1, buf);
+        snprintf(r->c0, sizeof r->c0, "%s", r->done ? "[x]" : "[ ]");
+        if(secondary && secondary[0]) snprintf(r->c1,sizeof r->c1,"%s  (%s)",txt,secondary);
+        else                          snprintf(r->c1,sizeof r->c1,"%s",txt);
+        if(!secondary || sscanf(secondary,"pri %d",&r->pri)!=1) r->pri=99;
+        snprintf(r->sort, sizeof r->sort, "%s", txt);
     } else {
-        if(secondary && secondary[0]) snprintf(buf,sizeof buf,"%s  (%s)",primary,secondary);
-        else                          snprintf(buf,sizeof buf,"%s",primary);
-        lv_table_set_cell_value(tc->tbl, tc->row, 0, buf);
+        if(secondary && secondary[0]) snprintf(r->c1,sizeof r->c1,"%s  (%s)",primary,secondary);
+        else                          snprintf(r->c1,sizeof r->c1,"%s",primary);
+        snprintf(r->sort, sizeof r->sort, "%s", primary);
     }
-    g_rowuids[tc->row] = uid;
-    tc->row++;
+}
+static int cmp_name(const void *a,const void *b){        /* Address, Memo */
+    return strcasecmp(((const SRow*)a)->sort, ((const SRow*)b)->sort);
+}
+static int cmp_todo(const void *a,const void *b){        /* incomplete, then priority, then text */
+    const SRow *x=a, *y=b;
+    if(x->done != y->done) return x->done - y->done;
+    if(x->pri  != y->pri ) return x->pri  - y->pri;
+    return strcasecmp(x->sort, y->sort);
 }
 static void tbl_click_cb(lv_event_t *e){
     lv_obj_t *t = lv_event_get_target(e);
@@ -240,14 +268,27 @@ static void build_record_table(void){
     else    { lv_obj_set_size(t, lv_pct(100), lv_pct(100)); }
     lv_obj_add_event_cb(t, tbl_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
-    if(n <= 0){
-        lv_table_set_cell_value(t, 0, 0, "(no records)");
-    } else {
-        g_rowuids = calloc(n, sizeof *g_rowuids);
-        g_rowuid_n = g_rowuids ? n : 0;
-        TblCtx tc = { t, 0, g_rowuid_n };
-        cur_app->iter(tbl_fill_cb, &tc);      /* pass 2: fill rows + uid map */
+    if(n <= 0){ lv_table_set_cell_value(t, 0, 0, "(no records)"); return; }
+
+    SRow *rows = calloc(n, sizeof *rows);
+    g_rowuids  = calloc(n, sizeof *g_rowuids);
+    if(!rows || !g_rowuids){                    /* out of RAM -> degrade, don't crash */
+        free(rows); free_rowuids();
+        lv_table_set_cell_value(t, 0, 0, "(low memory)");
+        return;
     }
+    Collect co = { rows, 0, n };
+    cur_app->iter(collect_cb, &co);             /* pass 2: collect rows */
+    qsort(rows, co.n, sizeof *rows, todo ? cmp_todo : cmp_name);
+
+    g_rowuid_n = co.n;
+    for(int i=0;i<co.n;i++){
+        if(todo){ lv_table_set_cell_value(t, i, 0, rows[i].c0);
+                  lv_table_set_cell_value(t, i, 1, rows[i].c1); }
+        else      lv_table_set_cell_value(t, i, 0, rows[i].c1);
+        g_rowuids[i] = rows[i].uid;
+    }
+    free(rows);
 }
 
 /* Address Look Up: mirror the field text into g_lookup and refilter the table */
@@ -578,7 +619,21 @@ static void show_edit(uint32_t uid){
 }
 
 /* U7: HotSync screen (Sync Now + a status line polled from the background task) */
-static void hs_tick(lv_timer_t *t){ (void)t; if(hs_status) lv_label_set_text(hs_status, hotsync_status()); }
+/* Progress is TEXT, not an lv_bar. On this no-PSRAM device the heap is badly
+ * fragmented during a sync (Wi-Fi + TLS hold the big blocks), and an lv_bar
+ * forces LVGL to allocate a draw-LAYER buffer to composite its indicator -- that
+ * allocation fails mid-sync and LVGL spins retrying the draw every refresh,
+ * starving IDLE0 -> Task WDT -> frozen screen (seen freezing at 66%). A label
+ * never allocates a layer, so the percentage is shown as text instead. */
+static void hs_tick(lv_timer_t *t){
+    (void)t;
+    if(!hs_status) return;
+    int p = hotsync_progress();              /* -1 idle, else 0..100 */
+    if(p >= 0 && p < 100)
+        lv_label_set_text_fmt(hs_status, "%s\n%d%%", hotsync_status(), p);
+    else
+        lv_label_set_text(hs_status, hotsync_status());
+}
 static void hs_sync_cb(lv_event_t *e){ (void)e; hotsync_start(); }
 
 static void show_hotsync(void){
@@ -1299,11 +1354,100 @@ static void menu_open(void){
     menu_item(panel, "About", act_about);
 }
 
+/* ------------------------- Find (global search, silkscreen) -------------
+ * Palm's Find scans every app for a substring. A Graffiti query field drives
+ * bridge/find.c's streaming search over all four PDBs; results list as
+ * "<app>: <snippet>", and tapping one opens that record in its app. Re-runs
+ * live per keystroke (small PDBs, interactive mode -> no TLS competing). */
+static FindHit *g_finds;
+static int      g_finds_n, g_finds_cap;
+static char     g_findq[40];
+static void free_finds(void){ free(g_finds); g_finds=NULL; g_finds_n=0; g_finds_cap=0; }
+
+/* pair each app's PDB with its FIND_* code (enum orders differ) */
+static const struct { int app, findapp; } FIND_DBS[] = {
+    { APP_CAL, FIND_CAL }, { APP_ADDR, FIND_ADDR },
+    { APP_TODO, FIND_TODO }, { APP_MEMO, FIND_MEMO },
+};
+static const char *find_app_label(int findapp){
+    return findapp==FIND_CAL ? "Date" : findapp==FIND_TODO ? "ToDo"
+         : findapp==FIND_ADDR ? "Addr" : "Memo";
+}
+static const AppDef *find_appdef(int findapp){
+    int a = findapp==FIND_CAL ? APP_CAL : findapp==FIND_TODO ? APP_TODO
+          : findapp==FIND_ADDR ? APP_ADDR : APP_MEMO;
+    for(int i=0;i<NAPPDEFS;i++) if(APPDEFS[i].app==a) return &APPDEFS[i];
+    return NULL;
+}
+static void find_collect_cb(const FindHit *h, void *ctx){
+    (void)ctx;
+    if(g_finds_n < g_finds_cap) g_finds[g_finds_n++] = *h;
+}
+static void find_click_cb(lv_event_t *e){
+    lv_obj_t *t = lv_event_get_target(e);
+    uint32_t r=LV_TABLE_CELL_NONE, c=LV_TABLE_CELL_NONE;
+    lv_table_get_selected_cell(t, &r, &c);
+    if(r==LV_TABLE_CELL_NONE || (int)r >= g_finds_n) return;
+    const AppDef *ad = find_appdef(g_finds[r].app);
+    uint32_t uid = g_finds[r].uid;         /* capture before kill_kb frees g_finds */
+    if(ad){ cur_app = ad; show_detail(uid); }
+}
+static void build_find_results(void){
+    free_finds();
+    if(g_findtbl){ lv_obj_del(g_findtbl); g_findtbl=NULL; }
+    lv_obj_t *t = lv_table_create(content);
+    g_findtbl = t;
+    lv_obj_set_style_radius(t, 0, 0);
+    lv_obj_set_style_border_width(t, 0, 0);
+    lv_obj_set_style_pad_all(t, 4, LV_PART_ITEMS);
+    lv_table_set_column_width(t, 0, LCD_W - 8);
+    lv_obj_set_size(t, lv_pct(100), lv_pct(84));
+    lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_add_event_cb(t, find_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    if(!g_findq[0]){ lv_table_set_cell_value(t, 0, 0, "Type to search all apps"); return; }
+    g_finds_cap = 60;
+    g_finds = calloc(g_finds_cap, sizeof *g_finds);
+    if(!g_finds){ lv_table_set_cell_value(t, 0, 0, "(low memory)"); return; }
+    for(int i=0;i<(int)(sizeof FIND_DBS/sizeof FIND_DBS[0]) && g_finds_n<g_finds_cap;i++)
+        find_in_pdb(data_db_path(FIND_DBS[i].app), FIND_DBS[i].findapp,
+                    g_findq, find_collect_cb, NULL);
+    if(g_finds_n==0){ lv_table_set_cell_value(t, 0, 0, "(no matches)"); return; }
+    for(int i=0;i<g_finds_n;i++){
+        char row[128];
+        snprintf(row, sizeof row, "%s: %s", find_app_label(g_finds[i].app), g_finds[i].snippet);
+        lv_table_set_cell_value(t, i, 0, row);
+    }
+}
+static void findq_ta_cb(lv_event_t *e){
+    lv_obj_t *ta = lv_event_get_target(e);
+    snprintf(g_findq, sizeof g_findq, "%s", lv_textarea_get_text(ta));
+    build_find_results();
+}
+static void show_find(void){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_findtbl = NULL; g_findq[0] = 0;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, "Find");
+    update_cat_trigger();
+
+    lv_obj_t *lb = lv_label_create(content);
+    lv_label_set_text(lb, "Find:"); lv_obj_set_pos(lb, 4, 8);
+    lv_obj_t *ta = lv_textarea_create(content);
+    lv_textarea_set_one_line(ta, true);
+    lv_textarea_set_max_length(ta, sizeof g_findq - 1);
+    lv_textarea_set_text(ta, "");                  /* set before cb so it doesn't fire */
+    lv_obj_set_width(ta, LCD_W - 52);
+    lv_obj_set_pos(ta, 46, 2);
+    lv_obj_add_event_cb(ta, findq_ta_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    active_ta = ta;                                /* Graffiti types the query */
+
+    build_find_results();
+}
+
 /* silkscreen buttons */
 static void menu_cb(lv_event_t *e){ (void)e; menu_open(); }
-/* Find engine is ready + host-tested (bridge/find.c); its UI still needs a
- * Graffiti query field, so the silkscreen Find is deferred for now. */
-static void find_cb(lv_event_t *e){ (void)e; /* TODO Find UI -> find_in_pdb() over all 4 PDBs */ }
+static void find_cb(lv_event_t *e){ (void)e; show_find(); }
 
 /* ------------------------- Calculator (silkscreen accessory) -------------
  * Full-screen modal keypad feeding the host-tested evaluator (bridge/calc.c).
@@ -1617,6 +1761,21 @@ static lv_obj_t *mk_silk(lv_obj_t *par, const lv_image_dsc_t *ic, lv_align_t al,
     return b;
 }
 
+/* refresh the title-bar clock: 12h time + date to its right ("12:34p  Jul 10").
+ * Persists across screen swaps since it lives on the title bar, not content. */
+static void clock_tick(lv_timer_t *t){
+    (void)t;
+    if(!clock_lbl) return;
+    time_t now=0; time(&now);
+    struct tm ti; localtime_r(&now, &ti);
+    int h = ti.tm_hour % 12; if(h==0) h = 12;
+    char b[24];
+    snprintf(b, sizeof b, "%d:%02d%s  %s %d",
+             h, ti.tm_min, ti.tm_hour < 12 ? "a" : "p",
+             CAL_MON[ti.tm_mon + 1], ti.tm_mday);
+    lv_label_set_text(clock_lbl, b);
+}
+
 void ui_init(void){
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, COL_BODY, 0);
@@ -1634,6 +1793,15 @@ void ui_init(void){
     lv_obj_set_style_text_color(title_lbl, COL_LINE, 0);   /* black on white */
     lv_obj_set_style_text_font(title_lbl, &lv_font_palm_bold, 0);
     lv_obj_align(title_lbl, LV_ALIGN_LEFT_MID, 6, 0);
+
+    /* live clock, centered in the title bar (Palm shows the time up top). Titles
+     * are left-aligned + short and the category trigger is far right, so center
+     * stays clear. Refreshed every 15 s by an lv_timer. */
+    clock_lbl = lv_label_create(bar);
+    lv_obj_set_style_text_color(clock_lbl, COL_LINE, 0);
+    lv_obj_align(clock_lbl, LV_ALIGN_CENTER, 0, 0);
+    clock_tick(NULL);
+    lv_timer_create(clock_tick, 15000, NULL);
 
     /* F2: category pop-up trigger (top-right, Palm convention) */
     cat_trigger = lv_button_create(bar);
