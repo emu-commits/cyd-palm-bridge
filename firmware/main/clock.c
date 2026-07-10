@@ -49,33 +49,58 @@ void clock_start_autosave(void){
         esp_timer_start_periodic(t, 120ULL * 1000 * 1000);  /* every 120 s */
 }
 
-/* minimal IANA -> POSIX TZ map (with US/EU DST rules). Extend as needed; an
- * unknown zone (or empty) falls back to UTC so the date is at least stable. */
+/* Built-in IANA -> POSIX TZ map (with US/EU/AU DST rules). The POSIX string
+ * carries the DST transition rules, so once tzset() sees it localtime() applies
+ * DST automatically by the current date -- no separate DST logic needed. This
+ * table is also the source for the on-device timezone picker (clock_zone_*),
+ * which is why it lives at file scope. Extend as needed. */
+static const struct { const char *iana, *posix; } TZ_TBL[] = {
+    {"America/New_York",    "EST5EDT,M3.2.0,M11.1.0"},
+    {"America/Detroit",     "EST5EDT,M3.2.0,M11.1.0"},
+    {"America/Chicago",     "CST6CDT,M3.2.0,M11.1.0"},
+    {"America/Denver",      "MST7MDT,M3.2.0,M11.1.0"},
+    {"America/Phoenix",     "MST7"},
+    {"America/Los_Angeles", "PST8PDT,M3.2.0,M11.1.0"},
+    {"America/Anchorage",   "AKST9AKDT,M3.2.0,M11.1.0"},
+    {"America/Halifax",     "AST4ADT,M3.2.0,M11.1.0"},
+    {"America/Sao_Paulo",   "BRT3"},
+    {"UTC",                 "UTC0"},
+    {"Europe/London",       "GMT0BST,M3.5.0/1,M10.5.0"},
+    {"Europe/Dublin",       "GMT0IST,M3.5.0/1,M10.5.0"},
+    {"Europe/Paris",        "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Berlin",       "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Madrid",       "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"Europe/Athens",       "EET-2EEST,M3.5.0/3,M10.5.0/4"},
+    {"Europe/Moscow",       "MSK-3"},
+    {"Asia/Dubai",          "GST-4"},
+    {"Asia/Kolkata",        "IST-5:30"},
+    {"Asia/Shanghai",       "CST-8"},
+    {"Asia/Tokyo",          "JST-9"},
+    {"Australia/Sydney",    "AEST-10AEDT,M10.1.0,M4.1.0/3"},
+    {"Pacific/Auckland",    "NZST-12NZDT,M9.5.0,M4.1.0/3"},
+};
+#define TZ_TBL_N ((int)(sizeof TZ_TBL / sizeof TZ_TBL[0]))
+
+/* unknown zone (or empty) falls back to UTC so the date is at least stable. */
 static const char *iana_to_posix(const char *z){
     if(!z || !z[0]) return "UTC0";
     /* already a POSIX TZ string (e.g. "EST5EDT,M3.2.0,M11.1.0")? pass through. */
     if(strchr(z, ',') || (strlen(z) <= 6 && !strchr(z, '/'))) return z;
-    struct { const char *iana, *posix; } M[] = {
-        {"America/New_York",    "EST5EDT,M3.2.0,M11.1.0"},
-        {"America/Detroit",     "EST5EDT,M3.2.0,M11.1.0"},
-        {"America/Chicago",     "CST6CDT,M3.2.0,M11.1.0"},
-        {"America/Denver",      "MST7MDT,M3.2.0,M11.1.0"},
-        {"America/Phoenix",     "MST7"},
-        {"America/Los_Angeles", "PST8PDT,M3.2.0,M11.1.0"},
-        {"America/Anchorage",   "AKST9AKDT,M3.2.0,M11.1.0"},
-        {"America/Halifax",     "AST4ADT,M3.2.0,M11.1.0"},
-        {"Europe/London",       "GMT0BST,M3.5.0/1,M10.5.0"},
-        {"Europe/Paris",        "CET-1CEST,M3.5.0,M10.5.0/3"},
-        {"Europe/Berlin",       "CET-1CEST,M3.5.0,M10.5.0/3"},
-        {"Europe/Madrid",       "CET-1CEST,M3.5.0,M10.5.0/3"},
-        {"Europe/Athens",       "EET-2EEST,M3.5.0/3,M10.5.0/4"},
-        {"Asia/Tokyo",          "JST-9"},
-        {"Asia/Shanghai",       "CST-8"},
-        {"Asia/Kolkata",        "IST-5:30"},
-        {"Australia/Sydney",    "AEST-10AEDT,M10.1.0,M4.1.0/3"},
-    };
-    for(unsigned i=0;i<sizeof M/sizeof M[0];i++) if(!strcmp(z, M[i].iana)) return M[i].posix;
+    for(int i=0;i<TZ_TBL_N;i++) if(!strcmp(z, TZ_TBL[i].iana)) return TZ_TBL[i].posix;
     return "UTC0";
+}
+
+int clock_zone_count(void){ return TZ_TBL_N; }
+const char *clock_zone_name(int i){ return (i>=0 && i<TZ_TBL_N) ? TZ_TBL[i].iana : ""; }
+
+void clock_now_desc(char *out, int cap){
+    if(!out || cap<=0) return;
+    time_t now=0; time(&now);
+    struct tm ti; localtime_r(&now,&ti);
+    /* %Z = zone abbrev (EDT), %z = numeric offset (-0400) under the active TZ. */
+    char zbuf[24]="";
+    strftime(zbuf,sizeof zbuf,"%Z %z",&ti);
+    snprintf(out,cap,"%s %s", zbuf, ti.tm_isdst>0 ? "(DST)" : "(standard)");
 }
 
 void clock_set_tz(const char *tz){

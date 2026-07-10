@@ -6,6 +6,96 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-10 — UI polish pass (TZ picker → lv_table → app overhauls)
+
+Three-part sprint after the user called sync + Date Book "ok for now". Working
+through: (1) timezone picker + DST, (2) an `lv_table` list backbone, (3) applying
+the Date Book "date-centric" lens to Address/ToDo/Memo. Docs updated after each.
+
+**(1) Timezone picker + DST — DONE (builds clean).** The DST *logic* already
+existed: `clock.c`'s IANA→POSIX map carries the transition rules (e.g.
+`EST5EDT,M3.2.0,M11.1.0`), so `localtime()` applies DST automatically by the
+current date once `tzset()` runs. The gap was the *input* — `PF_TZ` was a
+free-text Graffiti field, so a typo fell through to `UTC0` (no DST). Fix:
+- `clock.c` — the zone map moved to a file-scope table `TZ_TBL[]` (was a local in
+  `iana_to_posix`); added `clock_zone_count()`/`clock_zone_name(i)` to enumerate
+  it and `clock_now_desc(out,cap)` which formats the live wall clock as
+  `"EDT -0400 (DST)"` via `strftime("%Z %z")` + `tm_isdst`. Added a few zones
+  (UTC, Sao_Paulo, Dublin, Moscow, Dubai, Auckland).
+- `ui.c` — new `show_tz_picker()`: a scrollable `lv_list` of the built-in zones
+  with a header showing the current zone + live offset/DST. Tapping a zone stores
+  the IANA name in `config.timezone`, calls `clock_set_tz()` immediately, and
+  returns to Preferences. `pf_row_open_cb` routes `PF_TZ` here instead of the text
+  editor. Guarantees a mapped zone → DST always fires.
+- ⚠️ device-test watch: the picker is a 24-button `lv_list`; single-line buttons
+  are the lightest kind, but if it exhausts the 24 KB LVGL pool on-device, switch
+  it to the `lv_table` backbone from step 2.
+
+**(2) `lv_table` list backbone — DONE (builds clean). Removes the LIST_MAX=12 cap.**
+The generic `list_view` was an `lv_list` of N button objects. `lv_list` is NOT
+virtualized: each row is a full button+label from the fixed 24 KB LVGL object pool
+*and* needs a per-row draw task from that same pool — ~20-35 rows exhausted it
+(StoreProhibited on the failed alloc, or a Task WDT when the draw timer spun). That
+forced `LIST_MAX=12`, making records 13+ unreachable (the "… N more (not shown)"
+footer never worked). Rewrote `list_view` around a single `lv_table`:
+- One LVGL object regardless of row count; it stores compact per-cell text (not
+  objects) and draws only visible rows. Row count is now bounded by free heap for
+  the cell strings (KBs for hundreds of records), not by the object pool. **Cap
+  gone.**
+- Row→record identity: the table has no per-row user_data, so a parallel uid array
+  `g_rowuids` (indexed by row) is malloc'd to the record count via a two-pass
+  iterate (`tbl_count_cb` counts, `tbl_fill_cb` fills text + uid), resolved in
+  `tbl_click_cb` via `lv_table_get_selected_cell`. Freed in `kill_kb`/on rebuild
+  (`free_rowuids`).
+- To Do rows keep the `[x]`/`[ ]` completion prefix from the data layer (step 3
+  turns these into real columns). The Date Book Day view keeps its own bounded
+  `lv_list` (one day of events) + the restored `row_cb`.
+- `<stdlib.h>` added for malloc/free.
+
+**(3) Palm-lens Address/ToDo/Memo — DONE (builds clean).** Applied the Date Book
+"make a long list navigable" lens to the other three apps. `list_view` is now
+app-aware, with a shared `row_keep()` filter applied in BOTH the count and fill
+passes (so `g_rowuids` stays sized to what's shown), and `build_record_table()`
+factored out so a filter change rebuilds only the table:
+- **Address — Look Up (Palm's signature Address navigation).** A one-line
+  `Look Up:` textarea sits above the list; Graffiti types into it (`active_ta`),
+  and each keystroke (`LV_EVENT_VALUE_CHANGED`) mirrors to `g_lookup` and
+  refilters by **case-insensitive name prefix** (`strncasecmp`, `<strings.h>`).
+  The list rebuilds without tearing down the field (`g_listtbl` handle). The
+  existing top-right category trigger still filters too — the two compose.
+- **To Do — checkbox column + Show Completed.** Two-column table: col 0 =
+  `[x]`/`[ ]`, col 1 = description (+ `pri N`). Tapping **col 0 toggles done**
+  (`data_toggle_todo` + refresh); tapping the text opens detail. A **Show/Hide
+  Completed** toggle in Options (`g_todo_show_done`, `act_toggle_done`) filters
+  completed items via `row_keep`.
+- **Memo — unchanged structure** (single-column first-line list is already the
+  authentic Palm layout); it inherits the un-capped table + category filter.
+- `g_listtbl` is nulled in `kill_kb` (it's a child of `content`, deleted by
+  `lv_obj_clean` on every nav) to avoid a dangling delete.
+- ⚠️ device-test watch: sort order is still PDB order (Palm sorts Address by last
+  name, To Do by priority/due). Deferred — sorting needs buffering all rows, a RAM
+  call better made after seeing the table perform on-device. Look Up + category +
+  Show Completed already make the lists navigable.
+
+**On-device fixes (2026-07-10, after first flash).**
+- **TZ picker froze the device** → rebuilt on `lv_table` (was a 24-button
+  `lv_list`; that many buttons exhausted the 24 KB LVGL pool → draw-task WDT
+  freeze — the known failure class). Table row index == zone index, own click
+  handler (`tz_tbl_click_cb`). Same pool-safe pattern as the record list.
+- **Address Look Up only matched last name** → `row_keep` now also tests the
+  first-name token after `", "` in the `"Last, First"` primary (case-insensitive),
+  so Look Up matches by last OR first name like real Palm.
+- Both flashed to /dev/ttyUSB0; first flash booted clean (free heap ~193 KB, clock
+  restored from NVS, SD mounted, LVGL up, no crash).
+- **lv_table tap selected nothing** (TZ pick did nothing; record-list tap was
+  latently broken too). Root cause in LVGL 9.2 `lv_table` (`lv_table.c` ~594-606):
+  on `LV_EVENT_RELEASED` the widget sends `LV_EVENT_VALUE_CHANGED` **and then
+  resets** `row_act`/`col_act` to `CELL_NONE`; `LV_EVENT_CLICKED` is delivered
+  *after* RELEASED, so a CLICKED handler always reads `CELL_NONE`. Fix: read the
+  selection on **`LV_EVENT_VALUE_CHANGED`** (sent only on a genuine tap, not a
+  scroll drag) for both the record list and the TZ picker. **RULE: for lv_table
+  tap-to-select on this LVGL, use VALUE_CHANGED, never CLICKED.**
+
 ## SESSION 2026-07-09 — branch consolidation + Graffiti punctuation
 
 **Branches consolidated onto `main`.** Assuming the streaming sync is good: PR #2

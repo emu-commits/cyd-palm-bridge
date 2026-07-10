@@ -18,9 +18,12 @@
 #include "graffiti.h"
 #include "calc.h"
 #include "appcfg.h"
+#include "clock.h"        /* timezone picker + DST-aware zone list */
 #include "lvgl.h"
 #include <string.h>
+#include <strings.h>      /* strncasecmp for the Address Look Up filter */
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 
 #define TITLE_H     24
@@ -108,69 +111,177 @@ static int disc_built;
 
 /* tear down per-form / per-screen state when navigating away. Text entry is
  * Graffiti-only (no on-screen keyboard), so there's no overlay to drop here. */
+static void free_rowuids(void);
+static lv_obj_t *g_listtbl;           /* current record table (partial rebuild) */
 static void kill_kb(void){
-    g_form=NULL; active_ta=NULL; edit_cat_lbl=NULL;
+    g_form=NULL; active_ta=NULL; edit_cat_lbl=NULL; g_listtbl=NULL;
+    free_rowuids();
     kill_hs();
     if(disc_timer){ lv_timer_delete(disc_timer); disc_timer=NULL; }
     disc_status=NULL;
 }
 
+/* The record list is one virtualized `lv_table` (a SINGLE LVGL object) instead of
+ * an `lv_list` of N button objects. This is the fix for the no-PSRAM pool crash:
+ * `lv_list` materializes a full button+label per row from the fixed 24 KB LVGL
+ * object pool AND needs a draw task per row from that same pool -- ~20-35 rows
+ * exhausted it (StoreProhibited on the failed alloc, or a Task WDT when the draw
+ * timer spun). That forced a hard LIST_MAX=12 cap, so records past 12 were
+ * unreachable. `lv_table` holds only compact per-cell text (not objects) and
+ * draws only the visible rows, so row count is bounded by free heap for the cell
+ * strings (KBs for hundreds of records), not by the object pool. The cap is gone.
+ *
+ * Row->record identity: the table has no per-row user_data, so we keep a parallel
+ * uid array (g_rowuids) indexed by row and resolve it in the click handler. It's
+ * malloc'd to the record count (two-pass: count, then fill) and freed on nav. */
+static uint32_t *g_rowuids;
+static int       g_rowuid_n;
+static void free_rowuids(void){ free(g_rowuids); g_rowuids=NULL; g_rowuid_n=0; }
+
+/* per-app "lens" state (parallels the Date Book's date-centric navigation):
+ *  - Address: a Graffiti "Look Up" prefix filter on the name (Palm's signature
+ *    Address navigation aid) + a Name | Phone two-column layout.
+ *  - To Do: a checkbox column (tap col 0 = toggle done) + a Show Completed
+ *    toggle in the Options menu.
+ * g_listtbl is the live record table, kept so the Address filter can rebuild
+ * just the table without tearing down the Look Up field. */
+static char      g_lookup[24];        /* Address Look Up prefix (Graffiti) */
+static int       g_todo_show_done = 1;/* To Do: include completed items      */
+
+/* used by the Date Book day view, whose list is bounded to one day's events */
 static void row_cb(lv_event_t *e){
     show_detail((uint32_t)(uintptr_t)lv_event_get_user_data(e));
 }
 
-/* Each list row is a full LVGL button+label, drawn from the fixed 24 KB LVGL
- * object pool (LV_MEM_SIZE). lv_list is NOT virtualized, so too many records
- * exhaust the pool mid-build and panic (StoreProhibited when the failed alloc is
- * dereferenced) -- ~35 rows was enough to crash. Cap the rows we materialize and
- * show a "N more" footer instead; every record still syncs (sync reads the PDB,
- * not the list). The pool is kept at 24 KB (not enlarged) because the no-PSRAM
- * heap must leave a contiguous block for the mbedTLS handshake during sync --
- * enlarging it starved the second sync's TLS. TODO: a virtualized/paged list (or
- * lv_table, ~1 obj total) to browse arbitrarily large collections. NOTE: the cap
- * bounds not just the button OBJECTS but the LVGL draw tasks needed to render
- * them -- both come from the same 24 KB pool, and ~20 rows exhausted it mid-draw
- * (the refresh timer then spun -> Task WDT). 12 leaves headroom for the draw. */
-#define LIST_MAX 12
-typedef struct { lv_obj_t *list; int shown; } RowCtx;
-
-/* add one tappable row to the active list. To Do rows keep the "[x]"/"[ ]"
- * prefix from the data layer to show completion; tapping opens the record (where
- * the done state is toggled). Using plain list buttons for every app -- custom
- * checkbox rows made LVGL's compositor loop forever behind the menu overlay. */
-static void add_row(uint32_t uid, const char *primary, const char *secondary, void *ctx){
-    RowCtx *rc = (RowCtx *)ctx;
-    if(rc->shown++ >= LIST_MAX) return;   /* still count the record, don't materialize it */
-    char buf[128];
-    if(secondary && secondary[0]) snprintf(buf,sizeof buf,"%s  (%s)",primary,secondary);
-    else                          snprintf(buf,sizeof buf,"%s",primary);
-    lv_obj_t *b = lv_list_add_button(rc->list, NULL, buf);
-    lv_obj_set_style_radius(b, 0, 0);
-    lv_obj_add_event_cb(b, row_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)uid);
+/* keep predicate shared by the count + fill passes (reads cur_app). Must be
+ * applied identically in both passes so g_rowuids is sized to what's shown. */
+static int row_keep(const char *primary){
+    if(!cur_app) return 1;
+    if(cur_app->app==APP_ADDR && g_lookup[0]){
+        /* Palm Look Up matches by last OR first name. primary is "Last, First"
+         * (or just a name/company), so test the whole string and, if present,
+         * the first-name token after ", ". */
+        size_t n = strlen(g_lookup);
+        int hit = (strncasecmp(primary, g_lookup, n) == 0);
+        if(!hit){
+            const char *comma = strstr(primary, ", ");
+            if(comma) hit = (strncasecmp(comma + 2, g_lookup, n) == 0);
+        }
+        if(!hit) return 0;
+    }
+    if(cur_app->app==APP_TODO && !g_todo_show_done)
+        if(primary[0]=='[' && primary[1]=='x') return 0;   /* completed = "[x] ..." */
+    return 1;
 }
 
-/* scrolling list of records for one app */
+typedef struct { lv_obj_t *tbl; int row; int cap; } TblCtx;
+static void tbl_count_cb(uint32_t uid,const char*p,const char*s,void*ctx){
+    (void)uid;(void)s; if(row_keep(p)) (*(int*)ctx)++;
+}
+static void tbl_fill_cb(uint32_t uid,const char*primary,const char*secondary,void*ctx){
+    TblCtx *tc = (TblCtx*)ctx;
+    if(!row_keep(primary) || tc->row >= tc->cap) return;
+    char buf[128];
+    if(cur_app && cur_app->app==APP_TODO){
+        /* data layer emits "[x] desc" / "[ ] desc"; split into checkbox + text */
+        int done = (primary[0]=='[' && primary[1]=='x');
+        const char *txt = (primary[0]=='[') ? primary+4 : primary;
+        lv_table_set_cell_value(tc->tbl, tc->row, 0, done ? "[x]" : "[ ]");
+        if(secondary && secondary[0]) snprintf(buf,sizeof buf,"%s  (%s)",txt,secondary);
+        else                          snprintf(buf,sizeof buf,"%s",txt);
+        lv_table_set_cell_value(tc->tbl, tc->row, 1, buf);
+    } else {
+        if(secondary && secondary[0]) snprintf(buf,sizeof buf,"%s  (%s)",primary,secondary);
+        else                          snprintf(buf,sizeof buf,"%s",primary);
+        lv_table_set_cell_value(tc->tbl, tc->row, 0, buf);
+    }
+    g_rowuids[tc->row] = uid;
+    tc->row++;
+}
+static void tbl_click_cb(lv_event_t *e){
+    lv_obj_t *t = lv_event_get_target(e);
+    uint32_t r=LV_TABLE_CELL_NONE, c=LV_TABLE_CELL_NONE;
+    lv_table_get_selected_cell(t, &r, &c);
+    if(r==LV_TABLE_CELL_NONE || !g_rowuids || (int)r >= g_rowuid_n) return;
+    uint32_t uid = g_rowuids[r];
+    if(cur_app && cur_app->app==APP_TODO && c==0){   /* tap the checkbox = toggle */
+        data_toggle_todo(uid);
+        if(cur_app) app_reopen(cur_app);
+    } else {
+        show_detail(uid);
+    }
+}
+/* NOTE: lv_table selection must be read on LV_EVENT_VALUE_CHANGED, NOT
+ * LV_EVENT_CLICKED: on RELEASED the table sends VALUE_CHANGED and then resets the
+ * selected cell to CELL_NONE, and CLICKED is delivered afterward -- so a CLICKED
+ * handler always reads CELL_NONE and does nothing. VALUE_CHANGED is sent only on
+ * a genuine tap (not a scroll drag), so it behaves like a click for our purpose. */
+
+/* (re)build just the record table for cur_app. Callers set the title / any
+ * filter bar first; the Address Look Up field calls this on each keystroke. */
+static void build_record_table(void){
+    free_rowuids();
+    if(g_listtbl){ lv_obj_del(g_listtbl); g_listtbl=NULL; }
+    int todo = (cur_app && cur_app->app==APP_TODO);
+    int addr = (cur_app && cur_app->app==APP_ADDR);
+
+    int n = 0;
+    cur_app->iter(tbl_count_cb, &n);          /* pass 1: count (filtered) */
+
+    lv_obj_t *t = lv_table_create(content);
+    g_listtbl = t;
+    lv_obj_set_style_radius(t, 0, 0);
+    lv_obj_set_style_border_width(t, 0, 0);
+    lv_obj_set_style_pad_all(t, 4, LV_PART_ITEMS);
+    if(todo){ lv_table_set_column_width(t, 0, 34); lv_table_set_column_width(t, 1, LCD_W-46); }
+    else    { lv_table_set_column_width(t, 0, LCD_W-8); }
+    /* Address reserves the top strip for the Look Up field; others fill content */
+    if(addr){ lv_obj_set_size(t, lv_pct(100), lv_pct(84)); lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, 0); }
+    else    { lv_obj_set_size(t, lv_pct(100), lv_pct(100)); }
+    lv_obj_add_event_cb(t, tbl_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    if(n <= 0){
+        lv_table_set_cell_value(t, 0, 0, "(no records)");
+    } else {
+        g_rowuids = calloc(n, sizeof *g_rowuids);
+        g_rowuid_n = g_rowuids ? n : 0;
+        TblCtx tc = { t, 0, g_rowuid_n };
+        cur_app->iter(tbl_fill_cb, &tc);      /* pass 2: fill rows + uid map */
+    }
+}
+
+/* Address Look Up: mirror the field text into g_lookup and refilter the table */
+static void lookup_ta_cb(lv_event_t *e){
+    lv_obj_t *ta = lv_event_get_target(e);
+    snprintf(g_lookup, sizeof g_lookup, "%s", lv_textarea_get_text(ta));
+    build_record_table();
+}
+
+/* scrolling list of records for one app (virtualized lv_table + per-app lens) */
 static void list_view(const AppDef *ad){
     kill_kb();
     cur_app = ad;
     cur_uid = 0;
     lv_obj_clean(content);
+    g_listtbl = NULL;
     lv_label_set_text(title_lbl, ad->name);
-    lv_obj_t *list = lv_list_create(content);
-    lv_obj_set_size(list, lv_pct(100), lv_pct(100));
-    lv_obj_set_style_radius(list, 0, 0);
-    lv_obj_set_style_border_width(list, 0, 0);
-    lv_obj_set_style_pad_all(list, 0, 0);
-    RowCtx rc = { list, 0 };
-    ad->iter(add_row, &rc);
-    if(rc.shown == 0){
-        lv_obj_t *b = lv_list_add_button(list, NULL, "(no records)");
-        lv_obj_set_style_radius(b, 0, 0);
-    } else if(rc.shown > LIST_MAX){
-        char m[48]; snprintf(m, sizeof m, "... %d more (not shown)", rc.shown - LIST_MAX);
-        lv_obj_t *b = lv_list_add_button(list, NULL, m);
-        lv_obj_set_style_radius(b, 0, 0);
+
+    if(ad->app == APP_ADDR){
+        lv_obj_t *lb = lv_label_create(content);
+        lv_label_set_text(lb, "Look Up:"); lv_obj_set_pos(lb, 4, 8);
+        lv_obj_t *ta = lv_textarea_create(content);
+        lv_textarea_set_one_line(ta, true);
+        lv_textarea_set_max_length(ta, sizeof g_lookup - 1);
+        lv_textarea_set_text(ta, g_lookup);           /* set BEFORE the cb so it doesn't fire */
+        lv_obj_set_width(ta, LCD_W - 72);
+        lv_obj_set_pos(ta, 66, 2);
+        lv_obj_add_event_cb(ta, lookup_ta_cb, LV_EVENT_VALUE_CHANGED, NULL);
+        active_ta = ta;                                /* Graffiti types into Look Up */
+    } else {
+        g_lookup[0] = 0;                               /* filter only applies to Address */
     }
+
+    build_record_table();
     update_cat_trigger();
 }
 
@@ -797,8 +908,65 @@ static void show_pref_edit(int i){
     lv_obj_add_state(ta, LV_STATE_FOCUSED);
 }
 
+/* ---- timezone picker (replaces the free-text TZ editor) ----
+ * Picks from clock.c's built-in DST-aware zone list, so the chosen zone always
+ * resolves to a POSIX rule string and DST fires automatically. The header shows
+ * the resulting wall-clock offset + whether DST is active right now.
+ * Built on lv_table (virtualized), NOT an lv_list of ~24 buttons -- that many
+ * buttons exhausted the 24 KB LVGL pool and froze the device (draw-task WDT),
+ * the same failure class the record list hit. The table row index == zone index. */
+static void tz_cancel_cb(lv_event_t *e){ (void)e; show_prefs(); }
+static void tz_tbl_click_cb(lv_event_t *e){
+    lv_obj_t *t = lv_event_get_target(e);
+    uint32_t r=LV_TABLE_CELL_NONE, c=LV_TABLE_CELL_NONE;
+    lv_table_get_selected_cell(t, &r, &c);
+    if(r==LV_TABLE_CELL_NONE || (int)r >= clock_zone_count()) return;
+    const char *z = clock_zone_name((int)r);
+    Config *cfg = appcfg_mut();
+    snprintf(cfg->timezone, sizeof cfg->timezone, "%s", z);
+    clock_set_tz(z);          /* apply now so the clock/desc update immediately */
+    show_prefs();
+}
+static void show_tz_picker(void){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, "Time Zone");
+    update_cat_trigger();
+
+    lv_obj_t *cancel = lv_button_create(content);
+    lv_obj_set_size(cancel, 60, 28); lv_obj_align(cancel, LV_ALIGN_TOP_LEFT, 2, 2);
+    lv_obj_t *cl=lv_label_create(cancel); lv_label_set_text(cl,"Cancel"); lv_obj_center(cl);
+    lv_obj_add_event_cb(cancel, tz_cancel_cb, LV_EVENT_CLICKED, NULL);
+
+    /* header: current zone + live offset/DST status */
+    const Config *c = appcfg();
+    char desc[40]; clock_now_desc(desc, sizeof desc);
+    char hdr[128];
+    snprintf(hdr, sizeof hdr, "%s\n%s",
+             (c->timezone[0]) ? c->timezone : "(unset)", desc);
+    lv_obj_t *hl = lv_label_create(content);
+    lv_label_set_text(hl, hdr);
+    lv_obj_set_pos(hl, 68, 6);
+
+    lv_obj_t *t = lv_table_create(content);
+    lv_obj_set_size(t, lv_pct(100), lv_pct(78));
+    lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_radius(t, 0, 0);
+    lv_obj_set_style_border_width(t, 0, 0);
+    lv_obj_set_style_pad_all(t, 4, LV_PART_ITEMS);
+    lv_table_set_column_width(t, 0, LCD_W - 8);
+    int n = clock_zone_count();
+    for(int i=0;i<n;i++) lv_table_set_cell_value(t, i, 0, clock_zone_name(i));
+    lv_obj_add_event_cb(t, tz_tbl_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
+}
+
 /* ---- the Preferences list ---- */
-static void pf_row_open_cb(lv_event_t *e){ show_pref_edit((int)(intptr_t)lv_event_get_user_data(e)); }
+static void pf_row_open_cb(lv_event_t *e){
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    if(i == PF_TZ){ show_tz_picker(); return; }   /* zone -> picker, not text entry */
+    show_pref_edit(i);
+}
 static void pf_pol_row_cb(lv_event_t *e){ (void)e;
     Config *c = appcfg_mut(); c->policy = (c->policy + 1) % 3; show_prefs();
 }
@@ -1008,6 +1176,8 @@ static void act_delete(lv_event_t *e){ (void)e;
 }
 static void act_categories(lv_event_t *e){ (void)e; menu_close(); cat_trigger_cb(NULL); }
 static void act_prefs(lv_event_t *e){ (void)e; menu_close(); show_prefs(); }
+static void act_toggle_done(lv_event_t *e){ (void)e; menu_close();
+    g_todo_show_done = !g_todo_show_done; if(cur_app) app_reopen(cur_app); }
 
 /* debug: seed 30 test appointments into the Date Book so a >24-record collection
  * can be pushed to iCloud to exercise the streaming reconcile. Each is a new
@@ -1122,6 +1292,8 @@ static void menu_open(void){
     }
     menu_header(panel, "Options");
     if(cur_app) menu_item(panel, "Categories", act_categories);
+    if(cur_app && cur_app->app==APP_TODO)
+        menu_item(panel, g_todo_show_done ? "Hide Completed" : "Show Completed", act_toggle_done);
     menu_item(panel, "Preferences", act_prefs);
     menu_item(panel, "Add test events", act_gentest);
     menu_item(panel, "About", act_about);

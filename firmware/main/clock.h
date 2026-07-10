@@ -27,4 +27,12 @@ void clock_start_autosave(void);
  * POSIX TZ string directly, or maps a few common IANA names; unknown -> UTC. */
 void clock_set_tz(const char *tz);
 
+/* enumerate the built-in DST-aware timezone list (for the picker UI). */
+int clock_zone_count(void);
+const char *clock_zone_name(int i);   /* IANA name, e.g. "America/New_York" */
+
+/* describe the CURRENT wall clock under the active TZ, e.g. "EDT -0400 (DST)".
+ * Reflects the system time + whichever TZ clock_set_tz() last applied. */
+void clock_now_desc(char *out, int cap);
+
 #endif

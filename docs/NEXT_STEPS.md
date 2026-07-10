@@ -3,6 +3,28 @@
 Snapshot after the sync-correctness session. Newest state on top; see
 `docs/BUILD_PROGRESS.md` for the running build log and the deep-dive on each fix.
 
+## UPDATE 2026-07-10 — UI polish sprint (sync/Date Book parked as "ok for now")
+
+Three-part pass on the UI, docs updated between each:
+1. **Timezone picker + DST — DONE.** Free-text `PF_TZ` replaced with a picker over
+   `clock.c`'s DST-aware zone table; guarantees a mapped zone so DST fires. Header
+   shows live offset/DST. (`clock_zone_*` + `clock_now_desc` + `show_tz_picker`.)
+2. **`lv_table` list backbone — DONE.** `list_view` rewritten as one virtualized
+   `lv_table` (compact cell text + visible-only draw); the `LIST_MAX=12` cap is
+   gone. Row→uid via a malloc'd parallel array resolved in the click handler.
+3. **Palm-lens Address/ToDo/Memo — DONE.** Address gets a Graffiti **Look Up**
+   name-prefix filter (composes with the category trigger); To Do gets a checkbox
+   column (tap col 0 = toggle done) + a **Show/Hide Completed** toggle in Options;
+   Memo keeps the authentic first-line list. All inherit the un-capped table.
+   *Deferred:* record sorting (Address by last name, To Do by priority/due) — needs
+   row buffering; revisit after on-device performance check.
+
+All three build clean; **not yet flashed** — next device session flashes and
+verifies: TZ picker + live DST readout, browsing a >12-record collection (cap
+gone), Address Look Up, To Do checkbox toggle + Show Completed.
+
+The real open sync item (idempotency on live iCloud href relocation) stays parked.
+
 ## UPDATE — sync closed out (branch `claude/sync-uid-streaming`)
 
 Two structural gaps below are now DONE (host-green; on-device verification of
