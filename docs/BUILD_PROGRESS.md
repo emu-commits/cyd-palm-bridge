@@ -6,6 +6,37 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-10 (part 10) — streaming collection enumeration (8 KB cap gone)
+
+Bulk-loaded iCloud + re-synced: Address pulled, but **Date Book + To Do didn't**.
+Trace (`scratchpad/sync.log`) showed it was NOT a keep-alive regression (all
+REPORTs `st=207`) — two separate things:
+- **Date Book (64 events): the 8 KB enumeration cap.** The full sync-collection
+  REPORT (~42 KB) truncated at 8191 bytes, the PROPFIND fallback truncated too, so
+  `enumServer` returned failure and `sync_one` deliberately kept all local records
+  and pulled nothing. The streaming reconcile removed the *reconcile* cap, but the
+  initial server enumeration still buffered the whole etag list in one RAM buffer.
+- **To Do: a config mismatch, not a bug.** Clean incremental delta, zero changes
+  (`tok=incr rc=0 pull=0`, local recs=2) — the reminders were added to a different
+  Reminders list than the mapped `…/calendars/ad54474b-…`.
+
+**Fix (`722c6e0`): stream the enumeration.** `dav_sync_report` + `dav_list` spool
+the reply to SD (`ENUM_SPOOL`, no size cap — `davreq` gains a spool mode via
+`RespAcc.spool`, body streamed with `fwrite` in `on_event`, per-attempt truncate
+on the keep-alive retry) and parse it with new sliding-window parsers
+`dav_parse_report_stream` / `dav_parse_members_stream` (`dav_xml.c`): a 4 KB window
+slides over the file emitting each `<response>` block and reads the trailing
+sync-token from the final tail. Enumeration RAM is now O(1) in record count. The
+8 KB RAM buffer remains only for discovery (`dav_list_collections`). New offline
+gate `tests/streamparse.c` proves the streamed parse is byte-identical to the
+buffer parse across window boundaries (wide entries, 300 recs, empty, deletes,
+no-token, token-expired).
+
+**VERIFIED ON DEVICE:** `REPORT … rn=42153 rc=0 (stream)` — Date Book reconciled
+all 64 records and pulled the 2 new server events (`down +2`), heap stayed ~42 KB
+free. Host `make test` + gate.sh green. To Do still needs its collection re-mapped
+(Preferences → Discover) since its reminders live on another list.
+
 ## SESSION 2026-07-10 (part 9) — sync speed: TLS keep-alive connection reuse
 
 User: "adding records on device and syncing seems fine, though very slow. Does it

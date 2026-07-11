@@ -3,6 +3,27 @@
 Snapshot after the sync-correctness session. Newest state on top; see
 `docs/BUILD_PROGRESS.md` for the running build log and the deep-dive on each fix.
 
+## UPDATE 2026-07-10 (part 10) — streaming enumeration (8 KB cap GONE, verified)
+
+On-device with a real 64-event Date Book, the full sync-collection REPORT (~42 KB)
+overflowed the single 8 KB response buffer -> truncated -> `enumServer` failed ->
+collection skipped (pulled nothing). The streaming *reconcile* had removed the
+record cap but the *enumeration* still buffered the whole etag list. Fixed
+(`722c6e0`): `dav_sync_report`/`dav_list` spool the reply to SD and parse it with
+sliding-window parsers (`dav_parse_report_stream`/`_members_stream`); RAM during
+enumeration is O(1) in record count. New offline gate `tests/streamparse.c` proves
+parity with the buffer parser across window boundaries. **VERIFIED ON DEVICE:**
+`REPORT ... rn=42153 rc=0 (stream)`, Date Book reconciled 64 recs + pulled the 2
+new server events; heap stayed ~42 KB free. The 8 KB RAM buffer now only serves
+discovery (`dav_list_collections`, a handful of collections). *Residual:* a home
+with a very large number of calendars could still truncate discovery — stream it
+too if it ever bites.
+
+**To Do still shows nothing — this is a CONFIG issue, not a bug.** Its incremental
+delta returns zero changes (`tok=incr rc=0 pull=0`, local still recs=2), so the
+reminders were added to a different Reminders list than the mapped
+`…/calendars/ad54474b-…`. Re-map via Preferences -> Discover collections.
+
 ## UPDATE 2026-07-10 (part 9) — sync speed: TLS keep-alive (`20b33ed`, pushed)
 
 Sync was "very slow" because `dav_esp.c` did a full TLS handshake per DAV request
