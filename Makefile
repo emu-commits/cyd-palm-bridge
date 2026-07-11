@@ -5,7 +5,7 @@ CORE    = bridge/pdb.c bridge/datebook.c bridge/address.c bridge/ical.c bridge/v
           bridge/find.c
 
 all: roundtrip bridge_cli incremental synctoken category bigsync multiapp \
-     uidmatch idempotent find_test calc_test config_test
+     uidmatch idempotent streamparse find_test calc_test config_test
 
 dirs:
 	@mkdir -p pdb state
@@ -48,6 +48,12 @@ idempotent: tests/idempotent.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -DOBJ_FETCH_CAP=4096 -o $@ $^
 
 # offline unit tests (no server needed)
+# sliding-window enumeration parsers == the in-RAM buffer parsers, across window
+# boundaries and for the trailing sync-token. Proves the fix that removed the 8 KB
+# enumeration truncation. See tests/streamparse.c.
+streamparse: tests/streamparse.c $(CORE) | dirs
+	$(CC) $(CFLAGS) -o $@ $^
+
 find_test: tests/find_test.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
@@ -61,11 +67,12 @@ config_test: tests/config_test.c bridge/config.c | dirs
 fuzz_test: tests/fuzz_test.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -o $@ $^
 
-test: roundtrip find_test calc_test config_test
+test: roundtrip find_test calc_test config_test streamparse
 	./roundtrip
 	./find_test
 	./calc_test
 	./config_test
+	./streamparse
 
 # parser hardening sweep (sanitizer build; a bit slower)
 ftest: fuzz_test
@@ -91,6 +98,6 @@ mtest: multiapp
 
 clean:
 	rm -f roundtrip bridge_cli incremental synctoken category bigsync multiapp \
-	      uidmatch idempotent find_test calc_test config_test pdb/_rt_*.pdb
+	      uidmatch idempotent streamparse find_test calc_test config_test pdb/_rt_*.pdb
 
 .PHONY: all dirs test itest stest ctest btest mtest clean

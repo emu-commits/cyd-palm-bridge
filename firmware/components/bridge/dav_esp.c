@@ -11,6 +11,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <unistd.h>          /* ftruncate for the per-attempt spool reset */
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "esp_log.h"
@@ -21,9 +22,13 @@
 static const char *TAG = "dav";
 int dav_last_status = 0;
 
-/* accumulates the response body into a caller-owned buffer + grabs the ETag. */
+/* accumulates the response body into a caller-owned buffer + grabs the ETag.
+ * When `spool` is set, the body is instead streamed to that FILE with no size
+ * cap (the caller stream-parses it) -- this is how large collection enumerations
+ * avoid needing a full-response RAM buffer on the no-PSRAM device. */
 typedef struct {
     char *buf; int len, cap; int truncated;
+    FILE *spool;
     char etag[160];
 } RespAcc;
 
@@ -45,6 +50,11 @@ typedef struct {
 static esp_http_client_handle_t s_client;
 static char s_origin[128];
 static RespAcc *s_acc;
+/* when set, davreq streams the response body to this FILE (see RespAcc.spool). */
+static FILE *s_spoolfile;
+/* SD spool for a collection enumeration response (REPORT / PROPFIND); parsed in a
+ * sliding window so a large collection never needs a full-body RAM buffer. */
+#define ENUM_SPOOL "/sdcard/state/.enum"
 
 /* scheme://host[:port] prefix of an absolute URL. */
 static void url_origin(const char*url, char*out, int cap){
@@ -71,7 +81,9 @@ static esp_err_t on_event(esp_http_client_event_t *e){
             snprintf(a->etag,sizeof a->etag,"%s",e->header_value);
         break;
     case HTTP_EVENT_ON_DATA:
-        if(a->buf && a->cap>0){
+        if(a->spool){                          /* stream to SD, uncapped */
+            if(e->data_len>0){ a->len += (int)fwrite(e->data,1,e->data_len,a->spool); }
+        } else if(a->buf && a->cap>0){
             int room = a->cap-1 - a->len;
             int n = e->data_len < room ? e->data_len : room;
             if(n>0){ memcpy(a->buf+a->len, e->data, n); a->len+=n; a->buf[a->len]=0; }
@@ -101,7 +113,7 @@ static int davreq(const DavCtx*d, esp_http_client_method_t method, const char*ur
                   const char*body, int bodylen,
                   char*resp, int respcap, int*respn,
                   char*etag, int etagcap, char*effurl, int effcap){
-    RespAcc acc = { .buf=resp, .cap=respcap };
+    RespAcc acc = { .buf=resp, .cap=respcap, .spool=s_spoolfile };
     s_acc = &acc;
 
     char origin[128]; url_origin(url,origin,sizeof origin);
@@ -116,6 +128,7 @@ static int davreq(const DavCtx*d, esp_http_client_method_t method, const char*ur
     for(int attempt=0; attempt<2; attempt++){
         acc.len=0; acc.truncated=0; acc.etag[0]=0;
         if(resp && respcap) resp[0]=0;
+        if(acc.spool){ rewind(acc.spool); ftruncate(fileno(acc.spool),0); }  /* fresh spool per attempt */
 
         if(!s_client){
             esp_http_client_config_t cfg = {
@@ -227,38 +240,32 @@ int dav_get(const DavCtx*d,const char*coll,const char*name,char*out,int cap){
 }
 
 /* response buffer for listings; heap (freed per call) so it doesn't compete with
- * the ~40KB TLS handshake for long. A personal calendar's etag-only REPORT is a
- * few KB; oversize responses log a truncation warning. */
+ * the ~40KB TLS handshake for long. */
 #ifndef DAV_LIST_CAP
-#define DAV_LIST_CAP (8*1024)    /* malloc'd + freed per call. DELIBERATELY SMALL:
-                                    on the no-PSRAM heap this buffer competes with
-                                    mbedTLS's ~16.7 KB per-record INPUT buffer
-                                    (DYNAMIC_BUFFER reallocs it each read) -- a
-                                    12/16 KB list buffer fragmented the heap so the
-                                    TLS alloc(16749) failed (ESP_ERR_HTTP_FETCH_
-                                    HEADER) on the first/full REPORT. 8 KB leaves
-                                    room. A response that fills it is TRUNCATED
-                                    (incomplete) -> the caller treats that as a
-                                    failure and falls back to the lighter PROPFIND
-                                    (etags only), which fits far more records/KB.
-                                    (A collection whose etag list exceeds 8 KB
-                                    still needs true streaming -- see NEXT_STEPS.) */
+#define DAV_LIST_CAP (8*1024)    /* RAM buffer for DISCOVERY only (dav_list_collections):
+                                    a home-set has a handful of collections, so 8 KB is
+                                    ample and keeping it small avoids fragmenting the
+                                    no-PSRAM heap against mbedTLS's ~16.7 KB input
+                                    buffer. The per-collection ENUMERATION (REPORT /
+                                    PROPFIND, dav_sync_report / dav_list) no longer uses
+                                    this -- it spools the response to SD and stream-parses
+                                    it, so a large calendar's etag list has no size cap. */
 #endif
-/* a response that reached cap-1 bytes was cut off: the parse saw only part of the
- * collection, so it must NOT be trusted (acting on a partial view mass-deletes). */
-#define DAV_TRUNCATED(rn) ((rn) >= DAV_LIST_CAP-1)
 
 int dav_list(const DavCtx*d,const char*coll,dav_list_cb cb,void*ctx){
     char url[512]; snprintf(url,sizeof url,"%s/%s/",d->base,coll);
     char body[128]; int bl=body_getetag(body,sizeof body);
-    char*buf=malloc(DAV_LIST_CAP); if(!buf) return -1;
-    int rn=0;
+    /* Spool the (possibly large) PROPFIND response to SD and parse it in a sliding
+     * window -- no full-collection RAM buffer, so the member list has no size cap. */
+    FILE*sp=fopen(ENUM_SPOOL,"w+b"); if(!sp){ ESP_LOGW(TAG,"PROPFIND %s: spool open failed",coll); return -1; }
+    s_spoolfile=sp;
     int st=davreq(d,HTTP_METHOD_PROPFIND,url,1,"application/xml",NULL,body,bl,
-                  buf,DAV_LIST_CAP,&rn, NULL,0, NULL,0);
-    int count = st<0 ? -1 : dav_parse_members(buf,cb,ctx);
-    if(count>=0 && DAV_TRUNCATED(rn)){ count=-1; ESP_LOGW(TAG,"PROPFIND %s truncated at %d bytes -> failed",coll,rn); }
-    fprintf(stderr,"[dav] PROPFIND %s -> st=%d rn=%d members=%d\n",coll,st,rn,count);
-    free(buf);
+                  NULL,0,NULL, NULL,0, NULL,0);
+    s_spoolfile=NULL;
+    long rn = ftell(sp); rewind(sp);
+    int count = st<0 ? -1 : dav_parse_members_stream(sp,cb,ctx);
+    fclose(sp); remove(ENUM_SPOOL);
+    fprintf(stderr,"[dav] PROPFIND %s -> st=%d rn=%ld members=%d (stream)\n",coll,st,rn,count);
     return count;
 }
 
@@ -272,18 +279,18 @@ int dav_sync_report(const DavCtx*d,const char*coll,const char*token,
         "<d:sync-token>%s</d:sync-token><d:sync-level>1</d:sync-level>"
         "<d:prop><d:getetag/></d:prop></d:sync-collection>", token?token:"");
     char url[512]; snprintf(url,sizeof url,"%s/%s/",d->base,coll);
-    char*buf=malloc(DAV_LIST_CAP); if(!buf) return -1;
-    int rn=0;
+    /* Spool the REPORT reply to SD and stream-parse it: the etag list + trailing
+     * sync-token can be far larger than any RAM buffer, and truncating would lose
+     * records + the token. Streaming removes the 8 KB enumeration cap entirely. */
+    FILE*sp=fopen(ENUM_SPOOL,"w+b"); if(!sp){ ESP_LOGW(TAG,"REPORT %s: spool open failed",coll); return -1; }
+    s_spoolfile=sp;
     int st=davreq(d,HTTP_METHOD_REPORT,url,1,"application/xml",NULL,body,bl,
-                  buf,DAV_LIST_CAP,&rn, NULL,0, NULL,0);
-    int rc = st<0 ? -1 : dav_parse_report(buf,st,cb,ctx,newtoken,tokcap);
-    /* truncated => incomplete view + the trailing sync-token wasn't received, so
-     * fail: the caller falls back to the lighter PROPFIND (etags only, no bodies)
-     * or, failing that, skips the collection rather than acting on partial data. */
-    if(rc==0 && DAV_TRUNCATED(rn)){ rc=-1; if(newtoken&&tokcap)newtoken[0]=0;
-        ESP_LOGW(TAG,"REPORT %s truncated at %d bytes -> failed (fall back to PROPFIND)",coll,rn); }
-    fprintf(stderr,"[dav] REPORT %s tok=%s -> st=%d rn=%d rc=%d\n",coll,token&&token[0]?"incr":"full",st,rn,rc);
-    free(buf);
+                  NULL,0,NULL, NULL,0, NULL,0);
+    s_spoolfile=NULL;
+    long rn = ftell(sp); rewind(sp);
+    int rc = st<0 ? -1 : dav_parse_report_stream(sp,st,cb,ctx,newtoken,tokcap);
+    fclose(sp); remove(ENUM_SPOOL);
+    fprintf(stderr,"[dav] REPORT %s tok=%s -> st=%d rn=%ld rc=%d (stream)\n",coll,token&&token[0]?"incr":"full",st,rn,rc);
     return rc;
 }
 

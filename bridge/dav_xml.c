@@ -87,6 +87,91 @@ int dav_parse_report(const char*buf,int status,dav_sync_cb cb,void*ctx,
     return 0;
 }
 
+/* ---- streaming variants: slide a window over a spooled response FILE so a large
+ * collection's member list never needs a full-body RAM buffer. A single
+ * <response>..</response> block (href + getetag) is a few hundred bytes, far under
+ * the window, so blocks are always processed whole; the sync-token, which trails
+ * the last </response>, is left in the final tail and read there. ---- */
+#ifndef DAV_STREAM_WIN
+#define DAV_STREAM_WIN 4096
+#endif
+#define RESP_TAG_LEN 11   /* strlen("</response>") */
+
+int dav_parse_report_stream(FILE*f,int status,dav_sync_cb cb,void*ctx,
+                            char*newtoken,int tokcap){
+    if(newtoken&&tokcap) newtoken[0]=0;
+    if(status!=207) return -1;
+    char*buf=malloc(DAV_STREAM_WIN); if(!buf) return -1;
+    int len=0, first=1, sawMulti=0;
+    for(;;){
+        int got=(int)fread(buf+len,1,(size_t)(DAV_STREAM_WIN-1-len),f);
+        len+=got; buf[len]=0;
+        if(first){
+            if(strcasestr(buf,"valid-sync-token")){ free(buf); return 1; }  /* token expired */
+            if(strcasestr(buf,"multistatus")) sawMulti=1;
+            first=0;
+        }
+        const char*p=buf;
+        for(;;){
+            const char*r=strcasestr(p,"<response");
+            if(!r) break;                              /* keep the tail after the last
+                                                          </response> -- it holds the
+                                                          trailing sync-token */
+            const char*end=strcasestr(r,"</response>");
+            if(!end){ p=r; break; }                    /* incomplete block: keep from here */
+            char href[512]=""; dav_xml_text(r,end,"href",href,sizeof href);
+            if(!dav_href_is_coll(href)){
+                char name[256]=""; dav_basename(href,name,sizeof name);
+                char etag[160]=""; int hasEtag=dav_xml_text(r,end,"getetag",etag,sizeof etag); dav_strip_quotes(etag);
+                const char*f404=strstr(r,"404"); int deleted=!hasEtag && f404 && f404<end;
+                if(name[0] && cb) cb(name,etag,deleted,ctx);
+            }
+            p=end+RESP_TAG_LEN;
+        }
+        int consumed=(int)(p-buf), tail=len-consumed;
+        if(tail>0 && consumed>0) memmove(buf,buf+consumed,(size_t)tail);
+        len = tail>0 ? tail : 0; buf[len]=0;
+        if(got==0) break;                              /* EOF: final tail holds the token */
+        if(len>=DAV_STREAM_WIN-1){ len=0; buf[0]=0; }  /* safety: oversized block -> skip */
+    }
+    if(newtoken&&tokcap) dav_xml_text(buf,NULL,"sync-token",newtoken,tokcap);
+    int rc = sawMulti ? 0 : -1;
+    free(buf);
+    return rc;
+}
+
+int dav_parse_members_stream(FILE*f,dav_list_cb cb,void*ctx){
+    char*buf=malloc(DAV_STREAM_WIN); if(!buf) return -1;
+    int len=0, first=1, sawMulti=0, count=0;
+    for(;;){
+        int got=(int)fread(buf+len,1,(size_t)(DAV_STREAM_WIN-1-len),f);
+        len+=got; buf[len]=0;
+        if(first){ if(strcasestr(buf,"multistatus")) sawMulti=1; first=0; }
+        const char*p=buf;
+        for(;;){
+            const char*r=strcasestr(p,"<response");
+            if(!r){ p=buf+len; break; }
+            const char*end=strcasestr(r,"</response>");
+            if(!end){ p=r; break; }
+            char href[512]=""; dav_xml_text(r,end,"href",href,sizeof href);
+            if(!dav_href_is_coll(href)){
+                char name[256]=""; dav_basename(href,name,sizeof name);
+                char etag[160]=""; dav_xml_text(r,end,"getetag",etag,sizeof etag); dav_strip_quotes(etag);
+                if(name[0] && cb){ cb(name,etag,ctx); count++; }
+            }
+            p=end+RESP_TAG_LEN;
+        }
+        int consumed=(int)(p-buf), tail=len-consumed;
+        if(tail>0 && consumed>0) memmove(buf,buf+consumed,(size_t)tail);
+        len = tail>0 ? tail : 0; buf[len]=0;
+        if(got==0) break;
+        if(len>=DAV_STREAM_WIN-1){ len=0; buf[0]=0; }
+    }
+    int rc = sawMulti ? count : -1;
+    free(buf);
+    return rc;
+}
+
 int dav_parse_collections(const char*buf,dav_coll_cb cb,void*ctx){
     int count=0; const char*p=buf;
     while((p=strcasestr(p,"<response"))){
