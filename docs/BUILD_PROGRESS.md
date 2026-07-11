@@ -6,6 +6,39 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-10 (part 9) — sync speed: TLS keep-alive connection reuse
+
+User: "adding records on device and syncing seems fine, though very slow. Does it
+need to be this slow?" — no. Root cause: `dav_esp.c` did
+`esp_http_client_init/perform/cleanup` **per request**, so every DAV call opened a
+fresh TLS connection and did a full handshake (~1-3 s against iCloud's cert chain
+on the 160 MHz ESP32, software crypto). A first bulk pull of N records is **~2N
+handshakes** — `resolveServer` GETs each new object for its UID (`sync.c:465`) and
+`keepFromServer` GETs it again for its body (`sync.c:557`), plus each PUT/DELETE —
+so sync time scaled with record count almost entirely in TLS setup.
+
+**Fix (`20b33ed`): reuse one connection across requests.**
+- `dav_esp.c` keeps a single `esp_http_client` handle alive (`keep_alive_enable`)
+  bound to one origin (`scheme://host[:port]`); requests to the same origin reuse
+  its TCP+TLS connection, so the handshake happens ~once per network phase instead
+  of once per request. A different origin transparently rebuilds it.
+- Headers that vary (Content-Type / Depth / If-Match) are deleted between reused
+  requests so a prior PUT's If-Match can't leak into a later GET. The response
+  accumulator moved to a static `s_acc` (the handle outlives each call's stack
+  frame, so `user_data` can't carry it). One-shot reconnect retry handles a
+  server-dropped idle keep-alive socket.
+- **RAM invariant preserved:** new `dav_disconnect()` (dav.h; no-op on the host
+  curl transport) is called from the engine's `sortFile()` — i.e. right before
+  every heap-heavy in-memory sort — and from `wifi_down()`. So the ~40 KB TLS
+  working set is never resident during a sort (the exact collision the per-call
+  teardown originally avoided) and is always closed before the socket stack is
+  torn down. Net: **~2N handshakes/collection → ~3**, peak heap unchanged.
+
+Host gate suite green (sortFile's disconnect is a no-op on host); firmware builds
+clean, boots ~193 KB free heap. Discovery also benefits (its PROPFINDs now share
+one connection). **On-device before/after timing on the same record set is the
+next check** — and the bulk-load-in-iCloud → pull-to-device test the user planned.
+
 ## SESSION 2026-07-10 (part 8) — on-device: light-sleep off, sync-awake, due picker, brightness slider
 
 First on-device run of the part-3–7 sprint. Flashed `b302531`, then fixed what

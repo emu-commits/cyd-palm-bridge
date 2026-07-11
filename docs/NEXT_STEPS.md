@@ -3,6 +3,17 @@
 Snapshot after the sync-correctness session. Newest state on top; see
 `docs/BUILD_PROGRESS.md` for the running build log and the deep-dive on each fix.
 
+## UPDATE 2026-07-10 (part 9) — sync speed: TLS keep-alive (`20b33ed`, pushed)
+
+Sync was "very slow" because `dav_esp.c` did a full TLS handshake per DAV request
+(~2N handshakes to pull N records). Fixed by reusing one `esp_http_client`
+connection across requests to the same origin (`keep_alive_enable`); handshake now
+~once per network phase. RAM-safe: `dav_disconnect()` frees the TLS working set
+from `sortFile()` (before every heap-heavy sort) and `wifi_down()`, so it never
+coexists with a sort. Host gates green, firmware boots ~193 KB free.
+**Next: on-device before/after timing + the planned bulk-load-in-iCloud → pull
+test (which also exercises the >24-record / idempotency verifies).**
+
 ## UPDATE 2026-07-10 (part 8) — first on-device run of the part-3–7 sprint
 
 Flashed `b302531` and fixed what hardware surfaced (all pushed):
