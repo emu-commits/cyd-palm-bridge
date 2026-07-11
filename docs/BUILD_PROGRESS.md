@@ -6,6 +6,41 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-10 (part 11) — iCloud Reminders dead end + drift self-heal
+
+**The To Do mystery, solved.** A throwaway diagnostic build (`SYNC_DIAG_PROPFIND`,
+shadow-PROPFIND per collection, since removed) proved the part-10 "config mismatch"
+call WRONG. For the reminders list `ad54474b`: incremental `sync-collection`
+returned 0 rows while a plain PROPFIND saw 3 members — and the user's 16 real
+reminders were in NONE of them. Root cause: **Apple dropped CalDAV from Reminders
+in iOS 13**; reminders created in the modern app / iCloud.com live in a proprietary
+store no CalDAV client can reach. Discovery correctly finds the one CalDAV-visible
+list ("Reminders ⚠️", `rn=6443`, not truncated); its 3 objects are the device's own
+past test pushes, invisible to the native Reminders app. Not a bug — an Apple wall.
+
+**Decision:** To Do stays on the iCloud CalDAV VTODO lane (works cross-CalDAV +
+non-iCloud providers; invisible to native Reminders — acceptable, still cloud-backed).
+
+**Code shipped:**
+- **Streaming discovery** (`dav_parse_collections_stream` in `dav_xml.c`;
+  `dav_list_collections` spools to `ENUM_SPOOL`): removes the residual 8 KB cap —
+  the last non-streaming enumeration. `DAV_LIST_CAP` retired.
+- **Window-boundary parser fix:** `dav_parse_members_stream` + the new collections
+  parser dropped a record when `<response>` straddled the 4 KB window (discarded a
+  partial tag); now keep the tail like `dav_parse_report_stream`.
+- **`tests/streamparse.c` de-vacuumed:** used the `<d:response>` prefix but the
+  parser matches unprefixed `<response>` (as real iCloud/Radicale send), so record
+  comparisons had been 0==0. Fixed → immediately caught the boundary bug. Added
+  home-set/collections coverage incl. reminders-after-calendars truncation.
+- **Device always-full reconcile** (`ESP_PLATFORM`-gated in `sync_one`): clears the
+  read token + never persists `#synctoken`, so every device sync full-enumerates.
+  Fixes the drift where a failed first pull orphans a record (token advances past
+  it → never retried; the 2-vs-3 To Do gap). Host keeps incremental + its gates.
+- Discovery telemetry: `discovered [c] <name> (<href>)`.
+
+Host: `make test` + `tests/gate.sh` GREEN. Firmware built (57% free) + flashed.
+Unverified on device: To Do full-reconcile healing (out 2→3) + idempotent re-sync.
+
 ## SESSION 2026-07-10 (part 10) — streaming collection enumeration (8 KB cap gone)
 
 Bulk-loaded iCloud + re-synced: Address pulled, but **Date Book + To Do didn't**.

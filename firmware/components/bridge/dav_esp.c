@@ -241,16 +241,6 @@ int dav_get(const DavCtx*d,const char*coll,const char*name,char*out,int cap){
 
 /* response buffer for listings; heap (freed per call) so it doesn't compete with
  * the ~40KB TLS handshake for long. */
-#ifndef DAV_LIST_CAP
-#define DAV_LIST_CAP (8*1024)    /* RAM buffer for DISCOVERY only (dav_list_collections):
-                                    a home-set has a handful of collections, so 8 KB is
-                                    ample and keeping it small avoids fragmenting the
-                                    no-PSRAM heap against mbedTLS's ~16.7 KB input
-                                    buffer. The per-collection ENUMERATION (REPORT /
-                                    PROPFIND, dav_sync_report / dav_list) no longer uses
-                                    this -- it spools the response to SD and stream-parses
-                                    it, so a large calendar's etag list has no size cap. */
-#endif
 
 int dav_list(const DavCtx*d,const char*coll,dav_list_cb cb,void*ctx){
     char url[512]; snprintf(url,sizeof url,"%s/%s/",d->base,coll);
@@ -335,11 +325,18 @@ int dav_list_collections(const DavCtx*d,const char*path,dav_coll_cb cb,void*ctx)
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
         "<d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/><d:displayname/></d:prop></d:propfind>");
     char url[640]; snprintf(url,sizeof url,"%s%s",d->base,path);
-    char*buf=malloc(DAV_LIST_CAP); if(!buf) return -1;
-    int rn=0;
+    /* Spool the home-set PROPFIND to SD and stream-parse it: an iCloud calendar
+     * home returns calendars + reminder lists + inbox/outbox/notification, which
+     * together overrun any small RAM buffer -- and the reminder lists trail the
+     * calendars, so a truncated buffer would silently drop them from discovery. */
+    FILE*sp=fopen(ENUM_SPOOL,"w+b"); if(!sp){ ESP_LOGW(TAG,"PROPFIND collections: spool open failed"); return -1; }
+    s_spoolfile=sp;
     int st=davreq(d,HTTP_METHOD_PROPFIND,url,1,"application/xml",NULL,body,bl,
-                  buf,DAV_LIST_CAP,&rn, NULL,0, NULL,0);
-    int count = st<0 ? -1 : dav_parse_collections(buf,cb,ctx);
-    free(buf);
+                  NULL,0,NULL, NULL,0, NULL,0);
+    s_spoolfile=NULL;
+    long rn = ftell(sp); rewind(sp);
+    int count = st<0 ? -1 : dav_parse_collections_stream(sp,cb,ctx);
+    fclose(sp); remove(ENUM_SPOOL);
+    fprintf(stderr,"[dav] PROPFIND collections %s -> st=%d rn=%ld found=%d (stream)\n",path,st,rn,count);
     return count;
 }

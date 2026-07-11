@@ -3,6 +3,72 @@
 Snapshot after the sync-correctness session. Newest state on top; see
 `docs/BUILD_PROGRESS.md` for the running build log and the deep-dive on each fix.
 
+## UPDATE 2026-07-10 (part 11) — iCloud Reminders is a dead end; To Do stays on the CalDAV task lane
+
+**Correction to part 10:** "To Do is a CONFIG mismatch, re-map the list" was WRONG.
+On-device diagnostics settled it. A temporary shadow-PROPFIND build
+(`SYNC_DIAG_PROPFIND`, since removed) logged, per collection, what
+`sync-collection` reported vs what a plain PROPFIND sees:
+
+```
+[dav] REPORT   ad54474b… tok=incr -> rn=191  rc=0     (incremental delta: 0 rows)
+[dav] PROPFIND ad54474b… -> members=3                  (the list really has 3 objects)
+[diag] ad54474b… ok=1 incr=1 enumRows=0 PROPFIND=3
+[sync] ad54474b… out=2 push=0/0/0 pull=0/0/0           (device keeps 2, syncs nothing)
+```
+
+Two findings:
+1. **Discovery works and finds exactly ONE reminders list** ("Reminders ⚠️" =
+   `ad54474b`), response `rn=6443` (NOT truncated). So there is no other list to
+   re-map to — the mapping was correct all along.
+2. **The user's 16 reminders live in iCloud's *modern* Reminders store** (created
+   on iCloud.com), which Apple walled off from CalDAV in iOS 13 / macOS Catalina.
+   No CalDAV client (this bridge, Thunderbird, Fantastical, BusyCal, DAVx5, …) can
+   read or write them — confirmed by every CalDAV vendor's docs
+   (busymac, tasks.org, nextcloud#17190, davx5). The 3 CalDAV-visible objects are
+   the device's own past test pushes, sitting in a legacy stub the Reminders app
+   never shows. **This is an Apple limitation, not a bug — unfixable.**
+
+**Decision (user):** keep To Do on the **iCloud CalDAV VTODO lane** (option 1).
+iCloud's CalDAV servers still fully support VTODO task lists; they just don't sync
+with the native Reminders app / iCloud.com. Rationale: still cloud-backed, reuses
+the iCloud creds already loaded, and works for non-iCloud CalDAV providers too
+(Fastmail / Nextcloud Tasks / Radicale) via Discover → assign. To *view* these
+tasks on an iPhone, add iCloud as an **external CalDAV account** (Settings →
+Calendar → Add CalDAV Account); they appear in Reminders under a separate account,
+never in the built-in iCloud reminders.
+
+**Also found + fixed a real drift bug** (independent of the iCloud limitation):
+incremental sync can silently ORPHAN a record whose first pull fails — the
+RFC 6578 sync-token advances past it, so the next incremental never re-reports it
+(this is why the device had 2 todos while the CalDAV list had 3). Fix: on the
+device (`ESP_PLATFORM`), sync now **always full-enumerates** and never persists a
+sync-token — a full reconcile every sync self-heals drift and re-tries dropped
+pulls. iCloud CalDAV PIM data is tiny so the streamed etag list is cheap. The host
+keeps the incremental fast path (and `incremental`/`synctoken` gates).
+
+**Shipped this session (host-gated, firmware built + flashed):**
+- **Streaming discovery** — `dav_list_collections` now spools + sliding-window
+  parses (`dav_parse_collections_stream`); the residual 8 KB discovery cap noted
+  in part 10 is GONE. Last non-streaming enumeration eliminated.
+- **Stream parser window-boundary bug** — `dav_parse_members_stream` (and the new
+  collections parser) dropped a record when a `<response>` straddled the 4 KB
+  window (`if(!r){p=buf+len;...}` discarded a partial tag). Fixed to keep the tail,
+  matching `dav_parse_report_stream`.
+- **`tests/streamparse.c` was vacuous** — its synthetic XML used `<d:response>`
+  but the parser (and real iCloud/Radicale) keys on unprefixed `<response>`, so
+  record comparisons silently compared 0==0. Fixed to emit unprefixed XML; this is
+  what surfaced the boundary bug. Added collections-parser coverage incl. the
+  reminders-trail-the-calendars truncation case.
+- Per-collection discovery telemetry (`discovered [c] <name> (<href>)`).
+
+**Next / unverified on device:**
+- Confirm the device full-reconcile heals To Do (out 2 → 3, pulling the orphaned
+  test todo) and that a 2nd sync is idempotent (0 ops). Capture `[sync]`.
+- Optional: make "these are CalDAV tasks, not iCloud Reminders" clearer in the UI
+  so the split-brain isn't confusing.
+- Backlog unchanged: battery gauge (GPIO34), gate debug telemetry behind a flag.
+
 ## UPDATE 2026-07-10 (part 10) — streaming enumeration (8 KB cap GONE, verified)
 
 On-device with a real 64-event Date Book, the full sync-collection REPORT (~42 KB)

@@ -150,7 +150,9 @@ int dav_parse_members_stream(FILE*f,dav_list_cb cb,void*ctx){
         const char*p=buf;
         for(;;){
             const char*r=strcasestr(p,"<response");
-            if(!r){ p=buf+len; break; }
+            if(!r) break;                              /* keep the tail: it may hold a
+                                                          partial "<respo…" that strcasestr
+                                                          can't match until more is read */
             const char*end=strcasestr(r,"</response>");
             if(!end){ p=r; break; }
             char href[512]=""; dav_xml_text(r,end,"href",href,sizeof href);
@@ -170,6 +172,45 @@ int dav_parse_members_stream(FILE*f,dav_list_cb cb,void*ctx){
     int rc = sawMulti ? count : -1;
     free(buf);
     return rc;
+}
+
+/* streaming variant of dav_parse_collections: slide a window over a spooled
+ * home-set PROPFIND so a calendar home with many collections (iCloud returns
+ * calendars + reminder lists + inbox/outbox/notification) is never truncated by
+ * a fixed RAM buffer. A single collection <response> block (resourcetype +
+ * displayname) is well under the window, so blocks are processed whole. */
+int dav_parse_collections_stream(FILE*f,dav_coll_cb cb,void*ctx){
+    char*buf=malloc(DAV_STREAM_WIN); if(!buf) return -1;
+    int len=0, count=0;
+    for(;;){
+        int got=(int)fread(buf+len,1,(size_t)(DAV_STREAM_WIN-1-len),f);
+        len+=got; buf[len]=0;
+        const char*p=buf;
+        for(;;){
+            const char*r=strcasestr(p,"<response");
+            if(!r) break;                          /* keep the tail (may be a partial tag) */
+            const char*end=strcasestr(r,"</response>");
+            if(!end){ p=r; break; }                /* incomplete block: keep from here */
+            char href[512]=""; dav_xml_text(r,end,"href",href,sizeof href);
+            int kind=0;
+            const char*rt=dav_strcasestr_range(r,end,"resourcetype");
+            if(rt){
+                const char*rte=dav_strcasestr_range(rt,end,"/resourcetype"); if(!rte) rte=end;
+                if(dav_strcasestr_range(rt,rte,"calendar")) kind='c';
+                else if(dav_strcasestr_range(rt,rte,"addressbook")) kind='a';
+            }
+            char dn[128]=""; dav_xml_text(r,end,"displayname",dn,sizeof dn);
+            if(href[0] && cb){ cb(href,kind,dn,ctx); count++; }
+            p=end+RESP_TAG_LEN;
+        }
+        int consumed=(int)(p-buf), tail=len-consumed;
+        if(tail>0 && consumed>0) memmove(buf,buf+consumed,(size_t)tail);
+        len = tail>0 ? tail : 0; buf[len]=0;
+        if(got==0) break;
+        if(len>=DAV_STREAM_WIN-1){ len=0; buf[0]=0; }  /* safety: oversized block -> skip */
+    }
+    free(buf);
+    return count;
 }
 
 int dav_parse_collections(const char*buf,dav_coll_cb cb,void*ctx){

@@ -40,6 +40,7 @@ int dav_parse_report(const char*buf,int status,dav_sync_cb cb,void*ctx,
 int dav_parse_members_stream(FILE*f,dav_list_cb cb,void*ctx);
 int dav_parse_report_stream(FILE*f,int status,dav_sync_cb cb,void*ctx,
                             char*newtoken,int tokcap);
+int dav_parse_collections_stream(FILE*f,dav_coll_cb cb,void*ctx);
 
 /* walk a PROPFIND with resourcetype/displayname: cb(href, kind, dn). count. */
 int dav_parse_collections(const char*buf,dav_coll_cb cb,void*ctx);

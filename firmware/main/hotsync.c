@@ -298,6 +298,7 @@ static void disc_add(const char *href, int kind, const char *dn, void *ctx){
     snprintf(e->href,sizeof e->href,"%s",tmp);
     snprintf(e->name,sizeof e->name,"%s",(dn&&dn[0])?dn:"(unnamed)");
     e->kind = kind;
+    ESP_LOGI(TAG,"discovered [%c] %s (%s)", (char)kind, e->name, e->href);
 }
 
 /* PROPFIND `prop` at `path` (which itself may be an absolute URL); retarget

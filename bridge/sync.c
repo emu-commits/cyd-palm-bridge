@@ -639,6 +639,16 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
                      const CatRoute*rt,const char*Ccoll){
     uint32_t maxuid=0; int incremental=0;
     buildMapIdx(mapfile,s->token,sizeof s->token,&maxuid);   /* MP_IDX/MP_HREF/MP_PALM + token */
+#ifdef ESP_PLATFORM
+    /* Device: always FULL-enumerate. iCloud CalDAV PIM data is tiny, so the etag
+     * list is cheap (streamed), and a persisted RFC 6578 sync-token can silently
+     * orphan a record whose first pull failed -- the token advances past it and
+     * incremental never re-reports it. A full reconcile every sync self-heals
+     * that drift and re-tries any dropped pull. The host keeps the incremental
+     * fast path (and its gates). Clearing the token here forces enumServer's full
+     * PROPFIND/REPORT branch; the fresh token is not persisted (see below). */
+    s->token[0]=0;
+#endif
     int enumOk = enumServer(d,coll,s->token,s->newToken,sizeof s->newToken,&incremental); /* SV_RAW */
     if(enumOk!=0){
         /* The server could not be enumerated (all reports/PROPFIND failed or were
@@ -664,7 +674,11 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
 
     char mtmp[512]; snprintf(mtmp,sizeof mtmp,"%s.tmp",mapfile);
     FILE*mapf=fopen(mtmp,"w");
+#ifndef ESP_PLATFORM
+    /* device never persists the sync-token (always full-enumerates -- see sync_one
+     * top); the host keeps incremental, so it records the token for the next run. */
     if(mapf && s->newToken[0]) fprintf(mapf,"#synctoken\t%s\n",s->newToken);
+#endif
     Sink K={ .w=w, .mapf=mapf, .pullCat=pullCat };
     Sink*k=&K;
     const char*ext = kindExt(s->kind); int kind=s->kind;
