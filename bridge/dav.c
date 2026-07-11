@@ -41,6 +41,10 @@ static void grab_etag(const char*hdr,char*out,int cap){
     out[i]=0;
 }
 
+/* Host transport is a fresh curl process per call (stateless), so there is no
+ * persistent connection to close. Matches the dav.h contract as a no-op. */
+void dav_disconnect(void){}
+
 int dav_put(const DavCtx*d,const char*coll,const char*name,const char*ctype,
             const char*bodyfile,const char*ifmatch,
             char*etag_out,int etagcap,int*status_out){

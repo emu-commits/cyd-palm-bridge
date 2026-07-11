@@ -290,6 +290,11 @@ static int cmpLine(const void*a,const void*b){
  * (For collections beyond what free heap can sort, an external merge sort is the
  * next increment; Palm-scale data is well within an in-RAM sort.) */
 static void sortFile(const char*path){
+    /* About to malloc the whole file for an in-memory qsort. On the no-PSRAM
+     * device this heap must not fight the ~40 KB TLS working set, so release any
+     * live keep-alive connection first (no-op on the host). The next DAV call
+     * transparently reconnects; this keeps "TLS never resident during a sort". */
+    dav_disconnect();
     FILE*f=fopen(path,"rb"); if(!f) return;
     fseek(f,0,SEEK_END); long sz=ftell(f); fseek(f,0,SEEK_SET);
     if(sz<=0){ fclose(f); return; }

@@ -27,8 +27,43 @@ typedef struct {
     char etag[160];
 } RespAcc;
 
+/* --- persistent keep-alive connection ------------------------------------
+ * Init/perform/cleanup per request meant a full TLS handshake (~1-3 s against
+ * iCloud's cert chain) for EVERY DAV call -- ~2N handshakes to pull N records
+ * (one GET per object for its UID, one more for its body, plus each PUT/DELETE).
+ * We now keep ONE client handle alive and reuse its TCP+TLS connection
+ * (keep_alive_enable) across calls to the same origin, so the handshake happens
+ * about once per network phase instead of once per request.
+ *
+ * RAM stays bounded exactly as before: dav_disconnect() (called from the engine's
+ * sortFile(), i.e. immediately before every heap-heavy disk sort, and at end of
+ * sync) tears the ~40 KB TLS working set back down so it never coexists with a
+ * sort. The handle is bound to one origin (scheme://host[:port]); a request to a
+ * different origin transparently rebuilds it. s_acc carries the current call's
+ * response accumulator to on_event (user_data can't, since the handle outlives
+ * each call's stack frame). */
+static esp_http_client_handle_t s_client;
+static char s_origin[128];
+static RespAcc *s_acc;
+
+/* scheme://host[:port] prefix of an absolute URL. */
+static void url_origin(const char*url, char*out, int cap){
+    const char*p = strstr(url,"://");
+    if(!p){ if(cap) out[0]=0; return; }
+    const char*slash = strchr(p+3,'/');
+    int n = slash ? (int)(slash-url) : (int)strlen(url);
+    if(n>=cap) n=cap-1;
+    if(n<0) n=0;
+    memcpy(out,url,n); out[n]=0;
+}
+
+void dav_disconnect(void){
+    if(s_client){ esp_http_client_cleanup(s_client); s_client=NULL; }
+    s_origin[0]=0;
+}
+
 static esp_err_t on_event(esp_http_client_event_t *e){
-    RespAcc *a = (RespAcc*)e->user_data;
+    RespAcc *a = s_acc;
     if(!a) return ESP_OK;
     switch(e->event_id){
     case HTTP_EVENT_ON_HEADER:
@@ -67,43 +102,73 @@ static int davreq(const DavCtx*d, esp_http_client_method_t method, const char*ur
                   char*resp, int respcap, int*respn,
                   char*etag, int etagcap, char*effurl, int effcap){
     RespAcc acc = { .buf=resp, .cap=respcap };
-    if(resp && respcap) resp[0]=0;
+    s_acc = &acc;
 
-    esp_http_client_config_t cfg = {
-        .url = url,
-        .method = method,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .event_handler = on_event,
-        .user_data = &acc,
-        .timeout_ms = 20000,
-        .disable_auto_redirect = false,
-        .max_redirection_count = 5,
-        .buffer_size = 2048,
-        .buffer_size_tx = 2048,
-    };
-    esp_http_client_handle_t c = esp_http_client_init(&cfg);
-    if(!c) return -1;
+    char origin[128]; url_origin(url,origin,sizeof origin);
+    /* a request to a different origin than the live handle can't reuse it */
+    if(s_client && strcmp(s_origin,origin)!=0) dav_disconnect();
 
     char auth[320]; basic_auth(d,auth,sizeof auth);
-    if(auth[0]) esp_http_client_set_header(c,"Authorization",auth);
-    if(ctype)   esp_http_client_set_header(c,"Content-Type",ctype);
-    if(depth>=0){ char dh[4]={ depth?'1':'0', 0 }; esp_http_client_set_header(c,"Depth",dh); }
-    if(ifmatch && ifmatch[0]){ char v[176]; snprintf(v,sizeof v,"\"%s\"",ifmatch);
-        esp_http_client_set_header(c,"If-Match",v); }
-    if(body) esp_http_client_set_post_field(c, body, bodylen);
-
-    esp_err_t err = esp_http_client_perform(c);
     int status = -1;
-    if(err==ESP_OK){
-        status = esp_http_client_get_status_code(c);
-        if(effurl && effcap) esp_http_client_get_url(c, effurl, effcap);
-    } else {
-        ESP_LOGW(TAG,"%s failed: %s", url, esp_err_to_name(err));
+
+    /* Try on the reused connection; if perform fails (e.g. the server dropped an
+     * idle keep-alive socket), drop the handle and retry once on a fresh one. */
+    for(int attempt=0; attempt<2; attempt++){
+        acc.len=0; acc.truncated=0; acc.etag[0]=0;
+        if(resp && respcap) resp[0]=0;
+
+        if(!s_client){
+            esp_http_client_config_t cfg = {
+                .url = url,
+                .method = method,
+                .crt_bundle_attach = esp_crt_bundle_attach,
+                .event_handler = on_event,
+                .timeout_ms = 20000,
+                .disable_auto_redirect = false,
+                .max_redirection_count = 5,
+                .buffer_size = 2048,
+                .buffer_size_tx = 2048,
+                .keep_alive_enable = true,   /* reuse the TCP+TLS connection */
+            };
+            s_client = esp_http_client_init(&cfg);
+            if(!s_client){ s_acc=NULL; return -1; }
+            snprintf(s_origin,sizeof s_origin,"%s",origin);
+        }
+        esp_http_client_handle_t c = s_client;
+
+        esp_http_client_set_url(c,url);
+        esp_http_client_set_method(c,method);
+        /* headers persist on a reused handle -> clear the ones that vary so, e.g.,
+         * a prior PUT's If-Match can't leak into a later GET. */
+        esp_http_client_delete_header(c,"Content-Type");
+        esp_http_client_delete_header(c,"Depth");
+        esp_http_client_delete_header(c,"If-Match");
+        if(auth[0]) esp_http_client_set_header(c,"Authorization",auth);
+        if(ctype)   esp_http_client_set_header(c,"Content-Type",ctype);
+        if(depth>=0){ char dh[4]={ depth?'1':'0', 0 }; esp_http_client_set_header(c,"Depth",dh); }
+        if(ifmatch && ifmatch[0]){ char v[176]; snprintf(v,sizeof v,"\"%s\"",ifmatch);
+            esp_http_client_set_header(c,"If-Match",v); }
+        esp_http_client_set_post_field(c, body?body:NULL, body?bodylen:0);
+
+        esp_err_t err = esp_http_client_perform(c);
+        if(err==ESP_OK){
+            status = esp_http_client_get_status_code(c);
+            if(effurl && effcap) esp_http_client_get_url(c, effurl, effcap);
+            break;
+        }
+        /* failed: the connection may be stale -- tear it down and, on the first
+         * attempt, retry fresh. A second failure is a real error. */
+        ESP_LOGW(TAG,"%s failed: %s%s", url, esp_err_to_name(err),
+                 attempt==0 ? " (retrying on a fresh connection)" : "");
+        dav_disconnect();
     }
+
     if(etag && etagcap) snprintf(etag,etagcap,"%s",acc.etag);
     if(respn) *respn = acc.len;
     if(acc.truncated) ESP_LOGW(TAG,"response truncated at %d bytes: %s", respcap, url);
-    esp_http_client_cleanup(c);
+    s_acc = NULL;
+    /* connection is left OPEN for the next request; dav_disconnect() (engine
+     * sortFile / end of sync) frees it before the next heap-heavy sort. */
     return status;
 }
 

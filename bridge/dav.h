@@ -51,4 +51,9 @@ int dav_effective_host(const DavCtx*d,const char*path,char*out,int cap);
 typedef void (*dav_coll_cb)(const char*href,int kind,const char*displayname,void*ctx);
 int dav_list_collections(const DavCtx*d,const char*path,dav_coll_cb cb,void*ctx);
 
+/* Close any persistent keep-alive connection, freeing the ~40 KB TLS working set.
+ * The engine calls this before every heap-heavy disk sort (sortFile) and at end
+ * of sync, so TLS never coexists with a sort. No-op on the host (curl) transport. */
+void dav_disconnect(void);
+
 #endif

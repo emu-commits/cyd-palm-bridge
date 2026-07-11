@@ -125,6 +125,7 @@ static int wifi_up(void){
     return (b & WIFI_OK) ? 1 : 0;
 }
 static void wifi_down(void){
+    dav_disconnect();   /* close any keep-alive connection before the TLS/socket stack goes away */
     esp_wifi_stop();
     esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, s_h_wifi);
     esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, s_h_ip);
@@ -265,7 +266,7 @@ static void hotsync_task(void *arg){
                  (failed||protec)?" (some skipped)":"");
     ESP_LOGI(TAG,"%s",msg);
     setst(msg);
-    wifi_down();
+    wifi_down();           /* also closes the last collection's keep-alive connection */
     s_busy = 0;
     vTaskDelete(NULL);
 }
@@ -360,7 +361,7 @@ static void discover_task(void *arg){
     s_disc_done = 1;
     if(s_disc_n==0) setst("No collections found - check login");
     else { char m[80]; snprintf(m,sizeof m,"Found %d (%d cal, %d addr)",s_disc_n,ncal,s_disc_n-ncal); setst(m); }
-    wifi_down();
+    wifi_down();           /* also closes the discovery keep-alive connection */
     s_busy = 0;
     vTaskDelete(NULL);
 }
