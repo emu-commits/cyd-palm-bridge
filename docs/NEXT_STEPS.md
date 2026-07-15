@@ -3,6 +3,43 @@
 Snapshot after the sync-correctness session. Newest state on top; see
 `docs/BUILD_PROGRESS.md` for the running build log and the deep-dive on each fix.
 
+## UPDATE 2026-07-15 — product-hygiene sprint done (CI green); next phase = mobile simulator
+
+A whole-repo review (`docs/REVIEW_2026-07-15.md`) then its §6 "day of hygiene",
+all landed on `claude/project-review-recommendations-x1ihdn` and **green in CI**
+(host gates + Radicale sync gates + `idf.py build`). Cleared or advanced several
+backlog items below:
+
+- **DONE — item 12 (gate debug telemetry).** The per-healthy-sync `[sync]` lines
+  are behind `SYNC_DEBUG` (default off); genuine errors/warnings stay unconditional.
+  *(Follow-up: the `dav_esp.c` `[dav]` firmware lines aren't gated yet — do it when
+  next flashing; needs an ESP-IDF compile to confirm no unused-variable warnings.)*
+- **DONE — item 13 (host test environment).** Radicale runs reliably again: a local
+  `./davvenv` + `tests/run_gates.sh` is green, and CI stands up a throwaway Radicale
+  every push. Fixed two latent harness bugs CI exposed (cross-gate `palm/cal`
+  pollution; `run_gates.sh` never built `./fuzz_test`).
+- **DONE — U0 / memory item M1 (from the review).** Sync scratch buffers (~20 KB)
+  moved BSS → sync-lifetime heap (`scratch_alloc`/`sync_free_scratch`); ~20 KB now
+  returns to interactive mode between syncs. The "static → heap" prerequisite is
+  closed. On-device heap-headroom re-measure is a nice-to-have on the next flash.
+- **DONE — licensing + CI + README** (was implicit in "P1 usable by someone else"):
+  GPLv3/MIT split + NOTICE; GitHub Actions; a newcomer-facing README top.
+- **DONE — review M4/O6 firmware micro-fixes** (discovery cap + detail buffer):
+  compile-verified in CI; runtime flash-verify pending.
+
+**Still pending on-device (unchanged, need hardware):** the live-iCloud verifies
+below (To Do full-reconcile heal, >24-record idempotency, relocation trace), the
+config.ini/Preferences round-trip flash, Graffiti threshold tuning, U8 battery /
+light-sleep, U9 case. And the review's **M2** (tear down LVGL draw buffers during
+sync for real headroom) is still unbuilt.
+
+**Next phase — the mobile-friendly UI simulator (`docs/SIMULATOR_PLAN.md`).** Build
+the LVGL UI (`ui.c`) to WebAssembly behind a small platform shim so the Palm runs
+in a phone browser. This makes the review's UX-charm backlog (Graffiti ink trail,
+HotSync dialog, Palm form contract, on-screen keyboard) iterate-in-minutes and
+reviewable from a phone while travelling, and lets `LV_MEM_SIZE=24K` reproduce the
+pool-exhaustion class off-device. See that doc for the phased build.
+
 ## UPDATE 2026-07-10 (part 11) — iCloud Reminders is a dead end; To Do stays on the CalDAV task lane
 
 **Correction to part 10:** "To Do is a CONFIG mismatch, re-map the list" was WRONG.
