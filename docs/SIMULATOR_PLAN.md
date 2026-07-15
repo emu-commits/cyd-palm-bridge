@@ -43,21 +43,16 @@ platform shim is a handful of small files under a new `sim/` directory.
 
 ---
 
-## Two tracks
+## Approach — the real WASM simulator (single track)
 
-### Track A — instant HTML mockup (design-only, disposable)
-A hand-built static HTML/CSS replica of the key Palm screens (launcher, a list, a
-detail, the Graffiti strip), theme-accurate but **not** wired to real code.
-Purpose: decide charm/theme/layout questions (C5 About, C7 touches, title-bar
-style, bezel) in minutes and share on a phone as a published **Artifact**. Cheap,
-throwaway, no toolchain. Good first step to lock the visual target before investing
-in Track B. *(Can be produced immediately on request.)*
-
-### Track B — the real WASM simulator (the durable investment)
 Compile the actual `ui.c` + its portable dependencies to WebAssembly with
 Emscripten, behind the `sim/` shim. This is a genuine interactive Palm in the
 browser: real navigation, real records, real Graffiti recognition, real Calculator
-and Find — the thing you iterate the UX in. The rest of this doc is Track B.
+and Find — the thing you iterate the UX in.
+
+> A throwaway HTML/CSS mockup was considered and **dropped as redundant**: the port
+> renders the real `ui.c`, so a separate hand-built replica would just be duplicate
+> UI to maintain. Design/charm decisions are made directly in the real sim.
 
 ---
 
@@ -145,8 +140,8 @@ list — the sim narrows what a flash session must check, it doesn't replace it.
   `ui.c` grows a new dependency, which is the signal to add a stub.
 - **Touch fidelity for Graffiti** — validate continuous-move capture early (S1/S2);
   add an explicit touch handler if SDL's mouse mapping drops points.
-- **Scope** — Track A (mockup) exists precisely so design decisions don't block on
-  Track B; and hotsync/network is deferred to S5 so S2–S4 need no backend.
+- **Scope** — hotsync/network is deferred to S5 so S2–S4 need no backend, keeping
+  the first interactive build small.
 
 ---
 
