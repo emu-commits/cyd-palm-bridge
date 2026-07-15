@@ -1,0 +1,58 @@
+name: CI
+
+# Host gates run with nothing but a C compiler (+ Python/Radicale for the
+# server-backed sync gates); the firmware is compile-checked in the official
+# ESP-IDF container. This catches the "host-green but firmware won't build"
+# class before flash day.
+
+on:
+  push:
+    branches: [ main, "claude/**" ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  host-gates:
+    name: Host gates (codec + fuzz)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Offline gates (codec / find / calc / config / streamparse)
+        run: make test
+      - name: Fuzz gate (ASan + UBSan)
+        run: make ftest
+
+  sync-gates:
+    name: Sync gates (Radicale)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Radicale into ./davvenv (the harness's expected venv)
+        run: |
+          python3 -m venv davvenv
+          ./davvenv/bin/pip install --quiet radicale
+      - name: Every gate against a throwaway Radicale (codec + fuzz + two-way sync + round-trip)
+        run: ./tests/run_gates.sh
+
+  firmware-build:
+    name: Firmware build (ESP-IDF v5.5)
+    runs-on: ubuntu-latest
+    container: espressif/idf:release-v5.5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mark workspace safe for git (container runs as root)
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Provide a placeholder secrets.h (real creds live only on the SD card)
+        working-directory: firmware
+        run: cp main/secrets.h.example main/secrets.h
+      - name: idf.py build
+        working-directory: firmware
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          idf.py set-target esp32
+          idf.py build
