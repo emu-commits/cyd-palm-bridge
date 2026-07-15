@@ -24,6 +24,17 @@
 #include "appinfo.h"
 #include "sync.h"
 
+/* The `[sync]` lines that fire on every HEALTHY sync (per-collection read +
+ * push/pull summary, and the per-relocation trace) are gated behind SYNC_DEBUG
+ * so a release build (host CLI or on-device UART) is quiet. Genuine errors,
+ * OOM, dropped-record warnings, and failure notices below stay unconditional.
+ * Build the host with -DSYNC_DEBUG (or #define it on device) to restore them. */
+#ifdef SYNC_DEBUG
+#define SYNC_LOG(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define SYNC_LOG(...) ((void)0)
+#endif
+
 /* Working-set sizing. NOTE: as of the streaming reconcile (sync_collection /
  * sync_one below), MAXR NO LONGER caps a synced collection -- reconciliation is a
  * disk-backed merge-join whose resident cost during a DAV call is O(1). MAXR now
@@ -737,7 +748,7 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
          * but the server moved it to a new href -- the exact iCloud behavior we
          * need to observe on-device. Logged only when the hrefs actually differ. */
         if(hasMap && hasSrv && mHref[0] && sName[0] && strcmp(mHref,sName))
-            fprintf(stderr,"[sync] reloc uid=%u: map href=%s -> server href=%s (UID match)\n",
+            SYNC_LOG("[sync] reloc uid=%u: map href=%s -> server href=%s (UID match)\n",
                     (unsigned)uid,mHref,sName);
 
         int conflict = (lcs==LMOD||lcs==LDEL||lcs==LNEW) && (scs==SMOD||scs==SNEW||scs==SDEL)
@@ -828,7 +839,7 @@ int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
     s->kind=kind; snprintf(s->pdbpath,sizeof s->pdbpath,"%s",localpdb);
     static uint8_t ai[512]; int ailen=pdb_read_appinfo(localpdb,ai,sizeof ai); if(ailen<0)ailen=0;
     int nin = countRecs(localpdb);
-    fprintf(stderr,"[sync] read %s: recs=%d ailen=%d\n",localpdb,nin,ailen);
+    SYNC_LOG("[sync] read %s: recs=%d ailen=%d\n",localpdb,nin,ailen);
     SyncStats z={0}; if(!st) st=&z;
 
     PdbW *w = pdbw_begin(OUT_TMP);
@@ -836,7 +847,7 @@ int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
     progReset(nin);
     sync_one(d,s,coll,mapfile,pol,w,0,st,NULL,NULL);
     int nrec = pdbw_count(w);
-    fprintf(stderr,"[sync] %s: out=%d push=%d/%d/%d pull=%d/%d/%d\n",
+    SYNC_LOG("[sync] %s: out=%d push=%d/%d/%d pull=%d/%d/%d\n",
             coll,nrec,st->pushNew,st->pushMod,st->pushDel,
             st->pullNew,st->pullMod,st->pullDel);
     /* SAFETY: never overwrite a local PDB that HAD records with an empty result.
