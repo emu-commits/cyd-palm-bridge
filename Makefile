@@ -98,6 +98,6 @@ mtest: multiapp
 
 clean:
 	rm -f roundtrip bridge_cli incremental synctoken category bigsync multiapp \
-	      uidmatch idempotent streamparse find_test calc_test config_test pdb/_rt_*.pdb
+	      uidmatch idempotent streamparse find_test calc_test config_test fuzz_test pdb/_rt_*.pdb
 
 .PHONY: all dirs test itest stest ctest btest mtest clean

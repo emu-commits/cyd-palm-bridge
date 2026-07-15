@@ -57,7 +57,10 @@ curl -s -o /dev/null -u "$U:$P" -X MKCOL -H 'Content-Type: application/xml' \
   "$BASE/palm/card/"
 
 echo "== building =="
-make >/dev/null || { echo "build failed"; exit 1; }
+# `make` (all) does not build the sanitizer fuzz binary -- build it explicitly so
+# the fuzz gate below has ./fuzz_test on a clean checkout (it only "worked" before
+# if a prior `make ftest` had left the binary behind; CI's clean tree caught this).
+make >/dev/null && make fuzz_test >/dev/null || { echo "build failed"; exit 1; }
 
 rc=0
 # empty every collection (objects only) so one gate can't pollute the next --
