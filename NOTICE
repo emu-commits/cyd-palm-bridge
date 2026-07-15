@@ -1,0 +1,41 @@
+# Licensing and attribution
+
+CYD Palm is dual-licensed by component. The two halves have different obligations
+because only one of them incorporates third-party GPLv3 assets.
+
+## The on-device firmware (`firmware/`) — GPLv3
+
+The firmware is licensed under the **GNU General Public License v3.0** (see the
+root [`LICENSE`](LICENSE)).
+
+It is GPLv3 because it reuses assets derived from **PumpkinOS**
+(https://github.com/migueletto/PumpkinOS), which is GPLv3:
+
+- **Bitmap fonts** — the PalmOS system fonts, converted to LVGL fonts
+  (`firmware/main/lv_font_palm.c`, `firmware/main/lv_font_palm_bold.c`).
+- **Launcher / silkscreen icons** — the Palm app and silkscreen bitmaps
+  (`firmware/main/palm_icons.c`, `firmware/main/palm_icons.h`).
+
+PumpkinOS was also used as a *format and layout oracle* (a reference for the Palm
+PDB record layouts and app screen structure) when writing the clean-room codecs
+below; no PumpkinOS source code is compiled into the host bridge.
+
+## The host bridge (`bridge/`) — MIT
+
+The headless Palm ↔ CalDAV/CardDAV codec and sync engine under `bridge/` is
+**clean-room** — written from the documented Palm database layouts, not copied
+from PumpkinOS — and is licensed under the **MIT License** (see
+[`bridge/LICENSE`](bridge/LICENSE)) so the codec can be reused freely.
+
+Note: when `bridge/` sources are compiled *into the firmware* (as an ESP-IDF
+component), the resulting device binary is a combined work and is covered by the
+firmware's GPLv3. The MIT grant applies to the `bridge/` sources on their own
+(e.g. the host `bridge_cli` tool and anyone reusing the codec elsewhere).
+
+## Trademarks
+
+"Palm", "PalmOS", "Graffiti", and "HotSync" are or were trademarks of their
+respective owners. This project is an independent, non-commercial homage and is
+**not affiliated with, endorsed by, or sponsored by** Palm, Inc., its successors,
+or any current holder of these marks. The names are used only to describe
+compatibility and interaction conventions.
