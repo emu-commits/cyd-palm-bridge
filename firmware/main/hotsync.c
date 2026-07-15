@@ -256,6 +256,7 @@ static void hotsync_task(void *arg){
     }
 
     sync_set_progress(NULL, NULL);                 /* detach the hook */
+    sync_free_scratch();   /* hand the ~20 KB sync scratch back to the interactive UI */
     setprog(100);
     if(did==0 && failed>0)
         snprintf(msg,sizeof msg,"Sync failed - low memory (heap %lu)",
