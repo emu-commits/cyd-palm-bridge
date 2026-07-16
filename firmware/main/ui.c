@@ -1122,6 +1122,7 @@ static void show_tz_picker(void){
 }
 
 /* ---- the Preferences list ---- */
+static lv_obj_t *g_pf_bright_btn;   /* the "Brightness: NN%" row, refreshed on stepper close */
 static void pf_row_open_cb(lv_event_t *e){
     int i = (int)(intptr_t)lv_event_get_user_data(e);
     if(i == PF_TZ){ show_tz_picker(); return; }   /* zone -> picker, not text entry */
@@ -1139,10 +1140,11 @@ static void pf_saverow_cb(lv_event_t *e){ (void)e;
     int rc = appcfg_save();
     alert_show(rc==0 ? "Saved to config.ini" : "Could not write config.ini (SD card?)");
 }
-static void pf_add(lv_obj_t *list, const char *text, lv_event_cb_t cb, int ud){
+static lv_obj_t *pf_add(lv_obj_t *list, const char *text, lv_event_cb_t cb, int ud){
     lv_obj_t *b = lv_list_add_button(list, NULL, text);
     lv_obj_set_style_radius(b, 0, 0);
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, (void *)(intptr_t)ud);
+    return b;
 }
 static void show_prefs(void){
     kill_kb();
@@ -1174,7 +1176,7 @@ static void show_prefs(void){
     snprintf(row, sizeof row, "Conflicts: %s", pol_name(c->policy));
     pf_add(list, row, pf_pol_row_cb, 0);
     snprintf(row, sizeof row, "Brightness: %d%%", c->brightness);
-    pf_add(list, row, pf_bright_row_cb, 0);
+    g_pf_bright_btn = pf_add(list, row, pf_bright_row_cb, 0);
     pf_add(list, "Discover collections...", pf_disc_row_cb, 0);
     pf_add(list, "Save to config.ini", pf_saverow_cb, 0);
 }
@@ -1910,24 +1912,60 @@ void due_open(void){
 }
 static void due_btn_cb(lv_event_t *e){ (void)e; due_open(); }
 
-/* ------------------------- Preferences: brightness slider ------------------------- */
-/* A slider popup that live-adjusts the backlight as it's dragged and persists the
- * value to config.ini on release. */
+/* ------------------------- Preferences: brightness stepper ------------------------- */
+/* A [ - ]  75%  [ + ] popup that live-adjusts the backlight and persists on close.
+ *
+ * NOT an lv_slider: lv_slider derives from lv_bar (.base_class = &lv_bar_class),
+ * and a bar's indicator forces LVGL to allocate a draw-LAYER buffer from the fixed
+ * 24 KB object pool. On the no-PSRAM device (and in the 24 KB-pool wasm sim) that
+ * allocation can fail with the pool already full from the Preferences list, and
+ * LVGL then spins retrying the draw every refresh -> IDLE0 starves -> Task WDT ->
+ * frozen screen. This is the exact failure documented at hs_tick (why HotSync
+ * progress is text, not an lv_bar). Plain buttons never allocate a layer -- the
+ * same reason the Calculator and the on-screen keyboard use a button matrix -- so
+ * the stepper is pool-safe. Brightness floors at 10% so it can't go fully dark. */
 static lv_obj_t *g_brpop, *g_br_val;
-static void br_close(void){ if(g_brpop){ lv_obj_del(g_brpop); g_brpop=NULL; g_br_val=NULL; } }
-static void br_backdrop_cb(lv_event_t *e){ (void)e; br_close(); }
-static void br_slider_cb(lv_event_t *e){
-    lv_obj_t *s = (lv_obj_t *)lv_event_get_target(e);
-    int v = (int)lv_slider_get_value(s);
-    power_set_brightness(v);                         /* live preview */
-    if(g_br_val) lv_label_set_text_fmt(g_br_val, "%d%%", v);
-    if(lv_event_get_code(e) == LV_EVENT_RELEASED){
-        appcfg_mut()->brightness = v; appcfg_save();  /* persist -> survives reboot */
+static int g_br_val_cur, g_br_val_orig;
+static void br_close(void){
+    if(!g_brpop) return;
+    if(g_br_val_cur != g_br_val_orig){            /* persist once, on close */
+        appcfg_mut()->brightness = g_br_val_cur; appcfg_save();
+        /* refresh the underlying "Brightness: NN%" row (the popup is a layer_top
+         * overlay, so the Preferences list beneath it is still the live screen) */
+        if(g_pf_bright_btn){
+            lv_obj_t *lbl = lv_obj_get_child_by_type(g_pf_bright_btn, 0, &lv_label_class);
+            if(lbl) lv_label_set_text_fmt(lbl, "Brightness: %d%%", g_br_val_cur);
+        }
     }
+    lv_obj_del(g_brpop); g_brpop=NULL; g_br_val=NULL;
+}
+static void br_backdrop_cb(lv_event_t *e){ (void)e; br_close(); }
+static void br_set(int v){
+    if(v < 10) v = 10;
+    if(v > 100) v = 100;
+    g_br_val_cur = v;
+    power_set_brightness(v);                          /* live preview */
+    if(g_br_val) lv_label_set_text_fmt(g_br_val, "%d%%", v);
+}
+static void br_minus_cb(lv_event_t *e){ (void)e; br_set(g_br_val_cur - 10); }
+static void br_plus_cb (lv_event_t *e){ (void)e; br_set(g_br_val_cur + 10); }
+static lv_obj_t *br_step_btn(lv_obj_t *parent, const char *glyph, lv_event_cb_t cb){
+    lv_obj_t *b = lv_button_create(parent);
+    lv_obj_set_size(b, 56, 46);
+    lv_obj_set_style_radius(b, 0, 0);
+    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *l = lv_label_create(b);
+    lv_label_set_text(l, glyph);
+    lv_obj_set_style_text_font(l, &lv_font_palm_bold, 0);
+    lv_obj_center(l);
+    return b;
 }
 void br_open(void){
     if(g_brpop) return;
     int cur = appcfg()->brightness;
+    if(cur < 10) cur = 10;
+    g_br_val_orig = g_br_val_cur = cur;
+
     g_brpop = lv_obj_create(lv_layer_top());
     lv_obj_set_size(g_brpop, LCD_W, LCD_H);
     lv_obj_set_style_bg_color(g_brpop, COL_LINE, 0);
@@ -1955,15 +1993,22 @@ void br_open(void){
     lv_label_set_text(hdr, "Brightness");
     lv_obj_set_style_text_font(hdr, &lv_font_palm_bold, 0);
 
-    lv_obj_t *sl = lv_slider_create(panel);
-    lv_obj_set_width(sl, LCD_W - 70);
-    lv_slider_set_range(sl, 10, 100);   /* floor at 10% so it can't go fully dark */
-    lv_slider_set_value(sl, cur < 10 ? 10 : cur, LV_ANIM_OFF);
-    lv_obj_add_event_cb(sl, br_slider_cb, LV_EVENT_VALUE_CHANGED, NULL);
-    lv_obj_add_event_cb(sl, br_slider_cb, LV_EVENT_RELEASED, NULL);
+    /* [ - ]  NN%  [ + ] -- a transparent flex row of plain buttons + the value */
+    lv_obj_t *row = lv_obj_create(panel);
+    lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(row, LV_OPA_0, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_set_style_pad_column(row, 14, 0);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_flex_cross_place(row, LV_FLEX_ALIGN_CENTER, 0);
 
-    g_br_val = lv_label_create(panel);
+    br_step_btn(row, "-", br_minus_cb);
+    g_br_val = lv_label_create(row);
+    lv_obj_set_width(g_br_val, 52);
+    lv_obj_set_style_text_align(g_br_val, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text_fmt(g_br_val, "%d%%", cur);
+    br_step_btn(row, "+", br_plus_cb);
 }
 
 /* ------------------------- U6: Graffiti stroke capture ------------------------- */

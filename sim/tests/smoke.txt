@@ -59,6 +59,35 @@ t 300
 s prefs_kb_typed
 c 32 40
 t 300
+# Brightness stepper (must NOT be an lv_slider: a bar/slider draw-layer alloc
+# live-locks LVGL on the 24 KB pool -> WDT freeze). Scroll to the Brightness row,
+# open the [-] NN% [+] popup, step it, close. A regression here HANGS this run.
+d 120 190
+t 30
+m 120 100
+t 30
+m 120 50
+t 30
+u
+t 300
+d 120 190
+t 30
+m 120 100
+t 30
+m 120 50
+t 30
+u
+t 400
+c 120 140
+t 400
+s prefs_brightness
+c 52 175
+t 300
+c 188 175
+t 300
+s prefs_brightness_stepped
+c 120 30
+t 400
 c 18 225
 t 300
 # Graffiti with the C1 ink trail: screenshot MID-stroke, then after recognition
