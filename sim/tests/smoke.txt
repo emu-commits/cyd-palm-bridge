@@ -8,7 +8,7 @@ t 400
 s datebook_day
 c 18 225
 t 300
-# Address list -> record detail -> edit form (C4 bottom bar) -> cancel -> home
+# Address list -> record detail -> edit form (C4 bottom bar) -> Done (I4 toast)
 c 120 55
 t 400
 s address_list
@@ -18,8 +18,19 @@ s address_detail
 c 200 188
 t 400
 s edit_form
-c 200 188
+# tap Done (bottom-left) -> saves -> transient "Saved" toast (I4)
+c 36 190
+t 150
+s address_saved
+t 900
+# Options menu -> About: the C6 honesty lines (Memo device-only, To Do = CalDAV)
+c 18 300
 t 400
+c 60 185
+t 400
+s about_box
+c 120 30
+t 300
 c 18 225
 t 300
 # To Do
@@ -107,4 +118,14 @@ s graffiti_ink
 u
 t 400
 s graffiti_lookup
+# I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.
+# (CI starts on a fresh /sdcard, so the seed + manifest exist here.)
+c 18 225
+t 300
+c 18 300
+t 400
+c 70 85
+t 150
+s demo_removed
+t 900
 q

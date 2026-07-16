@@ -6,6 +6,43 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-16 (part 5) — I4 feedback toasts + C6 honesty labels
+
+Two small, high-value sim-testable items from the review, both verified and added
+to the smoke gate.
+
+- **I4 (feedback loops).** Record **save** and **delete** were silent-success.
+  Added a Palm-style transient toast: `toast_show()` puts a non-clickable black
+  pill (white text) just above the Graffiti strip that clears itself after ~900 ms
+  (one-shot `lv_timer`, the ink-fade idiom) -- no tap required, unlike the modal
+  `alert_show`. A plain label with a solid fill allocates no draw layer, so it's
+  pool-safe. Wired "Saved" into `save_cb` and "Deleted" into the delete-confirm.
+- **C6 (honesty labels).** The About box now states the two things the device knows
+  but the user didn't: "Memos stay on this device." and "To Dos sync as CalDAV
+  tasks, not the Reminders app." (the part-11 iCloud finding). Bumped to v0.3.
+- **I2 (demo seed vs. real data).** First boot seeds Johnny Appleseed + 14 fake
+  meetings; a first HotSync would push them into the user's real iCloud. Now the
+  seeder writes a manifest (`/sdcard/.demoseed`, per-app record count -- seeds
+  always take uniqueIDs 1..nr and new/synced records get max+1, so 1..nr uniquely
+  identifies the demo rows), and an Options -> **"Remove demo data"** item (shown
+  only while `data_demo_present()`) deletes exactly those in ONE rewrite per app
+  (`data_remove_demo`, not per-record -> no O(n^2) SD churn / WDT risk), then drops
+  the manifest so the item disappears and no re-seed happens (empty PDBs remain).
+  User-added / synced records (uniqueID > nr) are never touched. Verified: fresh
+  boot -> menu shows the item -> tap -> "Removed 41 demo records" -> lists empty,
+  item gone.
+
+- **I1.1 (first-run onboarding hint).** The launcher showed demo records with no
+  explanation. Until an iCloud account is configured (`dav_user` empty), it now
+  shows a centred hint in the grid's empty lower third: "Demo data shown. To sync
+  your own: edit config.ini on the card, or tap Menu > Preferences." It disappears
+  once the Apple ID is set. (The README showcase screenshot is left hint-free.)
+
+Smoke now taps **Done** on the Address edit form to capture the "Saved" toast
+(`address_saved`), opens **About** for the honesty text (`about_box`), and finally
+(destructive, so last) taps **Remove demo data** for the `demo_removed` toast; the
+`launcher` shot exercises the I1.1 hint.
+
 ## SESSION 2026-07-16 (part 4) — C7: the authentic inverted Palm title bar
 
 Charm item **C7 (title bar)** from the review, decided with the user against a

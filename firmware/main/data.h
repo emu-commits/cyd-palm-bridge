@@ -8,6 +8,12 @@
  * before a HotSync). safe to call every boot. */
 void data_seed_if_empty(void);
 
+/* I2: demo-seed management. data_demo_present() is true while the untouched demo
+ * seed is on the card; data_remove_demo() deletes exactly the seeded records
+ * (never user-added / synced ones) and returns how many it removed. */
+int  data_demo_present(void);
+int  data_remove_demo(void);
+
 enum { APP_CAL, APP_ADDR, APP_TODO, APP_MEMO };
 
 /* per-record display callback: record uid + primary line + optional secondary. */

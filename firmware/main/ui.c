@@ -98,6 +98,7 @@ static void show_discover(void);
 static void update_cat_trigger(void);
 static void cat_trigger_cb(lv_event_t *e);
 static void details_open(void);
+static void toast_show(const char *msg);   /* I4: transient save/delete feedback */
 static void due_open(void);
 static void due_btn_cb(lv_event_t *e);
 static void due_set_label(void);
@@ -378,7 +379,7 @@ static void confirm_cancel_cb(lv_event_t *e){ (void)e; confirm_close(); }
 static void confirm_delete_cb(lv_event_t *e){ (void)e;
     const AppDef *a = cur_app; uint32_t u = del_uid;
     confirm_close();
-    if(a && u){ data_delete(a->app, u); cur_uid = 0; app_reopen(a); }
+    if(a && u){ data_delete(a->app, u); cur_uid = 0; app_reopen(a); toast_show("Deleted"); }
 }
 static void ask_delete(uint32_t uid){
     if(g_confirm || !cur_app) return;
@@ -564,6 +565,7 @@ static void save_cb(lv_event_t *e){
     } else if(cur_app->app == APP_MEMO){
         data_save_memo(edit_uid,edit_cat,fv(0));
     }
+    toast_show("Saved");
     app_reopen(cur_app);
 }
 static void cancel_cb(lv_event_t *e){ (void)e; app_reopen(cur_app); }
@@ -909,6 +911,21 @@ static void show_launcher(void){
         lv_label_set_text(lbl, APPS[i]);
         lv_obj_set_style_text_font(lbl, &lv_font_palm, 0);
     }
+
+    /* I1.1: onboarding hint. Until an iCloud account is configured, the records on
+     * screen are demo data -- say so and point at setup, instead of leaving a
+     * newcomer to guess. Shows in the empty lower third of the launcher grid and
+     * disappears once dav_user (the Apple ID) is set. */
+    if(appcfg()->dav_user[0] == '\0'){
+        lv_obj_t *hint = lv_label_create(content);
+        lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(hint, LCD_W - 24);
+        lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+        lv_label_set_text(hint, "Demo data shown. To sync your own:\n"
+                                "edit config.ini on the card, or tap\n"
+                                "Menu > Preferences.");
+        lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -6);
+    }
 }
 
 /* ============ P1.5: Preferences + collection discovery ============ */
@@ -945,6 +962,32 @@ static void alert_show(const char *msg){
     lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(l, 180);
     lv_label_set_text(l, msg);
+}
+
+/* I4: a transient, auto-dismissing confirmation (Palm-style). Unlike alert_show
+ * (a modal you tap to close), this is a non-clickable pill just above the Graffiti
+ * strip that clears itself after ~900 ms -- for closing the loop on save/delete
+ * without demanding a tap. A plain label with a solid fill allocates no draw
+ * layer, so it's pool-safe (the lv_bar rule). */
+static lv_obj_t  *g_toast;
+static lv_timer_t *toast_timer;
+static void toast_clear_cb(lv_timer_t *t){ (void)t;
+    if(g_toast){ lv_obj_del(g_toast); g_toast=NULL; }
+    toast_timer = NULL;
+}
+static void toast_show(const char *msg){
+    if(g_toast){ lv_obj_del(g_toast); g_toast=NULL; }
+    g_toast = lv_label_create(lv_layer_top());
+    lv_obj_set_style_bg_color(g_toast, COL_LINE, 0);
+    lv_obj_set_style_bg_opa(g_toast, LV_OPA_COVER, 0);
+    lv_obj_set_style_text_color(g_toast, COL_TITLE_FG, 0);   /* white on black */
+    lv_obj_set_style_pad_all(g_toast, 6, 0);
+    lv_obj_set_style_radius(g_toast, 0, 0);
+    lv_label_set_text(g_toast, msg);
+    lv_obj_align(g_toast, LV_ALIGN_BOTTOM_MID, 0, -(GRAFFITI_H + 8));
+    if(toast_timer) lv_timer_delete(toast_timer);
+    toast_timer = lv_timer_create(toast_clear_cb, 900, NULL);
+    lv_timer_set_repeat_count(toast_timer, 1);   /* one-shot: auto-deletes */
 }
 
 /* ---- Preferences: edit the config.ini fields on-device (Graffiti entry) ----
@@ -1374,6 +1417,16 @@ static void act_gentest(lv_event_t *e){ (void)e; menu_close();
 }
 #endif /* UI_DEVTOOLS */
 
+/* I2: remove the demo seed before the first HotSync, so Johnny Appleseed and the
+ * fake meetings never get pushed into the user's real iCloud. Deletes only the
+ * seeded records (the manifest tracks them); user edits/additions are kept. */
+static void act_remove_demo(lv_event_t *e){ (void)e; menu_close();
+    int n = data_remove_demo();
+    if(cur_app) app_reopen(cur_app); else show_launcher();
+    char msg[40]; snprintf(msg, sizeof msg, "Removed %d demo record%s", n, n==1?"":"s");
+    toast_show(msg);
+}
+
 static lv_obj_t *g_about;
 static void about_close(void){ if(g_about){ lv_obj_del(g_about); g_about=NULL; } }
 static void about_backdrop_cb(lv_event_t *e){ (void)e; about_close(); }
@@ -1411,7 +1464,10 @@ static void act_about(lv_event_t *e){ (void)e;
     lv_label_set_text(body, "A pocket PDA that syncs to iCloud.\n"
                             "Offline by default. HotSync when\n"
                             "you want to. No feed. No ads.\n\n"
-                            "v0.2 - tap to close");
+                            "Memos stay on this device.\n"
+                            "To Dos sync as CalDAV tasks,\n"
+                            "not the Reminders app.\n\n"
+                            "v0.3 - tap to close");
     lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 20);
 }
 
@@ -1472,6 +1528,8 @@ static void menu_open(void){
         menu_item(panel, g_todo_sort_due ? "Sort by Priority" : "Sort by Due Date", act_toggle_sort);
     }
     menu_item(panel, "Preferences", act_prefs);
+    if(data_demo_present())
+        menu_item(panel, "Remove demo data", act_remove_demo);
 #ifdef UI_DEVTOOLS
     menu_item(panel, "Add test events", act_gentest);
 #endif
