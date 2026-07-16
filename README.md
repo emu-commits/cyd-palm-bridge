@@ -73,6 +73,16 @@ browser simulator on every push (the `palm-simulator-web` artifact) and publishe
 it to GitHub Pages: **https://emu-commits.github.io/cyd-palm-bridge/** — open it
 on a phone. Sync is stubbed in the simulator — everything else is the real thing.
 
+The simulator models the device's memory, not just its pixels: the LVGL object
+pool is the exact 24 KB (on the 32-bit wasm build), and the general heap is
+capped at a device-like ~144 KB budget (`sim/sim_heap.h`) so allocations that
+would fail on hardware fail in the browser too. Your records **persist in your
+browser** (an IndexedDB-backed `/sdcard`, per-device and origin-isolated — other
+sites can't read it); **passwords are never persisted** — the secret fields of
+`config.ini` are scrubbed before every write to browser storage, so don't expect
+credentials to survive a reload (and please don't enter real ones: sync is
+disabled in the simulator anyway).
+
 ---
 
 # How it works — architecture & build log

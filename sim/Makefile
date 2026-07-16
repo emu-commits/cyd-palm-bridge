@@ -32,7 +32,10 @@ APP_SRCS := \
     $(BR)/ical.c $(BR)/vcard.c $(BR)/tz.c $(BR)/charset.c \
     $(BR)/find.c $(BR)/calc.c $(BR)/config.c \
     stubs/hotsync_stub.c stubs/power_stub.c \
-    sim_port.c
+    sim_port.c heap_budget.c
+
+# route every libc allocation through the device-like heap budget (sim_heap.h)
+WRAP_LD := -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free
 
 LVGL_SRCS := $(shell find lvgl/src -name '*.c' 2>/dev/null)
 LVGL_OBJS := $(patsubst lvgl/src/%.c,build/lvgl/%.o,$(LVGL_SRCS))
@@ -62,8 +65,8 @@ build/lvgl/%.o: lvgl/src/%.c lv_conf.h | lvgl/src
 build/liblvgl.a: lvgl/src $(LVGL_OBJS)
 	ar rcs $@ $(LVGL_OBJS)
 
-build/sim_host: build/liblvgl.a $(APP_SRCS) host_main.c sim_port.h lv_conf.h
-	$(CC) $(CFLAGS) $(APP_SRCS) host_main.c build/liblvgl.a -o $@ -lm
+build/sim_host: build/liblvgl.a $(APP_SRCS) host_main.c sim_port.h sim_heap.h lv_conf.h
+	$(CC) $(CFLAGS) $(APP_SRCS) host_main.c build/liblvgl.a -o $@ -lm $(WRAP_LD)
 
 # ---- smoke: the CI gate (scripted run must exit 0 and produce shots) ----
 smoke: host
@@ -77,13 +80,14 @@ smoke: host
 # the Palm at module init; JS drives frames and blits the exported framebuffer. ----
 WASM_CFLAGS := $(filter-out -g,$(CFLAGS)) -g0
 
-build/web/index.html: lvgl/src $(APP_SRCS) wasm_main.c web/index.html lv_conf.h
+build/web/index.html: lvgl/src $(APP_SRCS) wasm_main.c web/index.html lv_conf.h sim_heap.h
 	mkdir -p build/web
 	$(EMCC) $(WASM_CFLAGS) \
 	    $(LVGL_SRCS) $(APP_SRCS) wasm_main.c \
 	    -o build/web/palm.js \
-	    -sEXPORTED_FUNCTIONS=_main,_sim_boot,_sim_frame,_sim_pointer,_sim_fb \
-	    -sEXPORTED_RUNTIME_METHODS=HEAPU8 \
+	    -lidbfs.js $(WRAP_LD) \
+	    -sEXPORTED_FUNCTIONS=_main,_sim_boot,_sim_frame,_sim_pointer,_sim_fb,_sim_scrub_config,_sim_heap_used,_sim_heap_freebytes \
+	    -sEXPORTED_RUNTIME_METHODS=HEAPU8,FS \
 	    -sALLOW_MEMORY_GROWTH=1 -sASSERTIONS=0 \
 	    -sMODULARIZE=1 -sEXPORT_NAME=PalmSim
 	cp web/index.html build/web/index.html

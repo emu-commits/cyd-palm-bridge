@@ -30,12 +30,17 @@
     background: #fff;
     border: 1px solid #111;
   }
-  #status { color: #9a9aa2; font-size: 13px; margin-top: 12px; }
+  #status { color: #9a9aa2; font-size: 13px; margin-top: 12px; text-align: center; }
+  #note   { color: #6e6e76; font-size: 11px; margin-top: 6px; max-width: 42em;
+            text-align: center; padding: 0 12px; }
 </style>
 </head>
 <body>
   <div id="case"><canvas id="lcd" width="240" height="320"></canvas></div>
   <div id="status">booting…</div>
+  <div id="note">Your records live in this browser only (IndexedDB — other sites can't
+    read it). Passwords are never saved, and sync is disabled here — please don't
+    enter real credentials.</div>
 
 <script src="palm.js"></script>
 <script>
@@ -46,46 +51,74 @@ const img = ctx.createImageData(W, H);
 const status = document.getElementById('status');
 
 PalmSim().then((m) => {
-  status.textContent = 'CYD Palm simulator — the real firmware UI, in your browser';
+  /* ---- SD card = IndexedDB: mount, restore, THEN boot the Palm ---- */
+  try { m.FS.mkdir('/sdcard'); } catch (e) {}
+  m.FS.mount(m.FS.filesystems.IDBFS, {}, '/sdcard');
+  m.FS.syncfs(true, (err) => {
+    if (err) console.warn('sdcard restore failed (starting fresh):', err);
+    m._sim_boot();
 
-  /* ---- pointer -> Palm touch (canvas CSS size -> 240x320 space) ---- */
-  function xy(ev){
-    const r = canvas.getBoundingClientRect();
-    const x = Math.round((ev.clientX - r.left) * W / r.width);
-    const y = Math.round((ev.clientY - r.top)  * H / r.height);
-    return [Math.max(0, Math.min(W - 1, x)), Math.max(0, Math.min(H - 1, y))];
-  }
-  let down = false;
-  canvas.addEventListener('pointerdown', (ev) => {
-    canvas.setPointerCapture(ev.pointerId);
-    down = true;
-    const [x, y] = xy(ev);
-    m._sim_pointer(x, y, 1);
-    ev.preventDefault();
-  });
-  canvas.addEventListener('pointermove', (ev) => {
-    if(!down) return;
-    const [x, y] = xy(ev);
-    m._sim_pointer(x, y, 1);
-    ev.preventDefault();
-  });
-  function lift(ev){ if(down){ down = false; m._sim_pointer(0, 0, 0); ev.preventDefault(); } }
-  canvas.addEventListener('pointerup', lift);
-  canvas.addEventListener('pointercancel', lift);
+    /* persist: scrub passwords out of config.ini FIRST, then write IndexedDB.
+       Runs every few seconds and when the tab hides/closes. */
+    let syncing = false;
+    function persist(){
+      if (syncing) return;
+      syncing = true;
+      m._sim_scrub_config();
+      m.FS.syncfs(false, () => { syncing = false; });
+    }
+    setInterval(persist, 4000);
+    addEventListener('pagehide', persist);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) persist(); });
 
-  /* ---- frame loop: step LVGL by real elapsed time, blit the framebuffer ---- */
-  const fbPtr = m._sim_fb();
-  const fbLen = W * H * 4;
-  let last = performance.now();
-  function frame(now){
-    m._sim_frame(Math.round(now - last));
-    last = now;
-    /* copy out of wasm memory (re-read HEAPU8 each frame: memory can grow) */
-    img.data.set(m.HEAPU8.subarray(fbPtr, fbPtr + fbLen));
-    ctx.putImageData(img, 0, 0);
+    /* ---- pointer -> Palm touch (canvas CSS size -> 240x320 space) ---- */
+    function xy(ev){
+      const r = canvas.getBoundingClientRect();
+      const x = Math.round((ev.clientX - r.left) * W / r.width);
+      const y = Math.round((ev.clientY - r.top)  * H / r.height);
+      return [Math.max(0, Math.min(W - 1, x)), Math.max(0, Math.min(H - 1, y))];
+    }
+    let down = false;
+    canvas.addEventListener('pointerdown', (ev) => {
+      canvas.setPointerCapture(ev.pointerId);
+      down = true;
+      const [x, y] = xy(ev);
+      m._sim_pointer(x, y, 1);
+      ev.preventDefault();
+    });
+    canvas.addEventListener('pointermove', (ev) => {
+      if(!down) return;
+      const [x, y] = xy(ev);
+      m._sim_pointer(x, y, 1);
+      ev.preventDefault();
+    });
+    function lift(ev){ if(down){ down = false; m._sim_pointer(0, 0, 0); ev.preventDefault(); } }
+    canvas.addEventListener('pointerup', lift);
+    canvas.addEventListener('pointercancel', lift);
+
+    /* ---- frame loop: step LVGL by real elapsed time, blit the framebuffer ---- */
+    const fbPtr = m._sim_fb();
+    const fbLen = W * H * 4;
+    let last = performance.now();
+    function frame(now){
+      m._sim_frame(Math.round(now - last));
+      last = now;
+      /* copy out of wasm memory (re-read HEAPU8 each frame: memory can grow) */
+      img.data.set(m.HEAPU8.subarray(fbPtr, fbPtr + fbLen));
+      ctx.putImageData(img, 0, 0);
+      requestAnimationFrame(frame);
+    }
     requestAnimationFrame(frame);
-  }
-  requestAnimationFrame(frame);
+
+    /* status: device-like heap readout (the budget the hardware would have) */
+    function heap(){
+      const free = m._sim_heap_freebytes();
+      status.textContent = 'the real firmware UI in your browser · heap: '
+                         + Math.round(free / 1024) + ' KB free';
+    }
+    heap();
+    setInterval(heap, 2000);
+  });
 }).catch((e) => { status.textContent = 'failed to start: ' + e; });
 </script>
 </body>

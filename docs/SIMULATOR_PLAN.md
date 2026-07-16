@@ -12,8 +12,20 @@
 > frontend** (scripted input + PPM/PNG screenshots) was added as the local dev
 > loop + CI gate alongside the browser target. Pages is enabled (Source:
 > GitHub Actions) -- the sim publishes to
-> https://emu-commits.github.io/cyd-palm-bridge/ on every push. Next: **S4**
-> (charm backlog in the sim) and **S5** (fetch-based sync).
+> https://emu-commits.github.io/cyd-palm-bridge/ on every push.
+>
+> **UPDATE (same day, post-launch):** two gaps found by using it on a phone,
+> both fixed. (1) **General-heap ceiling** (`sim/sim_heap.h` + `heap_budget.c`,
+> linker-wrapped malloc/calloc/realloc/free): the LVGL pool was already exact,
+> but general malloc drew from unlimited browser memory -- now it's capped at a
+> device-like budget (default 144 KB ~= the UI_ROADMAP Mode A free heap), armed
+> after boot; verified by a 1 KB-budget build rendering the UI's real
+> "(low memory)" degrade path. (2) **Persistent SD card**: /sdcard is now an
+> IDBFS (IndexedDB) mount -- records/prefs survive reloads, per-browser and
+> origin-isolated. Credentials are deliberately NOT persisted: sim_scrub_config()
+> blanks the password fields of config.ini before every write to browser
+> storage (session-only in RAM; sync is stubbed so stored creds would be pure
+> risk). Next: **S4** (charm backlog in the sim) and **S5** (fetch-based sync).
 
 Goal: run the real Palm UI (`firmware/main/ui.c`) **in a phone browser**, so the
 look-and-feel and the review's UX-charm backlog can be built and reviewed from a
