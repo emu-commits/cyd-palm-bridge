@@ -32,9 +32,16 @@ to the smoke gate.
   boot -> menu shows the item -> tap -> "Removed 41 demo records" -> lists empty,
   item gone.
 
+- **I1.1 (first-run onboarding hint).** The launcher showed demo records with no
+  explanation. Until an iCloud account is configured (`dav_user` empty), it now
+  shows a centred hint in the grid's empty lower third: "Demo data shown. To sync
+  your own: edit config.ini on the card, or tap Menu > Preferences." It disappears
+  once the Apple ID is set. (The README showcase screenshot is left hint-free.)
+
 Smoke now taps **Done** on the Address edit form to capture the "Saved" toast
 (`address_saved`), opens **About** for the honesty text (`about_box`), and finally
-(destructive, so last) taps **Remove demo data** for the `demo_removed` toast.
+(destructive, so last) taps **Remove demo data** for the `demo_removed` toast; the
+`launcher` shot exercises the I1.1 hint.
 
 ## SESSION 2026-07-16 (part 4) — C7: the authentic inverted Palm title bar
 

@@ -911,6 +911,21 @@ static void show_launcher(void){
         lv_label_set_text(lbl, APPS[i]);
         lv_obj_set_style_text_font(lbl, &lv_font_palm, 0);
     }
+
+    /* I1.1: onboarding hint. Until an iCloud account is configured, the records on
+     * screen are demo data -- say so and point at setup, instead of leaving a
+     * newcomer to guess. Shows in the empty lower third of the launcher grid and
+     * disappears once dav_user (the Apple ID) is set. */
+    if(appcfg()->dav_user[0] == '\0'){
+        lv_obj_t *hint = lv_label_create(content);
+        lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(hint, LCD_W - 24);
+        lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+        lv_label_set_text(hint, "Demo data shown. To sync your own:\n"
+                                "edit config.ini on the card, or tap\n"
+                                "Menu > Preferences.");
+        lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -6);
+    }
 }
 
 /* ============ P1.5: Preferences + collection discovery ============ */
