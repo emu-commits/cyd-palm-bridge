@@ -23,6 +23,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include "sim_port.h"
+#include "sim_heap.h"
 #include "ui.h"
 #include "data.h"
 #include "appcfg.h"
@@ -61,6 +62,7 @@ int main(int argc, char **argv){
     sim_init();
     ui_init();
     sim_step(300);   /* let the first layout/draw settle */
+    sim_heap_arm(SIM_HEAP_BUDGET);   /* device-like general-heap ceiling from here on */
 
     char line[256];
     int rc = 0;
@@ -80,6 +82,7 @@ int main(int argc, char **argv){
         else if(line[0] == 'q') break;
         else { fprintf(stderr, "script: bad line: %s", line); rc = 1; }
     }
-    fprintf(stderr, "sim_host: done (rc=%d)\n", rc);
+    fprintf(stderr, "sim_host: done (rc=%d) | heap used=%zu peak=%zu of %u budget\n",
+            rc, sim_heap_used(), sim_heap_peak(), (unsigned)SIM_HEAP_BUDGET);
     return rc;
 }

@@ -45,6 +45,18 @@ the Makefile fetch-then-recurse ordering was verified against a clean checkout
 **Next:** S4 — build the charm backlog (C1 Graffiti ink, C2 HotSync dialog, C4
 form contract, I1.2 keyboard) in the sim; S5 — fetch()-based sync in the browser.
 
+**Post-launch same-day (user feedback from the live sim):** (1) the
+**general-heap ceiling** -- linker-wrapped malloc/calloc/realloc/free
+(`heap_budget.c`) with a device-like budget (default 144 KB, armed post-boot,
+accounted via malloc_usable_size so foreign pointers free safely); a 1 KB-budget
+build renders the UI's genuine "(low memory)" path, screenshot-verified. (2)
+**persistent /sdcard** via IDBFS (IndexedDB): records survive reloads, per
+browser, origin-isolated; `sim_scrub_config()` blanks config.ini's password
+fields before every persist so credentials never reach browser storage. Cookies
+were considered and rejected (4 KB cap, transmitted with requests); IndexedDB is
+the correct primitive and is unreadable by other origins. The web shell shows a
+live "heap: N KB free" readout and a plain-language privacy note.
+
 ## SESSION 2026-07-15 — product-hygiene sprint + CI (all green) + review
 
 A vacation-safe, fully-verifiable pass (no on-device flashing available this
