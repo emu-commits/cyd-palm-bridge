@@ -29,7 +29,8 @@
 #include <time.h>
 
 #define TITLE_H     24
-#define COL_TITLE   lv_color_hex(0xFFFFFF)   /* white title bar (Palm) */
+#define COL_TITLE   lv_color_hex(0x000000)   /* black title bar (Palm: white-on-black) */
+#define COL_TITLE_FG lv_color_hex(0xFFFFFF)  /* title text/glyphs on the black bar */
 #define COL_BODY    lv_color_hex(0xFFFFFF)   /* white app body   */
 #define COL_GRAF    lv_color_hex(0xD6D6D6)   /* graffiti strip   */
 #define COL_LINE    lv_color_hex(0x000000)   /* black rules      */
@@ -2194,7 +2195,7 @@ void ui_init(void){
     lv_obj_set_style_border_color(bar, COL_LINE, 0);
 
     title_lbl = lv_label_create(bar);
-    lv_obj_set_style_text_color(title_lbl, COL_LINE, 0);   /* black on white */
+    lv_obj_set_style_text_color(title_lbl, COL_TITLE_FG, 0);   /* white on black (Palm) */
     lv_obj_set_style_text_font(title_lbl, &lv_font_palm_bold, 0);
     lv_obj_align(title_lbl, LV_ALIGN_LEFT_MID, 6, 0);
 
@@ -2202,7 +2203,7 @@ void ui_init(void){
      * are left-aligned + short and the category trigger is far right, so center
      * stays clear. Refreshed every 15 s by an lv_timer. */
     clock_lbl = lv_label_create(bar);
-    lv_obj_set_style_text_color(clock_lbl, COL_LINE, 0);
+    lv_obj_set_style_text_color(clock_lbl, COL_TITLE_FG, 0);
     lv_obj_align(clock_lbl, LV_ALIGN_CENTER, 0, 0);
     clock_tick(NULL);
     lv_timer_create(clock_tick, 15000, NULL);
@@ -2213,8 +2214,12 @@ void ui_init(void){
     lv_obj_align(cat_trigger, LV_ALIGN_RIGHT_MID, -2, 0);
     lv_obj_set_style_radius(cat_trigger, 0, 0);
     lv_obj_set_style_pad_hor(cat_trigger, 4, 0);
+    lv_obj_set_style_bg_color(cat_trigger, COL_TITLE, 0);      /* blend into the black bar */
+    lv_obj_set_style_border_width(cat_trigger, 1, 0);
+    lv_obj_set_style_border_color(cat_trigger, COL_TITLE_FG, 0);
     lv_obj_add_event_cb(cat_trigger, cat_trigger_cb, LV_EVENT_CLICKED, NULL);
     cat_label = lv_label_create(cat_trigger);
+    lv_obj_set_style_text_color(cat_label, COL_TITLE_FG, 0);   /* white on black */
     lv_label_set_text(cat_label, "All");
     lv_obj_center(cat_label);
     lv_obj_add_flag(cat_trigger, LV_OBJ_FLAG_HIDDEN);   /* only shown in data apps */

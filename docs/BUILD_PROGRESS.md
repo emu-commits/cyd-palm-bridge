@@ -6,6 +6,28 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-16 (part 4) — C7: the authentic inverted Palm title bar
+
+Charm item **C7 (title bar)** from the review, decided with the user against a
+rendered before/after: adopt the classic PalmOS **white-on-black** title bar
+(was black-on-white with a rule). One place: `COL_TITLE` -> black + a new
+`COL_TITLE_FG` (white) for the title text, the centred clock, and the top-right
+category chip (which also gets a 1px white border so it reads on black). Only the
+24 px bar inverts; every app body stays white, so there are no contrast
+regressions -- verified across launcher, Address list, Edit form, HotSync, menu,
+and Preferences in the sim. README screenshots (`docs/img/sim_*.png`) regenerated
+with the new look. Easily reverted (four style lines) if it ever needs to change.
+
+Also this session, a **freeze-class audit** of the whole `ui.c`: no other
+`lv_bar`/`lv_slider`/`lv_arc`/`lv_meter`/`lv_spinner` remains (the brightness
+slider was the last one); the `LV_OPA_30` popup backdrops are `bg_opa` fills, not
+object `opa`, so they don't force a draw layer. And **C7 (untimed-first Day view)**
+verified already-correct: untimed events render with a `"--:--"` prefix and `'-'`
+(0x2D) sorts before `'0'`..`'9'`, so they pin above timed events, per Palm. **C7
+(✓ glyph in To Do)** is deferred: the Palm font only covers codepoints 32-255,
+which has no checkmark -- adding one is a deliberate font-regen task (GPLv3
+PumpkinOS provenance), not a quick swap; the `[x]`/`[ ]` markers stay for now.
+
 ## SESSION 2026-07-16 (part 3) — brightness-row freeze fixed (the lv_bar rule, again)
 
 User hit a hard freeze tapping **Preferences → Brightness** on the live sim. Root

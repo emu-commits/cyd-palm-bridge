@@ -30,8 +30,15 @@
 > **S4 (2026-07-16, part 2): the charm sprint is BUILT in the sim** -- C1 ink
 > trail + char echo, C2 HotSync dialog, C4 form contract, I1.2 Preferences
 > keyboard, C5 devtools gating -- all in the real ui.c, screenshot-verified,
-> covered by the smoke gate. Remaining: C7 polish, C3 sound (hardware), the
-> on-glass verify, and **S5** (fetch-based sync).
+> covered by the smoke gate.
+>
+> **S4.1 (part 3-4):** a Preferences->Brightness **freeze** found on the live sim
+> was fixed (an `lv_slider` == an `lv_bar` == draw-layer alloc -> WDT; replaced
+> with a pool-safe `[-] NN% [+]` stepper, now a smoke gate). Then **C7 title bar**
+> adopted the authentic inverted (white-on-black) Palm look; a whole-`ui.c` sweep
+> confirmed no other layer-alloc widget remains, and C7 untimed-first Day view was
+> verified already-correct. Remaining: C7 ✓-glyph (font regen), C3 sound
+> (hardware), the on-glass verify, and **S5** (fetch-based sync).
 
 Goal: run the real Palm UI (`firmware/main/ui.c`) **in a phone browser**, so the
 look-and-feel and the review's UX-charm backlog can be built and reviewed from a
