@@ -25,7 +25,13 @@
 > origin-isolated. Credentials are deliberately NOT persisted: sim_scrub_config()
 > blanks the password fields of config.ini before every write to browser
 > storage (session-only in RAM; sync is stubbed so stored creds would be pure
-> risk). Next: **S4** (charm backlog in the sim) and **S5** (fetch-based sync).
+> risk).
+>
+> **S4 (2026-07-16, part 2): the charm sprint is BUILT in the sim** -- C1 ink
+> trail + char echo, C2 HotSync dialog, C4 form contract, I1.2 Preferences
+> keyboard, C5 devtools gating -- all in the real ui.c, screenshot-verified,
+> covered by the smoke gate. Remaining: C7 polish, C3 sound (hardware), the
+> on-glass verify, and **S5** (fetch-based sync).
 
 Goal: run the real Palm UI (`firmware/main/ui.c`) **in a phone browser**, so the
 look-and-feel and the review's UX-charm backlog can be built and reviewed from a

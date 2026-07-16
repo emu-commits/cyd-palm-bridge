@@ -6,6 +6,43 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-16 (part 2) — S4 charm sprint, built + verified in the sim
+
+The first UX sprint done entirely in the simulator loop (edit ui.c -> make -C
+sim smoke -> look at the PNGs), exactly what the sim was built for. All are
+changes to the REAL firmware/main/ui.c, compile-verified for ESP32 in CI;
+on-glass look/feel verify queued for the next flash session.
+
+- **C1 Graffiti ink trail + character echo.** An I1 (2-color) canvas behind the
+  writing pads -- 168x106 @ 1bpp = ~2.3 KB static, OFF the LVGL pool -- inked by
+  direct set_px Bresenham (2px pen), so it never allocates a draw layer (immune
+  to the mid-sync layer-alloc failure class). Ink lingers ~450 ms after pen-up,
+  then clears; the recognized character flashes at the strip's bottom-centre for
+  600 ms. Screenshot-verified mid-stroke, lingering, and faded; recognition
+  unaffected. THE missing feedback loop -- writing without ink was flying blind.
+- **C2 the HotSync moment.** The HotSync arrows logo front and centre, status +
+  % beneath, a bold Sync Now at the bottom. Progress stays text (the lv_bar
+  layer-alloc WDT rule holds).
+- **C4 Palm form contract.** The record edit form's actions moved to a bottom
+  row, Done leftmost (Done | category Details | Cancel); fields fill the space
+  above. Matches Palm's Done/Details convention.
+- **I1.2 Preferences tap keyboard.** Config fields get a QWERTY lv_buttonmatrix
+  (the calculator's proven single-object pattern): lower/upper/digits+symbols
+  maps, @ . - _ : / on the base layer for SSIDs/emails/paths, backspace, space.
+  Kills the "19-char app password by untuned Graffiti" setup blocker. Graffiti
+  still works in parallel; record editing stays Graffiti-only.
+- **C5 dev scaffolding gated + About refreshed.** "Add test events" now behind
+  UI_DEVTOOLS (defined in the sim Makefile and -- deliberately greppable --
+  in firmware/main/CMakeLists.txt with a REMOVE-for-release comment, since the
+  >24-record on-device verify still needs it). About: v0.2 + the pitch
+  ("Offline by default. HotSync when you want to. No feed. No ads.").
+
+`make -C sim smoke` now exercises all of it (13 screenshots/run, incl. a
+MID-stroke ink capture); heap telemetry unchanged (peak 2.2 KB post-boot).
+Still open from the charm list: C7 touches (checkmark glyph, untimed-first Day
+view, title-bar style decision) and C3 sound (hardware). On-device verifies
+queued in NEXT_STEPS.
+
 ## SESSION 2026-07-16 — the simulator is REAL (S0–S3 of SIMULATOR_PLAN.md)
 
 The plan's core bet held: `ui.c` includes no `esp_*` headers, so the **real UI +
