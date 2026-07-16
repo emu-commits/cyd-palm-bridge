@@ -13,6 +13,10 @@
 #define DB_ADDR "/sdcard/AddressDB.pdb"
 #define DB_TODO "/sdcard/ToDoDB.pdb"
 #define DB_MEMO "/sdcard/MemoDB.pdb"
+/* I2: records the demo seed so "Remove demo data" can delete exactly what was
+ * seeded (per-app record count; seeds always take uniqueIDs 1..nr, and new/synced
+ * records get max+1, so 1..nr uniquely identifies the demo rows). */
+#define DEMO_MANIFEST "/sdcard/.demoseed"
 
 static const char *db_path(int app){
     return app==APP_CAL?DB_CAL : app==APP_ADDR?DB_ADDR : app==APP_TODO?DB_TODO : DB_MEMO;
@@ -46,8 +50,8 @@ int data_get_categories(int app, CatTable *t){
  * Enough rows to overflow the list (scroll test). This overwrites each boot for
  * now; U7 HotSync replaces it with real synced data. */
 #define SEEDMAX 32
-static void seed_datebook(void){
-    uint8_t *arena = malloc(SEEDMAX*96); if(!arena) return; PdbRec r[SEEDMAX]; int nr=0, used=0;
+static int seed_datebook(void){
+    uint8_t *arena = malloc(SEEDMAX*96); if(!arena) return 0; PdbRec r[SEEDMAX]; int nr=0, used=0;
     uint8_t ai[APPINFO_SIZE]; int al=build_appinfo(ai);
     struct { const char *s; int mo, d, h; } ev[] = {
         {"Standup",8,3,9},{"1:1 with Sam",8,3,14},{"Groceries",8,4,18},{"Dentist",8,5,10},
@@ -64,10 +68,11 @@ static void seed_datebook(void){
         if(l>0){ r[nr]=(PdbRec){.attr=(uint8_t)(i%3),.uniqueID=(uint32_t)(i+1),.data=arena+used,.len=l}; used+=l; nr++; }
     }
     pdb_write_ai(DB_CAL,"DatebookDB",0x44415441,0x64617465,ai,al,r,nr); free(arena);
+    return nr;
 }
 
-static void seed_address(void){
-    uint8_t *arena = malloc(SEEDMAX*96); if(!arena) return; PdbRec r[SEEDMAX]; int nr=0, used=0;
+static int seed_address(void){
+    uint8_t *arena = malloc(SEEDMAX*96); if(!arena) return 0; PdbRec r[SEEDMAX]; int nr=0, used=0;
     uint8_t ai[APPINFO_SIZE]; int al=build_appinfo(ai);
     struct { const char *last,*first,*co,*phone; } pc[] = {
         {"Appleseed","Johnny","Acme Corp","555-0100"},{"Bramble","Rosa","Widgets Inc","555-0200"},
@@ -87,10 +92,11 @@ static void seed_address(void){
         if(l>0){ r[nr]=(PdbRec){.attr=(uint8_t)(i%3),.uniqueID=(uint32_t)(i+1),.data=arena+used,.len=l}; used+=l; nr++; }
     }
     pdb_write_ai(DB_ADDR,"AddressDB",0x44415441,0x61646472,ai,al,r,nr); free(arena);
+    return nr;
 }
 
-static void seed_todo(void){
-    uint8_t *arena = malloc(SEEDMAX*96); if(!arena) return; PdbRec r[SEEDMAX]; int nr=0, used=0;
+static int seed_todo(void){
+    uint8_t *arena = malloc(SEEDMAX*96); if(!arena) return 0; PdbRec r[SEEDMAX]; int nr=0, used=0;
     uint8_t ai[APPINFO_SIZE]; int al=build_appinfo(ai);
     struct { const char *s; int pr, done; } td[] = {
         {"Buy stamps",2,0},{"Renew passport",1,0},{"Call plumber",3,0},{"File taxes",1,1},
@@ -105,10 +111,11 @@ static void seed_todo(void){
         if(l>0){ r[nr]=(PdbRec){.attr=(uint8_t)(i%3),.uniqueID=(uint32_t)(i+1),.data=arena+used,.len=l}; used+=l; nr++; }
     }
     pdb_write_ai(DB_TODO,"ToDoDB",0x44415441,0x746F646F,ai,al,r,nr); free(arena);
+    return nr;
 }
 
-static void seed_memo(void){
-    uint8_t *arena = malloc(SEEDMAX*256); if(!arena) return; PdbRec r[SEEDMAX]; int nr=0, used=0;
+static int seed_memo(void){
+    uint8_t *arena = malloc(SEEDMAX*256); if(!arena) return 0; PdbRec r[SEEDMAX]; int nr=0, used=0;
     uint8_t ai[APPINFO_SIZE]; int al=build_appinfo(ai);
     const char *memos[] = {
         "Shopping list\nMilk\nEggs\nBread\nCoffee",
@@ -124,6 +131,7 @@ static void seed_memo(void){
         used+=len; nr++;
     }
     pdb_write_ai(DB_MEMO,"MemoDB",0x44415441,0x6D656D6F,ai,al,r,nr); free(arena);
+    return nr;
 }
 
 /* Migrate PDBs seeded by an older build that had no AppInfo (so the category
@@ -152,15 +160,76 @@ static void ensure_appinfo(const char *path,const char *nm,uint32_t type,uint32_
 
 void data_seed_if_empty(void){
     /* only seed a DB that doesn't exist yet, so edits + synced data persist */
-    if(!file_exists(DB_CAL))  seed_datebook();
-    if(!file_exists(DB_ADDR)) seed_address();
-    if(!file_exists(DB_TODO)) seed_todo();
-    if(!file_exists(DB_MEMO)) seed_memo();
+    int seeded[4] = { -1, -1, -1, -1 };
+    if(!file_exists(DB_CAL))  seeded[APP_CAL]  = seed_datebook();
+    if(!file_exists(DB_ADDR)) seeded[APP_ADDR] = seed_address();
+    if(!file_exists(DB_TODO)) seeded[APP_TODO] = seed_todo();
+    if(!file_exists(DB_MEMO)) seeded[APP_MEMO] = seed_memo();
+    /* I2: if we seeded anything this boot, record it so the demo rows can be
+     * removed as a set before the first HotSync (don't push fake data to iCloud) */
+    int any = 0;
+    for(int i=0;i<4;i++) if(seeded[i] > 0) any = 1;
+    if(any){
+        FILE *f = fopen(DEMO_MANIFEST, "wb");
+        if(f){
+            for(int i=0;i<4;i++) if(seeded[i] > 0) fprintf(f, "%d %d\n", i, seeded[i]);
+            fclose(f);
+        }
+    }
     /* backfill categories into PDBs from older builds that lacked AppInfo */
     ensure_appinfo(DB_CAL, "DatebookDB",0x44415441,0x64617465);
     ensure_appinfo(DB_ADDR,"AddressDB", 0x44415441,0x61646472);
     ensure_appinfo(DB_TODO,"ToDoDB",    0x44415441,0x746F646F);
     ensure_appinfo(DB_MEMO,"MemoDB",    0x44415441,0x6D656D6F);
+}
+
+/* I2: is the (still-untouched) demo seed present? Drives the "Remove demo data"
+ * menu item. The manifest is deleted once the demo rows are removed. */
+int data_demo_present(void){ return file_exists(DEMO_MANIFEST); }
+
+/* one-pass filter: keep every record whose uniqueID is outside 1..maxuid (i.e.
+ * drop the demo rows), counting how many were dropped. */
+typedef struct { uint32_t maxuid; uint8_t *arena; int used; PdbRec *recs; int nr; int removed; } DemoRW;
+static int demoRwCb(const PdbRec *r, int i, void *ctx){ (void)i; DemoRW *w=ctx;
+    if(r->uniqueID >= 1 && r->uniqueID <= w->maxuid){ w->removed++; return 0; }  /* drop */
+    if(w->used + r->len > RW_ARENA || w->nr >= RW_MAX) return 1;
+    memcpy(w->arena + w->used, r->data, r->len);
+    w->recs[w->nr] = (PdbRec){.attr=r->attr,.uniqueID=r->uniqueID,.data=w->arena+w->used,.len=r->len};
+    w->used += r->len; w->nr++; return 0;
+}
+/* rewrite one app's PDB once, dropping demo rows (uid 1..nr); returns count removed. */
+static int remove_demo_from(int app, uint32_t nr){
+    const char *path = db_path(app);
+    if(!file_exists(path)) return 0;
+    uint8_t ai[512]; int al = pdb_read_appinfo(path, ai, sizeof ai); if(al<0) al=0;
+    DemoRW w = { nr, g_arena, 0, g_recs, 0, 0 };
+    pdb_read(path, demoRwCb, &w);
+    const char *nm; uint32_t type, creator;
+    switch(app){
+        case APP_CAL:  nm="DatebookDB"; type=0x44415441; creator=0x64617465; break;
+        case APP_ADDR: nm="AddressDB";  type=0x44415441; creator=0x61646472; break;
+        case APP_TODO: nm="ToDoDB";     type=0x44415441; creator=0x746F646F; break;
+        default:       nm="MemoDB";     type=0x44415441; creator=0x6D656D6F; break;
+    }
+    pdb_write_ai(path, nm, type, creator, al?ai:NULL, al, g_recs, w.nr);
+    return w.removed;
+}
+
+/* I2: delete exactly the demo-seeded records (uniqueIDs 1..nr per app from the
+ * manifest -- ONE rewrite per app, not per record), then drop the manifest.
+ * Returns the number of records removed. User-added / synced records
+ * (uniqueID > nr) are never touched. */
+int data_remove_demo(void){
+    FILE *f = fopen(DEMO_MANIFEST, "rb");
+    if(!f) return 0;
+    int app, nr, removed = 0;
+    while(fscanf(f, "%d %d", &app, &nr) == 2){
+        if(app < 0 || app > 3 || nr <= 0) continue;
+        removed += remove_demo_from(app, (uint32_t)nr);
+    }
+    fclose(f);
+    remove(DEMO_MANIFEST);
+    return removed;
 }
 
 /* ------------------------- iteration ------------------------- */

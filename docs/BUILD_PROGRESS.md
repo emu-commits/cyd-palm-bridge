@@ -20,9 +20,21 @@ to the smoke gate.
 - **C6 (honesty labels).** The About box now states the two things the device knows
   but the user didn't: "Memos stay on this device." and "To Dos sync as CalDAV
   tasks, not the Reminders app." (the part-11 iCloud finding). Bumped to v0.3.
+- **I2 (demo seed vs. real data).** First boot seeds Johnny Appleseed + 14 fake
+  meetings; a first HotSync would push them into the user's real iCloud. Now the
+  seeder writes a manifest (`/sdcard/.demoseed`, per-app record count -- seeds
+  always take uniqueIDs 1..nr and new/synced records get max+1, so 1..nr uniquely
+  identifies the demo rows), and an Options -> **"Remove demo data"** item (shown
+  only while `data_demo_present()`) deletes exactly those in ONE rewrite per app
+  (`data_remove_demo`, not per-record -> no O(n^2) SD churn / WDT risk), then drops
+  the manifest so the item disappears and no re-seed happens (empty PDBs remain).
+  User-added / synced records (uniqueID > nr) are never touched. Verified: fresh
+  boot -> menu shows the item -> tap -> "Removed 41 demo records" -> lists empty,
+  item gone.
 
 Smoke now taps **Done** on the Address edit form to capture the "Saved" toast
-(`address_saved`) and opens **About** for the honesty text (`about_box`).
+(`address_saved`), opens **About** for the honesty text (`about_box`), and finally
+(destructive, so last) taps **Remove demo data** for the `demo_removed` toast.
 
 ## SESSION 2026-07-16 (part 4) — C7: the authentic inverted Palm title bar
 

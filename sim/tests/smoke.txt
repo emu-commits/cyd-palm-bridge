@@ -118,4 +118,14 @@ s graffiti_ink
 u
 t 400
 s graffiti_lookup
+# I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.
+# (CI starts on a fresh /sdcard, so the seed + manifest exist here.)
+c 18 225
+t 300
+c 18 300
+t 400
+c 70 85
+t 150
+s demo_removed
+t 900
 q

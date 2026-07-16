@@ -1402,6 +1402,16 @@ static void act_gentest(lv_event_t *e){ (void)e; menu_close();
 }
 #endif /* UI_DEVTOOLS */
 
+/* I2: remove the demo seed before the first HotSync, so Johnny Appleseed and the
+ * fake meetings never get pushed into the user's real iCloud. Deletes only the
+ * seeded records (the manifest tracks them); user edits/additions are kept. */
+static void act_remove_demo(lv_event_t *e){ (void)e; menu_close();
+    int n = data_remove_demo();
+    if(cur_app) app_reopen(cur_app); else show_launcher();
+    char msg[40]; snprintf(msg, sizeof msg, "Removed %d demo record%s", n, n==1?"":"s");
+    toast_show(msg);
+}
+
 static lv_obj_t *g_about;
 static void about_close(void){ if(g_about){ lv_obj_del(g_about); g_about=NULL; } }
 static void about_backdrop_cb(lv_event_t *e){ (void)e; about_close(); }
@@ -1503,6 +1513,8 @@ static void menu_open(void){
         menu_item(panel, g_todo_sort_due ? "Sort by Priority" : "Sort by Due Date", act_toggle_sort);
     }
     menu_item(panel, "Preferences", act_prefs);
+    if(data_demo_present())
+        menu_item(panel, "Remove demo data", act_remove_demo);
 #ifdef UI_DEVTOOLS
     menu_item(panel, "Add test events", act_gentest);
 #endif
