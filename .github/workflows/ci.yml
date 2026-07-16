@@ -94,12 +94,12 @@ jobs:
         with:
           path: sim/build/web/
 
-  # Publishes the simulator to a public URL on every push. Requires GitHub Pages
-  # to be enabled once in the repo settings (Settings -> Pages -> Source:
-  # "GitHub Actions"); until then this job fails softly without failing the run.
+  # Publishes the simulator to a public URL on every push (and on manual
+  # dispatch). Requires GitHub Pages enabled with Source: "GitHub Actions" in
+  # the repo settings; misconfigured, it fails softly without failing the run.
   simulator-deploy:
-    name: Deploy simulator to Pages (needs Pages enabled in Settings)
-    if: github.event_name == 'push'
+    name: Deploy simulator to Pages (needs Pages source = GitHub Actions)
+    if: github.event_name != 'pull_request'
     needs: simulator-wasm
     runs-on: ubuntu-latest
     continue-on-error: true
