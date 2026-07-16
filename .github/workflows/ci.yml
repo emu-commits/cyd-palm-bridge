@@ -56,3 +56,59 @@ jobs:
           . "$IDF_PATH/export.sh"
           idf.py set-target esp32
           idf.py build
+
+  simulator-smoke:
+    name: Simulator smoke (native headless)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create /sdcard (the firmware data layer's SD root)
+        run: sudo mkdir -p /sdcard && sudo chmod 777 /sdcard
+      - name: Build + run the scripted UI tour (real ui.c, screenshots)
+        run: make -C sim smoke
+      - name: Convert screenshots to PNG
+        run: python3 sim/tools/ppm2png.py sim/build/shots/*.ppm
+      - name: Upload screenshots (visual record per push)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-screenshots
+          path: sim/build/shots/*.png
+
+  simulator-wasm:
+    name: Simulator wasm (browser build)
+    runs-on: ubuntu-latest
+    container: emscripten/emsdk:3.1.61
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mark workspace safe for git (container runs as root)
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: emcc build (index.html + palm.js + palm.wasm)
+        run: make -C sim wasm
+      - name: Upload the web simulator
+        uses: actions/upload-artifact@v4
+        with:
+          name: palm-simulator-web
+          path: sim/build/web/
+      - name: Upload as a Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: sim/build/web/
+
+  # Publishes the simulator to a public URL on every push. Requires GitHub Pages
+  # to be enabled once in the repo settings (Settings -> Pages -> Source:
+  # "GitHub Actions"); until then this job fails softly without failing the run.
+  simulator-deploy:
+    name: Deploy simulator to Pages (needs Pages enabled in Settings)
+    if: github.event_name == 'push'
+    needs: simulator-wasm
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
