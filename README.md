@@ -1,4 +1,81 @@
-# CYD Palm — a PalmOS-style PDA that syncs to iCloud
+# CYD Palm — a pocket PDA that syncs to iCloud
+
+> A PalmOS-style touchscreen organizer — **Date Book, Address, To Do, Memo**, with
+> **Graffiti** handwriting — running on a ~$15 ESP32 "Cheap Yellow Display," that
+> two-way syncs to your iCloud **calendars, reminders, and contacts**. Offline by
+> default; **HotSync** when you want to. An open-source homage to the Palm Pilot:
+> a little more charming, and a lot less demanding, than a smartphone.
+
+<!-- TODO: a photo of the device here is the single best thing this README could add. -->
+
+## What you need
+
+- An **ESP32-2432S028R "Cheap Yellow Display"** (the base, no-PSRAM CYD) — ~$15.
+- A **microSD card** (any small size) — holds your Palm databases + config.
+- An **iCloud account** with an **app-specific password** — create one at
+  appleid.apple.com → *Sign-In & Security → App-Specific Passwords* (needs 2FA).
+  It's scoped and revocable, and never exposes your main Apple ID password.
+- To build & flash: **ESP-IDF v5.5** + a USB cable. *(There's no prebuilt binary
+  yet — you flash it yourself.)*
+
+## Set it up
+
+1. **Build & flash the firmware** — see
+   [Build + flash the firmware](#build--flash-the-firmware) below. On first boot
+   the device seeds a few demo records so the apps aren't empty.
+2. **Make your config** — copy [`firmware/config.ini.example`](firmware/config.ini.example)
+   onto the SD card as `config.ini` and edit the Wi-Fi + iCloud lines (SSID,
+   password, Apple ID, app-specific password). This is the no-reflash way to
+   configure the device; you can also edit these on-screen in **Preferences**.
+3. **Point it at your calendars** — on the device, **Preferences → Discover
+   collections…** lists your iCloud calendars, reminders lists, and address book;
+   tap each to assign it to Date Book / To Do / Address. (Advanced users can instead
+   run `bridge_cli discover` on a computer — see below.)
+4. **Insert the card and boot.** Tap **HotSync → Sync Now**.
+5. **Enjoy a Palm again.** Records you add on the device push to iCloud; changes on
+   iCloud pull down on the next sync. Use it offline; HotSync when convenient.
+
+> **Heads-up (honest limitations):** **Memos stay on the device** — iCloud has no
+> sync surface for Notes. **To Do** syncs to iCloud's *CalDAV task lists*, which
+> the iPhone Reminders app shows only if you add iCloud as an external CalDAV
+> account (Settings → Calendar → Add CalDAV Account), not under the built-in
+> iCloud reminders. And the first sync will push the **demo seed records** to your
+> real iCloud — delete them there (or in the apps) once your own data is in.
+
+## What works today
+
+Booted and proven on hardware: calibrated touch, the classic Palm launcher + apps,
+Graffiti text entry, categories, Find, a Calculator, and **bidirectional iCloud
+sync** for Date Book, To Do, and Address (records push *and* pull, edits survive,
+deletes propagate). The hard part — fitting Wi-Fi + TLS + the sync engine beside
+LVGL in ~80 KB of RAM with no PSRAM — is solved. Full status, the build log, and
+what's next live in [`docs/`](docs/).
+
+## Try it without hardware — the simulator
+
+The **real firmware UI** (the same `ui.c`, data layer, Graffiti recognizer, Palm
+fonts and icons) also builds for your desktop and your **phone browser** — see
+[`docs/SIMULATOR_PLAN.md`](docs/SIMULATOR_PLAN.md) and [`sim/`](sim/):
+
+<p>
+  <img src="docs/img/sim_launcher.png" width="180" alt="Palm launcher in the simulator">
+  <img src="docs/img/sim_address.png" width="180" alt="Address list with Look Up in the simulator">
+</p>
+
+```
+make -C sim smoke     # native headless: scripted UI tour + screenshots (CI gate)
+make -C sim wasm      # browser build via Emscripten -> sim/build/web/
+```
+
+The native build needs `/sdcard` to exist (`sudo mkdir -p /sdcard && sudo chmod
+777 /sdcard`); LVGL v9.2.2 is fetched automatically on first build. CI builds the
+browser simulator on every push (the `palm-simulator-web` artifact) and publishes
+it to GitHub Pages: **https://emu-commits.github.io/cyd-palm-bridge/** — open it
+on a phone. Sync is stubbed in the simulator — everything else is the real thing.
+
+---
+
+# How it works — architecture & build log
 
 A **native PDA on the base CYD** (`ESP32-2432S028R`, **NO PSRAM**, 4 MB flash,
 ~300 KB SRAM): a PalmOS-style touchscreen handheld that reads/edits Palm PIM

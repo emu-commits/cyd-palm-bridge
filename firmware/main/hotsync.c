@@ -256,6 +256,7 @@ static void hotsync_task(void *arg){
     }
 
     sync_set_progress(NULL, NULL);                 /* detach the hook */
+    sync_free_scratch();   /* hand the ~20 KB sync scratch back to the interactive UI */
     setprog(100);
     if(did==0 && failed>0)
         snprintf(msg,sizeof msg,"Sync failed - low memory (heap %lu)",
@@ -274,7 +275,7 @@ static void hotsync_task(void *arg){
 /* ---- collection discovery (Preferences) ----------------------------------
  * Same background-task slot as the sync (guarded by s_busy). Results land in a
  * small fixed array; the UI reads them after hotsync_discover_done(). */
-#define MAX_DISC 12
+#define MAX_DISC 24
 static DiscColl s_disc[MAX_DISC];
 static volatile int s_disc_n;
 static volatile int s_disc_done;
@@ -289,7 +290,7 @@ const DiscColl *hotsync_discover_get(int i){ return (i>=0 && i<s_disc_n) ? &s_di
 static void disc_add(const char *href, int kind, const char *dn, void *ctx){
     (void)ctx;
     if((kind!='c' && kind!='a') || !href || !href[0]) return;
-    if(s_disc_n >= MAX_DISC) return;
+    if(s_disc_n >= MAX_DISC){ ESP_LOGW(TAG,"discovery: more than %d collections; list truncated",MAX_DISC); return; }
     const char *s = href; while(*s=='/') s++;
     char tmp[192]; snprintf(tmp,sizeof tmp,"%s",s);
     size_t n = strlen(tmp); while(n && tmp[n-1]=='/') tmp[--n]=0;

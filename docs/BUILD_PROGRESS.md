@@ -6,6 +6,87 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-16 — the simulator is REAL (S0–S3 of SIMULATOR_PLAN.md)
+
+The plan's core bet held: `ui.c` includes no `esp_*` headers, so the **real UI +
+data layer + Graffiti recognizer + Palm fonts/icons + bridge codec compile
+unchanged** behind a small `sim/` shim (esp_log/nvs/esp_timer header stubs — which
+also let the REAL `clock.c` TZ/DST logic run — plus hotsync/power stubs and a
+device-parity LVGL port: 40-row RGB565 partial buffer, mono theme, Palm font,
+injected touch/time).
+
+**Verified locally by looking at it:** the native headless frontend
+(`sim/host_main.c`) takes a stdin script (tap/drag/advance-time) and dumps PNG
+screenshots — launcher with live clock, Date Book Day view, Address list/detail
+with the Look Up filter live-filtering, To Do (checkbox column, priority sort),
+Memo, HotSync (stub status), menus, and a scripted **Graffiti stroke resolving
+through the real `$1` recognizer** into the Look Up field
+(`'i' d=0.6, 2nd 'j' 13.3`). `make -C sim smoke` runs the tour as a CI gate and
+uploads the screenshots as a per-push artifact.
+
+**One real memory finding:** the launcher OOM'd the 24 KB LVGL pool on x86-64 —
+not a bug, arithmetic: LP64 pointers double every LVGL object, so 24 KB holds
+half the device's objects. `sim/lv_conf.h` now uses 24 KB on 32-bit targets
+(**wasm is 32-bit ⇒ true device parity**) and 48 KB on LP64 hosts. The failure
+mode itself (create returns NULL → crash in the caller) is the exact
+pool-exhaustion class the device hits — the sim reproduces it as designed.
+
+**Browser build:** `make -C sim wasm` (emcc, no SDL — exported RGBA framebuffer
+blitted to a canvas; pointer events → Palm touch; MEMFS `/sdcard`;
+`sim/web/index.html` is a mobile-friendly aspect-locked shell with a case bezel).
+Built in CI (`emscripten/emsdk` container) → `palm-simulator-web` artifact, plus
+a tolerant Pages deploy: **enable Pages once in repo Settings (Source: GitHub
+Actions) and every push publishes the simulator at a public URL.**
+
+Also: LVGL v9.2.2 pinned + auto-fetched by the sim Makefile (not vendored), and
+the Makefile fetch-then-recurse ordering was verified against a clean checkout
+(the class of "works locally, dies in CI" bug the last session hit).
+
+**Next:** S4 — build the charm backlog (C1 Graffiti ink, C2 HotSync dialog, C4
+form contract, I1.2 keyboard) in the sim; S5 — fetch()-based sync in the browser.
+
+## SESSION 2026-07-15 — product-hygiene sprint + CI (all green) + review
+
+A vacation-safe, fully-verifiable pass (no on-device flashing available this
+session; ESP-IDF absent locally but the firmware is now compiled in CI). Whole-repo
+review first (`docs/REVIEW_2026-07-15.md`), then the "day of hygiene" from its §6.
+
+**Shipped (branch `claude/project-review-recommendations-x1ihdn`, all CI-green):**
+- **Licensing** (`b543456`) — root `LICENSE` GPLv3 (firmware links PumpkinOS GPLv3
+  fonts/icons), `bridge/LICENSE` MIT (clean-room host codecs), `NOTICE` documenting
+  the split + PumpkinOS provenance + a Palm non-affiliation line. Closes the
+  long-open "add a LICENSE when U3a lands" item.
+- **CI** (`53edba9`, `ef7b835`) — `.github/workflows/ci.yml`: host-gates
+  (`make test` + `make ftest`), sync-gates (throwaway Radicale → `run_gates.sh`,
+  every server gate), firmware-build (`espressif/idf:release-v5.5` → `idf.py build`).
+  **First run caught two latent "works-on-my-machine" harness bugs**, both fixed:
+  (1) `run_gates.sh` ran `bigsync` (leaves 200 objs in `palm/cal`) before `multiapp`
+  (reuses `palm/cal`) with no server cleanup → ported `gate.sh`'s `clearcolls`;
+  (2) `run_gates.sh` ran `./fuzz_test` but `make` (all) never builds it → build it
+  explicitly (+ added to `make clean`). CI now fully green incl. the firmware build.
+- **M1 / U0 done** (`0766987`) — the sync scratch buffers (`g_body` 8 KB, `g_lrec`
+  `PALM_REC_MAX`, `g_objbuf` `OBJ_FETCH_CAP`, ~20 KB) moved from resident BSS to
+  sync-lifetime heap: `scratch_alloc()` at each sync entry (idempotent),
+  `sync_free_scratch()` after HotSync hands the RAM back to the interactive UI. The
+  "static → heap" U0 prerequisite the roadmap flagged as not-optional. Nine
+  `sizeof g_*` sites became explicit caps (a pointer's sizeof would silently be 8).
+  Full server gate suite green incl. the `-DOBJ_FETCH_CAP=4096` truncation path.
+- **Telemetry gated** (`f046ecc`) — the 3 `[sync]` lines that fire on every healthy
+  sync are behind `SYNC_DEBUG` (default off); genuine errors stay unconditional.
+  Deleted superseded root scaffolding (`addr_prototype.c`, `pdb_prototype.c`).
+- **README** (`e9eedcf`) — leads with a newcomer setup guide (what it is / what you
+  need / 5-step SD-card setup / honest limitations); engineering detail preserved
+  under "How it works".
+- **Firmware micro-fixes** (`d77ac63`) — `MAX_DISC` 12→24 + a truncation warning
+  (silent discovery drop); `show_detail` buffer 720→1280 (memo truncation). These
+  were compile-unverified locally but **now compile clean in the CI firmware job**;
+  on-device runtime behavior still wants a flash-verify.
+
+**Next phase:** the mobile-friendly UI simulator — see `docs/SIMULATOR_PLAN.md`.
+It turns the review's UX-charm backlog (Graffiti ink, HotSync dialog, form
+contract, on-screen keyboard) into iterate-in-a-browser work reviewable from a
+phone, and lets `LV_MEM_SIZE=24K` reproduce the pool-exhaustion class off-device.
+
 ## SESSION 2026-07-10 (part 11) — iCloud Reminders dead end + drift self-heal
 
 **The To Do mystery, solved.** A throwaway diagnostic build (`SYNC_DIAG_PROPFIND`,

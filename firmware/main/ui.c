@@ -433,7 +433,7 @@ static void show_detail(uint32_t uid){
     if(!cur_app) return;
     cur_uid = uid;
     kill_kb();
-    static char buf[720];
+    static char buf[1280];   /* fits a full-length memo (mtext is 1200) without truncation */
     if(!data_detail(cur_app->app, uid, buf, sizeof buf)) snprintf(buf,sizeof buf,"(not found)");
 
     lv_obj_clean(content);

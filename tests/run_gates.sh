@@ -57,12 +57,25 @@ curl -s -o /dev/null -u "$U:$P" -X MKCOL -H 'Content-Type: application/xml' \
   "$BASE/palm/card/"
 
 echo "== building =="
-make >/dev/null || { echo "build failed"; exit 1; }
+# `make` (all) does not build the sanitizer fuzz binary -- build it explicitly so
+# the fuzz gate below has ./fuzz_test on a clean checkout (it only "worked" before
+# if a prior `make ftest` had left the binary behind; CI's clean tree caught this).
+make >/dev/null && make fuzz_test >/dev/null || { echo "build failed"; exit 1; }
 
 rc=0
+# empty every collection (objects only) so one gate can't pollute the next --
+# bigsync leaves 200 objects in palm/cal, which multiapp's To Do test reuses, so
+# without this the run order alone would fail multiapp. Mirrors gate.sh.
+clearcolls(){
+  for c in cal card; do
+    curl -s -u "$U:$P" -X PROPFIND -H 'Depth: 1' "$BASE/palm/$c/" \
+      | grep -o "/palm/$c/[^<]*\.\(ics\|vcf\)" | sort -u \
+      | while read -r href; do curl -s -o /dev/null -u "$U:$P" -X DELETE "$BASE$href"; done
+  done
+}
 run(){   # run <label> <clean-state?> <command...>
     local label="$1" clean="$2"; shift 2
-    [ "$clean" = clean ] && { rm -rf state; mkdir -p state; }
+    [ "$clean" = clean ] && { rm -rf state; mkdir -p state; clearcolls; }
     echo "== $label =="
     if "$@"; then echo "  -> PASS"; else echo "  -> FAIL"; rc=1; fi
 }
@@ -76,6 +89,7 @@ run "incremental (two-way + policies)" clean ./incremental
 run "synctoken (RFC 6578 delta)"       clean ./synctoken
 run "category (category->collection)"  clean ./category
 run "uidmatch (UID identity, reloc+foreign)" clean ./uidmatch
+run "idempotent (etag churn + unresolvable reloc)" clean ./idempotent
 run "bigsync (device-sized, 90 recs)"  clean ./bigsync
 run "multiapp (To Do + Address sync)"  clean ./multiapp
 run "dav_roundtrip (PDB->server->PDB)" clean ./tests/dav_roundtrip.sh

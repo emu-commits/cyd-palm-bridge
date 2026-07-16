@@ -36,3 +36,7 @@
 /firmware/main/secrets.h
 /firmware/dependencies.lock
 /firmware/managed_components/
+
+# simulator: fetched LVGL source + build artifacts
+/sim/lvgl/
+/sim/build/

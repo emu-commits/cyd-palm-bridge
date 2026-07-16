@@ -1,0 +1,114 @@
+name: CI
+
+# Host gates run with nothing but a C compiler (+ Python/Radicale for the
+# server-backed sync gates); the firmware is compile-checked in the official
+# ESP-IDF container. This catches the "host-green but firmware won't build"
+# class before flash day.
+
+on:
+  push:
+    branches: [ main, "claude/**" ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  host-gates:
+    name: Host gates (codec + fuzz)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Offline gates (codec / find / calc / config / streamparse)
+        run: make test
+      - name: Fuzz gate (ASan + UBSan)
+        run: make ftest
+
+  sync-gates:
+    name: Sync gates (Radicale)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Radicale into ./davvenv (the harness's expected venv)
+        run: |
+          python3 -m venv davvenv
+          ./davvenv/bin/pip install --quiet radicale
+      - name: Every gate against a throwaway Radicale (codec + fuzz + two-way sync + round-trip)
+        run: ./tests/run_gates.sh
+
+  firmware-build:
+    name: Firmware build (ESP-IDF v5.5)
+    runs-on: ubuntu-latest
+    container: espressif/idf:release-v5.5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mark workspace safe for git (container runs as root)
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Provide a placeholder secrets.h (real creds live only on the SD card)
+        working-directory: firmware
+        run: cp main/secrets.h.example main/secrets.h
+      - name: idf.py build
+        working-directory: firmware
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          idf.py set-target esp32
+          idf.py build
+
+  simulator-smoke:
+    name: Simulator smoke (native headless)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create /sdcard (the firmware data layer's SD root)
+        run: sudo mkdir -p /sdcard && sudo chmod 777 /sdcard
+      - name: Build + run the scripted UI tour (real ui.c, screenshots)
+        run: make -C sim smoke
+      - name: Convert screenshots to PNG
+        run: python3 sim/tools/ppm2png.py sim/build/shots/*.ppm
+      - name: Upload screenshots (visual record per push)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-screenshots
+          path: sim/build/shots/*.png
+
+  simulator-wasm:
+    name: Simulator wasm (browser build)
+    runs-on: ubuntu-latest
+    container: emscripten/emsdk:3.1.61
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mark workspace safe for git (container runs as root)
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: emcc build (index.html + palm.js + palm.wasm)
+        run: make -C sim wasm
+      - name: Upload the web simulator
+        uses: actions/upload-artifact@v4
+        with:
+          name: palm-simulator-web
+          path: sim/build/web/
+      - name: Upload as a Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: sim/build/web/
+
+  # Publishes the simulator to a public URL on every push (and on manual
+  # dispatch). Requires GitHub Pages enabled with Source: "GitHub Actions" in
+  # the repo settings; misconfigured, it fails softly without failing the run.
+  simulator-deploy:
+    name: Deploy simulator to Pages (needs Pages source = GitHub Actions)
+    if: github.event_name != 'pull_request'
+    needs: simulator-wasm
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -48,4 +48,11 @@ int sync_categorized(const DavCtx*d,const char*localpdb,const char*outpdb,
 typedef void (*SyncProgressFn)(int done,int total,void*ctx);
 void sync_set_progress(SyncProgressFn fn,void*ctx);
 
+/* Release the sync scratch buffers (~20 KB: emit body + one local record + the
+ * server-object fetch buffer) that the sync entry points allocate on demand.
+ * On the no-PSRAM device, call this after a HotSync so the RAM returns to the
+ * interactive UI; the host CLI/tests may skip it (the process exits). Safe to
+ * call when nothing is allocated (a no-op) and safe to call between syncs. */
+void sync_free_scratch(void);
+
 #endif

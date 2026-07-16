@@ -24,6 +24,17 @@
 #include "appinfo.h"
 #include "sync.h"
 
+/* The `[sync]` lines that fire on every HEALTHY sync (per-collection read +
+ * push/pull summary, and the per-relocation trace) are gated behind SYNC_DEBUG
+ * so a release build (host CLI or on-device UART) is quiet. Genuine errors,
+ * OOM, dropped-record warnings, and failure notices below stay unconditional.
+ * Build the host with -DSYNC_DEBUG (or #define it on device) to restore them. */
+#ifdef SYNC_DEBUG
+#define SYNC_LOG(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define SYNC_LOG(...) ((void)0)
+#endif
+
 /* Working-set sizing. NOTE: as of the streaming reconcile (sync_collection /
  * sync_one below), MAXR NO LONGER caps a synced collection -- reconciliation is a
  * disk-backed merge-join whose resident cost during a DAV call is O(1). MAXR now
@@ -48,14 +59,18 @@
 #define BODY_TMP STATE_DIR "/.body"    /* PUT body staged here before upload */
 #define OUT_TMP  STATE_DIR "/.pdbout"  /* streamed output record bytes         */
 
-/* Shared emit scratch, kept OFF the stack: the sync runs single-threaded and
- * never holds two bodies at once, so one 8 KB buffer serves every emit site. On
- * the device an 8 KB stack frame per record (loadRec runs for every record)
- * overflowed the task stack; this moves it to .bss so the stack stays small. */
-static char g_body[8192];
-/* one shared buffer for a single lazily-read local record (see locBytes). Also
- * off-stack for the same reason: the reconcile loop reads records one at a time. */
-static uint8_t g_lrec[PALM_REC_MAX];
+/* Sync scratch. Kept OFF the stack (the sync runs single-threaded and never
+ * holds two bodies at once; on the device an 8 KB stack frame per record --
+ * loadRec runs for every record -- overflowed the sync task stack), but
+ * heap-allocated for the sync's LIFETIME rather than resident in BSS:
+ * scratch_alloc() acquires them at each public sync entry and sync_free_scratch()
+ * releases them, so ~20 KB (BODY_CAP + PALM_REC_MAX + OBJ_FETCH_CAP) returns to
+ * the interactive UI between syncs on the no-PSRAM device (the U0 rule). */
+#define BODY_CAP 8192
+static char   *g_body;    /* emit scratch: one object body at a time (BODY_CAP) */
+static uint8_t *g_lrec;   /* one lazily-read local record (PALM_REC_MAX)        */
+/* defined after g_objbuf (needs its cap); used by the entry points above it. */
+static int scratch_alloc(void);
 
 /* ---- kind helpers ---- */
 static const char* kindExt(int k){ return k==KIND_CARD?"vcf":"ics"; }
@@ -138,7 +153,7 @@ static int parse_object(int kind,const char*obj,uint8_t*out,int cap){
 
 static int pushRec(const PdbRec*r,int i,void*ctx){
     (void)i; PushCtx*p=ctx;
-    int bl=emit_object(p->kind,r->data,r->len,r->uniqueID,g_body,sizeof g_body,NULL);
+    int bl=emit_object(p->kind,r->data,r->len,r->uniqueID,g_body,BODY_CAP,NULL);
     if(bl<0) return 0;
     FILE*f=fopen(BODY_TMP,"wb"); fwrite(g_body,1,strlen(g_body),f); fclose(f);
     char name[64]; snprintf(name,sizeof name,"%u.%s",(unsigned)r->uniqueID,kindExt(p->kind));
@@ -150,6 +165,7 @@ static int pushRec(const PdbRec*r,int i,void*ctx){
 }
 
 int sync_push(const DavCtx*d,const char*pdbpath,const char*coll,int kind){
+    if(!scratch_alloc()) return -1;
     FILE*map=fopen(STATE_DIR "/sync_map.tsv","a");
     PushCtx p={ .d=d,.coll=coll,.kind=kind,.map=map,.n=0 };
     pdb_read(pdbpath,pushRec,&p);
@@ -163,6 +179,7 @@ static void collectName(const char*name,const char*etag,void*ctx){
 }
 
 int sync_pull(const DavCtx*d,const char*coll,const char*outpdb,int kind){
+    if(!scratch_alloc()) return -1;
     NameList *nl = calloc(1,sizeof *nl);
     uint8_t *arena = malloc(ARENA_CAP);
     PdbRec *recs = calloc(MAXR,sizeof *recs);
@@ -259,7 +276,24 @@ static int locBytes(const S*s,const Loc*L,uint8_t*buf,int cap){
 #define OBJ_FETCH_CAP (256*1024)
 #endif
 #endif
-static char g_objbuf[OBJ_FETCH_CAP];
+static char *g_objbuf;    /* server-object fetch buffer (OBJ_FETCH_CAP) */
+
+/* Acquire/release the sync scratch. scratch_alloc() runs at each public sync
+ * entry; it is idempotent, so a nested entry point (sync_categorized ->
+ * sync_collection) shares one allocation. sync_free_scratch() hands the ~20 KB
+ * back -- the device calls it after a HotSync so interactive mode gets the RAM;
+ * the host CLI/tests may skip it (the process exits). Returns 1 ok, 0 on OOM. */
+static int scratch_alloc(void){
+    if(!g_body)   g_body   = malloc(BODY_CAP);
+    if(!g_lrec)   g_lrec   = malloc(PALM_REC_MAX);
+    if(!g_objbuf) g_objbuf = malloc(OBJ_FETCH_CAP);
+    return g_body && g_lrec && g_objbuf;
+}
+void sync_free_scratch(void){
+    free(g_body);   g_body=NULL;
+    free(g_lrec);   g_lrec=NULL;
+    free(g_objbuf); g_objbuf=NULL;
+}
 
 /* per-collection index temp files (STATE_DIR). Each is rebuilt per collection;
  * sync is single-threaded so sharing the names across collections is fine. */
@@ -356,7 +390,7 @@ static int lcBuildCb(const PdbRec*r,int i,void*ctx){
         if(!dest||strcmp(dest,b->C)) return 0;      /* not this collection */
     }
     uint64_t hash=0;
-    if(emit_object(b->kind,r->data,r->len,r->uniqueID,g_body,sizeof g_body,NULL)>=0) hash=fnv1a(g_body);
+    if(emit_object(b->kind,r->data,r->len,r->uniqueID,g_body,BODY_CAP,NULL)>=0) hash=fnv1a(g_body);
     if(b->f) fprintf(b->f,"%010u\t%d\t%d\t%d\t%llu\n",
                      (unsigned)r->uniqueID,i,(int)r->attr,r->len,(unsigned long long)hash);
     if(r->uniqueID>b->maxuid) b->maxuid=r->uniqueID;
@@ -467,7 +501,7 @@ static int resolveServer(const DavCtx*d,const char*coll,int incremental){
         } else if(cmp<0){                 /* server only */
             if(sp){                       /* a new present object -> GET for its UID */
                 char objuid[48]=""; uint64_t oh;
-                int got=dav_get(d,coll,sh,g_objbuf,sizeof g_objbuf);
+                int got=dav_get(d,coll,sh,g_objbuf,OBJ_FETCH_CAP);
                 if(got>0 && got<OBJ_FETCH_CAP-1 && objuid_of(g_objbuf,objuid,sizeof objuid)==0){
                     oh=uidHash(objuid);
                     if(o) fprintf(o,"%016llx\t%s\t%s\t%d\n",(unsigned long long)oh,sh,se,1);
@@ -559,7 +593,7 @@ static void keepBytes(Sink*k,uint32_t uid,uint8_t attr,const uint8_t*data,int le
  * it is skipped with a warning rather than silently truncated. */
 static int keepFromServer(const DavCtx*d,const char*coll,int kind,Sink*k,
                           uint32_t uid,const char*name,const char*etag){
-    int got=dav_get(d,coll,name,g_objbuf,sizeof g_objbuf);
+    int got=dav_get(d,coll,name,g_objbuf,OBJ_FETCH_CAP);
     if(got<=0){ fprintf(stderr,"warning: could not fetch %s -- dropped\n",name); return -1; }
     if(got>=OBJ_FETCH_CAP-1){             /* hit the buffer limit => truncated */
         fprintf(stderr,"warning: %s exceeds %d bytes (large PHOTO?) -- dropped\n",name,OBJ_FETCH_CAP);
@@ -569,7 +603,7 @@ static int keepFromServer(const DavCtx*d,const char*coll,int kind,Sink*k,
     if(l<=0){ fprintf(stderr,"warning: could not parse %s -- dropped\n",name); return -1; }
     char ouid[48]=""; objuid_of(g_objbuf,ouid,sizeof ouid);   /* preserve the object's own UID */
     /* hash over the synth-UID body (UID-independent) so it matches loadRec's. */
-    emit_object(kind,tmp,l,uid,g_body,sizeof g_body,NULL);
+    emit_object(kind,tmp,l,uid,g_body,BODY_CAP,NULL);
     keepBytes(k,uid,(uint8_t)k->pullCat,tmp,l,name,etag,fnv1a(g_body),ouid);
     return 0;
 }
@@ -593,9 +627,9 @@ static int pushLocal(const DavCtx*d,const char*coll,int kind,Sink*k,
                      const char*name,const char*ifmatch,
                      const char*oldHref,const char*oldEtag,uint64_t oldHash,
                      const char*objuid){
-    if(locBytes(s,L,g_lrec,sizeof g_lrec)!=L->len){
+    if(locBytes(s,L,g_lrec,PALM_REC_MAX)!=L->len){
         fprintf(stderr,"[sync] lazy read failed for local uid=%u -- skipped\n",(unsigned)uid); return -1; }
-    int bl=emit_object(kind,g_lrec,L->len,uid,g_body,sizeof g_body,objuid);
+    int bl=emit_object(kind,g_lrec,L->len,uid,g_body,BODY_CAP,objuid);
     if(bl<0) return -1;
     /* the UID actually stored in the object (override, else the synth default). */
     char synth[32]; snprintf(synth,sizeof synth,"palm-%u@cyd",(unsigned)uid);
@@ -606,7 +640,7 @@ static int pushLocal(const DavCtx*d,const char*coll,int kind,Sink*k,
     if(st>=200 && st<300){
         if(!etag[0]) dav_getetag(d,coll,name,etag,sizeof etag);   /* fallback */
         /* hash over the synth-UID body (UID-independent), matching loadRec. */
-        emit_object(kind,g_lrec,L->len,uid,g_body,sizeof g_body,NULL);
+        emit_object(kind,g_lrec,L->len,uid,g_body,BODY_CAP,NULL);
         keepBytes(k,uid,L->attr,g_lrec,L->len,name,etag,fnv1a(g_body),storedUid); /* PDB + fresh map row */
         return st;
     }
@@ -737,7 +771,7 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
          * but the server moved it to a new href -- the exact iCloud behavior we
          * need to observe on-device. Logged only when the hrefs actually differ. */
         if(hasMap && hasSrv && mHref[0] && sName[0] && strcmp(mHref,sName))
-            fprintf(stderr,"[sync] reloc uid=%u: map href=%s -> server href=%s (UID match)\n",
+            SYNC_LOG("[sync] reloc uid=%u: map href=%s -> server href=%s (UID match)\n",
                     (unsigned)uid,mHref,sName);
 
         int conflict = (lcs==LMOD||lcs==LDEL||lcs==LNEW) && (scs==SMOD||scs==SNEW||scs==SDEL)
@@ -780,7 +814,7 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
                 if(keepFromServer(d,coll,kind,k,uid,srvName,sEtag)==0) st->pullMod++;
             }
         } else if(lcs==LCLEAN && scs==SCLEAN){
-            if(locBytes(s,L,g_lrec,sizeof g_lrec)==L->len)
+            if(locBytes(s,L,g_lrec,PALM_REC_MAX)==L->len)
                 keepBytes(k,uid,L->attr,g_lrec,L->len,srvName,mEtag,L->hash,mObjuid);
             else fprintf(stderr,"[sync] lazy read failed for clean uid=%u\n",(unsigned)uid);
             st->unchanged++;
@@ -823,12 +857,13 @@ static int countRecs(const char*pdb){ int n=0; pdb_read(pdb,countRecsCb,&n); ret
 int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
                     const char*coll,int kind,const char*mapfile,
                     ConflictPolicy pol,SyncStats*st){
+    if(!scratch_alloc()) return -1;
     S *s = calloc(1,sizeof *s);
     if(!s){ fprintf(stderr,"sync_collection: out of memory\n"); return -1; }
     s->kind=kind; snprintf(s->pdbpath,sizeof s->pdbpath,"%s",localpdb);
     static uint8_t ai[512]; int ailen=pdb_read_appinfo(localpdb,ai,sizeof ai); if(ailen<0)ailen=0;
     int nin = countRecs(localpdb);
-    fprintf(stderr,"[sync] read %s: recs=%d ailen=%d\n",localpdb,nin,ailen);
+    SYNC_LOG("[sync] read %s: recs=%d ailen=%d\n",localpdb,nin,ailen);
     SyncStats z={0}; if(!st) st=&z;
 
     PdbW *w = pdbw_begin(OUT_TMP);
@@ -836,7 +871,7 @@ int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
     progReset(nin);
     sync_one(d,s,coll,mapfile,pol,w,0,st,NULL,NULL);
     int nrec = pdbw_count(w);
-    fprintf(stderr,"[sync] %s: out=%d push=%d/%d/%d pull=%d/%d/%d\n",
+    SYNC_LOG("[sync] %s: out=%d push=%d/%d/%d pull=%d/%d/%d\n",
             coll,nrec,st->pushNew,st->pushMod,st->pushDel,
             st->pullNew,st->pullMod,st->pullDel);
     /* SAFETY: never overwrite a local PDB that HAD records with an empty result.
@@ -859,6 +894,7 @@ static void sanitizeColl(const char*coll,char*out,int cap){
 int sync_categorized(const DavCtx*d,const char*localpdb,const char*outpdb,
                      int kind,const CatRoute*rt,const char*mapdir,
                      ConflictPolicy pol,SyncStats*st){
+    if(!scratch_alloc()) return -1;
     static uint8_t ai[512]; int ailen=pdb_read_appinfo(localpdb,ai,sizeof ai); if(ailen<0)ailen=0;
     S *s = calloc(1,sizeof *s);
     if(!s){ fprintf(stderr,"sync_categorized: out of memory\n"); return -1; }
