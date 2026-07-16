@@ -51,6 +51,29 @@ deletes propagate). The hard part — fitting Wi-Fi + TLS + the sync engine besi
 LVGL in ~80 KB of RAM with no PSRAM — is solved. Full status, the build log, and
 what's next live in [`docs/`](docs/).
 
+## Try it without hardware — the simulator
+
+The **real firmware UI** (the same `ui.c`, data layer, Graffiti recognizer, Palm
+fonts and icons) also builds for your desktop and your **phone browser** — see
+[`docs/SIMULATOR_PLAN.md`](docs/SIMULATOR_PLAN.md) and [`sim/`](sim/):
+
+<p>
+  <img src="docs/img/sim_launcher.png" width="180" alt="Palm launcher in the simulator">
+  <img src="docs/img/sim_address.png" width="180" alt="Address list with Look Up in the simulator">
+</p>
+
+```
+make -C sim smoke     # native headless: scripted UI tour + screenshots (CI gate)
+make -C sim wasm      # browser build via Emscripten -> sim/build/web/
+```
+
+The native build needs `/sdcard` to exist (`sudo mkdir -p /sdcard && sudo chmod
+777 /sdcard`); LVGL v9.2.2 is fetched automatically on first build. CI builds the
+browser simulator on every push (the `palm-simulator-web` artifact); enabling
+GitHub Pages in the repo settings (Source: "GitHub Actions") turns that into a
+public URL you can open on a phone. Sync is stubbed in the simulator — everything
+else is the real thing.
+
 ---
 
 # How it works — architecture & build log

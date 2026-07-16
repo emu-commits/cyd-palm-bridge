@@ -1,5 +1,19 @@
 # Next phase — a mobile-friendly UI simulator
 
+> **STATUS (2026-07-16): S0–S3 BUILT** (`sim/`). The real `ui.c` boots headless
+> and renders correctly (screenshot-verified: launcher, Date Book Day view,
+> Address list/detail with live Look Up filtering, To Do, Memo, HotSync screen,
+> menus — and the `$1` recognizer resolving a Graffiti stroke end-to-end into a
+> field). `make -C sim smoke` is a CI gate with screenshots uploaded per push;
+> `make -C sim wasm` builds the browser version in CI (emsdk container). Two
+> deltas from this plan as written: **32/64-bit pool scaling** (24 KB assumes
+> 32-bit pointers; an LP64 host needs 48 KB for the same object capacity — the
+> wasm build is 32-bit and keeps true 24 KB parity), and the **native headless
+> frontend** (scripted input + PPM/PNG screenshots) was added as the local dev
+> loop + CI gate alongside the browser target. Remaining: enable GitHub Pages in
+> the repo settings for the public URL; then **S4** (charm backlog in the sim)
+> and **S5** (fetch-based sync) are open.
+
 Goal: run the real Palm UI (`firmware/main/ui.c`) **in a phone browser**, so the
 look-and-feel and the review's UX-charm backlog can be built and reviewed from a
 phone — no board, no flashing, no cable — and so the no-PSRAM LVGL memory limits

@@ -6,6 +6,45 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-16 — the simulator is REAL (S0–S3 of SIMULATOR_PLAN.md)
+
+The plan's core bet held: `ui.c` includes no `esp_*` headers, so the **real UI +
+data layer + Graffiti recognizer + Palm fonts/icons + bridge codec compile
+unchanged** behind a small `sim/` shim (esp_log/nvs/esp_timer header stubs — which
+also let the REAL `clock.c` TZ/DST logic run — plus hotsync/power stubs and a
+device-parity LVGL port: 40-row RGB565 partial buffer, mono theme, Palm font,
+injected touch/time).
+
+**Verified locally by looking at it:** the native headless frontend
+(`sim/host_main.c`) takes a stdin script (tap/drag/advance-time) and dumps PNG
+screenshots — launcher with live clock, Date Book Day view, Address list/detail
+with the Look Up filter live-filtering, To Do (checkbox column, priority sort),
+Memo, HotSync (stub status), menus, and a scripted **Graffiti stroke resolving
+through the real `$1` recognizer** into the Look Up field
+(`'i' d=0.6, 2nd 'j' 13.3`). `make -C sim smoke` runs the tour as a CI gate and
+uploads the screenshots as a per-push artifact.
+
+**One real memory finding:** the launcher OOM'd the 24 KB LVGL pool on x86-64 —
+not a bug, arithmetic: LP64 pointers double every LVGL object, so 24 KB holds
+half the device's objects. `sim/lv_conf.h` now uses 24 KB on 32-bit targets
+(**wasm is 32-bit ⇒ true device parity**) and 48 KB on LP64 hosts. The failure
+mode itself (create returns NULL → crash in the caller) is the exact
+pool-exhaustion class the device hits — the sim reproduces it as designed.
+
+**Browser build:** `make -C sim wasm` (emcc, no SDL — exported RGBA framebuffer
+blitted to a canvas; pointer events → Palm touch; MEMFS `/sdcard`;
+`sim/web/index.html` is a mobile-friendly aspect-locked shell with a case bezel).
+Built in CI (`emscripten/emsdk` container) → `palm-simulator-web` artifact, plus
+a tolerant Pages deploy: **enable Pages once in repo Settings (Source: GitHub
+Actions) and every push publishes the simulator at a public URL.**
+
+Also: LVGL v9.2.2 pinned + auto-fetched by the sim Makefile (not vendored), and
+the Makefile fetch-then-recurse ordering was verified against a clean checkout
+(the class of "works locally, dies in CI" bug the last session hit).
+
+**Next:** S4 — build the charm backlog (C1 Graffiti ink, C2 HotSync dialog, C4
+form contract, I1.2 keyboard) in the sim; S5 — fetch()-based sync in the browser.
+
 ## SESSION 2026-07-15 — product-hygiene sprint + CI (all green) + review
 
 A vacation-safe, fully-verifiable pass (no on-device flashing available this
