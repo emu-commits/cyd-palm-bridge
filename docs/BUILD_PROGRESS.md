@@ -6,6 +6,34 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-16 (part 3) — brightness-row freeze fixed (the lv_bar rule, again)
+
+User hit a hard freeze tapping **Preferences → Brightness** on the live sim. Root
+cause: the brightness popup used an **`lv_slider`**, and `lv_slider`'s
+`.base_class = &lv_bar_class` -- so it is a bar with a knob, and a bar's indicator
+forces LVGL to allocate a draw-LAYER buffer from the fixed 24 KB object pool. With
+the Preferences list already resident, that alloc fails and LVGL spins retrying the
+draw every refresh -> IDLE0 starves -> Task WDT -> frozen screen. This is the exact
+failure the codebase documents at `hs_tick` (why HotSync progress is text, not an
+`lv_bar`) and in NEXT_STEPS part-2 -- the brightness slider (added `ef1a0d0`) was a
+latent instance of it that shipped.
+
+- **Fix:** replaced the slider with a pool-safe **`[ - ]  NN%  [ + ]` stepper** of
+  plain `lv_button`s (the same widget class the Calculator and the on-screen
+  keyboard use -- buttons never allocate a draw layer). Live preview via
+  `power_set_brightness` on each tap; persists to `config.ini` once on close (only
+  if changed); 10% floor so it can't go fully dark. On close it also refreshes the
+  underlying "Brightness: NN%" list row in place (via `lv_obj_get_child_by_type`),
+  so the value isn't stale until re-entry -- without rebuilding the list (which
+  would lose the scroll position).
+- **Verified in the sim:** scripted navigation scrolls to the Brightness row, opens
+  the stepper, steps down/up, and closes -- screenshot-confirmed at each step, value
+  persisted to `config.ini` (`brightness = 70`), row refreshed. No freeze (a
+  regression would HANG the run).
+- **Regression gate:** `sim/tests/smoke.txt` now scrolls to Brightness, opens the
+  stepper, steps it, and closes (`prefs_brightness` + `prefs_brightness_stepped`
+  shots). Any future bar/slider reintroduction live-locks this run -> CI red.
+
 ## SESSION 2026-07-16 (part 2) — S4 charm sprint, built + verified in the sim
 
 The first UX sprint done entirely in the simulator loop (edit ui.c -> make -C
