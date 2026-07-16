@@ -6,6 +6,24 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-16 (part 5) — I4 feedback toasts + C6 honesty labels
+
+Two small, high-value sim-testable items from the review, both verified and added
+to the smoke gate.
+
+- **I4 (feedback loops).** Record **save** and **delete** were silent-success.
+  Added a Palm-style transient toast: `toast_show()` puts a non-clickable black
+  pill (white text) just above the Graffiti strip that clears itself after ~900 ms
+  (one-shot `lv_timer`, the ink-fade idiom) -- no tap required, unlike the modal
+  `alert_show`. A plain label with a solid fill allocates no draw layer, so it's
+  pool-safe. Wired "Saved" into `save_cb` and "Deleted" into the delete-confirm.
+- **C6 (honesty labels).** The About box now states the two things the device knows
+  but the user didn't: "Memos stay on this device." and "To Dos sync as CalDAV
+  tasks, not the Reminders app." (the part-11 iCloud finding). Bumped to v0.3.
+
+Smoke now taps **Done** on the Address edit form to capture the "Saved" toast
+(`address_saved`) and opens **About** for the honesty text (`about_box`).
+
 ## SESSION 2026-07-16 (part 4) — C7: the authentic inverted Palm title bar
 
 Charm item **C7 (title bar)** from the review, decided with the user against a
