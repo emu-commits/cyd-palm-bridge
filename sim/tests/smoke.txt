@@ -1,4 +1,4 @@
-# sim smoke: boot the real UI, tour every app, write one Graffiti letter.
+# sim smoke: boot the real UI, tour every app, exercise the S4 charm features.
 # Run by `make -C sim smoke` (CI gate); any bad command or crash exits non-zero.
 t 1000
 s launcher
@@ -8,13 +8,18 @@ t 400
 s datebook_day
 c 18 225
 t 300
-# Address list -> one record's detail -> home
+# Address list -> record detail -> edit form (C4 bottom bar) -> cancel -> home
 c 120 55
 t 400
 s address_list
 c 120 130
 t 400
 s address_detail
+c 200 188
+t 400
+s edit_form
+c 200 188
+t 400
 c 18 225
 t 300
 # To Do
@@ -29,7 +34,7 @@ t 400
 s memo_list
 c 18 225
 t 300
-# HotSync (stub status)
+# HotSync (C2: logo + status + Sync Now)
 c 155 110
 t 400
 s hotsync
@@ -41,19 +46,35 @@ t 400
 s menu_open
 c 200 180
 t 300
-# Graffiti: an 'i' stroke into the Address Look Up field
+# Preferences field editor with the I1.2 tap keyboard; type one key, cancel out
+c 18 300
+t 300
+c 75 66
+t 400
+c 120 37
+t 400
+s prefs_kb
+c 14 150
+t 300
+s prefs_kb_typed
+c 32 40
+t 300
+c 18 225
+t 300
+# Graffiti with the C1 ink trail: screenshot MID-stroke, then after recognition
 c 120 55
 t 400
 d 80 215
 t 40
-m 80 235
+m 82 235
 t 40
-m 80 255
+m 84 255
 t 40
-m 80 275
+m 82 275
 t 40
 m 80 295
 t 40
+s graffiti_ink
 u
 t 400
 s graffiti_lookup

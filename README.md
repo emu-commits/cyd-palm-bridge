@@ -60,6 +60,7 @@ fonts and icons) also builds for your desktop and your **phone browser** — see
 <p>
   <img src="docs/img/sim_launcher.png" width="180" alt="Palm launcher in the simulator">
   <img src="docs/img/sim_address.png" width="180" alt="Address list with Look Up in the simulator">
+  <img src="docs/img/sim_ink.png" width="180" alt="Graffiti ink trail mid-stroke in the simulator">
 </p>
 
 ```

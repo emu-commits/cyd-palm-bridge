@@ -22,7 +22,9 @@ BR := ../bridge
 # sim/include FIRST: shields the build from a real (gitignored) secrets.h and
 # provides the esp_log/nvs/esp_timer shims that let real firmware sources compile.
 INC    := -I. -Iinclude -Ilvgl -I$(FW) -I$(BR)
-CFLAGS := -O2 -g -Wall -DLV_CONF_INCLUDE_SIMPLE $(INC)
+# UI_DEVTOOLS: keep the "Add test events" dev menu item in sim builds (used to
+# mass-generate records against the heap/pool ceilings). Release firmware drops it.
+CFLAGS := -O2 -g -Wall -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS $(INC)
 
 # the REAL firmware UI + data layer + portable modules, unchanged
 APP_SRCS := \

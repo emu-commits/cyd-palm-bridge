@@ -7,3 +7,8 @@ idf_component_register(
              fatfs sdmmc esp_driver_sdspi esp_driver_spi esp_driver_gpio lwip
              lvgl esp_timer esp_driver_ledc esp_pm
 )
+
+# UI_DEVTOOLS keeps the Options -> "Add test events" item (seeds 30 events to
+# exercise the >24-record streaming sync on device). REMOVE this line for a
+# release build so users never see dev scaffolding.
+target_compile_definitions(${COMPONENT_LIB} PRIVATE UI_DEVTOOLS)

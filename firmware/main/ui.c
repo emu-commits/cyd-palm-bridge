@@ -587,27 +587,29 @@ static void show_edit(uint32_t uid){
     lv_obj_clean(content);
     lv_label_set_text(title_lbl, uid ? "Edit" : "New");
 
-    lv_obj_t *cancel = lv_button_create(content);
-    lv_obj_set_size(cancel, 60, 28); lv_obj_align(cancel, LV_ALIGN_TOP_LEFT, 2, 2);
-    lv_obj_t *cl=lv_label_create(cancel); lv_label_set_text(cl,"Cancel"); lv_obj_center(cl);
-    lv_obj_add_event_cb(cancel, cancel_cb, LV_EVENT_CLICKED, NULL);
-    /* middle button = category trigger (Palm sets a record's category here). Shows
-     * the current category; tap to choose. */
+    /* C4: Palm form contract -- the action row lives across the BOTTOM of the
+     * form (Palm's Done/Details convention), Done leftmost. Done saves (Palm
+     * edits committed on Done); Details is the category trigger; Cancel
+     * discards. The fields fill the space above. */
+    lv_obj_t *done = lv_button_create(content);
+    lv_obj_set_size(done, 64, 30); lv_obj_align(done, LV_ALIGN_BOTTOM_LEFT, 4, -3);
+    lv_obj_t *dl=lv_label_create(done); lv_label_set_text(dl,"Done"); lv_obj_center(dl);
+    lv_obj_add_event_cb(done, save_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *det = lv_button_create(content);
-    lv_obj_set_size(det, 112, 28); lv_obj_align(det, LV_ALIGN_TOP_MID, 0, 2);
+    lv_obj_set_size(det, 92, 30); lv_obj_align(det, LV_ALIGN_BOTTOM_MID, 0, -3);
     lv_obj_set_style_pad_hor(det, 2, 0);
     edit_cat_lbl = lv_label_create(det); lv_obj_center(edit_cat_lbl);
     lv_obj_add_event_cb(det, details_btn_cb, LV_EVENT_CLICKED, NULL);
     set_editcat_label();
-    lv_obj_t *save = lv_button_create(content);
-    lv_obj_set_size(save, 60, 28); lv_obj_align(save, LV_ALIGN_TOP_RIGHT, -2, 2);
-    lv_obj_t *sl=lv_label_create(save); lv_label_set_text(sl,"Save"); lv_obj_center(sl);
-    lv_obj_add_event_cb(save, save_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *cancel = lv_button_create(content);
+    lv_obj_set_size(cancel, 64, 30); lv_obj_align(cancel, LV_ALIGN_BOTTOM_RIGHT, -4, -3);
+    lv_obj_t *cl=lv_label_create(cancel); lv_label_set_text(cl,"Cancel"); lv_obj_center(cl);
+    lv_obj_add_event_cb(cancel, cancel_cb, LV_EVENT_CLICKED, NULL);
 
     g_form = lv_obj_create(content);
     lv_obj_t *form = g_form;
-    lv_obj_set_size(form, LCD_W, FORM_FULL);
-    lv_obj_set_pos(form, 0, 34);
+    lv_obj_set_size(form, LCD_W, (PDA_H - TITLE_H) - 38);   /* fields above the bottom bar */
+    lv_obj_set_pos(form, 0, 0);
     lv_obj_set_style_radius(form, 0, 0);
     lv_obj_set_style_border_width(form, 0, 0);
     lv_obj_set_style_bg_color(form, COL_BODY, 0);
@@ -652,7 +654,7 @@ static void show_edit(uint32_t uid){
         lv_obj_t *ta = lv_textarea_create(form);       /* one big multi-line field */
         lv_textarea_set_text(ta, mtext);
         lv_textarea_set_max_length(ta, sizeof mtext - 1);
-        lv_obj_set_size(ta, LCD_W - 16, FORM_FULL - 8);
+        lv_obj_set_size(ta, LCD_W - 16, (PDA_H - TITLE_H) - 46);
         lv_obj_set_pos(ta, 2, 2);
         lv_obj_add_event_cb(ta, ta_click_cb, LV_EVENT_CLICKED, NULL);
         g_fields[g_nfields++] = ta;
@@ -687,20 +689,32 @@ static void show_hotsync(void){
     lv_label_set_text(title_lbl, "HotSync");
     update_cat_trigger();
 
-    lv_obj_t *btn = lv_button_create(content);
-    lv_obj_set_size(btn, 120, 40);
-    lv_obj_align(btn, LV_ALIGN_TOP_MID, 0, 16);
-    lv_obj_t *bl = lv_label_create(btn);
-    lv_label_set_text(bl, "Sync Now");
-    lv_obj_center(bl);
-    lv_obj_add_event_cb(btn, hs_sync_cb, LV_EVENT_CLICKED, NULL);
+    /* C2: the classic HotSync moment -- the logo front and centre, the status
+     * ("Synchronizing <app>... N%") beneath it. Progress stays TEXT (never an
+     * lv_bar: its draw-layer alloc fails mid-sync on the fragmented no-PSRAM
+     * heap and live-locks LVGL -- see the note at hs_tick). The icon is drawn
+     * once, before any sync starts, so it costs nothing during the window. */
+    lv_obj_t *img = lv_image_create(content);
+    lv_image_set_src(img, &icon_hotsync);
+    lv_obj_set_style_image_recolor(img, COL_LINE, 0);
+    lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);
+    lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 12);
 
     hs_status = lv_label_create(content);
     lv_label_set_long_mode(hs_status, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(hs_status, LCD_W - 12);
-    lv_obj_align(hs_status, LV_ALIGN_TOP_MID, 0, 70);
+    lv_obj_align(hs_status, LV_ALIGN_TOP_MID, 0, 56);
     lv_obj_set_style_text_align(hs_status, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(hs_status, hotsync_status());
+
+    lv_obj_t *btn = lv_button_create(content);
+    lv_obj_set_size(btn, 130, 38);
+    lv_obj_align(btn, LV_ALIGN_BOTTOM_MID, 0, -14);
+    lv_obj_t *bl = lv_label_create(btn);
+    lv_obj_set_style_text_font(bl, &lv_font_palm_bold, 0);
+    lv_label_set_text(bl, "Sync Now");
+    lv_obj_center(bl);
+    lv_obj_add_event_cb(btn, hs_sync_cb, LV_EVENT_CLICKED, NULL);
 
     hs_timer = lv_timer_create(hs_tick, 400, NULL);
 }
@@ -977,6 +991,41 @@ static void pf_edit_save_cb(lv_event_t *e){ (void)e;
     appcfg_save();            /* persist to SD now -> survives reboot */
     show_prefs();
 }
+
+/* I1.2: on-screen keyboard for the Preferences fields. Entering a 19-character
+ * app-specific password stroke-by-stroke through an untuned recognizer was the
+ * single biggest setup blocker, so config fields get a tap keyboard: ONE
+ * lv_buttonmatrix (the calculator's proven pattern -- a single object, sizes
+ * its own cells, safe in the 24 KB pool). Graffiti still works in parallel;
+ * record editing everywhere else remains Graffiti-only (the signature input). */
+static const char *KB_LOWER[] = {
+    "q","w","e","r","t","y","u","i","o","p","\n",
+    "a","s","d","f","g","h","j","k","l","@","\n",
+    "ABC","z","x","c","v","b","n","m","<-","\n",
+    "123",".","-","_","space",":","/","" };
+static const char *KB_UPPER[] = {
+    "Q","W","E","R","T","Y","U","I","O","P","\n",
+    "A","S","D","F","G","H","J","K","L","@","\n",
+    "abc","Z","X","C","V","B","N","M","<-","\n",
+    "123",".","-","_","space",":","/","" };
+static const char *KB_DIGIT[] = {
+    "1","2","3","4","5","6","7","8","9","0","\n",
+    "!","#","$","%","&","*","(",")","+","=","\n",
+    "abc",",",";","'","\"","?","~","^","<-","\n",
+    "ABC",".","-","_","space",":","/","" };
+static void prefkb_cb(lv_event_t *e){
+    lv_obj_t *bm = lv_event_get_target(e);
+    uint32_t id = lv_buttonmatrix_get_selected_button(bm);
+    const char *t = lv_buttonmatrix_get_button_text(bm, id);
+    if(!t || !active_ta) return;
+    if(!strcmp(t, "ABC")){ lv_buttonmatrix_set_map(bm, KB_UPPER); return; }
+    if(!strcmp(t, "abc")){ lv_buttonmatrix_set_map(bm, KB_LOWER); return; }
+    if(!strcmp(t, "123")){ lv_buttonmatrix_set_map(bm, KB_DIGIT); return; }
+    if(!strcmp(t, "<-")) { lv_textarea_delete_char(active_ta); return; }
+    if(!strcmp(t, "space")){ lv_textarea_add_char(active_ta, ' '); return; }
+    lv_textarea_add_char(active_ta, (uint32_t)t[0]);
+}
+
 static void show_pref_edit(int i){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0; pf_edit_idx = i;
@@ -996,16 +1045,26 @@ static void show_pref_edit(int i){
     int cap=0; const char *val = pf_buf(appcfg_mut(), i, &cap);
     lv_obj_t *lb = lv_label_create(content);
     lv_label_set_text(lb, PF_LABELS[i]);
-    lv_obj_set_pos(lb, 4, 40);
+    lv_obj_set_pos(lb, 4, 38);
     lv_obj_t *ta = lv_textarea_create(content);       /* ONE textarea -> light + safe */
     lv_textarea_set_one_line(ta, true);
     lv_textarea_set_max_length(ta, cap>0 ? cap-1 : 63);
     lv_textarea_set_text(ta, val ? val : "");
     lv_obj_set_width(ta, LCD_W - 16);
-    lv_obj_set_pos(ta, 4, 58);
+    lv_obj_set_pos(ta, 4, 54);
     lv_obj_add_event_cb(ta, ta_click_cb, LV_EVENT_CLICKED, NULL);
     g_fields[0] = ta; g_nfields = 1; active_ta = ta;
     lv_obj_add_state(ta, LV_STATE_FOCUSED);
+
+    /* the tap keyboard fills the rest of the screen below the field */
+    lv_obj_t *bm = lv_buttonmatrix_create(content);
+    lv_obj_set_size(bm, LCD_W - 4, (PDA_H - TITLE_H) - 92);
+    lv_obj_align(bm, LV_ALIGN_BOTTOM_MID, 0, -2);
+    lv_buttonmatrix_set_map(bm, KB_LOWER);
+    lv_obj_set_style_radius(bm, 0, 0);
+    lv_obj_set_style_radius(bm, 0, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(bm, 0, 0);
+    lv_obj_add_event_cb(bm, prefkb_cb, LV_EVENT_VALUE_CHANGED, NULL);
 }
 
 /* ---- timezone picker (replaces the free-text TZ editor) ----
@@ -1289,7 +1348,9 @@ static void act_toggle_sort(lv_event_t *e){ (void)e; menu_close();
 /* debug: seed 30 test appointments into the Date Book so a >24-record collection
  * can be pushed to iCloud to exercise the streaming reconcile. Each is a new
  * record (uid 0 => data layer assigns a fresh uniqueID); the next HotSync pushes
- * all of them up. */
+ * all of them up. C5: dev scaffolding -- only present when UI_DEVTOOLS is
+ * defined (sim builds + dev firmware builds; strip the define for release). */
+#ifdef UI_DEVTOOLS
 static void act_gentest(lv_event_t *e){ (void)e; menu_close();
     time_t now=0; time(&now);
     struct tm base; localtime_r(&now,&base);
@@ -1308,6 +1369,7 @@ static void act_gentest(lv_event_t *e){ (void)e; menu_close();
     if(cur_app && cur_app->app==APP_CAL) list_view(cur_app);
     alert_show("Added 30 test events to Date Book.\nHotSync to push them to iCloud.");
 }
+#endif /* UI_DEVTOOLS */
 
 static lv_obj_t *g_about;
 static void about_close(void){ if(g_about){ lv_obj_del(g_about); g_about=NULL; } }
@@ -1343,7 +1405,10 @@ static void act_about(lv_event_t *e){ (void)e;
     lv_obj_t *body = lv_label_create(panel);
     lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(body, 160);                       /* panel(180) - 2*pad(10) */
-    lv_label_set_text(body, "A PalmOS-style PDA that syncs to iCloud.\n\nv0.1 - tap to close");
+    lv_label_set_text(body, "A pocket PDA that syncs to iCloud.\n"
+                            "Offline by default. HotSync when\n"
+                            "you want to. No feed. No ads.\n\n"
+                            "v0.2 - tap to close");
     lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 20);
 }
 
@@ -1404,7 +1469,9 @@ static void menu_open(void){
         menu_item(panel, g_todo_sort_due ? "Sort by Priority" : "Sort by Due Date", act_toggle_sort);
     }
     menu_item(panel, "Preferences", act_prefs);
+#ifdef UI_DEVTOOLS
     menu_item(panel, "Add test events", act_gentest);
+#endif
     menu_item(panel, "About", act_about);
 }
 
@@ -1900,10 +1967,84 @@ void br_open(void){
 }
 
 /* ------------------------- U6: Graffiti stroke capture ------------------------- */
-static void graf_down_cb(lv_event_t *e){ (void)e; graffiti_clear(); }
+
+/* C1: the ink trail. Real Graffiti showed your stroke; without it the user
+ * can't tell whether a stroke registered or where it went wrong. An I1 canvas
+ * (2 colors) sits BEHIND the writing pads: 168x106 @ 1bpp is ~2.3 KB in BSS --
+ * off the LVGL pool, cheap enough for the no-PSRAM device. Ink is drawn with
+ * direct set_px (Bresenham, 2px pen) -- no draw-layer allocation, so it can
+ * never hit the mid-sync layer-alloc failure documented at show_hotsync. The
+ * ink fades (clears) shortly after pen-up, like the real thing. */
+#define INK_X0 36                        /* clear of the 30px silkscreen buttons */
+#define INK_Y0 3
+#define INK_W  (LCD_W - 2*INK_X0)
+#define INK_H  (GRAFFITI_H - 6)
+static lv_obj_t  *ink_canvas;
+static uint8_t    ink_buf[LV_CANVAS_BUF_SIZE(INK_W, INK_H, 1, 1) + 16]; /* +palette */
+static int        ink_lx = -1, ink_ly = -1;   /* last canvas-local point (-1 = pen up) */
+static lv_timer_t *ink_fade;
+
+static void ink_clear(void){
+    if(!ink_canvas) return;
+    lv_color_t bg = { .blue = 0 };       /* indexed canvas: palette index in .blue */
+    lv_canvas_fill_bg(ink_canvas, bg, LV_OPA_COVER);
+}
+static void ink_fade_cb(lv_timer_t *t){ (void)t; ink_clear(); ink_fade = NULL; }
+static void ink_fade_start(void){
+    if(ink_fade){ lv_timer_delete(ink_fade); }
+    ink_fade = lv_timer_create(ink_fade_cb, 450, NULL);
+    lv_timer_set_repeat_count(ink_fade, 1);
+}
+static void ink_point(int sx, int sy){
+    if(!ink_canvas) return;
+    int x = sx - INK_X0, y = sy - (PDA_H + INK_Y0);
+    if(x < 0 || y < 0 || x >= INK_W || y >= INK_H){ ink_lx = -1; return; }
+    if(ink_lx < 0){ ink_lx = x; ink_ly = y; }
+    int x0 = ink_lx, y0 = ink_ly;
+    int dx = x > x0 ? x - x0 : x0 - x, sx_ = x0 < x ? 1 : -1;
+    int dy = y > y0 ? y0 - y : y - y0, sy_ = y0 < y ? 1 : -1;   /* dy <= 0 */
+    int err = dx + dy;
+    lv_color_t ink = { .blue = 1 };
+    for(;;){
+        lv_canvas_set_px(ink_canvas, x0, y0, ink, LV_OPA_COVER);
+        if(x0 + 1 < INK_W) lv_canvas_set_px(ink_canvas, x0 + 1, y0, ink, LV_OPA_COVER);
+        if(y0 + 1 < INK_H) lv_canvas_set_px(ink_canvas, x0, y0 + 1, ink, LV_OPA_COVER);
+        if(x0 == x && y0 == y) break;
+        int e2 = 2 * err;
+        if(e2 >= dy){ err += dy; x0 += sx_; }
+        if(e2 <= dx){ err += dx; y0 += sy_; }
+    }
+    ink_lx = x; ink_ly = y;
+}
+
+/* echo the recognized character in the strip for a moment (Palm-style feedback) */
+static lv_obj_t  *graf_echo_lbl;
+static lv_timer_t *echo_timer;
+static void echo_clear_cb(lv_timer_t *t){ (void)t;
+    if(graf_echo_lbl) lv_label_set_text(graf_echo_lbl, "");
+    echo_timer = NULL;
+}
+static void graf_echo(char c){
+    if(!graf_echo_lbl || c < ' ' || c > 126) return;
+    char s[2] = { c, 0 };
+    lv_label_set_text(graf_echo_lbl, s);
+    if(echo_timer) lv_timer_delete(echo_timer);
+    echo_timer = lv_timer_create(echo_clear_cb, 600, NULL);
+    lv_timer_set_repeat_count(echo_timer, 1);
+}
+
+static void graf_down_cb(lv_event_t *e){ (void)e;
+    graffiti_clear();
+    if(ink_fade){ lv_timer_delete(ink_fade); ink_fade = NULL; }
+    ink_clear();
+    ink_lx = -1;
+    lv_point_t p; lv_indev_get_point(lv_indev_active(), &p);
+    ink_point(p.x, p.y);
+}
 static void graf_move_cb(lv_event_t *e){ (void)e;
     lv_point_t p; lv_indev_get_point(lv_indev_active(), &p);
     graffiti_add_point(p.x, p.y);
+    ink_point(p.x, p.y);
 }
 /* case state armed by the shift upstroke: none -> shift (one letter) -> caps lock
  * -> none, cycling on each upstroke (Palm's single/double/single shift). */
@@ -1924,7 +2065,10 @@ static void show_punct(int on){
 /* user_data: 0 = letters (abc pad), 1 = digits (123 pad) */
 static void graf_up_cb(lv_event_t *e){
     int digits = (int)(intptr_t)lv_event_get_user_data(e);
+    ink_lx = -1;
+    ink_fade_start();                                  /* ink lingers, then clears */
     char c = graffiti_recognize(digits);
+    if(c) graf_echo(c);                                /* flash what was recognized */
     if(!c){ show_punct(0); return; }                   /* nothing / punct rejected */
     if(c == GRAF_SHIFT){ graf_case = (graf_case + 1) % 3; show_case(); return; }
     if(c == GRAF_PUNCT){ show_punct(1); return; }       /* tap: arm punctuation */
@@ -2041,6 +2185,16 @@ void ui_init(void){
     mk_silk(graf, &silk_find, LV_ALIGN_TOP_RIGHT,   -3,  3, find_cb);
     mk_silk(graf, &silk_calc, LV_ALIGN_BOTTOM_RIGHT,-3, -3, calc_cb);
 
+    /* C1: the ink canvas sits UNDER the pads (created first = behind); the pads
+     * stay the clickable surfaces and feed both the recognizer and the ink. */
+    ink_canvas = lv_canvas_create(graf);
+    lv_canvas_set_buffer(ink_canvas, ink_buf, INK_W, INK_H, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_palette(ink_canvas, 0, lv_color_to_32(COL_GRAF, 0xFF));
+    lv_canvas_set_palette(ink_canvas, 1, lv_color_to_32(COL_LINE, 0xFF));
+    lv_obj_set_pos(ink_canvas, INK_X0, INK_Y0);
+    lv_obj_clear_flag(ink_canvas, LV_OBJ_FLAG_CLICKABLE);
+    ink_clear();
+
     /* U6: two Graffiti writing pads between the silkscreen buttons -- abc (left)
      * writes letters, 123 (right) writes digits; strokes -> $1 -> active field.
      * Swipe L->R = space, R->L = backspace. There is no on-screen keyboard. */
@@ -2063,6 +2217,12 @@ void ui_init(void){
     lv_label_set_text(graf_punct_lbl, "");
     lv_obj_set_style_text_font(graf_punct_lbl, &lv_font_palm_bold, 0);
     lv_obj_align(graf_punct_lbl, LV_ALIGN_TOP_MID, 0, 1);
+
+    /* recognized-character echo (bottom-centre; flashes for ~600 ms per stroke) */
+    graf_echo_lbl = lv_label_create(graf);
+    lv_label_set_text(graf_echo_lbl, "");
+    lv_obj_set_style_text_font(graf_echo_lbl, &lv_font_palm_bold, 0);
+    lv_obj_align(graf_echo_lbl, LV_ALIGN_BOTTOM_MID, 0, -1);
 
     show_launcher();
 }
