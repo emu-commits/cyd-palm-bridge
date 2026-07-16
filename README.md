@@ -69,10 +69,9 @@ make -C sim wasm      # browser build via Emscripten -> sim/build/web/
 
 The native build needs `/sdcard` to exist (`sudo mkdir -p /sdcard && sudo chmod
 777 /sdcard`); LVGL v9.2.2 is fetched automatically on first build. CI builds the
-browser simulator on every push (the `palm-simulator-web` artifact); enabling
-GitHub Pages in the repo settings (Source: "GitHub Actions") turns that into a
-public URL you can open on a phone. Sync is stubbed in the simulator — everything
-else is the real thing.
+browser simulator on every push (the `palm-simulator-web` artifact) and publishes
+it to GitHub Pages: **https://emu-commits.github.io/cyd-palm-bridge/** — open it
+on a phone. Sync is stubbed in the simulator — everything else is the real thing.
 
 ---
 

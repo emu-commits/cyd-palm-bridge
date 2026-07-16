@@ -10,9 +10,10 @@
 > 32-bit pointers; an LP64 host needs 48 KB for the same object capacity — the
 > wasm build is 32-bit and keeps true 24 KB parity), and the **native headless
 > frontend** (scripted input + PPM/PNG screenshots) was added as the local dev
-> loop + CI gate alongside the browser target. Remaining: enable GitHub Pages in
-> the repo settings for the public URL; then **S4** (charm backlog in the sim)
-> and **S5** (fetch-based sync) are open.
+> loop + CI gate alongside the browser target. Pages is enabled (Source:
+> GitHub Actions) -- the sim publishes to
+> https://emu-commits.github.io/cyd-palm-bridge/ on every push. Next: **S4**
+> (charm backlog in the sim) and **S5** (fetch-based sync).
 
 Goal: run the real Palm UI (`firmware/main/ui.c`) **in a phone browser**, so the
 look-and-feel and the review's UX-charm backlog can be built and reviewed from a
