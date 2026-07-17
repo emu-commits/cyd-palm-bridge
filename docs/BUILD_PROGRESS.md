@@ -6,6 +6,29 @@ can resume cold. Newest phase on top.
 > **Forward-looking plan lives in `docs/NEXT_STEPS.md`** (prioritized P0/P1/P2).
 > This file is the historical log; that file is what to do next.
 
+## SESSION 2026-07-17 (part 6) — I3 Week view (Day/Week/Month zoom hierarchy)
+
+The Date Book had Day + Month views but no **Week view** (the review's I3 gap; the
+Day-view comment even claimed Day/Week/Month existed). Added `show_datebook_week()`
+and wired a consistent zoom hierarchy: tapping a view's **centre label zooms out**
+one level (Day -> Week -> Month), a **day tap zooms back in**. So the Day view's
+central date button now opens the Week (was: jumped straight to Month); the Week's
+centre range label opens the Month; the Month's day tap opens the Day. Month's
+"Today" still fast-jumps home.
+
+- **Week view** is a plain scrollable `lv_list` (the pool-safe pattern -- no
+  draw-layer widget, unlike the brightness `lv_slider` that live-locked the 24 KB
+  pool): one row per day of the week, "Wdy m/d" plus an "N event(s)" count when the
+  day has any (counted by scanning that day via `data_cal_day` -- 7 tiny streaming
+  scans, matching the streaming-as-a-rule design). Today's row is tinted `COL_GRAF`
+  (a background fill only -> allocates no layer). `g_wk_*` holds the week start (its
+  Sunday) so prev/next `[<]`/`[>]` page whole weeks; the header shows the range
+  ("Jul 12-18", or "Jun 29 - Jul 5" across a month boundary).
+- Verified in the sim: Day -> tap date -> Week (range + per-day counts, today
+  tinted) -> tap Sun 7/12 -> its Day view -> tap date -> Week -> tap range ->
+  Month grid. Added a `datebook_week` gate to the smoke test (between Day view and
+  home); `make -C sim smoke` green, heap peak 568 B of 147 KB.
+
 ## SESSION 2026-07-16 (part 5) — I4 feedback toasts + C6 honesty labels
 
 Two small, high-value sim-testable items from the review, both verified and added
