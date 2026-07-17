@@ -12,6 +12,13 @@ What was built, and the non-obvious things that cost time to learn. This is the
 ## Milestone changelog (newest first)
 
 ### 2026-07 — review cycle: charm + intuitiveness in the simulator
+- **C4 Edit Categories** — the category picker's tail row ("Edit Categories") opens
+  a pool-safe editor: a list of the app's categories (Unfiled reserved/hidden), a
+  **New** button, and per-category **rename** via the I1.2 tap keyboard (one
+  textarea + one button-matrix). `data_set_categories` writes the new AppInfo back
+  with `pdb_write_ai`, preserving every record (a record's category nibble is
+  untouched, so a rename retags its whole category). Delete is deferred (needs
+  recategorising affected records to Unfiled). Smoke-gated.
 - **I3** — Date Book **Week view**; Day/Week/Month zoom hierarchy (centre label
   zooms out, day tap zooms in).
 - **I4** — transient save/delete **toasts** (were silent-success). **C6** — About

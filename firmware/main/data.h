@@ -59,6 +59,8 @@ int data_delete(int app, uint32_t uid);
 /* categories: read the app's category table; get/set the active list filter
  * (-1 = All). List iterators honor the filter. */
 int  data_get_categories(int app, CatTable *t);
+/* write the app's category table back (preserving records). 1 on success. */
+int  data_set_categories(int app, const CatTable *t);
 void data_set_category(int cat);
 int  data_get_category(void);
 
