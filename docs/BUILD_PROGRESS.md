@@ -12,6 +12,10 @@ What was built, and the non-obvious things that cost time to learn. This is the
 ## Milestone changelog (newest first)
 
 ### 2026-07 — review cycle: charm + intuitiveness in the simulator
+- **I4 config-save feedback** — the Preferences field editor (silent) and the
+  "Save to config.ini" row (modal alert) now show the same transient "Saved" toast
+  as record save/delete, so config edits close the feedback loop consistently. A
+  *write failure* stays a modal alert (the user must notice the card didn't take).
 - **C4 event Alarm + Repeat** — the Date Book Details sheet gained an Alarm on/off
   toggle and a Repeat cycle (None/Daily/Weekly/Monthly/Yearly), both plain buttons
   that relabel in place. The `Appt` struct + `ApptPack`/`ical_emit` already carried

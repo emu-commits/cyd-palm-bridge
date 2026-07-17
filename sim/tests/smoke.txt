@@ -115,7 +115,8 @@ t 400
 s menu_open
 c 200 180
 t 300
-# Preferences field editor with the I1.2 tap keyboard; type one key, cancel out
+# Preferences field editor with the I1.2 tap keyboard; type one key, then Save ->
+# I4 transient "Saved" toast (config edits close the feedback loop like records do)
 c 18 300
 t 300
 c 75 66
@@ -126,7 +127,9 @@ s prefs_kb
 c 14 150
 t 300
 s prefs_kb_typed
-c 32 40
+c 208 40
+t 200
+s prefs_field_saved
 t 300
 # Brightness stepper (must NOT be an lv_slider: a bar/slider draw-layer alloc
 # live-locks LVGL on the 24 KB pool -> WDT freeze). Scroll to the Brightness row,

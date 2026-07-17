@@ -28,9 +28,6 @@ mostly away from the bench via the browser simulator).
   cycle; persisted via `ApptPack`, propagated as VALARM/RRULE by the codec). The
   only deferred piece is category **delete** — it must recategorise the affected
   records to Unfiled, which rename/add don't touch.
-- **`[sim]` I4 — config-field-save feedback.** Record save/delete now toast;
-  the Preferences **Save** still uses the modal alert. Give it the same
-  transient toast for consistency.
 - **`[sim]` I3 "Go to Date"** *(low priority)* — a fast cross-year jump dialog.
   The Day/Week/Month zoom hierarchy + `[<]`/`[>]` paging already reach any date,
   so this is a convenience, not a gap.
@@ -113,5 +110,5 @@ GitHub Pages, native headless smoke gate in CI). And this review cycle's charm/
 intuitiveness batch: C1 ink trail, C2 HotSync dialog, the full C4 form contract
 (bottom bar, Edit Categories, Address 10 fields, event Alarm/Repeat), C5/C6
 About honesty, C7 inverted title bar, I1.1 onboarding hint, I1.2 keyboard,
-I2 remove-demo-data safety, I3 Week view, I4 save/delete toasts, and the
-brightness-stepper freeze fix.
+I2 remove-demo-data safety, I3 Week view, I4 feedback toasts (record
+save/delete *and* config-field save), and the brightness-stepper freeze fix.
