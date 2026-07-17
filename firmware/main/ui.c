@@ -104,10 +104,13 @@ static void due_btn_cb(lv_event_t *e);
 static void due_set_label(void);
 static void br_open(void);
 
-/* Date Book uses PalmOS's date-centric views (Day + Month) instead of a flat list
- * of every event -- see show_datebook_day / show_datebook_month. g_cal_* holds the
- * currently-viewed day so navigation + "return from a record" land back on it. */
+/* Date Book uses PalmOS's date-centric views (Day/Week/Month) instead of a flat
+ * list of every event -- see show_datebook_day / show_datebook_week /
+ * show_datebook_month. g_cal_* holds the currently-viewed day so navigation +
+ * "return from a record" land back on it. Tapping the centre label of a view
+ * zooms out one level (Day -> Week -> Month); a day tap zooms back in. */
 static void show_datebook_day(int y, int m, int d);
+static void show_datebook_week(int y, int m, int d);
 static void show_datebook_month(int y, int m);
 static void app_reopen(const AppDef *a);   /* back to an app's main view (Day view for Date Book) */
 static int  g_cal_y, g_cal_m, g_cal_d;
@@ -762,7 +765,7 @@ static int day_cmp(const void *a,const void *b){
 }
 static void day_prev_cb(lv_event_t *e){ (void)e; cal_add_days(&g_cal_y,&g_cal_m,&g_cal_d,-1); show_datebook_day(g_cal_y,g_cal_m,g_cal_d); }
 static void day_next_cb(lv_event_t *e){ (void)e; cal_add_days(&g_cal_y,&g_cal_m,&g_cal_d, 1); show_datebook_day(g_cal_y,g_cal_m,g_cal_d); }
-static void day_month_cb(lv_event_t *e){ (void)e; show_datebook_month(g_cal_y,g_cal_m); }
+static void day_week_cb(lv_event_t *e){ (void)e; show_datebook_week(g_cal_y,g_cal_m,g_cal_d); }  /* zoom out to the week */
 
 static void show_datebook_day(int y,int m,int d){
     kill_kb();
@@ -781,7 +784,7 @@ static void show_datebook_day(int y,int m,int d){
     lv_obj_add_event_cb(next,day_next_cb,LV_EVENT_CLICKED,NULL);
     lv_obj_t *mon=lv_button_create(content); lv_obj_set_size(mon,130,28); lv_obj_align(mon,LV_ALIGN_TOP_MID,0,2);
     lv_obj_t *ml=lv_label_create(mon); lv_label_set_text_fmt(ml,"%s %d, %d",CAL_MON[m],d,y); lv_obj_center(ml);
-    lv_obj_add_event_cb(mon,day_month_cb,LV_EVENT_CLICKED,NULL);   /* tap the date -> Month view */
+    lv_obj_add_event_cb(mon,day_week_cb,LV_EVENT_CLICKED,NULL);   /* tap the date -> Week view */
 
     g_ndayrows=0;
     data_cal_day(y,m,d,day_collect,NULL);
@@ -797,6 +800,78 @@ static void show_datebook_day(int y,int m,int d){
         lv_obj_t *b=lv_list_add_button(list,NULL,g_dayrows[i].txt);
         lv_obj_set_style_radius(b,0,0);
         lv_obj_add_event_cb(b,row_cb,LV_EVENT_CLICKED,(void*)(uintptr_t)g_dayrows[i].uid);
+    }
+}
+
+/* --- Week view (7-day agenda: one scrollable list, a count per day, today tinted).
+ * Sits between Day and Month in the zoom hierarchy: tap a day row to zoom in to
+ * that Day, tap the centre range label to zoom out to the Month. Pool-safe --
+ * plain list buttons + labels, no draw-layer widgets. g_wk_* is the week start
+ * (its Sunday) so prev/next page whole weeks. */
+static int g_wk_y, g_wk_m, g_wk_d;
+static struct { int y,m,d; } g_wkdays[7];
+static int g_wk_count;
+static void wk_count_cb(uint32_t uid,const char *p,const char *s,void *ctx){
+    (void)uid;(void)p;(void)s;(void)ctx; g_wk_count++;
+}
+static void wk_day_cb(lv_event_t *e){
+    int i=(int)(uintptr_t)lv_event_get_user_data(e);
+    show_datebook_day(g_wkdays[i].y,g_wkdays[i].m,g_wkdays[i].d);
+}
+static void week_prev_cb(lv_event_t *e){ (void)e; cal_add_days(&g_wk_y,&g_wk_m,&g_wk_d,-7); show_datebook_week(g_wk_y,g_wk_m,g_wk_d); }
+static void week_next_cb(lv_event_t *e){ (void)e; cal_add_days(&g_wk_y,&g_wk_m,&g_wk_d, 7); show_datebook_week(g_wk_y,g_wk_m,g_wk_d); }
+static void week_month_cb(lv_event_t *e){ (void)e; show_datebook_month(g_wk_y,g_wk_m); }
+
+static void show_datebook_week(int y,int m,int d){
+    kill_kb();
+    cur_app=&APPDEFS[0]; cur_uid=0;
+    /* snap (y,m,d) back to the Sunday that starts its week */
+    g_wk_y=y; g_wk_m=m; g_wk_d=d;
+    cal_add_days(&g_wk_y,&g_wk_m,&g_wk_d, -cal_wday(y,m,d));
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl,"Week");
+    update_cat_trigger();
+
+    /* materialise the 7 days up front (used by the range label and each row) */
+    for(int i=0;i<7;i++){
+        g_wkdays[i].y=g_wk_y; g_wkdays[i].m=g_wk_m; g_wkdays[i].d=g_wk_d;
+        cal_add_days(&g_wkdays[i].y,&g_wkdays[i].m,&g_wkdays[i].d, i);
+    }
+
+    lv_obj_t *prev=lv_button_create(content); lv_obj_set_size(prev,38,28); lv_obj_align(prev,LV_ALIGN_TOP_LEFT,2,2);
+    lv_obj_t *pl=lv_label_create(prev); lv_label_set_text(pl,"<"); lv_obj_center(pl);
+    lv_obj_add_event_cb(prev,week_prev_cb,LV_EVENT_CLICKED,NULL);
+    lv_obj_t *next=lv_button_create(content); lv_obj_set_size(next,38,28); lv_obj_align(next,LV_ALIGN_TOP_RIGHT,-2,2);
+    lv_obj_t *nl=lv_label_create(next); lv_label_set_text(nl,">"); lv_obj_center(nl);
+    lv_obj_add_event_cb(next,week_next_cb,LV_EVENT_CLICKED,NULL);
+    lv_obj_t *rng=lv_button_create(content); lv_obj_set_size(rng,150,28); lv_obj_align(rng,LV_ALIGN_TOP_MID,0,2);
+    lv_obj_t *rl=lv_label_create(rng); lv_obj_center(rl);
+    if(g_wkdays[0].m==g_wkdays[6].m)
+        lv_label_set_text_fmt(rl,"%s %d-%d",CAL_MON[g_wkdays[0].m],g_wkdays[0].d,g_wkdays[6].d);
+    else
+        lv_label_set_text_fmt(rl,"%s %d - %s %d",CAL_MON[g_wkdays[0].m],g_wkdays[0].d,CAL_MON[g_wkdays[6].m],g_wkdays[6].d);
+    lv_obj_add_event_cb(rng,week_month_cb,LV_EVENT_CLICKED,NULL);   /* tap the range -> Month view */
+
+    int ty,tm,td; cal_today(&ty,&tm,&td);
+    lv_obj_t *list=lv_list_create(content);
+    lv_obj_set_size(list,LCD_W,FORM_FULL);
+    lv_obj_set_pos(list,0,34);
+    lv_obj_set_style_radius(list,0,0); lv_obj_set_style_border_width(list,0,0); lv_obj_set_style_pad_all(list,0,0);
+    for(int i=0;i<7;i++){
+        g_wk_count=0;
+        data_cal_day(g_wkdays[i].y,g_wkdays[i].m,g_wkdays[i].d,wk_count_cb,NULL);
+        char row[48];
+        if(g_wk_count==0)
+            snprintf(row,sizeof row,"%s %d/%d",CAL_WD[cal_wday(g_wkdays[i].y,g_wkdays[i].m,g_wkdays[i].d)],g_wkdays[i].m,g_wkdays[i].d);
+        else
+            snprintf(row,sizeof row,"%s %d/%d   %d event%s",
+                     CAL_WD[cal_wday(g_wkdays[i].y,g_wkdays[i].m,g_wkdays[i].d)],g_wkdays[i].m,g_wkdays[i].d,
+                     g_wk_count, g_wk_count==1?"":"s");
+        lv_obj_t *b=lv_list_add_button(list,NULL,row);
+        lv_obj_set_style_radius(b,0,0);
+        if(g_wkdays[i].y==ty && g_wkdays[i].m==tm && g_wkdays[i].d==td)
+            lv_obj_set_style_bg_color(b,COL_GRAF,0);   /* tint today's row (bg fill only -> pool-safe) */
+        lv_obj_add_event_cb(b,wk_day_cb,LV_EVENT_CLICKED,(void*)(uintptr_t)i);
     }
 }
 

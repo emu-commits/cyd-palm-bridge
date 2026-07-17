@@ -1,44 +1,14 @@
 # Next phase — a mobile-friendly UI simulator
 
-> **STATUS (2026-07-16): S0–S3 BUILT** (`sim/`). The real `ui.c` boots headless
-> and renders correctly (screenshot-verified: launcher, Date Book Day view,
-> Address list/detail with live Look Up filtering, To Do, Memo, HotSync screen,
-> menus — and the `$1` recognizer resolving a Graffiti stroke end-to-end into a
-> field). `make -C sim smoke` is a CI gate with screenshots uploaded per push;
-> `make -C sim wasm` builds the browser version in CI (emsdk container). Two
-> deltas from this plan as written: **32/64-bit pool scaling** (24 KB assumes
-> 32-bit pointers; an LP64 host needs 48 KB for the same object capacity — the
-> wasm build is 32-bit and keeps true 24 KB parity), and the **native headless
-> frontend** (scripted input + PPM/PNG screenshots) was added as the local dev
-> loop + CI gate alongside the browser target. Pages is enabled (Source:
-> GitHub Actions) -- the sim publishes to
-> https://emu-commits.github.io/cyd-palm-bridge/ on every push.
->
-> **UPDATE (same day, post-launch):** two gaps found by using it on a phone,
-> both fixed. (1) **General-heap ceiling** (`sim/sim_heap.h` + `heap_budget.c`,
-> linker-wrapped malloc/calloc/realloc/free): the LVGL pool was already exact,
-> but general malloc drew from unlimited browser memory -- now it's capped at a
-> device-like budget (default 144 KB ~= the UI_ROADMAP Mode A free heap), armed
-> after boot; verified by a 1 KB-budget build rendering the UI's real
-> "(low memory)" degrade path. (2) **Persistent SD card**: /sdcard is now an
-> IDBFS (IndexedDB) mount -- records/prefs survive reloads, per-browser and
-> origin-isolated. Credentials are deliberately NOT persisted: sim_scrub_config()
-> blanks the password fields of config.ini before every write to browser
-> storage (session-only in RAM; sync is stubbed so stored creds would be pure
-> risk).
->
-> **S4 (2026-07-16, part 2): the charm sprint is BUILT in the sim** -- C1 ink
-> trail + char echo, C2 HotSync dialog, C4 form contract, I1.2 Preferences
-> keyboard, C5 devtools gating -- all in the real ui.c, screenshot-verified,
-> covered by the smoke gate.
->
-> **S4.1 (part 3-4):** a Preferences->Brightness **freeze** found on the live sim
-> was fixed (an `lv_slider` == an `lv_bar` == draw-layer alloc -> WDT; replaced
-> with a pool-safe `[-] NN% [+]` stepper, now a smoke gate). Then **C7 title bar**
-> adopted the authentic inverted (white-on-black) Palm look; a whole-`ui.c` sweep
-> confirmed no other layer-alloc widget remains, and C7 untimed-first Day view was
-> verified already-correct. Remaining: C7 ✓-glyph (font regen), C3 sound
-> (hardware), the on-glass verify, and **S5** (fetch-based sync).
+> **STATUS: BUILT and live** (`sim/`). The real `ui.c` runs as a **native headless**
+> host (scripted input + PPM/PNG screenshots; `make -C sim smoke` is a CI gate) and
+> as **WASM** in the phone browser, published to
+> https://emu-commits.github.io/cyd-palm-bridge/ on every push. It has a device-like
+> LVGL pool + general-heap ceiling (32-bit wasm keeps true 24 KB parity), IDBFS
+> `/sdcard` persistence, and credential scrubbing. The whole charm/intuitiveness
+> backlog was built and screenshot-verified in it. This doc is the **original plan**;
+> for what's left see `docs/BACKLOG.md`, for the build history + the sim-specific
+> lessons see `docs/BUILD_PROGRESS.md`.
 
 Goal: run the real Palm UI (`firmware/main/ui.c`) **in a phone browser**, so the
 look-and-feel and the review's UX-charm backlog can be built and reviewed from a

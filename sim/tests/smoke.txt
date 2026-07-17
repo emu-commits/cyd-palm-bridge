@@ -2,10 +2,17 @@
 # Run by `make -C sim smoke` (CI gate); any bad command or crash exits non-zero.
 t 1000
 s launcher
-# Date Book (Day view) and back home
+# Date Book: Day view -> tap the date to zoom out to Week (I3) -> tap a day to
+# zoom back to Day -> home. The Week view is a plain scrollable list (pool-safe).
 c 40 55
 t 400
 s datebook_day
+c 120 40
+t 400
+s datebook_week
+c 120 80
+t 400
+s datebook_day2
 c 18 225
 t 300
 # Address list -> record detail -> edit form (C4 bottom bar) -> Done (I4 toast)
