@@ -43,6 +43,21 @@ s address_detail
 c 200 188
 t 400
 s edit_form
+# C4: the Address edit form now scrolls through 10 fields (was 5). Drag up to
+# reveal Company/Phone/Address/City/State/Zip and screenshot the lower half.
+d 120 140
+t 30
+m 120 110
+t 30
+m 120 80
+t 30
+m 120 55
+t 30
+m 120 35
+t 30
+u
+t 300
+s edit_form_fields
 # tap Done (bottom-left) -> saves -> transient "Saved" toast (I4)
 c 36 190
 t 150

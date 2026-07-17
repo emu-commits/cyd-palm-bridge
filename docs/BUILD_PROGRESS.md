@@ -12,6 +12,11 @@ What was built, and the non-obvious things that cost time to learn. This is the
 ## Milestone changelog (newest first)
 
 ### 2026-07 — review cycle: charm + intuitiveness in the simulator
+- **C4 Address edit form** — expanded from 5 to 10 scrollable fields (Last, First,
+  Title, Company, Phone, Address, City, State, Zip, Note). The `form_field` builder
+  order and `save_cb`'s `fv()` indices move in lock-step; fields the form still
+  doesn't expose (phone2-5 labels, country, custom1-4) are preserved from the old
+  record on save. Smoke-gated (scroll to reveal the lower fields).
 - **C4 Edit Categories** — the category picker's tail row ("Edit Categories") opens
   a pool-safe editor: a list of the app's categories (Unfiled reserved/hidden), a
   **New** button, and per-category **rename** via the I1.2 tap keyboard (one
