@@ -1149,6 +1149,7 @@ static void pf_edit_save_cb(lv_event_t *e){ (void)e;
     if(dst && cap) snprintf(dst, cap, "%s", lv_textarea_get_text(g_fields[0]));
     appcfg_save();            /* persist to SD now -> survives reboot */
     show_prefs();
+    toast_show("Saved");      /* I4: same transient feedback as record save/delete */
 }
 
 /* I1.2: on-screen keyboard for the Preferences fields. Entering a 19-character
@@ -1297,7 +1298,10 @@ static void pf_disc_row_cb(lv_event_t *e){ (void)e;
 static void pf_bright_row_cb(lv_event_t *e){ (void)e; br_open(); }
 static void pf_saverow_cb(lv_event_t *e){ (void)e;
     int rc = appcfg_save();
-    alert_show(rc==0 ? "Saved to config.ini" : "Could not write config.ini (SD card?)");
+    /* I4: success is a transient toast (like record save); a write FAILURE stays a
+     * modal alert -- the user must notice the card didn't take their settings. */
+    if(rc==0) toast_show("Saved to config.ini");
+    else      alert_show("Could not write config.ini (SD card?)");
 }
 static lv_obj_t *pf_add(lv_obj_t *list, const char *text, lv_event_cb_t cb, int ud){
     lv_obj_t *b = lv_list_add_button(list, NULL, text);
