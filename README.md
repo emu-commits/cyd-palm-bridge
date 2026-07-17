@@ -106,20 +106,20 @@ Two halves, both real — and joined on hardware with **bidirectional** iCloud s
    **Calculator**, and HotSync. **Bidirectional sync confirmed on device** —
    Date Book + To Do + Address each sync to their own iCloud collection (Address
    over CardDAV); records push *and* pull, edits survive, deletes propagate.
-   See **[docs/BUILD_PROGRESS.md](docs/BUILD_PROGRESS.md)** (cold-resume log) and
-   **[docs/NEXT_STEPS.md](docs/NEXT_STEPS.md)** (what to do next). Firmware in
-   **`firmware/`** (ESP-IDF).
+   See **[docs/BUILD_PROGRESS.md](docs/BUILD_PROGRESS.md)** (build history +
+   hard-won lessons) and **[docs/BACKLOG.md](docs/BACKLOG.md)** (what's left).
+   Firmware in **`firmware/`** (ESP-IDF).
 
 > **The hard part was RAM** (no PSRAM): TLS + Wi-Fi + LVGL + the sync working set
 > must coexist in ~80 KB of heap. It fits after shrinking the LVGL pool, enabling
 > mbedTLS dynamic buffers, trimming Wi-Fi buffers, and keeping the sync working set
-> small. The reconcile struct `S` is a single `calloc` that must sit *beside* the
-> mbedTLS handshake, so **`MAXR` stays at 24** (an earlier 24→96 bump broke sync:
-> `S` starved the TLS handshake and pulls silently failed). This **caps a
-> collection at 24 records** — see NEXT_STEPS for the streaming rework to lift it.
-> **Known gaps:** Memo has no iCloud DAV surface (stays local); creds are still
-> compile-time in `secrets.h` (on-device `config.ini` is planned); Graffiti has no
-> punctuation yet; power + case are the remaining hardware phases.
+> small. The reconcile struct `S` must sit *beside* the mbedTLS handshake, so the
+> in-RAM index stays at `MAXR=24` (an earlier 24→96 bump starved the handshake and
+> pulls silently failed). The **streaming reconcile then removed the record cap** —
+> records stream to/from SD, so a collection is no longer bounded by `MAXR` (an
+> on-device >24-record round-trip is the remaining verify). **Known gaps:** Memo
+> has no iCloud DAV surface (stays local); power + case are the remaining hardware
+> phases. The full to-do list is **[docs/BACKLOG.md](docs/BACKLOG.md)**.
 
 ---
 

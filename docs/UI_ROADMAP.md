@@ -5,17 +5,12 @@ a touchscreen with Graffiti text entry, sync to iCloud, run on a battery, live i
 a printed case. This doc answers the up-front question — **does 0 PSRAM block
 this?** — then lays out the build.
 
-> **STATUS (2026-07-09) — most of this is built and on-device; sync is now
-> two-way.** Done + on hardware: U0 (static→heap RAM unlock), U1 display, U2 touch
-> (calibrated, NVS), U3 app shell, U3a Palm fonts/icons/theme, U4 data views, U5
-> detail+edit, **F1 menus, F2 categories, F3 Memo/apps, F4 Details, U6 Graffiti,
-> U7 HotSync (BIDIRECTIONAL iCloud sync working for Date Book + To Do + Address —
-> push & pull, edits survive, deletes propagate), per-record Delete + confirm,
-> Calculator app**. TLS fits at `MAXR=24` (an earlier 24→96 bump broke pulls). See
-> `docs/NEXT_STEPS.md` for what's next (UID-based matching, >24-record streaming,
-> on-device config.ini, Graffiti punctuation, Find UI). **Remaining:** U8 power,
-> U9 case (hardware); Graffiti training-game app + X 2-stroke (backlog below).
-> Blow-by-blow + commit list in **docs/BUILD_PROGRESS.md** (the cold-resume record).
+> **STATUS — this design is built.** The whole UI (U0–U7, F1–F4) is on hardware:
+> display, calibrated touch, the LVGL Palm-skinned shell, all four apps with
+> detail/edit, menus, categories, Details, Graffiti, per-record Delete, Calculator,
+> and bidirectional iCloud HotSync. This doc is kept as the **design + memory
+> analysis** that proved a no-PSRAM CYD could run it. For **what's left** see
+> **`docs/BACKLOG.md`**; for **history + lessons** see **`docs/BUILD_PROGRESS.md`**.
 
 > **BACKLOG — Graffiti training "game" app.** Real Palm Pilots have a Graffiti
 > icon in the launcher; we should too. Make it a light, kanji/Chinese-writing-app
