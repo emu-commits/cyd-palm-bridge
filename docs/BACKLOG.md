@@ -22,12 +22,11 @@ mostly away from the bench via the browser simulator).
 ## Do next — in the simulator
 
 - **`[sim]` C4 extras — finish the Palm form contract.** The bottom-bar
-  Done/Details/Delete pattern is in; **Edit Categories (rename/add) is now done**
-  (the picker's tail row opens a pool-safe editor; `data_set_categories` writes the
-  AppInfo back, preserving records). Still missing Palm staples:
+  Done/Details/Delete pattern is in; **Edit Categories (rename/add)** and the
+  **Address edit form (now 10 scrollable fields: Last/First/Title/Company/Phone/
+  Address/City/State/Zip/Note, was 5)** are done. Still missing:
   - Event **alarm** + **repeat** fields in the Date Book Details sheet (the data
     already round-trips VALARM/RRULE — this is UI only).
-  - **Address** showing more than 5 fields on the edit form.
   - Category **delete** (deferred — it must recategorise the affected records to
     Unfiled, which rename/add don't touch).
 - **`[sim]` I4 — config-field-save feedback.** Record save/delete now toast;

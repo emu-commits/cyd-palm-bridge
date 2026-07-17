@@ -555,12 +555,17 @@ static void save_cb(lv_event_t *e){
         Addr a; memset(&a,0,sizeof a);
         a.fields[F_name]=iv(&a,fv(0));
         a.fields[F_firstName]=iv(&a,fv(1));
-        a.fields[F_company]=iv(&a,fv(2));
-        a.fields[F_phone1]=iv(&a,fv(3)); a.phoneLabel[0]=have?old.phoneLabel[0]:workLabel;
-        a.fields[F_note]=iv(&a,fv(4));
-        if(have){   /* preserve fields the form doesn't expose */
+        a.fields[F_title]=iv(&a,fv(2));
+        a.fields[F_company]=iv(&a,fv(3));
+        a.fields[F_phone1]=iv(&a,fv(4)); a.phoneLabel[0]=have?old.phoneLabel[0]:workLabel;
+        a.fields[F_address]=iv(&a,fv(5));
+        a.fields[F_city]=iv(&a,fv(6));
+        a.fields[F_state]=iv(&a,fv(7));
+        a.fields[F_zip]=iv(&a,fv(8));
+        a.fields[F_note]=iv(&a,fv(9));
+        if(have){   /* preserve fields the form still doesn't expose */
             for(int k=1;k<5;k++) if(old.fields[F_phone1+k]){ a.fields[F_phone1+k]=iv(&a,old.fields[F_phone1+k]); a.phoneLabel[k]=old.phoneLabel[k]; }
-            static const int keep[]={F_address,F_city,F_state,F_zip,F_country,F_title,F_custom1,F_custom2,F_custom3,F_custom4};
+            static const int keep[]={F_country,F_custom1,F_custom2,F_custom3,F_custom4};
             for(unsigned k=0;k<sizeof keep/sizeof keep[0];k++) if(old.fields[keep[k]]) a.fields[keep[k]]=iv(&a,old.fields[keep[k]]);
             a.displayPhone=old.displayPhone;
         }
@@ -649,11 +654,18 @@ static void show_edit(uint32_t uid){
         y += 52;
     } else if(cur_app->app == APP_ADDR){
         Addr a; if(!data_get_addr(uid,&a)) memset(&a,0,sizeof a);
-        form_field(form,"Last",a.fields[F_name],40,&y);
-        form_field(form,"First",a.fields[F_firstName],40,&y);
-        form_field(form,"Company",a.fields[F_company],60,&y);
-        form_field(form,"Phone",a.fields[F_phone1],40,&y);
-        form_field(form,"Note",a.fields[F_note],200,&y);
+        /* the scrollable form now exposes the common Palm Address fields (was just
+         * 5); fv() indices below must stay in lock-step with save_cb's APP_ADDR arm */
+        form_field(form,"Last",a.fields[F_name],40,&y);       /* fv0 */
+        form_field(form,"First",a.fields[F_firstName],40,&y); /* fv1 */
+        form_field(form,"Title",a.fields[F_title],40,&y);     /* fv2 */
+        form_field(form,"Company",a.fields[F_company],60,&y); /* fv3 */
+        form_field(form,"Phone",a.fields[F_phone1],40,&y);    /* fv4 */
+        form_field(form,"Address",a.fields[F_address],60,&y); /* fv5 */
+        form_field(form,"City",a.fields[F_city],40,&y);       /* fv6 */
+        form_field(form,"State",a.fields[F_state],20,&y);     /* fv7 */
+        form_field(form,"Zip",a.fields[F_zip],20,&y);         /* fv8 */
+        form_field(form,"Note",a.fields[F_note],200,&y);      /* fv9 */
     } else if(cur_app->app == APP_MEMO){
         static char mtext[1200];
         if(!data_get_memo(uid, mtext, sizeof mtext)) mtext[0]=0;
