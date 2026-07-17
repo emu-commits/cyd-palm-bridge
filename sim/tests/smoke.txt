@@ -13,6 +13,24 @@ s datebook_week
 c 120 80
 t 400
 s datebook_day2
+# C4 event Details: menu -> New -> Details -> toggle Alarm on + cycle Repeat ->
+# close -> Done (persists via ApptPack). Plain buttons only -> pool-safe.
+c 18 300
+t 300
+c 60 68
+t 400
+c 120 188
+t 400
+c 150 105
+t 200
+c 150 140
+t 200
+s cal_details
+c 210 260
+t 200
+c 40 188
+t 300
+s cal_event_saved
 c 18 225
 t 300
 # Address list -> record detail -> edit form (C4 bottom bar) -> Done (I4 toast)

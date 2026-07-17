@@ -12,6 +12,12 @@ What was built, and the non-obvious things that cost time to learn. This is the
 ## Milestone changelog (newest first)
 
 ### 2026-07 — review cycle: charm + intuitiveness in the simulator
+- **C4 event Alarm + Repeat** — the Date Book Details sheet gained an Alarm on/off
+  toggle and a Repeat cycle (None/Daily/Weekly/Monthly/Yearly), both plain buttons
+  that relabel in place. The `Appt` struct + `ApptPack`/`ical_emit` already carried
+  `hasAlarm`/`hasRepeat` (VALARM/RRULE), so this was UI-only: `g_ev_*` init from the
+  loaded event in the edit-form builder, applied in `save_cb`. Round-trip verified
+  in the sim (set On/Weekly -> save -> reopen shows On/Weekly). Smoke-gated.
 - **C4 Address edit form** — expanded from 5 to 10 scrollable fields (Last, First,
   Title, Company, Phone, Address, City, State, Zip, Note). The `form_field` builder
   order and `save_cb`'s `fv()` indices move in lock-step; fields the form still

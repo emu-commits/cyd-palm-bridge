@@ -90,6 +90,28 @@ static lv_obj_t *active_ta;            /* last-focused textarea (Graffiti target
 static int g_due_has, g_due_y, g_due_m, g_due_d;
 static lv_obj_t *g_due_lbl;            /* label on the edit-form Due trigger */
 
+/* Date Book Details: alarm on/off + repeat type, edited in the Details sheet and
+ * applied to the Appt on Save (the codec already round-trips VALARM/RRULE). */
+static int g_ev_alarm, g_ev_repeat;
+static const char *repeat_name(int rt){
+    switch(rt){
+        case repeatDaily:  return "Daily";
+        case repeatWeekly: return "Weekly";
+        case repeatMonthlyByDay: case repeatMonthlyByDate: return "Monthly";
+        case repeatYearly: return "Yearly";
+        default:           return "None";
+    }
+}
+static int repeat_next(int rt){   /* cycle None->Daily->Weekly->Monthly->Yearly->None */
+    switch(rt){
+        case repeatNone:   return repeatDaily;
+        case repeatDaily:  return repeatWeekly;
+        case repeatWeekly: return repeatMonthlyByDate;
+        case repeatMonthlyByDate: case repeatMonthlyByDay: return repeatYearly;
+        default:           return repeatNone;
+    }
+}
+
 static void list_view(const AppDef *ad);
 static void show_detail(uint32_t uid);
 static void show_edit(uint32_t uid);
@@ -542,6 +564,10 @@ static void save_cb(lv_event_t *e){
         int mo,dd,yy; if(sscanf(fv(1),"%d/%d/%d",&mo,&dd,&yy)==3){ a.month=mo; a.day=dd; a.year=yy; }
         int hh,mm; if(sscanf(fv(2),"%d:%d",&hh,&mm)==2){ a.hasTime=1; a.sH=hh; a.sM=mm; a.eH=(hh+1)%24; a.eM=mm; }
         snprintf(a.note,sizeof a.note,"%s",fv(3));
+        a.hasAlarm = g_ev_alarm;                          /* Details sheet: alarm + repeat */
+        if(g_ev_alarm && a.alarmAdv <= 0){ a.alarmAdv = 5; a.alarmUnit = 0; }  /* default 5 min */
+        if(g_ev_repeat == repeatNone){ a.hasRepeat = 0; a.repeatType = repeatNone; }
+        else { a.hasRepeat = 1; a.repeatType = g_ev_repeat; if(a.repeatFreq <= 0) a.repeatFreq = 1; }
         data_save_cal(edit_uid,edit_cat,&a);
     } else if(cur_app->app == APP_TODO){
         Todo t; if(!data_get_todo(edit_uid,&t)) memset(&t,0,sizeof t);
@@ -628,6 +654,8 @@ static void show_edit(uint32_t uid){
     int y = 2;
     if(cur_app->app == APP_CAL){
         Appt a; if(!data_get_cal(uid,&a)) default_appt(&a);
+        g_ev_alarm  = a.hasAlarm;                              /* Details sheet state */
+        g_ev_repeat = a.hasRepeat ? a.repeatType : repeatNone;
         char ds[24]; snprintf(ds,sizeof ds,"%d/%d/%d",a.month,a.day,a.year);
         char ts[16]; snprintf(ts,sizeof ts,"%d:%02d",a.sH,a.sM);
         form_field(form,"Description",a.description,255,&y);
@@ -2034,6 +2062,29 @@ static void details_close(void){ if(g_details){ lv_obj_del(g_details); g_details
 static void details_backdrop_cb(lv_event_t *e){ (void)e; details_close(); }
 static void details_pick_cb(lv_event_t *e){ edit_cat = (int)(intptr_t)lv_event_get_user_data(e); details_close(); set_editcat_label(); }
 
+/* Date Book Details: Alarm on/off + Repeat cycle. Plain buttons that relabel in
+ * place (pool-safe); the picked state lives in g_ev_* until Save. */
+static lv_obj_t *g_ev_alarm_lbl, *g_ev_repeat_lbl;
+static void ev_alarm_cb(lv_event_t *e){ (void)e;
+    g_ev_alarm = !g_ev_alarm;
+    if(g_ev_alarm_lbl) lv_label_set_text_fmt(g_ev_alarm_lbl, "Alarm: %s", g_ev_alarm?"On":"Off");
+}
+static void ev_repeat_cb(lv_event_t *e){ (void)e;
+    g_ev_repeat = repeat_next(g_ev_repeat);
+    if(g_ev_repeat_lbl) lv_label_set_text_fmt(g_ev_repeat_lbl, "Repeat: %s", repeat_name(g_ev_repeat));
+}
+static lv_obj_t *details_row(lv_obj_t *panel, const char *txt, lv_event_cb_t cb){
+    lv_obj_t *b = lv_button_create(panel);
+    lv_obj_set_width(b, lv_pct(100));
+    lv_obj_set_style_radius(b, 0, 0);
+    lv_obj_set_style_pad_ver(b, 4, 0);
+    lv_obj_t *l = lv_label_create(b);
+    lv_label_set_text(l, txt);
+    lv_obj_align(l, LV_ALIGN_LEFT_MID, 2, 0);
+    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
+    return l;
+}
+
 /* Details dialog: choose the record's category (Palm's per-record Details). */
 static void details_open(void){
     if(!cur_app || g_details) return;
@@ -2061,6 +2112,17 @@ static void details_open(void){
     lv_obj_set_style_pad_all(panel, 4, 0);
     lv_obj_set_style_pad_row(panel, 2, 0);
     lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
+
+    if(cur_app->app == APP_CAL){    /* Date Book: alarm + repeat above the category */
+        lv_obj_t *eh = lv_label_create(panel);
+        lv_label_set_text(eh, "Event:");
+        lv_obj_set_style_text_font(eh, &lv_font_palm_bold, 0);
+        char buf[24];
+        snprintf(buf, sizeof buf, "Alarm: %s", g_ev_alarm?"On":"Off");
+        g_ev_alarm_lbl = details_row(panel, buf, ev_alarm_cb);
+        snprintf(buf, sizeof buf, "Repeat: %s", repeat_name(g_ev_repeat));
+        g_ev_repeat_lbl = details_row(panel, buf, ev_repeat_cb);
+    }
 
     lv_obj_t *hdr = lv_label_create(panel);
     lv_label_set_text(hdr, "Category:");
