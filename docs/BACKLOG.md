@@ -22,12 +22,14 @@ mostly away from the bench via the browser simulator).
 ## Do next — in the simulator
 
 - **`[sim]` C4 extras — finish the Palm form contract.** The bottom-bar
-  Done/Details/Delete pattern is in; still missing Palm staples:
-  - **Edit Categories** (rename/add) — the AppInfo codec already supports it;
-    today `act_categories` only opens the category *picker*, not an editor.
+  Done/Details/Delete pattern is in; **Edit Categories (rename/add) is now done**
+  (the picker's tail row opens a pool-safe editor; `data_set_categories` writes the
+  AppInfo back, preserving records). Still missing Palm staples:
   - Event **alarm** + **repeat** fields in the Date Book Details sheet (the data
     already round-trips VALARM/RRULE — this is UI only).
   - **Address** showing more than 5 fields on the edit form.
+  - Category **delete** (deferred — it must recategorise the affected records to
+    Unfiled, which rename/add don't touch).
 - **`[sim]` I4 — config-field-save feedback.** Record save/delete now toast;
   the Preferences **Save** still uses the modal alert. Give it the same
   transient toast for consistency.
@@ -110,7 +112,7 @@ device reconcile). On-device `config.ini` + Preferences + Discover. The PalmOS U
 (views, edit forms, menus, categories, Graffiti, HotSync, Calculator, Find).
 Legal/CI/README hygiene. The **browser simulator** (real `ui.c` to WASM, live on
 GitHub Pages, native headless smoke gate in CI). And this review cycle's charm/
-intuitiveness batch: C1 ink trail, C2 HotSync dialog, C4 form contract, C5/C6
-About honesty, C7 inverted title bar, I1.1 onboarding hint, I1.2 keyboard,
-I2 remove-demo-data safety, I3 Week view, I4 save/delete toasts, and the
-brightness-stepper freeze fix.
+intuitiveness batch: C1 ink trail, C2 HotSync dialog, C4 form contract +
+Edit Categories, C5/C6 About honesty, C7 inverted title bar, I1.1 onboarding
+hint, I1.2 keyboard, I2 remove-demo-data safety, I3 Week view, I4 save/delete
+toasts, and the brightness-stepper freeze fix.

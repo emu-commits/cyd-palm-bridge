@@ -1822,6 +1822,7 @@ static void calc_cb(lv_event_t *e){ (void)e; calc_open(); }
 
 /* ------------------------- F2: category picker ------------------------- */
 static lv_obj_t *cat_trigger, *cat_label, *g_catpop;
+static void ce_edit_item(lv_obj_t *par);   /* "Edit Categories" tail item (C4) */
 
 static void catpop_close(void){ if(g_catpop){ lv_obj_del(g_catpop); g_catpop=NULL; } }
 static void catpop_backdrop_cb(lv_event_t *e){ (void)e; catpop_close(); }
@@ -1886,6 +1887,133 @@ static void cat_trigger_cb(lv_event_t *e){
 
     cat_item(panel, "All", -1);
     if(have) for(int c=0;c<CAT_COUNT;c++) if(t.name[c][0]) cat_item(panel, t.name[c], c);
+    ce_edit_item(panel);   /* Palm: the picker's last row edits the categories */
+}
+
+/* ---------------- C4: Edit Categories (rename existing / add new) ----------------
+ * Palm's "Edit Categories" from the tail of the category picker. Renames land in
+ * the app's PDB AppInfo immediately (data_set_categories preserves records; a
+ * record's category nibble is unchanged, so a rename retags everything in that
+ * category). "Unfiled" (slot 0) is reserved and not listed. Delete is out of
+ * scope here -- it would need to recategorise the affected records to Unfiled.
+ * All widgets are the pool-safe kind: a list of buttons, and for naming, one
+ * textarea + one button-matrix keyboard (the Preferences I1.2 pattern). */
+static int g_ce_app;    /* app whose categories are being edited */
+static int g_ce_slot;   /* category slot (1..15) being named */
+static void show_cat_edit(void);
+static void show_cat_name_edit(int slot);
+
+static void cat_name_cancel_cb(lv_event_t *e){ (void)e; show_cat_edit(); }
+static void cat_name_save_cb(lv_event_t *e){ (void)e;
+    CatTable t;
+    if(data_get_categories(g_ce_app, &t)){
+        snprintf(t.name[g_ce_slot], sizeof t.name[0], "%s", lv_textarea_get_text(g_fields[0]));
+        if(data_set_categories(g_ce_app, &t)) toast_show("Saved");
+    }
+    show_cat_edit();
+}
+
+static void show_cat_name_edit(int slot){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0; g_ce_slot = slot;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, "Category");
+    update_cat_trigger();
+
+    lv_obj_t *cancel = lv_button_create(content);
+    lv_obj_set_size(cancel, 60, 28); lv_obj_align(cancel, LV_ALIGN_TOP_LEFT, 2, 2);
+    lv_obj_t *cl=lv_label_create(cancel); lv_label_set_text(cl,"Cancel"); lv_obj_center(cl);
+    lv_obj_add_event_cb(cancel, cat_name_cancel_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *save = lv_button_create(content);
+    lv_obj_set_size(save, 60, 28); lv_obj_align(save, LV_ALIGN_TOP_RIGHT, -2, 2);
+    lv_obj_t *sl=lv_label_create(save); lv_label_set_text(sl,"Save"); lv_obj_center(sl);
+    lv_obj_add_event_cb(save, cat_name_save_cb, LV_EVENT_CLICKED, NULL);
+
+    CatTable t; const char *cur = "";
+    if(data_get_categories(g_ce_app, &t)) cur = t.name[slot];
+    lv_obj_t *lb = lv_label_create(content);
+    lv_label_set_text(lb, "Name:");
+    lv_obj_set_pos(lb, 4, 38);
+    lv_obj_t *ta = lv_textarea_create(content);
+    lv_textarea_set_one_line(ta, true);
+    lv_textarea_set_max_length(ta, (int)sizeof t.name[0] - 1);   /* 15 chars */
+    lv_textarea_set_text(ta, cur ? cur : "");
+    lv_obj_set_width(ta, LCD_W - 16);
+    lv_obj_set_pos(ta, 4, 54);
+    lv_obj_add_event_cb(ta, ta_click_cb, LV_EVENT_CLICKED, NULL);
+    g_fields[0] = ta; g_nfields = 1; active_ta = ta;
+    lv_obj_add_state(ta, LV_STATE_FOCUSED);
+
+    lv_obj_t *bm = lv_buttonmatrix_create(content);
+    lv_obj_set_size(bm, LCD_W - 4, (PDA_H - TITLE_H) - 92);
+    lv_obj_align(bm, LV_ALIGN_BOTTOM_MID, 0, -2);
+    lv_buttonmatrix_set_map(bm, KB_LOWER);
+    lv_obj_set_style_radius(bm, 0, 0);
+    lv_obj_set_style_radius(bm, 0, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(bm, 0, 0);
+    lv_obj_add_event_cb(bm, prefkb_cb, LV_EVENT_VALUE_CHANGED, NULL);
+}
+
+static void ce_row_cb(lv_event_t *e){ show_cat_name_edit((int)(intptr_t)lv_event_get_user_data(e)); }
+static void ce_done_cb(lv_event_t *e){ (void)e; app_reopen(&APPDEFS[g_ce_app]); }
+static void ce_new_cb(lv_event_t *e){ (void)e;
+    CatTable t; if(!data_get_categories(g_ce_app, &t)) return;
+    for(int c=1;c<CAT_COUNT;c++) if(!t.name[c][0]){ show_cat_name_edit(c); return; }
+    toast_show("Categories full");
+}
+
+static void show_cat_edit(void){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, "Edit Categories");
+    update_cat_trigger();
+
+    lv_obj_t *done = lv_button_create(content);
+    lv_obj_set_size(done, 60, 28); lv_obj_align(done, LV_ALIGN_TOP_LEFT, 2, 2);
+    lv_obj_t *dl=lv_label_create(done); lv_label_set_text(dl,"Done"); lv_obj_center(dl);
+    lv_obj_add_event_cb(done, ce_done_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *nw = lv_button_create(content);
+    lv_obj_set_size(nw, 60, 28); lv_obj_align(nw, LV_ALIGN_TOP_RIGHT, -2, 2);
+    lv_obj_t *nl=lv_label_create(nw); lv_label_set_text(nl,"New"); lv_obj_center(nl);
+    lv_obj_add_event_cb(nw, ce_new_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *list = lv_list_create(content);
+    lv_obj_set_size(list, LCD_W, FORM_FULL);
+    lv_obj_set_pos(list, 0, 34);
+    lv_obj_set_style_radius(list,0,0); lv_obj_set_style_border_width(list,0,0); lv_obj_set_style_pad_all(list,0,0);
+    CatTable t; int have = data_get_categories(g_ce_app, &t);
+    int shown = 0;
+    if(have) for(int c=1;c<CAT_COUNT;c++) if(t.name[c][0]){
+        lv_obj_t *b=lv_list_add_button(list,NULL,t.name[c]);
+        lv_obj_set_style_radius(b,0,0);
+        lv_obj_add_event_cb(b,ce_row_cb,LV_EVENT_CLICKED,(void*)(intptr_t)c);
+        shown++;
+    }
+    if(!shown){
+        lv_obj_t *b=lv_list_add_button(list,NULL,"(tap New to add one)");
+        lv_obj_set_style_radius(b,0,0);
+    }
+}
+
+static void ce_open_cb(lv_event_t *e){ (void)e;
+    if(!cur_app) return;
+    g_ce_app = cur_app->app;
+    catpop_close();
+    show_cat_edit();
+}
+static void ce_edit_item(lv_obj_t *par){
+    lv_obj_t *b = lv_button_create(par);
+    lv_obj_set_width(b, lv_pct(100));
+    lv_obj_set_style_radius(b, 0, 0);
+    lv_obj_set_style_pad_ver(b, 4, 0);
+    lv_obj_set_style_border_width(b, 1, 0);
+    lv_obj_set_style_border_side(b, LV_BORDER_SIDE_TOP, 0);
+    lv_obj_set_style_border_color(b, COL_LINE, 0);
+    lv_obj_t *l = lv_label_create(b);
+    lv_label_set_text(l, "Edit Categories");
+    lv_obj_align(l, LV_ALIGN_LEFT_MID, 2, 0);
+    lv_obj_add_event_cb(b, ce_open_cb, LV_EVENT_CLICKED, NULL);
 }
 
 /* ------------------------- F4: Details (category) ------------------------- */

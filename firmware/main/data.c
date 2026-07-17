@@ -158,6 +158,30 @@ static void ensure_appinfo(const char *path,const char *nm,uint32_t type,uint32_
     pdb_write_ai(path,nm,type,creator,nai,nal,g_recs,c.nr);
 }
 
+/* app -> PDB header identity (name/type/creator), matching the seeders. */
+static void db_ident(int app, const char **nm, uint32_t *type, uint32_t *creator){
+    *type = 0x44415441;   /* 'DATA' */
+    switch(app){
+        case APP_CAL:  *nm="DatebookDB"; *creator=0x64617465; break;   /* 'date' */
+        case APP_ADDR: *nm="AddressDB";  *creator=0x61646472; break;   /* 'addr' */
+        case APP_TODO: *nm="ToDoDB";     *creator=0x746F646F; break;   /* 'todo' */
+        default:       *nm="MemoDB";     *creator=0x6D656D6F; break;   /* 'memo' */
+    }
+}
+
+/* C4: write a new category table into the app's PDB AppInfo, preserving every
+ * record (the low-nibble category on each record is untouched). Mirrors
+ * ensure_appinfo's rewrite; 1 on success, 0 on failure. */
+int data_set_categories(int app, const CatTable *t){
+    const char *path = db_path(app);
+    if(!file_exists(path)) return 0;
+    uint8_t nai[APPINFO_SIZE]; int nal = appinfo_build(nai, sizeof nai, t);
+    if(nal < 0) return 0;
+    Collect c={0,0}; pdb_read(path,collectCb,&c);
+    const char *nm; uint32_t type, creator; db_ident(app,&nm,&type,&creator);
+    return pdb_write_ai(path,nm,type,creator,nai,nal,g_recs,c.nr) >= 0;
+}
+
 void data_seed_if_empty(void){
     /* only seed a DB that doesn't exist yet, so edits + synced data persist */
     int seeded[4] = { -1, -1, -1, -1 };

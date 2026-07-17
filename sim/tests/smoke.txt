@@ -19,6 +19,24 @@ t 300
 c 120 55
 t 400
 s address_list
+# C4 Edit Categories: category trigger -> picker -> "Edit Categories" tail row ->
+# New -> tap keyboard (one key) -> Save (writes AppInfo) -> Done. A pool-safe
+# editor (list + one textarea + one button-matrix); a regression here would HANG.
+c 218 12
+t 300
+c 200 152
+t 300
+s cat_editor
+c 208 40
+t 300
+c 179 148
+t 100
+c 208 40
+t 300
+s cat_saved
+c 32 40
+t 300
+# back on the Address list: tap a record
 c 120 130
 t 400
 s address_detail
