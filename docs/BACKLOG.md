@@ -77,12 +77,16 @@ with a **feasibility check on the base CYD** before committing to a build.
      (handles CDATA vs entity-escaped HTML, entity decoding, body preference,
      item cap; bounded per-item RAM). Host-gated (`rss_test`, in `make test` +
      a sanitized `rss_asan` in `ftest`).
-   - **B — next:** the reader app in the sim — an SD article store, a "News"
-     launcher app, the swipe UX + index, seeded articles for browsing. Pool-safe
-     (labels + content swap, no layer-compositing).
-   - **C — device:** the HotSync fetch phase (streaming GET → parse → store) +
-     feed URLs in `config.ini`. Compile-verified in CI; runtime-verified on glass
-     (the network fetch is stubbed in the sim, like all sync work).
+   - **B — DONE:** the reader app. `bridge/news.c` is an on-SD store (a fixed-record
+     index + a text blob; O(1)-RAM reads by index, host-gated `news_test`). A **"News"
+     launcher app** shows one article per screen (feed · position · bold title ·
+     body) and navigates by **vertical swipe** (press/release Y-delta — robust on the
+     headless host *and* real touch, where LVGL's gesture heuristic isn't). Seeded
+     with sample articles until a real fetch runs. Pool-safe (labels + content swap
+     on a gesture surface). Smoke-gated.
+   - **C — next (device):** the HotSync fetch phase (streaming GET → `rss_parse` →
+     `news_add`) + feed URLs in `config.ini`. Compile-verified in CI; runtime-
+     verified on glass (the network fetch is stubbed in the sim, like all sync work).
 
 **Also open (infrastructure, needs a decision):**
 - **S5 — real sync in the sim `[sim]`.** A `fetch()`-based DAV transport behind

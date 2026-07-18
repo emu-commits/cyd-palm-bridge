@@ -30,6 +30,7 @@
 /streamparse
 /rss_test
 /rss_asan
+/news_test
 
 # ESP-IDF firmware
 /firmware/build/

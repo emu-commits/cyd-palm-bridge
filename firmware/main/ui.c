@@ -18,6 +18,7 @@
 #include "graffiti.h"
 #include "calc.h"
 #include "find.h"         /* global search engine (bridge/find.c) */
+#include "news.h"         /* RSS reader's on-SD article store */
 #include "appcfg.h"
 #include "power.h"        /* live backlight brightness for the Preferences slider */
 #include "clock.h"        /* timezone picker + DST-aware zone list */
@@ -39,15 +40,16 @@ static lv_obj_t *content;      /* the swappable view area */
 static lv_obj_t *title_lbl;
 static lv_obj_t *clock_lbl;    /* live clock in the title bar (Palm) */
 
-static const char *APPS[] = { "Date Book", "Address", "To Do List", "Memo Pad", "HotSync", "Graffiti" };
+static const char *APPS[] = { "Date Book", "Address", "To Do List", "Memo Pad", "HotSync", "Graffiti", "News" };
 /* authentic Palm app launcher icons (from PumpkinOS) */
 static const lv_image_dsc_t *APP_ICONS[] = { &icon_datebook, &icon_address,
                                              &icon_todo, &icon_memo, &icon_hotsync,
-                                             &icon_graffiti };
+                                             &icon_graffiti, &icon_news };
 #define NAPPS ((int)(sizeof(APPS)/sizeof(APPS[0])))
 
 static void show_launcher(void);
 static void show_trainer(void);
+static void show_news(void);
 static void show_app(const char *name);
 
 /* a borderless, non-scrolling panel with a solid fill */
@@ -988,6 +990,7 @@ static void show_app(const char *name){
         if(!strcmp(name, APPDEFS[i].name)){ data_set_category(-1); list_view(&APPDEFS[i]); return; }
     if(!strcmp(name, "HotSync")){ show_hotsync(); return; }
     if(!strcmp(name, "Graffiti")){ show_trainer(); return; }
+    if(!strcmp(name, "News")){ show_news(); return; }
     cur_app = NULL;
     lv_obj_clean(content);
     lv_label_set_text(title_lbl, name);
@@ -1176,6 +1179,135 @@ static void show_trainer(void){
     graf_char_hook = trainer_input;    /* AFTER kill_kb cleared it: route strokes here */
 }
 
+/* ===================== News (RSS reader, roadmap #4) =========================
+ * A one-item-per-view, vertical-swipe feed reader (headline + text, no images).
+ * Articles are fetched during HotSync and stored on SD (bridge/news.c); the reader
+ * holds only the current article in RAM (read from SD on each swipe), so it scales
+ * to any store size. Pool-safe: labels only, content swapped in place on swipe --
+ * no layer-compositing widget. Until a real fetch runs (or in the sim, which has
+ * no network) the store is seeded with a few sample articles so it's browseable. */
+static int      g_news_i;                       /* current article index */
+static lv_obj_t *g_news_hdr, *g_news_feed, *g_news_title, *g_news_body, *g_news_hint;
+static char     g_news_buf[2048];
+
+/* sample feed shown until HotSync fills the store (device) or always (sim). */
+static void news_seed_if_empty(void){
+    if(news_count() > 0) return;
+    if(!news_begin()) return;
+    struct { const char *feed,*title,*body; } S[] = {
+      {"CYD News","Palm PDA lives again","A base ESP32 CYD now runs a PalmOS-style "
+        "PDA that two-way syncs to iCloud -- and swipes through the news like this."},
+      {"Tech","No PSRAM, no problem","The whole UI fits beside Wi-Fi and TLS in ~80 KB "
+        "of heap by time-multiplexing: rich UI offline, a status line during HotSync."},
+      {"Tech","Graffiti, recognised","A $1 unistroke recognizer turns strokes into "
+        "letters; a built-in trainer even learns your own hand over time."},
+      {"World","Offline-first, on purpose","Like the original Palm: use it offline, "
+        "HotSync periodically. Your data lives on the SD card, always readable."},
+      {"World","Swipe to continue","This reader is one article per screen. Swipe up "
+        "for the next story, down for the previous one -- no thumbs required."},
+      {"Fun","The charm of constraints","240x320, a resistive touch panel, and a "
+        "24 KB object pool. Working within limits is half the fun."},
+    };
+    for(unsigned i=0;i<sizeof S/sizeof S[0];i++) news_add(S[i].feed,S[i].title,S[i].body,0);
+    news_commit();
+}
+
+static void news_render(void){
+    int n = news_count();
+    if(g_news_i < 0) g_news_i = 0;
+    if(g_news_i >= n) g_news_i = n>0 ? n-1 : 0;
+    if(n <= 0){
+        if(g_news_hdr)   lv_label_set_text(g_news_hdr, "");
+        if(g_news_feed)  lv_label_set_text(g_news_feed, "");
+        if(g_news_title) lv_label_set_text(g_news_title, "No news yet");
+        if(g_news_body)  lv_label_set_text(g_news_body, "HotSync fetches your feeds.\n"
+                                           "Add feed URLs in Preferences.");
+        if(g_news_hint)  lv_label_set_text(g_news_hint, "");
+        return;
+    }
+    NewsMeta m; news_meta(g_news_i, &m);
+    news_read_text(g_news_i, g_news_buf, sizeof g_news_buf);
+    lv_label_set_text_fmt(g_news_hdr, "%d/%d", g_news_i+1, n);
+    lv_label_set_text(g_news_feed, m.feed);
+    lv_label_set_text(g_news_title, m.title);
+    lv_label_set_text(g_news_body, g_news_buf);
+    lv_label_set_text(g_news_hint, g_news_i < n-1 ? "swipe up for next" :
+                                   (n>1 ? "swipe down for previous" : ""));
+}
+
+/* Manual vertical-swipe detection (robust across the headless host and real
+ * resistive touch, unlike LVGL's velocity-based gesture heuristic). The indev
+ * point is already reset by the RELEASED event, so we track the last position
+ * seen during PRESSING and compare it to the press Y. */
+static int g_news_py, g_news_ly;
+static void news_press_cb(lv_event_t *e){
+    (void)e;
+    lv_point_t p; lv_indev_get_point(lv_indev_active(), &p);
+    g_news_py = g_news_ly = p.y;
+}
+static void news_pressing_cb(lv_event_t *e){
+    (void)e;
+    lv_point_t p; lv_indev_get_point(lv_indev_active(), &p);
+    if(p.y > 0) g_news_ly = p.y;                                        /* last valid drag Y */
+}
+static void news_release_cb(lv_event_t *e){
+    (void)e;
+    int dy = g_news_ly - g_news_py, n = news_count();
+    if(dy < -36 && g_news_i < n-1){ g_news_i++; news_render(); }        /* swipe up = next */
+    else if(dy > 36 && g_news_i > 0){ g_news_i--; news_render(); }      /* swipe down = prev */
+}
+
+static void show_news(void){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0;
+    news_seed_if_empty();
+    g_news_i = 0;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, "News");
+    update_cat_trigger();
+
+    /* a full-content gesture surface holds the labels; cleaned on navigation away
+     * (so the gesture handler never accumulates on the persistent `content`). */
+    lv_obj_t *surf = lv_obj_create(content);
+    lv_obj_set_size(surf, LCD_W, PDA_H - TITLE_H);
+    lv_obj_set_pos(surf, 0, 0);
+    lv_obj_set_style_radius(surf, 0, 0);
+    lv_obj_set_style_border_width(surf, 0, 0);
+    lv_obj_set_style_bg_color(surf, COL_BODY, 0);
+    lv_obj_set_style_pad_all(surf, 6, 0);
+    lv_obj_clear_flag(surf, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(surf, LV_OBJ_FLAG_CLICKABLE);         /* so it receives press/release */
+    lv_obj_add_event_cb(surf, news_press_cb,    LV_EVENT_PRESSED,  NULL);
+    lv_obj_add_event_cb(surf, news_pressing_cb, LV_EVENT_PRESSING, NULL);
+    lv_obj_add_event_cb(surf, news_release_cb,  LV_EVENT_RELEASED, NULL);
+
+    g_news_feed = lv_label_create(surf);
+    lv_obj_set_style_text_font(g_news_feed, &lv_font_palm, 0);
+    lv_obj_align(g_news_feed, LV_ALIGN_TOP_LEFT, 0, 0);
+    g_news_hdr = lv_label_create(surf);
+    lv_obj_set_style_text_font(g_news_hdr, &lv_font_palm, 0);
+    lv_obj_align(g_news_hdr, LV_ALIGN_TOP_RIGHT, 0, 0);
+
+    g_news_title = lv_label_create(surf);
+    lv_obj_set_style_text_font(g_news_title, &lv_font_palm_bold, 0);
+    lv_label_set_long_mode(g_news_title, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(g_news_title, LCD_W - 12);
+    lv_obj_align(g_news_title, LV_ALIGN_TOP_LEFT, 0, 16);
+
+    g_news_body = lv_label_create(surf);
+    lv_label_set_long_mode(g_news_body, LV_LABEL_LONG_DOT);   /* clip long bodies (feed card) */
+    lv_obj_set_width(g_news_body, LCD_W - 12);
+    lv_obj_set_height(g_news_body, PDA_H - TITLE_H - 64);
+    lv_obj_align(g_news_body, LV_ALIGN_TOP_LEFT, 0, 44);
+
+    g_news_hint = lv_label_create(surf);
+    lv_obj_set_style_text_font(g_news_hint, &lv_font_palm, 0);
+    lv_obj_set_style_text_color(g_news_hint, COL_GRAF, 0);
+    lv_obj_align(g_news_hint, LV_ALIGN_BOTTOM_MID, 0, 0);
+
+    news_render();
+}
+
 static void show_launcher(void){
     kill_kb();
     cur_app = NULL;
@@ -1218,18 +1350,19 @@ static void show_launcher(void){
     }
 
     /* I1.1: onboarding hint. Until an iCloud account is configured, the records on
-     * screen are demo data -- say so and point at setup, instead of leaving a
-     * newcomer to guess. Shows in the empty lower third of the launcher grid and
-     * disappears once dav_user (the Apple ID) is set. */
+     * screen are demo data -- say so and point at setup. A full-width flex item at
+     * the end of the grid (so it flows BELOW the icons instead of overlapping them
+     * now that the app grid can be three rows); the grid scrolls to reveal it.
+     * Disappears once dav_user (the Apple ID) is set. */
     if(appcfg()->dav_user[0] == '\0'){
-        lv_obj_t *hint = lv_label_create(content);
+        lv_obj_t *hint = lv_label_create(grid);
         lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(hint, LCD_W - 24);
+        lv_obj_set_width(hint, lv_pct(100));
+        lv_obj_set_style_pad_top(hint, 6, 0);
         lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
         lv_label_set_text(hint, "Demo data shown. To sync your own:\n"
                                 "edit config.ini on the card, or tap\n"
                                 "Menu > Preferences.");
-        lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -6);
     }
 }
 

@@ -11,6 +11,25 @@ What was built, and the non-obvious things that cost time to learn. This is the
 
 ## Milestone changelog (newest first)
 
+### 2026-07 — RSS reader (roadmap #4) stage B: the reader app
+- **`bridge/news.c`** — the on-SD article store: `news.idx` (a header + fixed
+  172-byte records: feed, title, blob offset+len, time) + `news.dat` (bodies
+  concatenated). The reader seeks one record + one body span per article, so
+  browsing is O(1) RAM regardless of store size; the writer streams articles in
+  with `news_begin`/`news_add`/`news_commit`. Host-gated (`tests/news_test.c`:
+  write, reopen, read back meta + bodies, truncation, rewrite) in `make test`.
+- **"News" launcher app** (`show_news`, its own newspaper icon) — one article per
+  screen: feed · `n/N` · **bold title** · body (clipped feed-card style). Navigates
+  by **vertical swipe**: since the headless host doesn't reliably synthesize LVGL's
+  velocity-based gesture, swipe is detected manually from the press Y vs. the last
+  PRESSING Y (the RELEASED event's indev point is already reset to 0) — which also
+  works on the real resistive panel. Seeded with sample articles until a real fetch
+  runs. Pool-safe (labels + content swap on one clickable surface; sim heap peak 0).
+- The launcher is now **seven apps → three rows**; the I1.1 onboarding hint moved
+  into the grid's flex flow (a full-width row after the icons) so it no longer
+  overlaps row 3. `news.c` + `rss.c` compile into both the sim and firmware builds.
+  Smoke-gated (launch News → swipe up → next article).
+
 ### 2026-07 — RSS reader (roadmap #4) stage A: the feed parser
 - Feasibility settled (GO): fetch **streams to SD** with bounded per-item RAM (the
   DAV sliding-window pattern), sync stays short with a feed/item cap + conditional
