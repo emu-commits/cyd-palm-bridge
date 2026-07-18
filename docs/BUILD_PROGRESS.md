@@ -24,6 +24,10 @@ What was built, and the non-obvious things that cost time to learn. This is the
   stem + compact top bowl, was `d`). Letters **97.5% → 99.6%** mean at 3 px jitter
   (worst glyph 72% → 92%); digits stay 100%. The synthetic model is a proxy —
   final thresholds still want real on-device `graf` telemetry.
+- **Punctuation coverage** added to the harness (arming the punct-shift with a tap,
+  then the stroke). All 8 punct glyphs (`@ , / - ' ( ) ?`) recognize at 100% — the
+  set was already well-separated (orientation distinguishes the straight lines), so
+  no punct template edits were needed; the gate now locks all three sets.
 
 ### 2026-07 — review cycle: charm + intuitiveness in the simulator
 - **I4 config-save feedback** — the Preferences field editor (silent) and the
