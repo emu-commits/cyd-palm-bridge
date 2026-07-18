@@ -11,6 +11,22 @@ What was built, and the non-obvious things that cost time to learn. This is the
 
 ## Milestone changelog (newest first)
 
+### 2026-07 — Graffiti trainer: finish item #2 (training mode, graded score, icon)
+- **Training mode.** A Drill/Train toggle. Train mode records the user's *own* stroke
+  for each letter as a **per-device template** — `graffiti_capture_user()` grabs the
+  raw stroke (via a new pre-recognition `graf_capture_hook` so the buffer is intact),
+  downsampled to ≤32 points, ~3.3 KB in BSS, persisted to `/sdcard/graf_user.dat` and
+  loaded at boot in `ui_init`. `graffiti_recognize` now also matches user templates
+  (`match_user`) and prefers one when it's a closer fit than the built-in — calibrating
+  recognition to the user's hand + this resistive panel.
+- **Graded score.** `graffiti_last_distance()` exposes the $1 match distance; Drill mode
+  shows a quality `%` (0 = perfect, LET_THRESH = just-accepted): "Nice! 81%".
+- **Launcher app.** Promoted from a menu item to a first-class launcher app with its
+  own 25×22 icon (`icon_graffiti`, a bold "A"); the Options-menu shortcut was removed.
+  The launcher reflowed to 2×3, so the smoke's Memo/HotSync taps moved with it.
+- Smoke-gated: launch via icon → Drill graded score → Train toggle → capture
+  ("saved your 'a'", recorded 1/26). `make -C sim smoke` + `graf` gate green.
+
 ### 2026-07 — Graffiti SRS trainer (roadmap #2, v1)
 - New **Graffiti Trainer** app (Menu → "Graffiti Trainer", `show_trainer`): shows a
   target letter + its **stroke guide** — drawn on a 96×96 I1 canvas from the

@@ -27,4 +27,18 @@ char graffiti_recognize(int digits);
  * draw a stroke guide. */
 const float *graffiti_letter_template(char c, int *npairs);
 
+/* $1 match distance of the last recognized letter/digit (lower = better). Used by
+ * the trainer for a graded score. Valid right after graffiti_recognize(). */
+float graffiti_last_distance(void);
+
+/* --- per-device user templates (the trainer's "training mode") --- */
+/* capture the just-drawn stroke as the user's template for lowercase c. 1 on ok. */
+int  graffiti_capture_user(char c);
+/* how many letters have a user template; clear them all. */
+int  graffiti_user_count(void);
+void graffiti_user_reset(void);
+/* persist / restore the user templates (caller supplies the SD path). 1 on ok. */
+int  graffiti_user_save(const char *path);
+int  graffiti_user_load(const char *path);
+
 #endif

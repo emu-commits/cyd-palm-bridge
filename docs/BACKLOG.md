@@ -37,20 +37,20 @@ with a **feasibility check on the base CYD** before committing to a build.
    real on-device `graf` telemetry (the synthetic model is a proxy). This is the
    foundation for the trainer below.
 
-2. **Graffiti training app — a spaced-repetition (SRS) trainer `[sim]`.**
-   *Feasibility PROVEN + v1 built.* A working trainer ships behind Menu → "Graffiti
-   Trainer": it shows a target letter + its **stroke guide** (drawn on an I1 canvas
-   from the recognizer's own template, with a start dot for direction), you draw it
-   in the Graffiti strip (routed via a `graf_char_hook`), and it scores the stroke
-   with the real recognizer and schedules the next with a **per-letter Leitner box**
-   (weak letters resurface more; boxes persist to `/sdcard/graf_train.dat`).
-   Correct → "Nice!" + advance + streak; wrong → shows what it read + retry. It's
-   **pool-safe** (labels + one canvas, the ink-strip pattern — heap peak 0 in the
-   sim), which answers the two feasibility questions: template storage/scoring fits,
-   and stroke capture reuses the proven text-entry pipeline. **Still to do:** the
-   **training mode** (capture the user's *own* strokes as per-device templates — the
-   harder storage question, ~26 × N points), a proper launcher icon (it's a menu
-   item for now), and a graded score (distance, not just pass/fail).
+2. **Graffiti training app — a spaced-repetition (SRS) trainer `[sim]`. DONE.**
+   A **launcher app** ("Graffiti", its own icon) with two modes:
+   - **Drill** — shows a target letter + its **stroke guide** (drawn on an I1 canvas
+     from the recognizer's template, start dot for direction); you write it, and it's
+     scored by the real recognizer with a **graded %** (from the $1 match distance)
+     and scheduled by a **per-letter Leitner box** (weak letters resurface more;
+     persisted to `/sdcard/graf_train.dat`).
+   - **Train** — records *your own* stroke for each letter as a **per-device
+     template** (`graffiti_capture_user`, stored ~3.3 KB, persisted to
+     `/sdcard/graf_user.dat`, loaded at boot). Recognition then prefers a user
+     template when it's a closer match, calibrating to this hand + resistive panel.
+   Pool-safe throughout (labels + one canvas; heap peak 0 in the sim). Both open
+   feasibility questions (pool storage/scoring; capture smoothness) are settled.
+   *Nice-to-haves later:* a "reset my templates" control and a fuller confidence UI.
 
 3. **Japanese kanji trainer — extend the training app `[sim]` + dataset work.**
    Reuse the SRS engine + stroke scoring from (2) for kanji. **Stroke-order data:
