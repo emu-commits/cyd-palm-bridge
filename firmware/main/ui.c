@@ -46,6 +46,7 @@ static const lv_image_dsc_t *APP_ICONS[] = { &icon_datebook, &icon_address,
 #define NAPPS ((int)(sizeof(APPS)/sizeof(APPS[0])))
 
 static void show_launcher(void);
+static void show_trainer(void);
 static void show_app(const char *name);
 
 /* a borderless, non-scrolling panel with a solid fill */
@@ -153,8 +154,13 @@ static void free_rowuids(void);
 static void free_finds(void);
 static lv_obj_t *g_listtbl;           /* current record table (partial rebuild) */
 static lv_obj_t *g_findtbl;           /* Find results table                     */
+/* Graffiti input hook: when set (the trainer), a recognized character goes here
+ * instead of the active textarea. Cleared on every screen teardown so it can't
+ * outlive the trainer. */
+static void (*graf_char_hook)(char c);
 static void kill_kb(void){
     g_form=NULL; active_ta=NULL; edit_cat_lbl=NULL; g_listtbl=NULL; g_findtbl=NULL;
+    graf_char_hook=NULL;
     free_rowuids();
     free_finds();
     kill_hs();
@@ -986,6 +992,131 @@ static void show_app(const char *name){
     lv_obj_center(l);
 }
 
+/* ===================== Graffiti Trainer (roadmap #2) =========================
+ * A learn-to-write drill: shows a target letter + its stroke guide (drawn from the
+ * recognizer's own template), you draw it in the Graffiti strip, and it scores the
+ * stroke and schedules the next with a per-letter Leitner spaced-repetition box
+ * (weak letters resurface more; boxes persist to the SD card). Pool-safe: labels +
+ * one I1 canvas for the guide (the ink-strip pattern), no layer-alloc widgets.
+ * Input arrives through graf_char_hook (set on entry, cleared by kill_kb). */
+#define TR_GW 96
+#define TR_GH 96
+static uint8_t   tr_guide_buf[LV_CANVAS_BUF_SIZE(TR_GW, TR_GH, 1, 1) + 16];
+static lv_obj_t *tr_guide, *tr_prompt, *tr_score, *tr_feedback;
+static uint8_t   tr_box[26];        /* Leitner box 0..4 per letter (0 = due most) */
+static int       tr_target;         /* current target letter index 0..25 */
+static int       tr_correct, tr_total, tr_streak, tr_best;
+static unsigned  tr_rng = 0x1234abcdu;
+static int tr_rand(void){ tr_rng = tr_rng*1103515245u + 12345u; return (int)((tr_rng>>16) & 0x7fff); }
+
+#define TR_SAVE "/sdcard/graf_train.dat"
+static void tr_load(void){
+    FILE *f = fopen(TR_SAVE, "rb");
+    if(f){ if(fread(tr_box,1,26,f) != 26) memset(tr_box,0,26); fclose(f); }
+    else memset(tr_box,0,26);
+    for(int i=0;i<26;i++) if(tr_box[i]>4) tr_box[i]=4;
+}
+static void tr_save(void){ FILE *f=fopen(TR_SAVE,"wb"); if(f){ fwrite(tr_box,1,26,f); fclose(f); } }
+
+/* weighted pick: weight = 5 - box (weak letters heavier), the current one excluded */
+static int tr_pick(void){
+    int w[26], sum=0;
+    for(int i=0;i<26;i++){ int wi = 5 - tr_box[i]; if(wi<1) wi=1; if(i==tr_target) wi=0; w[i]=wi; sum+=wi; }
+    if(sum<=0) return (tr_target+1)%26;
+    int r = tr_rand() % sum;
+    for(int i=0;i<26;i++){ r -= w[i]; if(r<0) return i; }
+    return 0;
+}
+
+static void tr_plot(int x, int y){
+    if(x<0||y<0||x>=TR_GW||y>=TR_GH) return;
+    lv_color_t on = { .blue = 1 };
+    lv_canvas_set_px(tr_guide, x, y, on, LV_OPA_COVER);
+}
+static void tr_line(int x0,int y0,int x1,int y1){    /* Bresenham, 2px weight */
+    int dx=abs(x1-x0), sx=x0<x1?1:-1, dy=-abs(y1-y0), sy=y0<y1?1:-1, err=dx+dy;
+    for(;;){
+        tr_plot(x0,y0); tr_plot(x0+1,y0); tr_plot(x0,y0+1);
+        if(x0==x1&&y0==y1) break;
+        int e2=2*err;
+        if(e2>=dy){ err+=dy; x0+=sx; }
+        if(e2<=dx){ err+=dx; y0+=sy; }
+    }
+}
+static void tr_draw_guide(int letter){
+    lv_color_t bg = { .blue = 0 };
+    lv_canvas_fill_bg(tr_guide, bg, LV_OPA_COVER);
+    int np; const float *p = graffiti_letter_template((char)('a'+letter), &np);
+    if(!p || np<1) return;
+    const int pad=14, span=TR_GW-2*pad;
+    #define GX(i) (pad + (int)(p[2*(i)]  /10.0f*span))
+    #define GY(i) (pad + (int)(p[2*(i)+1]/10.0f*span))
+    for(int i=0;i<np-1;i++) tr_line(GX(i),GY(i),GX(i+1),GY(i+1));
+    int sx=GX(0), sy=GY(0);                       /* filled start dot: shows direction */
+    for(int a=-2;a<=2;a++) for(int b=-2;b<=2;b++) if(a*a+b*b<=4) tr_plot(sx+a,sy+b);
+    #undef GX
+    #undef GY
+}
+
+static void tr_render(void){
+    tr_draw_guide(tr_target);
+    if(tr_prompt) lv_label_set_text_fmt(tr_prompt, "Write:  %c", 'a'+tr_target);
+    if(tr_score)  lv_label_set_text_fmt(tr_score, "%d/%d  streak %d (best %d)",
+                                        tr_correct, tr_total, tr_streak, tr_best);
+}
+
+static void trainer_input(char c){
+    if(c < 'a' || c > 'z') return;                /* ignore space/backspace/etc. */
+    tr_total++;
+    if(c == 'a'+tr_target){
+        tr_correct++; tr_streak++; if(tr_streak>tr_best) tr_best=tr_streak;
+        if(tr_box[tr_target]<4) tr_box[tr_target]++;
+        if(tr_feedback) lv_label_set_text(tr_feedback, "Nice!");
+        tr_target = tr_pick();                    /* advance on success */
+    } else {
+        tr_streak=0;
+        if(tr_box[tr_target]>0) tr_box[tr_target]--;
+        if(tr_feedback) lv_label_set_text_fmt(tr_feedback, "read as '%c' - try again", c);
+    }                                             /* wrong: keep the same target */
+    tr_save();
+    tr_render();
+}
+
+static void show_trainer(void){
+    kill_kb();
+    cur_app=NULL; cur_uid=0;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, "Graffiti");
+    update_cat_trigger();
+    tr_load();
+    tr_correct=tr_total=tr_streak=tr_best=0;
+    tr_target=0; tr_target=tr_pick();
+
+    tr_prompt = lv_label_create(content);
+    lv_obj_set_style_text_font(tr_prompt, &lv_font_palm_bold, 0);
+    lv_obj_align(tr_prompt, LV_ALIGN_TOP_MID, 0, 8);
+
+    tr_guide = lv_canvas_create(content);
+    lv_canvas_set_buffer(tr_guide, tr_guide_buf, TR_GW, TR_GH, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_palette(tr_guide, 0, lv_color_to_32(COL_BODY, 0xFF));
+    lv_canvas_set_palette(tr_guide, 1, lv_color_to_32(COL_LINE, 0xFF));
+    lv_obj_align(tr_guide, LV_ALIGN_TOP_MID, 0, 32);
+    lv_obj_set_style_border_width(tr_guide, 1, 0);
+    lv_obj_set_style_border_color(tr_guide, COL_LINE, 0);
+
+    tr_feedback = lv_label_create(content);
+    lv_obj_set_style_text_font(tr_feedback, &lv_font_palm, 0);
+    lv_obj_align(tr_feedback, LV_ALIGN_TOP_MID, 0, 32 + TR_GH + 6);
+    lv_label_set_text(tr_feedback, "draw it in the strip below");
+
+    tr_score = lv_label_create(content);
+    lv_obj_set_style_text_font(tr_score, &lv_font_palm, 0);
+    lv_obj_align(tr_score, LV_ALIGN_BOTTOM_MID, 0, -2);
+
+    tr_render();
+    graf_char_hook = trainer_input;    /* AFTER kill_kb cleared it: route strokes here */
+}
+
 static void show_launcher(void){
     kill_kb();
     cur_app = NULL;
@@ -1505,6 +1636,7 @@ static void act_delete(lv_event_t *e){ (void)e;
 }
 static void act_categories(lv_event_t *e){ (void)e; menu_close(); cat_trigger_cb(NULL); }
 static void act_prefs(lv_event_t *e){ (void)e; menu_close(); show_prefs(); }
+static void act_trainer(lv_event_t *e){ (void)e; menu_close(); show_trainer(); }
 static void act_toggle_done(lv_event_t *e){ (void)e; menu_close();
     g_todo_show_done = !g_todo_show_done; if(cur_app) app_reopen(cur_app); }
 static void act_toggle_sort(lv_event_t *e){ (void)e; menu_close();
@@ -1647,6 +1779,7 @@ static void menu_open(void){
         menu_item(panel, g_todo_sort_due ? "Sort by Priority" : "Sort by Due Date", act_toggle_sort);
     }
     menu_item(panel, "Preferences", act_prefs);
+    menu_item(panel, "Graffiti Trainer", act_trainer);
     if(data_demo_present())
         menu_item(panel, "Remove demo data", act_remove_demo);
 #ifdef UI_DEVTOOLS
@@ -2458,6 +2591,7 @@ static void graf_up_cb(lv_event_t *e){
     if(c == GRAF_SHIFT){ graf_case = (graf_case + 1) % 3; show_case(); return; }
     if(c == GRAF_PUNCT){ show_punct(1); return; }       /* tap: arm punctuation */
     show_punct(0);                                      /* any real char clears it */
+    if(graf_char_hook){ graf_char_hook(c); return; }    /* trainer intercepts input */
     if(!active_ta){ graf_case = CASE_NONE; show_case(); return; }
     if(c == '\b'){                                     /* backspace: keep caps lock */
         lv_textarea_delete_char(active_ta);

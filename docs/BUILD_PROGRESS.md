@@ -11,6 +11,23 @@ What was built, and the non-obvious things that cost time to learn. This is the
 
 ## Milestone changelog (newest first)
 
+### 2026-07 — Graffiti SRS trainer (roadmap #2, v1)
+- New **Graffiti Trainer** app (Menu → "Graffiti Trainer", `show_trainer`): shows a
+  target letter + its **stroke guide** — drawn on a 96×96 I1 canvas from the
+  recognizer's own template (`graffiti_letter_template`) with a filled start dot for
+  direction. You write in the Graffiti strip; a new `graf_char_hook` in `graf_up_cb`
+  routes the recognized char to the trainer instead of a textarea (the hook is
+  cleared by `kill_kb`, so it can't outlive the screen). Scoring uses the real
+  recognizer; a **per-letter Leitner box** (0..4) schedules the next glyph (weight
+  5−box, weak letters resurface more) and persists to `/sdcard/graf_train.dat`.
+  Correct → "Nice!" + advance + streak; wrong → shows what it read, same target.
+- **Feasibility (roadmap's explicit ask) proven by construction:** pool-safe
+  (labels + one canvas, no layer widget; sim heap peak 0), and stroke capture reuses
+  the proven text-entry pipeline. Smoke-gated (`trainer` / `trainer_scored`: draw
+  the fresh-state first target 'm' → "Nice!"). Remaining: a training mode that
+  captures the user's own strokes as per-device templates, a launcher icon, graded
+  scoring.
+
 ### 2026-07 — Graffiti recognizer polish
 - **Accuracy harness + CI gate** (`sim/tests/graf_test.c`, `make -C sim graf`).
   Synthesizes hand-drawn-like strokes from each template (polyline densified +

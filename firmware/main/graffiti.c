@@ -279,6 +279,16 @@ char graffiti_recognize(int digits){
     return c;
 }
 
+/* runtime accessor: the ideal stroke for a lowercase letter a-z (control points,
+ * grid ~0..10, y down), so the Graffiti trainer can draw a "how to write it"
+ * guide. Returns NULL for non-letters. */
+const float *graffiti_letter_template(char c, int *npairs){
+    if(c < 'a' || c > 'z') return NULL;
+    const Tmpl *t = &LTMPL[c - 'a'];
+    if(npairs) *npairs = t->n;
+    return t->pts;
+}
+
 #ifdef GRAF_TEST_HOOKS
 /* test-only accessors so the offline accuracy harness (sim/tests/graf_test.c)
  * can synthesize noisy strokes from the REAL templates and measure recognition

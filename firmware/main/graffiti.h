@@ -22,4 +22,9 @@ void graffiti_add_point(int x, int y);  /* add a sampled point during the stroke
  * code, or 0 if none/too short. */
 char graffiti_recognize(int digits);
 
+/* the ideal stroke for lowercase letter c (a-z): control points in a ~0..10 grid
+ * (y down), *npairs point pairs. NULL for non-letters. Used by the trainer to
+ * draw a stroke guide. */
+const float *graffiti_letter_template(char c, int *npairs);
+
 #endif
