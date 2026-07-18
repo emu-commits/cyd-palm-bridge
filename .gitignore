@@ -28,6 +28,8 @@
 /uidmatch
 /idempotent
 /streamparse
+/rss_test
+/rss_asan
 
 # ESP-IDF firmware
 /firmware/build/
