@@ -65,8 +65,8 @@ with a **feasibility check on the base CYD** before committing to a build.
    display likely needs a small embedded CJK subset font *or* drawing the KanjiVG
    outlines directly. Note KanjiVG's CC BY-SA attribution/share-alike terms.
 
-4. **RSS reader — a TikTok-swipe, text-only feed `[sim]`. Feasibility: GO; in
-   progress.** A full-screen, one-item-per-view reader swiped vertically (headline
+4. **RSS reader — a TikTok-swipe, text-only feed `[sim]`. Feasibility: GO; code
+   DONE (device runtime-verify pending).** A full-screen, one-item-per-view reader swiped vertically (headline
    + body text, no images), with articles fetched during **HotSync** and stored on
    **SD** for offline reading — the same offline-first model as the PIM apps. The
    RAM math checks out: fetch **streams to SD** (bounded per-item RAM, like the DAV
@@ -176,3 +176,10 @@ intuitiveness batch: C1 ink trail, C2 HotSync dialog, the full C4 form contract
 About honesty, C7 inverted title bar, I1.1 onboarding hint, I1.2 keyboard,
 I2 remove-demo-data safety, I3 Week view, I4 feedback toasts (record
 save/delete *and* config-field save), and the brightness-stepper freeze fix.
+
+This cycle also landed two of the "new apps / input experience" items: the
+**Graffiti accuracy harness + template fixes** (letters 97.5%→99.6%, now a CI
+gate) and the **Graffiti SRS trainer** (Drill/Train, per-device user templates),
+plus the full **RSS reader** — streaming parser, on-SD store, swipe reader app,
+and the HotSync fetch phase (all merged; only the on-glass live-fetch verify
+remains).
