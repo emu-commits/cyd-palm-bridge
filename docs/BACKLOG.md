@@ -65,14 +65,24 @@ with a **feasibility check on the base CYD** before committing to a build.
    display likely needs a small embedded CJK subset font *or* drawing the KanjiVG
    outlines directly. Note KanjiVG's CC BY-SA attribution/share-alike terms.
 
-4. **RSS reader — a TikTok-swipe, text-only feed `[sim]`.** A full-screen,
-   one-item-per-view reader you swipe vertically through (headline + body text, no
-   images), with articles fetched during **HotSync** (over the existing Wi-Fi/TLS
-   path in the sync window) and stored on the **SD card** as a local DB the UI
-   reads offline — the same offline-first model as the PIM apps. *Feasibility to
-   settle:* a feed-fetch + RSS/HTML-to-text step inside the sync task's RAM
-   budget; how much text to cache per feed on SD; and the swipe-paging UX in LVGL
-   (keep it pool-safe — plain labels, no layer-compositing widgets).
+4. **RSS reader — a TikTok-swipe, text-only feed `[sim]`. Feasibility: GO; in
+   progress.** A full-screen, one-item-per-view reader swiped vertically (headline
+   + body text, no images), with articles fetched during **HotSync** and stored on
+   **SD** for offline reading — the same offline-first model as the PIM apps. The
+   RAM math checks out: fetch **streams to SD** (bounded per-item RAM, like the DAV
+   sliding-window enumeration), sync stays short with a feed/item cap + conditional
+   GET, and the reader holds only the current article (+ a small index) in RAM.
+   Staged build:
+   - **A — DONE:** `bridge/rss.c` streaming RSS 2.0 / Atom parser + HTML-to-text
+     (handles CDATA vs entity-escaped HTML, entity decoding, body preference,
+     item cap; bounded per-item RAM). Host-gated (`rss_test`, in `make test` +
+     a sanitized `rss_asan` in `ftest`).
+   - **B — next:** the reader app in the sim — an SD article store, a "News"
+     launcher app, the swipe UX + index, seeded articles for browsing. Pool-safe
+     (labels + content swap, no layer-compositing).
+   - **C — device:** the HotSync fetch phase (streaming GET → parse → store) +
+     feed URLs in `config.ini`. Compile-verified in CI; runtime-verified on glass
+     (the network fetch is stubbed in the sim, like all sync work).
 
 **Also open (infrastructure, needs a decision):**
 - **S5 — real sync in the sim `[sim]`.** A `fetch()`-based DAV transport behind

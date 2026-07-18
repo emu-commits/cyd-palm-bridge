@@ -11,6 +11,22 @@ What was built, and the non-obvious things that cost time to learn. This is the
 
 ## Milestone changelog (newest first)
 
+### 2026-07 — RSS reader (roadmap #4) stage A: the feed parser
+- Feasibility settled (GO): fetch **streams to SD** with bounded per-item RAM (the
+  DAV sliding-window pattern), sync stays short with a feed/item cap + conditional
+  GET, and the reader holds only the current article + a small index in RAM — no
+  whole-feed or all-articles buffer. The live HTTPS fetch is device-only (stubbed
+  in the sim), but the parsing is portable and host-gated.
+- **`bridge/rss.c`** — a streaming RSS 2.0 / Atom parser: a byte-driven state
+  machine accumulates only the current `<item>`/`<entry>` into a bounded buffer,
+  then extracts `<title>` and the richest body (content:encoded → description →
+  content → summary). `rss_html_to_text` strips tags + decodes entities in one
+  pass, crucially treating `&lt;`/`&gt;` as tag delimiters so it handles both CDATA
+  raw-HTML and the entity-escaped HTML that RSS `<description>` usually carries.
+  Numeric + named entities → UTF-8. Host-gated (`tests/rss_test.c`: RSS + Atom,
+  CDATA vs escaped, body preference, item cap, file vs buffer) in `make test`, plus
+  a sanitized `rss_asan` in `ftest` (it eats untrusted network bytes).
+
 ### 2026-07 — Graffiti trainer: finish item #2 (training mode, graded score, icon)
 - **Training mode.** A Drill/Train toggle. Train mode records the user's *own* stroke
   for each letter as a **per-device template** — `graffiti_capture_user()` grabs the
