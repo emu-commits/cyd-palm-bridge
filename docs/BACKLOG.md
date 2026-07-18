@@ -28,12 +28,14 @@ with a **feasibility check on the base CYD** before committing to a build.
 1. **Graffiti polishing `[sim]`.** *In progress.* Built an offline **accuracy
    harness** (`sim/tests/graf_test.c`, `make -C sim graf`, now a CI gate): it
    synthesizes noisy strokes from each template and reports per-glyph accuracy +
-   confusions. Used it to separate the worst collisions — letters went **97.5% →
-   99.6%** mean at 3 px jitter (h→k 72→92, g→o and p→d fixed, no glyph below 92%);
-   digits 100%. **Still to do:** the writing *feel* (ink-trail / char-echo UX),
-   the punctuation set (harness covers letters + digits only), the `X` 2-stroke
-   exception, and final threshold tuning against real on-device `graf` telemetry
-   (the synthetic model is a proxy). This is the foundation for the trainer below.
+   confusions, across **all three sets** — letters, digits, and punctuation (the
+   two-step punct-shift arm is simulated). Used it to separate the worst letter
+   collisions — letters **97.5% → 99.6%** mean at 3 px jitter (h→k 72→92, g→o and
+   p→d fixed, no glyph below 92%); digits and punctuation both 100% (punct was
+   already well-separated). **Still to do:** the writing *feel* (ink-trail /
+   char-echo UX), the `X` 2-stroke exception, and final threshold tuning against
+   real on-device `graf` telemetry (the synthetic model is a proxy). This is the
+   foundation for the trainer below.
 
 2. **Graffiti training app — a spaced-repetition (SRS) trainer `[sim]`.** The
    long-standing idea (a Palm-style launcher app in the mould of a writing-drill):

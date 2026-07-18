@@ -55,7 +55,16 @@ static int synth(const float *pts, int np, float sigma, int *ox, int *oy){
 
 struct res { char ch; int correct; char worst_conf; int worst_n; };
 
-static int run_set(int which, int digits, const char *label, float sigma,
+/* arm the punctuation shift the way the UI does: a single tap (a sub-TAP_PX
+ * stroke) makes graffiti_recognize return GRAF_PUNCT and read the NEXT stroke as
+ * punctuation. */
+static void arm_punct(void){
+    graffiti_clear();
+    graffiti_add_point(45,45); graffiti_add_point(46,45); graffiti_add_point(45,46);
+    (void)graffiti_recognize(0);
+}
+
+static int run_set(int which, int digits, int punct, const char *label, float sigma,
                    float pass_each, float pass_mean){
     int nt = graf_test_ntmpl(which);
     struct res R[64];
@@ -68,6 +77,7 @@ static int run_set(int which, int digits, const char *label, float sigma,
         for(int t=0;t<TRIALS;t++){
             int ox[MAXO], oy[MAXO];
             int n = synth(pts, np, sigma, ox, oy);
+            if(punct) arm_punct();          /* two-step: tap arms, then the stroke */
             graffiti_clear();
             for(int j=0;j<n;j++) graffiti_add_point(ox[j], oy[j]);
             char c = graffiti_recognize(digits);
@@ -115,8 +125,12 @@ int main(void){
     /* letters + digits at a moderate jitter that approximates the resistive strip.
      * Thresholds are set to lock in the current templates; raise them as the
      * templates improve. */
-    ok &= run_set(0, 0, "letters", 3.0f, 0.80f, 0.95f);
-    ok &= run_set(1, 1, "digits",  3.0f, 0.80f, 0.95f);
+    ok &= run_set(0, 0, 0, "letters", 3.0f, 0.80f, 0.95f);
+    ok &= run_set(1, 1, 0, "digits",  3.0f, 0.80f, 0.95f);
+    /* punctuation: a smaller, curvier set entered after the punct-shift; several
+     * members are single straight lines that only differ by orientation, so the
+     * bar is a touch lower than letters/digits. */
+    ok &= run_set(2, 0, 1, "punct",   3.0f, 0.70f, 0.85f);
     printf("\n%s\n", ok ? "graf accuracy: OK" : "graf accuracy: FAIL");
     return ok ? 0 : 1;
 }
