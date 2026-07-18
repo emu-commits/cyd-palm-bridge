@@ -19,23 +19,55 @@ mostly away from the bench via the browser simulator).
 
 ---
 
-## Do next — in the simulator
+## Next up when we resume (priority order)
 
-- **`[sim]` C4 extras — the Palm form contract is now complete.** Done: the
-  bottom-bar Done/Details/Delete pattern, **Edit Categories (rename/add)**, the
-  **Address edit form (10 scrollable fields, was 5)**, and event **Alarm + Repeat**
-  in the Date Book Details sheet (a toggle + a None/Daily/Weekly/Monthly/Yearly
-  cycle; persisted via `ApptPack`, propagated as VALARM/RRULE by the codec). The
-  only deferred piece is category **delete** — it must recategorise the affected
-  records to Unfiled, which rename/add don't touch.
-- **`[sim]` I3 "Go to Date"** *(low priority)* — a fast cross-year jump dialog.
-  The Day/Week/Month zoom hierarchy + `[<]`/`[>]` paging already reach any date,
-  so this is a convenience, not a gap.
-- **`[sim]` S5 — real sync in the sim.** Sync is stubbed in the browser build.
-  A `fetch()`-based DAV transport behind the same `dav.h` seam would let the
-  HotSync flow (and **M2** below) be exercised off-device. Larger effort; gated
-  on a safe way to hold credentials in the browser (today they are deliberately
-  never persisted).
+The sim-testable charm/intuitiveness backlog is done (see "Recently done"). The
+next arc is about the **input experience** and **new apps**. Each of 2–4 starts
+with a **feasibility check on the base CYD** before committing to a build.
+
+1. **Graffiti polishing `[sim]`.** Tighten the recognizer and the writing feel
+   before building anything on top of it — the stroke templates are coarse
+   starters. Revisit per-letter shapes + thresholds, the punctuation shift, and
+   the ink-trail/char-echo UX; the `X` 2-stroke exception is still unhandled.
+   This is the foundation for the training app below.
+
+2. **Graffiti training app — a spaced-repetition (SRS) trainer `[sim]`.** The
+   long-standing idea (a Palm-style launcher app in the mould of a writing-drill):
+   show a target stroke, the user traces it, score against the template, advance;
+   an **SRS schedule** resurfaces the glyphs you're worst at, and a **training
+   mode** captures the user's *own* strokes as per-device templates (calibrating
+   to this exact resistive panel). *Feasibility to settle first:* the SRS queue +
+   per-glyph stats are tiny (SD/NVS), so the open questions are (a) template
+   storage + scoring cost inside the 24 KB LVGL pool, and (b) whether stroke
+   capture is smooth enough on the bit-banged touch.
+
+3. **Japanese kanji trainer — extend the training app `[sim]` + dataset work.**
+   Reuse the SRS engine + stroke scoring from (2) for kanji. **Stroke-order data:
+   KanjiVG** (github.com/KanjiVG/kanjivg, CC BY-SA) — per-character SVG stroke
+   paths *with order*. **Learning sequence:** a WaniKani-style ordering (community
+   repos expose the level/sequence lists). The real work is a **build-time
+   pipeline**: parse KanjiVG SVG paths → resample into our recognizer's point
+   format (or a compact polyline), pack into a device-friendly binary indexed by
+   codepoint, and pick a subset (e.g. WaniKani levels) that fits 4 MB flash / SD.
+   *Feasibility to settle:* processed dataset size; per-kanji stroke count vs. the
+   recognizer; and **CJK rendering** — the bitmap font is Latin-only, so kanji
+   display likely needs a small embedded CJK subset font *or* drawing the KanjiVG
+   outlines directly. Note KanjiVG's CC BY-SA attribution/share-alike terms.
+
+4. **RSS reader — a TikTok-swipe, text-only feed `[sim]`.** A full-screen,
+   one-item-per-view reader you swipe vertically through (headline + body text, no
+   images), with articles fetched during **HotSync** (over the existing Wi-Fi/TLS
+   path in the sync window) and stored on the **SD card** as a local DB the UI
+   reads offline — the same offline-first model as the PIM apps. *Feasibility to
+   settle:* a feed-fetch + RSS/HTML-to-text step inside the sync task's RAM
+   budget; how much text to cache per feed on SD; and the swipe-paging UX in LVGL
+   (keep it pool-safe — plain labels, no layer-compositing widgets).
+
+**Also open (infrastructure, needs a decision):**
+- **S5 — real sync in the sim `[sim]`.** A `fetch()`-based DAV transport behind
+  the same `dav.h` seam so the HotSync flow (and **M2** below) can be exercised in
+  the browser. Larger effort; gated on how credentials are handled in the browser
+  (today they are deliberately never persisted). Relevant to (4)'s HotSync fetch.
 
 ## Blocked — needs a prerequisite
 
@@ -90,13 +122,11 @@ mostly away from the bench via the browser simulator).
 
 ## Someday / nice-to-have
 
-- **`[sim]` Graffiti training game.** A launcher app that shows a target stroke,
-  scores the user's trace, and advances — doubling as a per-user *training* mode
-  that captures the user's own stroke as the template. Case is settled: one stroke
-  set (26 capital-style letters), lowercase output, upstroke = shift-next (two =
-  caps lock). Includes the **X** 2-stroke exception.
-- Preferences app icon in the launcher; RSS reader; power/reset-button remap;
-  dark mode.
+*(The Graffiti trainer and RSS reader graduated to the prioritized roadmap at the
+top.) The Graffiti case model is settled: one stroke set (26 capital-style
+letters), lowercase output, upstroke = shift-next (two = caps lock).*
+
+- Preferences app icon in the launcher; power/reset-button remap; dark mode.
 
 ---
 
