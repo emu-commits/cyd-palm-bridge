@@ -98,7 +98,7 @@ static esp_err_t on_event(esp_http_client_event_t *e){
 /* Build "Basic base64(user:pass)" for a proactive Authorization header (iCloud
  * wants auth on the first request rather than after a 401 challenge). */
 static void basic_auth(const DavCtx*d, char*out, int cap){
-    if(!d->user || !d->user[0]){ if(cap) out[0]=0; return; }   /* public GET: no auth */
+    if(!d->user[0]){ if(cap) out[0]=0; return; }   /* public GET (empty user): no auth */
     char up[192]; int n=snprintf(up,sizeof up,"%s:%s",d->user,d->pass);
     unsigned char b64[288]; size_t bl=0;
     if(mbedtls_base64_encode(b64,sizeof b64,&bl,(const unsigned char*)up,(size_t)n)!=0){ if(cap)out[0]=0; return; }
