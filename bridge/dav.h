@@ -25,6 +25,11 @@ int dav_getetag(const DavCtx*d,const char*coll,const char*name,char*etag,int cap
 /* GET <base>/<coll>/<name> into out buffer. returns bytes or -1. */
 int dav_get(const DavCtx*d,const char*coll,const char*name,char*out,int cap);
 
+/* Stream a public https URL's body to an SD file (the News reader's feed fetch).
+ * Returns the HTTP status, or -1. Device-only: implemented in dav_esp.c; the host
+ * transport (dav.c) does not provide it (nothing on the host fetches feeds). */
+int dav_fetch_url(const char *url, const char *path);
+
 /* PROPFIND Depth:1 on <base>/<coll>/ ; cb(name, etag) per member object. */
 typedef void (*dav_list_cb)(const char*name,const char*etag,void*ctx);
 int dav_list(const DavCtx*d,const char*coll,dav_list_cb cb,void*ctx);

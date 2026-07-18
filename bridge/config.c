@@ -57,6 +57,9 @@ static void apply(Config *c, const char *key, const char *val){
     else if(!strcasecmp(key,"todo_coll")) setstr(c->todo_coll,     sizeof c->todo_coll, val);
     else if(!strcasecmp(key,"card_coll")) setstr(c->card_coll,     sizeof c->card_coll, val);
     else if(!strcasecmp(key,"timezone"))  setstr(c->timezone,      sizeof c->timezone, val);
+    else if(!strcasecmp(key,"news_feed1")) setstr(c->news_feed[0], sizeof c->news_feed[0], val);
+    else if(!strcasecmp(key,"news_feed2")) setstr(c->news_feed[1], sizeof c->news_feed[1], val);
+    else if(!strcasecmp(key,"news_feed3")) setstr(c->news_feed[2], sizeof c->news_feed[2], val);
     else if(!strcasecmp(key,"brightness"))    c->brightness    = clampi(atoi(val),0,100);
     else if(!strcasecmp(key,"backlight_sec")) c->backlight_sec = clampi(atoi(val),0,3600);
     else if(!strcasecmp(key,"policy"))        c->policy        = config_policy_from_str(val);
@@ -96,6 +99,9 @@ int config_save(const char *path, const Config *c){
     fprintf(f,"todo_coll = %s\n",     c->todo_coll);
     fprintf(f,"card_coll = %s\n",     c->card_coll);
     fprintf(f,"timezone = %s\n",      c->timezone);
+    fprintf(f,"news_feed1 = %s\n",    c->news_feed[0]);
+    fprintf(f,"news_feed2 = %s\n",    c->news_feed[1]);
+    fprintf(f,"news_feed3 = %s\n",    c->news_feed[2]);
     fprintf(f,"brightness = %d\n",    c->brightness);
     fprintf(f,"backlight_sec = %d\n", c->backlight_sec);
     fprintf(f,"policy = %s\n",        config_policy_to_str(c->policy));

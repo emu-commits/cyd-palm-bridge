@@ -26,6 +26,7 @@ typedef struct {
     char todo_coll[192];       /* To Do (Reminders list) collection      */
     char card_coll[192];       /* Address book collection                */
     char timezone[48];         /* e.g. America/New_York ("" = floating)  */
+    char news_feed[3][160];    /* RSS/Atom feed URLs for the News reader ("" = unused) */
     int  brightness;           /* backlight, 0..100                      */
     int  backlight_sec;        /* idle seconds -> dim backlight, 0=never  */
     int  policy;               /* CFG_POL_*                              */
