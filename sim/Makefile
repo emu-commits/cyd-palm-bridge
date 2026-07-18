@@ -32,7 +32,7 @@ APP_SRCS := \
     $(FW)/lv_font_palm.c $(FW)/lv_font_palm_bold.c $(FW)/palm_icons.c \
     $(BR)/pdb.c $(BR)/datebook.c $(BR)/address.c $(BR)/todo.c $(BR)/appinfo.c \
     $(BR)/ical.c $(BR)/vcard.c $(BR)/tz.c $(BR)/charset.c \
-    $(BR)/find.c $(BR)/calc.c $(BR)/config.c \
+    $(BR)/find.c $(BR)/calc.c $(BR)/config.c $(BR)/rss.c $(BR)/news.c \
     stubs/hotsync_stub.c stubs/power_stub.c \
     sim_port.c heap_budget.c
 

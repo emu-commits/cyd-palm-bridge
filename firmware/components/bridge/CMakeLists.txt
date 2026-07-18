@@ -20,6 +20,8 @@ idf_component_register(
         "${BRIDGE_DIR}/find.c"
         "${BRIDGE_DIR}/calc.c"
         "${BRIDGE_DIR}/config.c"
+        "${BRIDGE_DIR}/rss.c"
+        "${BRIDGE_DIR}/news.c"
     INCLUDE_DIRS
         "."
         "${BRIDGE_DIR}"

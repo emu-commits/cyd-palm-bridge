@@ -36,6 +36,24 @@ t 400
 s trainer_trained
 c 18 225
 t 300
+# News (RSS reader, roadmap #4): launcher app (row 3) opens a one-item-per-view
+# feed (seeded with samples in the sim). Press-drag UP navigates to the next
+# article. Pool-safe (labels + content swap on a gesture surface; a regression
+# here would HANG or fail to advance).
+c 120 160
+t 400
+s news_reader
+d 120 185
+t 30
+m 120 130
+t 30
+m 120 70
+t 30
+u
+t 400
+s news_reader_next
+c 18 225
+t 300
 # Date Book: Day view -> tap the date to zoom out to Week (I3) -> tap a day to
 # zoom back to Day -> home. The Week view is a plain scrollable list (pool-safe).
 c 40 55
