@@ -42,7 +42,7 @@ WRAP_LD := -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free
 LVGL_SRCS := $(shell find lvgl/src -name '*.c' 2>/dev/null)
 LVGL_OBJS := $(patsubst lvgl/src/%.c,build/lvgl/%.o,$(LVGL_SRCS))
 
-.PHONY: host wasm smoke clean lvgl-src
+.PHONY: host wasm smoke graf clean lvgl-src
 
 # LVGL_SRCS is evaluated when make parses this file, so on a clean checkout the
 # source must be fetched BEFORE the build graph is used: the entry points fetch,
@@ -76,6 +76,17 @@ smoke: host
 	./build/sim_host build/shots < tests/smoke.txt
 	@ls build/shots/*.ppm >/dev/null
 	@echo "sim smoke: OK"
+
+# ---- graf: offline Graffiti recognizer accuracy gate (no LVGL/display needed).
+# Synthesizes noisy strokes from the real templates and asserts recognition
+# accuracy; a template edit that regresses recognition fails here. ----
+graf: build/graf_test
+	./build/graf_test
+
+build/graf_test: tests/graf_test.c $(FW)/graffiti.c $(FW)/graffiti.h
+	@mkdir -p build
+	$(CC) -O2 -Wall -Iinclude -I$(FW) -DGRAF_TEST_HOOKS \
+	    tests/graf_test.c $(FW)/graffiti.c -o $@ -lm
 
 # ---- wasm: everything compiled by emcc in one shot (CI build; no local emcc needed).
 # 32-bit wasm => the TRUE 24 KB device pool applies (see lv_conf.h). main() boots

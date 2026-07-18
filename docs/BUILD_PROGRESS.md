@@ -11,6 +11,20 @@ What was built, and the non-obvious things that cost time to learn. This is the
 
 ## Milestone changelog (newest first)
 
+### 2026-07 — Graffiti recognizer polish
+- **Accuracy harness + CI gate** (`sim/tests/graf_test.c`, `make -C sim graf`).
+  Synthesizes hand-drawn-like strokes from each template (polyline densified +
+  deterministic Gaussian jitter at a realistic pixel scale), runs them through the
+  real `graffiti_recognize()`, and reports per-glyph accuracy + top confusions;
+  fails CI if accuracy drops below the gate (letters/digits, mean ≥95%, every
+  glyph ≥80%). Test-only accessors (`graf_test_*`, `#ifdef GRAF_TEST_HOOKS`) expose
+  the templates without duplicating the tables.
+- **Template separation fixes** guided by the harness: `h` (rounded n-hump, was
+  colliding with `k`), `g` (circle + hooked descender, was `o`/`q`), `p` (long
+  stem + compact top bowl, was `d`). Letters **97.5% → 99.6%** mean at 3 px jitter
+  (worst glyph 72% → 92%); digits stay 100%. The synthetic model is a proxy —
+  final thresholds still want real on-device `graf` telemetry.
+
 ### 2026-07 — review cycle: charm + intuitiveness in the simulator
 - **I4 config-save feedback** — the Preferences field editor (silent) and the
   "Save to config.ini" row (modal alert) now show the same transient "Saved" toast

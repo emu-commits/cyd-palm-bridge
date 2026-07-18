@@ -111,8 +111,8 @@ T(t_c,'c', 9,2, 4,1, 1,5, 4,9, 9,8)                            /* open-right C *
 T(t_d,'d', 3,10, 3,0, 8,3, 8,7, 3,10)                          /* up, then right bowl */
 T(t_e,'e', 8,1, 4,2, 7,5, 4,8, 8,9)                            /* reverse 3 */
 T(t_f,'f', 8,1, 3,1, 3,10)                                     /* top bar + down */
-T(t_g,'g', 8,3, 4,1, 1,5, 4,9, 8,7, 8,4, 5,4)                 /* CCW spiral + mid tick */
-T(t_h,'h', 2,0, 2,10, 2,6, 6,4, 8,6, 8,10)                    /* stem + hump */
+T(t_g,'g', 8,3, 4,1, 1,5, 4,9, 8,7, 7,10, 4,10)              /* circle + hooked descender */
+T(t_h,'h', 2,0, 2,10, 2,6, 5,4, 8,6, 8,10)                    /* stem + rounded n-hump */
 T(t_i,'i', 5,0, 5,10)                                          /* vertical */
 T(t_j,'j', 7,0, 7,8, 5,10, 2,9)                               /* J hook */
 T(t_k,'k', 2,0, 2,10, 2,6, 8,2, 4,6, 8,10)                    /* stem + 2 diagonals */
@@ -120,7 +120,7 @@ T(t_l,'l', 2,0, 2,10, 8,10)                                   /* right angle */
 T(t_m,'m', 1,10, 3,1, 5,6, 7,1, 9,10)                         /* upside-down W */
 T(t_n,'n', 1,10, 1,0, 9,10, 9,0)                              /* up, diagonal, up (N) */
 T(t_o,'o', 8,2, 4,1, 1,4, 2,8, 6,10, 9,7, 8,3, 4,1)          /* circle */
-T(t_p,'p', 2,10, 2,0, 7,1, 8,4, 4,5, 2,5)                    /* stem + bowl */
+T(t_p,'p', 2,10, 2,0, 6,0, 8,2, 6,4, 2,4)                    /* long stem + compact top bowl */
 T(t_q,'q', 7,1, 4,1, 2,3, 4,5, 7,5, 8,3, 7,1, 7,9)          /* top circle + straight tail */
 T(t_r,'r', 2,10, 2,0, 7,2, 3,5, 8,10)                        /* stem, bowl, leg to BR */
 T(t_s,'s', 8,2, 4,1, 3,4, 6,6, 7,8, 3,9)                     /* S curve */
@@ -278,3 +278,14 @@ char graffiti_recognize(int digits){
     graffiti_clear();
     return c;
 }
+
+#ifdef GRAF_TEST_HOOKS
+/* test-only accessors so the offline accuracy harness (sim/tests/graf_test.c)
+ * can synthesize noisy strokes from the REAL templates and measure recognition
+ * without duplicating the coordinate tables. which: 0=letters 1=digits 2=punct. */
+int graf_test_ntmpl(int which){ return which==0?NLTMPL : which==1?NDTMPL : NPTMPL; }
+const float *graf_test_tmpl(int which, int i, char *ch, int *npairs){
+    const Tmpl *s = which==0?LTMPL : which==1?DTMPL : PTMPL;
+    *ch = s[i].c; *npairs = s[i].n; return s[i].pts;
+}
+#endif

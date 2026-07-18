@@ -64,6 +64,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Create /sdcard (the firmware data layer's SD root)
         run: sudo mkdir -p /sdcard && sudo chmod 777 /sdcard
+      - name: Graffiti recognizer accuracy gate
+        run: make -C sim graf
       - name: Build + run the scripted UI tour (real ui.c, screenshots)
         run: make -C sim smoke
       - name: Convert screenshots to PNG
