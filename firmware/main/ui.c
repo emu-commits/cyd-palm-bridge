@@ -39,10 +39,11 @@ static lv_obj_t *content;      /* the swappable view area */
 static lv_obj_t *title_lbl;
 static lv_obj_t *clock_lbl;    /* live clock in the title bar (Palm) */
 
-static const char *APPS[] = { "Date Book", "Address", "To Do List", "Memo Pad", "HotSync" };
+static const char *APPS[] = { "Date Book", "Address", "To Do List", "Memo Pad", "HotSync", "Graffiti" };
 /* authentic Palm app launcher icons (from PumpkinOS) */
 static const lv_image_dsc_t *APP_ICONS[] = { &icon_datebook, &icon_address,
-                                             &icon_todo, &icon_memo, &icon_hotsync };
+                                             &icon_todo, &icon_memo, &icon_hotsync,
+                                             &icon_graffiti };
 #define NAPPS ((int)(sizeof(APPS)/sizeof(APPS[0])))
 
 static void show_launcher(void);
@@ -154,13 +155,16 @@ static void free_rowuids(void);
 static void free_finds(void);
 static lv_obj_t *g_listtbl;           /* current record table (partial rebuild) */
 static lv_obj_t *g_findtbl;           /* Find results table                     */
-/* Graffiti input hook: when set (the trainer), a recognized character goes here
- * instead of the active textarea. Cleared on every screen teardown so it can't
- * outlive the trainer. */
+/* Graffiti input hooks (the trainer). graf_char_hook: a recognized character goes
+ * here instead of the active textarea (drill mode). graf_capture_hook: runs on
+ * pen-up BEFORE recognition, so the raw stroke can be captured as a user template
+ * (train mode); returns 1 if it consumed the stroke. Both cleared on every screen
+ * teardown so they can't outlive the trainer. */
 static void (*graf_char_hook)(char c);
+static int  (*graf_capture_hook)(void);
 static void kill_kb(void){
     g_form=NULL; active_ta=NULL; edit_cat_lbl=NULL; g_listtbl=NULL; g_findtbl=NULL;
-    graf_char_hook=NULL;
+    graf_char_hook=NULL; graf_capture_hook=NULL;
     free_rowuids();
     free_finds();
     kill_hs();
@@ -983,6 +987,7 @@ static void show_app(const char *name){
     for(int i=0;i<NAPPDEFS;i++)
         if(!strcmp(name, APPDEFS[i].name)){ data_set_category(-1); list_view(&APPDEFS[i]); return; }
     if(!strcmp(name, "HotSync")){ show_hotsync(); return; }
+    if(!strcmp(name, "Graffiti")){ show_trainer(); return; }
     cur_app = NULL;
     lv_obj_clean(content);
     lv_label_set_text(title_lbl, name);
@@ -1001,11 +1006,14 @@ static void show_app(const char *name){
  * Input arrives through graf_char_hook (set on entry, cleared by kill_kb). */
 #define TR_GW 96
 #define TR_GH 96
+#define TR_USER "/sdcard/graf_user.dat"
 static uint8_t   tr_guide_buf[LV_CANVAS_BUF_SIZE(TR_GW, TR_GH, 1, 1) + 16];
-static lv_obj_t *tr_guide, *tr_prompt, *tr_score, *tr_feedback;
+static lv_obj_t *tr_guide, *tr_prompt, *tr_score, *tr_feedback, *tr_mode_lbl;
 static uint8_t   tr_box[26];        /* Leitner box 0..4 per letter (0 = due most) */
 static int       tr_target;         /* current target letter index 0..25 */
 static int       tr_correct, tr_total, tr_streak, tr_best;
+static int       tr_mode;           /* 0 = Drill (quiz), 1 = Train (record my strokes) */
+static int       tr_train_idx;      /* Train mode walks a..z in order */
 static unsigned  tr_rng = 0x1234abcdu;
 static int tr_rand(void){ tr_rng = tr_rng*1103515245u + 12345u; return (int)((tr_rng>>16) & 0x7fff); }
 
@@ -1060,25 +1068,66 @@ static void tr_draw_guide(int letter){
 
 static void tr_render(void){
     tr_draw_guide(tr_target);
-    if(tr_prompt) lv_label_set_text_fmt(tr_prompt, "Write:  %c", 'a'+tr_target);
-    if(tr_score)  lv_label_set_text_fmt(tr_score, "%d/%d  streak %d (best %d)",
-                                        tr_correct, tr_total, tr_streak, tr_best);
+    if(tr_prompt) lv_label_set_text_fmt(tr_prompt, "%s  %c",
+                                        tr_mode ? "Trace:" : "Write:", 'a'+tr_target);
+    if(tr_mode_lbl) lv_label_set_text(tr_mode_lbl, tr_mode ? "Drill" : "Train");
+    if(tr_score){
+        if(tr_mode) lv_label_set_text_fmt(tr_score, "recorded %d/26 letters", graffiti_user_count());
+        else        lv_label_set_text_fmt(tr_score, "%d/%d  streak %d (best %d)",
+                                          tr_correct, tr_total, tr_streak, tr_best);
+    }
 }
 
+/* Drill mode: score the recognized character, with a quality %% from the $1 match
+ * distance (0 == perfect, LET_THRESH == just-accepted). */
 static void trainer_input(char c){
     if(c < 'a' || c > 'z') return;                /* ignore space/backspace/etc. */
+    int pct = (int)(100.0f * (1.0f - graffiti_last_distance()/32.0f));
+    if(pct<0) pct=0;
+    if(pct>100) pct=100;
     tr_total++;
     if(c == 'a'+tr_target){
         tr_correct++; tr_streak++; if(tr_streak>tr_best) tr_best=tr_streak;
         if(tr_box[tr_target]<4) tr_box[tr_target]++;
-        if(tr_feedback) lv_label_set_text(tr_feedback, "Nice!");
+        if(tr_feedback) lv_label_set_text_fmt(tr_feedback, "Nice!  %d%%", pct);
         tr_target = tr_pick();                    /* advance on success */
     } else {
         tr_streak=0;
         if(tr_box[tr_target]>0) tr_box[tr_target]--;
-        if(tr_feedback) lv_label_set_text_fmt(tr_feedback, "read as '%c' - try again", c);
+        if(tr_feedback) lv_label_set_text_fmt(tr_feedback, "read '%c' (%d%%) - try again", c, pct);
     }                                             /* wrong: keep the same target */
     tr_save();
+    tr_render();
+}
+
+/* Train mode: capture the raw stroke as this letter's per-device template (runs on
+ * pen-up, before recognition, so the buffer is intact), persist it, and walk a..z.
+ * Returns 1 = consumed (no normal recognition/typing). */
+static int trainer_capture(void){
+    if(graffiti_capture_user((char)('a'+tr_target))){
+        graffiti_user_save(TR_USER);
+        if(tr_feedback) lv_label_set_text_fmt(tr_feedback, "saved your '%c'", 'a'+tr_target);
+        tr_train_idx = (tr_train_idx + 1) % 26;   /* next letter to record */
+        tr_target = tr_train_idx;
+    } else if(tr_feedback) {
+        lv_label_set_text(tr_feedback, "draw the whole letter");
+    }
+    tr_render();
+    return 1;
+}
+
+static void tr_mode_toggle(lv_event_t *e){
+    (void)e;
+    tr_mode = !tr_mode;
+    if(tr_mode){
+        tr_train_idx = 0; tr_target = 0;
+        graf_char_hook = NULL; graf_capture_hook = trainer_capture;
+        if(tr_feedback) lv_label_set_text(tr_feedback, "trace each letter to teach it");
+    } else {
+        tr_target = tr_pick();
+        graf_capture_hook = NULL; graf_char_hook = trainer_input;
+        if(tr_feedback) lv_label_set_text(tr_feedback, "draw it in the strip below");
+    }
     tr_render();
 }
 
@@ -1090,11 +1139,21 @@ static void show_trainer(void){
     update_cat_trigger();
     tr_load();
     tr_correct=tr_total=tr_streak=tr_best=0;
+    tr_mode=0; tr_train_idx=0;
     tr_target=0; tr_target=tr_pick();
 
     tr_prompt = lv_label_create(content);
     lv_obj_set_style_text_font(tr_prompt, &lv_font_palm_bold, 0);
-    lv_obj_align(tr_prompt, LV_ALIGN_TOP_MID, 0, 8);
+    lv_obj_align(tr_prompt, LV_ALIGN_TOP_LEFT, 6, 8);
+
+    /* mode toggle: Drill (quiz) <-> Train (record my own strokes) */
+    lv_obj_t *mb = lv_button_create(content);
+    lv_obj_set_size(mb, 56, 26);
+    lv_obj_align(mb, LV_ALIGN_TOP_RIGHT, -4, 2);
+    lv_obj_set_style_radius(mb, 0, 0);
+    tr_mode_lbl = lv_label_create(mb);
+    lv_obj_center(tr_mode_lbl);
+    lv_obj_add_event_cb(mb, tr_mode_toggle, LV_EVENT_CLICKED, NULL);
 
     tr_guide = lv_canvas_create(content);
     lv_canvas_set_buffer(tr_guide, tr_guide_buf, TR_GW, TR_GH, LV_COLOR_FORMAT_I1);
@@ -1636,7 +1695,6 @@ static void act_delete(lv_event_t *e){ (void)e;
 }
 static void act_categories(lv_event_t *e){ (void)e; menu_close(); cat_trigger_cb(NULL); }
 static void act_prefs(lv_event_t *e){ (void)e; menu_close(); show_prefs(); }
-static void act_trainer(lv_event_t *e){ (void)e; menu_close(); show_trainer(); }
 static void act_toggle_done(lv_event_t *e){ (void)e; menu_close();
     g_todo_show_done = !g_todo_show_done; if(cur_app) app_reopen(cur_app); }
 static void act_toggle_sort(lv_event_t *e){ (void)e; menu_close();
@@ -1779,7 +1837,6 @@ static void menu_open(void){
         menu_item(panel, g_todo_sort_due ? "Sort by Priority" : "Sort by Due Date", act_toggle_sort);
     }
     menu_item(panel, "Preferences", act_prefs);
-    menu_item(panel, "Graffiti Trainer", act_trainer);
     if(data_demo_present())
         menu_item(panel, "Remove demo data", act_remove_demo);
 #ifdef UI_DEVTOOLS
@@ -2585,6 +2642,10 @@ static void graf_up_cb(lv_event_t *e){
     int digits = (int)(intptr_t)lv_event_get_user_data(e);
     ink_lx = -1;
     ink_fade_start();                                  /* ink lingers, then clears */
+    if(graf_capture_hook && graf_capture_hook()){      /* trainer train-mode: grab raw stroke */
+        graffiti_clear();
+        return;
+    }
     char c = graffiti_recognize(digits);
     if(c) graf_echo(c);                                /* flash what was recognized */
     if(!c){ show_punct(0); return; }                   /* nothing / punct rejected */
@@ -2659,6 +2720,10 @@ void ui_init(void){
     lv_obj_set_style_bg_color(scr, COL_BODY, 0);
     lv_obj_set_style_text_font(scr, &lv_font_palm, 0);   /* authentic Palm font, inherited */
     lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* per-device Graffiti calibration (trainer's training mode): if the user has
+     * recorded their own strokes, load them so recognition uses them system-wide. */
+    graffiti_user_load("/sdcard/graf_user.dat");
 
     /* title bar: app title + category picker (F2), black rule underneath (Palm).
      * Home/Menu live on the silkscreen buttons below, not here. */

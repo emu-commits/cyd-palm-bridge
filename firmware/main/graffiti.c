@@ -9,6 +9,8 @@
 #include "graffiti.h"
 #include <math.h>
 #include <string.h>
+#include <stdio.h>
+#include <stdint.h>
 #include "esp_log.h"
 
 #define N        48          /* resample count */
@@ -25,6 +27,18 @@ typedef struct { float x, y; } Pt;
 static Pt s_buf[MAXPTS];
 static int s_n;
 static int s_punct;          /* punctuation shift armed: next stroke is punctuation */
+static float s_last_dist = 1e9f;   /* $1 distance of the last letter/digit match */
+
+/* Per-device user templates (the trainer's "training mode"): the user's own stroke
+ * for a letter, captured downsampled to <=GU_PTS raw points. When present, it's
+ * matched alongside the built-in template and wins when closer -- calibrating
+ * recognition to this exact hand + resistive panel. ~26*32*2*2 = ~3.3 KB. */
+#define GU_PTS 32
+static int16_t s_user[26][GU_PTS][2];
+static uint8_t s_user_n[26];        /* point count per letter, 0 = none */
+#define GU_MAGIC 0x47550001u        /* 'GU' v1 */
+
+float graffiti_last_distance(void){ return s_last_dist; }
 
 void graffiti_clear(void){ s_n = 0; }
 void graffiti_add_point(int x, int y){
@@ -247,7 +261,67 @@ static char match_set(const Tmpl *set, int nset, float thresh, const char *label
     ESP_LOGI("graf","%s pts=%d bbox=%.0fx%.0f -> '%c' d=%.1f (2nd '%c' %.1f)%s",
              label, npts, rw, rh, bc?bc:'?', best, sc?sc:'?', second,
              best<thresh?"":"  [rejected]");
+    s_last_dist = best;
     return (best < thresh) ? bc : 0;
+}
+
+/* match the buffered stroke against the stored USER templates; best letter + its
+ * distance in *out_d (1e9 if none). Same $1 pipeline as match_set. */
+static char match_user(float *out_d){
+    *out_d = 1e9f;
+    Pt cand[N]; resample(s_buf, s_n, cand); normalize(cand);
+    float best = 1e9f; char bc = 0;
+    for(int i=0;i<26;i++){
+        if(!s_user_n[i]) continue;
+        Pt tp[GU_PTS];
+        for(int k=0;k<s_user_n[i];k++){ tp[k].x=s_user[i][k][0]; tp[k].y=s_user[i][k][1]; }
+        Pt rt[N]; resample(tp, s_user_n[i], rt); normalize(rt);
+        float d = dist_best(cand, rt);
+        if(d < best){ best = d; bc = (char)('a'+i); }
+    }
+    *out_d = best;
+    return bc;
+}
+
+/* trainer "training mode": store the just-drawn stroke as the user's template for
+ * lowercase letter c (downsampled to GU_PTS points). 1 on success. */
+int graffiti_capture_user(char c){
+    if(c < 'a' || c > 'z' || s_n < 2) return 0;
+    float w=0,h=0; stroke_bbox(&w,&h);
+    if(w < TAP_PX && h < TAP_PX) return 0;      /* a tap isn't a letter */
+    int idx = c - 'a', out = 0;
+    for(int k=0; k<GU_PTS; k++){
+        int src = (GU_PTS==1) ? 0 : (int)((long)k * (s_n-1) / (GU_PTS-1));
+        if(src >= s_n) src = s_n-1;
+        s_user[idx][out][0] = (int16_t)s_buf[src].x;
+        s_user[idx][out][1] = (int16_t)s_buf[src].y;
+        out++;
+        if(out >= s_n) break;              /* short stroke: don't pad past its length */
+    }
+    s_user_n[idx] = (uint8_t)out;
+    return 1;
+}
+int  graffiti_user_count(void){ int n=0; for(int i=0;i<26;i++) if(s_user_n[i]) n++; return n; }
+void graffiti_user_reset(void){ memset(s_user_n,0,sizeof s_user_n); }
+
+int graffiti_user_save(const char *path){
+    FILE *f = fopen(path, "wb"); if(!f) return 0;
+    uint32_t magic = GU_MAGIC;
+    int ok = fwrite(&magic,4,1,f)==1
+          && fwrite(s_user_n,1,26,f)==26
+          && fwrite(s_user,1,sizeof s_user,f)==1;
+    fclose(f); return ok;
+}
+int graffiti_user_load(const char *path){
+    FILE *f = fopen(path, "rb"); if(!f) return 0;
+    uint32_t magic=0;
+    int ok = fread(&magic,4,1,f)==1 && magic==GU_MAGIC
+          && fread(s_user_n,1,26,f)==26
+          && fread(s_user,1,sizeof s_user,f)==1;
+    fclose(f);
+    if(!ok) graffiti_user_reset();
+    else for(int i=0;i<26;i++) if(s_user_n[i]>GU_PTS) s_user_n[i]=0;   /* sanitise */
+    return ok;
 }
 
 char graffiti_recognize(int digits){
@@ -275,6 +349,10 @@ char graffiti_recognize(int digits){
     if(s_n < 4){ graffiti_clear(); return 0; } /* too short: ignore */
     char c = match_set(digits ? DTMPL : LTMPL, digits ? NDTMPL : NLTMPL,
                        LET_THRESH, digits ? "123" : "abc");
+    if(!digits){                       /* let a closer USER template win (calibration) */
+        float ud; char uc = match_user(&ud);
+        if(uc && ud < LET_THRESH && (c==0 || ud < s_last_dist)){ c = uc; s_last_dist = ud; }
+    }
     graffiti_clear();
     return c;
 }
