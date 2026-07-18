@@ -2,6 +2,30 @@
 # Run by `make -C sim smoke` (CI gate); any bad command or crash exits non-zero.
 t 1000
 s launcher
+# Graffiti Trainer (roadmap #2): Menu -> Graffiti Trainer opens the drill (target
+# letter + a stroke guide drawn on an I1 canvas + score). On a fresh box file the
+# first target is 'm'; draw it in the strip -> "Nice!" + advance. Pool-safe (labels
+# + one canvas, the ink-strip pattern); a regression here would HANG or misdraw.
+c 18 300
+t 300
+c 55 80
+t 400
+s trainer
+d 45 300
+t 25
+m 57 222
+t 25
+m 70 262
+t 25
+m 84 222
+t 25
+m 100 300
+t 25
+u
+t 400
+s trainer_scored
+c 18 225
+t 300
 # Date Book: Day view -> tap the date to zoom out to Week (I3) -> tap a day to
 # zoom back to Day -> home. The Week view is a plain scrollable list (pool-safe).
 c 40 55
