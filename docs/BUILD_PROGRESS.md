@@ -11,6 +11,23 @@ What was built, and the non-obvious things that cost time to learn. This is the
 
 ## Milestone changelog (newest first)
 
+### 2026-07 — RSS reader (roadmap #4) stage C: the HotSync fetch (device)
+- `config.ini` gains **`news_feed1..3`** (Config + `config.c` parse/save/defaults).
+- **`dav_fetch_url(url, path)`** (device-only, in `dav_esp.c`): streams a public
+  https body straight to an SD file, reusing the existing `esp_http_client`/mbedTLS
+  handle + the spool-to-SD pattern (`dav_list` does the same for PROPFIND). A
+  no-user `DavCtx` means no `Authorization` header (`basic_auth` now returns empty
+  for an empty user); declared in `dav.h`, unimplemented on the host (nothing there
+  fetches feeds).
+- **`fetch_news()`** in `hotsync.c` runs after the PIM sync while Wi-Fi is still up
+  (and after `sync_free_scratch()` returns the ~20 KB): for each configured feed,
+  `dav_fetch_url` → `rss_parse_file` (sliding window) → `news_add`, capped per-feed
+  (15) and overall (30), then `news_commit` + `dav_disconnect`. Bounded RAM — the
+  fetch spools to SD, the parser holds one item, `news_add` writes to SD.
+- **Compile-verified only** (the ESP-IDF CI build compiles `hotsync.c`/`dav_esp.c`);
+  the sim uses the HotSync stub, so the live fetch is runtime-verified on hardware.
+  Host gates + sim smoke still green (shared `config.c`/`rss.c`/`news.c`).
+
 ### 2026-07 — RSS reader (roadmap #4) stage B: the reader app
 - **`bridge/news.c`** — the on-SD article store: `news.idx` (a header + fixed
   172-byte records: feed, title, blob offset+len, time) + `news.dat` (bodies

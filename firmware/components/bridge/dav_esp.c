@@ -98,6 +98,7 @@ static esp_err_t on_event(esp_http_client_event_t *e){
 /* Build "Basic base64(user:pass)" for a proactive Authorization header (iCloud
  * wants auth on the first request rather than after a 401 challenge). */
 static void basic_auth(const DavCtx*d, char*out, int cap){
+    if(!d->user || !d->user[0]){ if(cap) out[0]=0; return; }   /* public GET: no auth */
     char up[192]; int n=snprintf(up,sizeof up,"%s:%s",d->user,d->pass);
     unsigned char b64[288]; size_t bl=0;
     if(mbedtls_base64_encode(b64,sizeof b64,&bl,(const unsigned char*)up,(size_t)n)!=0){ if(cap)out[0]=0; return; }
@@ -237,6 +238,21 @@ int dav_get(const DavCtx*d,const char*coll,const char*name,char*out,int cap){
     int st=davreq(d,HTTP_METHOD_GET,url,-1,NULL,NULL,NULL,0, out,cap,&rn, NULL,0, NULL,0);
     if(st<0 || st>=400) return -1;
     return rn;
+}
+
+/* Stream an arbitrary (public) https URL's body straight to an SD file -- used by
+ * the News reader's HotSync fetch to spool a feed for the sliding-window RSS
+ * parser, exactly as dav_list spools a PROPFIND. No auth, no size cap in RAM.
+ * Returns the HTTP status, or -1. Device-only (dav.h declares it; dav.c/host has
+ * no implementation because the host never fetches feeds). */
+int dav_fetch_url(const char *url, const char *path){
+    FILE *sp = fopen(path,"w+b"); if(!sp) return -1;
+    DavCtx pub; memset(&pub,0,sizeof pub);      /* empty user => no Authorization */
+    s_spoolfile = sp;
+    int st = davreq(&pub,HTTP_METHOD_GET,url,-1,NULL,NULL,NULL,0, NULL,0,NULL, NULL,0, NULL,0);
+    s_spoolfile = NULL;
+    fclose(sp);
+    return st;
 }
 
 /* response buffer for listings; heap (freed per call) so it doesn't compete with

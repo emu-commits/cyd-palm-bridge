@@ -84,9 +84,18 @@ with a **feasibility check on the base CYD** before committing to a build.
      headless host *and* real touch, where LVGL's gesture heuristic isn't). Seeded
      with sample articles until a real fetch runs. Pool-safe (labels + content swap
      on a gesture surface). Smoke-gated.
-   - **C — next (device):** the HotSync fetch phase (streaming GET → `rss_parse` →
-     `news_add`) + feed URLs in `config.ini`. Compile-verified in CI; runtime-
-     verified on glass (the network fetch is stubbed in the sim, like all sync work).
+   - **C — DONE (compile-verified):** the HotSync fetch phase. `config.ini` gains
+     `news_feed1..3`; a new device-only `dav_fetch_url()` streams a public feed to
+     SD (reusing the `esp_http_client`/mbedTLS path + the spool-to-SD pattern, no
+     auth); `fetch_news()` runs after the PIM sync (Wi-Fi still up) — for each feed,
+     GET → `rss_parse_file` → `news_add`, capped per-feed and overall, then
+     `news_commit`. Compiles in the ESP-IDF CI build; **runtime-verify on device**
+     (the sim uses the HotSync stub, so this path isn't exercised there). On glass,
+     confirm: a feed fetches, items appear in News, sync stays reasonably quick, and
+     heap holds during the fetch.
+
+   **The RSS reader is now feature-complete in code** (parser + store + reader app +
+   fetch phase), sim/host-verified except the live network fetch.
 
 **Also open (infrastructure, needs a decision):**
 - **S5 — real sync in the sim `[sim]`.** A `fetch()`-based DAV transport behind
