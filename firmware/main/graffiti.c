@@ -40,6 +40,16 @@ static uint8_t s_user_n[26];        /* point count per letter, 0 = none */
 
 float graffiti_last_distance(void){ return s_last_dist; }
 
+/* read-only copy of the raw captured stroke (the points fed via
+ * graffiti_add_point since the last clear), as x,y pairs. Returns the point
+ * count (<= max). Used by the Kana writing trainer to match a drawn stroke
+ * against an expected kana stroke -- it does not touch recognition state. */
+int graffiti_raw_stroke(int16_t *out_xy, int max){
+    int n = s_n < max ? s_n : max;
+    for(int i=0;i<n;i++){ out_xy[2*i]=(int16_t)s_buf[i].x; out_xy[2*i+1]=(int16_t)s_buf[i].y; }
+    return n;
+}
+
 void graffiti_clear(void){ s_n = 0; }
 void graffiti_add_point(int x, int y){
     if(s_n < MAXPTS){ s_buf[s_n].x = (float)x; s_buf[s_n].y = (float)y; s_n++; }

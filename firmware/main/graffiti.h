@@ -35,6 +35,13 @@ const float *graffiti_glyph_template(char c, int *npairs);
  * the trainer for a graded score. Valid right after graffiti_recognize(). */
 float graffiti_last_distance(void);
 
+/* read-only copy of the raw captured stroke (points since the last clear) as x,y
+ * pairs into out_xy[2*max]; returns the point count (<= max). For the Kana writing
+ * trainer's per-stroke matcher; does not affect recognition. Call before the
+ * stroke is cleared (e.g. from a graf_capture_hook). */
+#include <stdint.h>
+int graffiti_raw_stroke(int16_t *out_xy, int max);
+
 /* --- per-device user templates (the trainer's "training mode") --- */
 /* capture the just-drawn stroke as the user's template for lowercase c. 1 on ok. */
 int  graffiti_capture_user(char c);

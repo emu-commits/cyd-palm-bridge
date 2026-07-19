@@ -76,6 +76,23 @@ t 20
 u
 t 500
 s kana_scored
+# Kana WRITE challenge (Tier 2): tap the top-right toggle to switch Sound->Write.
+# It shows the kana's NUMBERED stroke model (I1 canvas) + "stroke 1/N"; draw a
+# stroke in the strip and the per-stroke matcher (kana_write.c, separate from the
+# Latin recognizer) checks it against the expected next stroke, enforcing order.
+# A hang/crash or pool exhaustion here fails the run.
+c 208 40
+t 400
+s kana_write
+d 55 256
+t 20
+m 85 252
+t 20
+m 118 250
+t 20
+u
+t 400
+s kana_write_stroke
 c 18 225
 t 300
 # Date Book: Day view -> tap the date to zoom out to Week (I3) -> tap a day to
