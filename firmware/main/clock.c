@@ -109,3 +109,18 @@ void clock_set_tz(const char *tz){
     tzset();
     ESP_LOGI(TAG,"timezone: %s -> %s", (tz&&tz[0])?tz:"(unset)", posix);
 }
+
+void clock_zone_hhmm(const char *iana, time_t t, char *out, int cap){
+    if(!out || cap <= 0) return;
+    out[0] = '\0';
+    /* apply the target zone just long enough to format its wall clock, then put the
+     * user's active zone back so the rest of the UI (and clock_now_desc) is unaffected. */
+    char save[48] = "";
+    const char *cur = getenv("TZ");
+    if(cur){ strncpy(save, cur, sizeof save - 1); }
+    setenv("TZ", iana_to_posix(iana), 1); tzset();
+    struct tm ti; localtime_r(&t, &ti);
+    strftime(out, cap, "%H:%M", &ti);
+    if(save[0]) setenv("TZ", save, 1); else unsetenv("TZ");
+    tzset();
+}

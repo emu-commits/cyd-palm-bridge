@@ -30,7 +30,7 @@ CFLAGS := -O2 -g -Wall -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS $(INC)
 APP_SRCS := \
     $(FW)/ui.c $(FW)/data.c $(FW)/graffiti.c $(FW)/appcfg.c $(FW)/clock.c \
     $(FW)/lv_font_palm.c $(FW)/lv_font_palm_bold.c $(FW)/lv_font_kana.c $(FW)/palm_icons.c \
-    $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c \
+    $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(FW)/dash.c \
     $(BR)/pdb.c $(BR)/datebook.c $(BR)/address.c $(BR)/todo.c $(BR)/appinfo.c \
     $(BR)/ical.c $(BR)/vcard.c $(BR)/tz.c $(BR)/charset.c \
     $(BR)/find.c $(BR)/calc.c $(BR)/config.c $(BR)/rss.c $(BR)/news.c $(BR)/feeds.c \

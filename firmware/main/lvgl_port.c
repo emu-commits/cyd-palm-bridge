@@ -6,6 +6,7 @@
 #include "power.h"
 #include "appcfg.h"
 #include "hotsync.h"
+#include "ui.h"           /* ui_show_lock() -- re-raise the dashboard on wake */
 #include "lv_font_palm.h"
 #include "lvgl.h"
 #include "esp_heap_caps.h"
@@ -69,7 +70,7 @@ static int idle_step(void){
         return 0;
     }
     if(power_screen_off()){
-        if(tp_pressed()){ power_backlight(1); g_swallow_tap = 1; }
+        if(tp_pressed()){ power_backlight(1); g_swallow_tap = 1; ui_show_lock(); }
         return power_screen_off();
     }
     if(secs > 0){

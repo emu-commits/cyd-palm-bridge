@@ -56,6 +56,13 @@ Everything below is checked against this list. Where something strains it, I say
 
 ## 1) The lock-screen dashboard — the hero feature
 
+> **Status: BUILT (emulator-verified).** Shown on boot and re-raised on every wake;
+> swipe up to unlock. All tiles below render, strictly mono, pool-safe (sim heap peak
+> 600 B). The hero clock is drawn on a 1-bpp canvas (a 4×7 pixel font) so it needs no
+> large font. Weather/battery are the two device-bench pieces (see §"device-later").
+> Code: `dash.c/.h` (weather cache + moon/sun math), the Lock-screen section of
+> `ui.c`, `clock_zone_hhmm()`, `power_battery_pct()`.
+
 **Verdict: GO, and this is where we invest the most design effort.** This is the
 screen a buyer sees in the Etsy photos and the screen that's lit on their desk all
 day. It should be genuinely beautiful and information-dense, in a Palm-flavored way.
@@ -205,7 +212,8 @@ pays for and doesn't return." Ranked by impact on sellability:
 
 ## Sequencing (BLE dropped, mono, dashboard-first)
 
-1. Lock-screen **dashboard** — **mock up first (approved), then build.** The hero.
+1. Lock-screen **dashboard** — mock approved, **built + emulator-verified.** ✅
+   Remaining for it: the device-side weather fetch + battery ADC (below).
 2. **Alarms fire** + **battery/power** honesty.
 3. **Games**: Minesweeper + Word first, then Sudoku, then Zip (all **renamed**,
    strictly mono).

@@ -5,7 +5,18 @@ next session can pick up without re-deriving. Authoritative detail lives in
 `docs/BACKLOG.md` (roadmap + changelog) and `docs/KANA_TRAINER.md` (the Japanese
 trainer's full Tier 1–5 analysis).
 
-_Last updated: 2026-07-19._
+_Last updated: 2026-07-19 (product pivot)._
+
+## Direction change (read first)
+
+The project pivoted from "extend the Japanese trainer" to **making a sellable
+consumer device** (Etsy). The full strategy + decisions are in
+**`docs/PRODUCT_PLAN.md`**. Locked decisions: **BLE/companion-app dropped** (Wi-Fi
+only), **strictly mono Palm** aesthetic, **lock-screen dashboard first**. The
+**Japanese trainer is frozen at Tier 2** (it teaches recognition, not pen-to-paper
+writing) — it stays as a launcher app, not a headline. Roadmap now: dashboard →
+alarms/battery → games (Minesweeper, a Word clone, Sudoku, Zip — all renamed) →
+web-flasher/OTA/first-run polish.
 
 ## Where things stand
 
@@ -51,7 +62,35 @@ _Last updated: 2026-07-19._
 - SRS state persists to `/sdcard/kana_train.dat` (magic `KT02`, both challenges).
 - `icon_kana` in `firmware/main/palm_icons.c`. `NOTICE` credits IPAGothic + KanjiVG.
 
+## Lock-screen dashboard — BUILT this cycle (emulator-verified)
+
+The hero feature of the product pivot. Full-screen mono glance view, shown on boot
+and re-raised on every wake; **swipe up to unlock** into the launcher. Tiles: big
+clock (drawn on a 1-bpp canvas via a 4×7 pixel font — no large font needed), two
+world times (DST-aware), cached weather (temp / air / a 6-hour temp+rain strip),
+battery, next event + next due, sunrise/sunset, moon phase (drawn). Pool-safe (one
+I1 canvas + labels; sim heap peak 600 B). Key files:
+
+- `firmware/main/dash.c/.h` — pure C (host-testable): the SD weather-cache blob
+  (`WxCache`, `WX_PATH`) + load/seed, moon-phase math, sunrise/sunset math.
+- `firmware/main/ui.c` — the Lock-screen section (search `ui_show_lock`): the canvas
+  graphics (`dash_paint` draws EVERYTHING — clock, separators, rain bars, moon — since
+  `fill_bg` wipes the canvas each refresh), the labels, the swipe handler, the
+  next-event/next-due queries.
+- `firmware/main/clock.c` — `clock_zone_hhmm()` world-time helper (saves/restores TZ).
+- `firmware/main/power.c` + sim stub — `power_battery_pct()` (device returns -1 until
+  the ADC is calibrated → the tile shows "USB"; the sim returns a sample 72%).
+- `firmware/main/lvgl_port.c` — re-raises the lock on device wake (`idle_step`).
+- Weather currently renders from a **sample** blob seeded by `dash_weather_seed_sample`
+  (no network in the sim / before a fetch). The real Open-Meteo fetch is device-later.
+
 ## Next steps / open gates (in priority order)
+
+0. **DEVICE-LATER for the dashboard (before the product is "done"):** the live weather
+   fetch (Open-Meteo HTTPS during HotSync, *after* DAV frees its TLS buffers, stream-
+   parsed into `WX_PATH`) and the battery ADC on GPIO34 (calibrate, then return a real
+   `power_battery_pct()`). Neither is sim-verifiable. Then: **alarms that fire** and the
+   **games**.
 
 1. **Tier 2 on-device tuning — THE GATE before any kanji work.** The emulator proves
    the *mechanics* only; whether the per-stroke matcher *feels* right on the physical

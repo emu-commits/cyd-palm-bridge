@@ -1,6 +1,20 @@
 # sim smoke: boot the real UI, tour every app, exercise the S4 charm features.
 # Run by `make -C sim smoke` (CI gate); any bad command or crash exits non-zero.
 t 1000
+# Lock-screen dashboard (product roadmap): the first thing shown on boot -- clock,
+# world time, cached weather + hourly strip, battery, next event/due, sun + moon.
+# Swipe up to unlock into the launcher. Pool-safe (one I1 canvas + labels).
+s dashboard
+d 120 275
+t 30
+m 120 210
+t 30
+m 120 140
+t 30
+m 120 90
+t 30
+u
+t 400
 s launcher
 # Graffiti Trainer (roadmap #2): launcher app (Graffiti icon, row 2 col 3) opens
 # the drill (target letter + a stroke guide on an I1 canvas + a graded score). On a

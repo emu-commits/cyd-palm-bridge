@@ -22,4 +22,9 @@ void power_backlight(int on);
 /* 1 if the screen is currently blanked by the idle timeout. */
 int  power_screen_off(void);
 
+/* battery charge estimate 0..100, or -1 if unknown (no gauge / not yet calibrated).
+ * The base CYD's GPIO34 divider is coarse; until it's calibrated on the bench this
+ * returns -1 and the dashboard shows a "USB" state instead of a fake percentage. */
+int  power_battery_pct(void);
+
 #endif
