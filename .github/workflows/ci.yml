@@ -66,6 +66,8 @@ jobs:
         run: sudo mkdir -p /sdcard && sudo chmod 777 /sdcard
       - name: Graffiti recognizer accuracy gate
         run: make -C sim graf
+      - name: Minesweeper board-logic gate
+        run: make -C sim mines
       - name: Build + run the scripted UI tour (real ui.c, screenshots)
         run: make -C sim smoke
       - name: Convert screenshots to PNG
