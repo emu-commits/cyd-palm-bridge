@@ -10,6 +10,7 @@
  */
 #ifndef CLOCK_H
 #define CLOCK_H
+#include <time.h>   /* time_t for clock_zone_hhmm() */
 
 /* boot: load the persisted epoch from NVS into the system clock (no-op if none
  * saved yet, e.g. first boot before the first sync). Call early, before the UI. */
@@ -34,5 +35,11 @@ const char *clock_zone_name(int i);   /* IANA name, e.g. "America/New_York" */
 /* describe the CURRENT wall clock under the active TZ, e.g. "EDT -0400 (DST)".
  * Reflects the system time + whichever TZ clock_set_tz() last applied. */
 void clock_now_desc(char *out, int cap);
+
+/* format the wall clock of an arbitrary zone at time t as "HH:MM" (24h), DST-aware.
+ * `iana` is an IANA name (or a POSIX TZ string) from the built-in table; unknown ->
+ * UTC. Restores the active TZ afterwards, so the world-clock tiles don't disturb the
+ * system zone. `out` is left empty on bad args. */
+void clock_zone_hhmm(const char *iana, time_t t, char *out, int cap);
 
 #endif

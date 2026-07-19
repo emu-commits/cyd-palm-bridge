@@ -25,14 +25,16 @@
 #include "kana_strokes.h" /* per-kana stroke polylines (Tier 2 writing challenge) */
 #include "kana_write.h"   /* per-stroke $1 matcher (Tier 2) */
 #include "appcfg.h"
-#include "power.h"        /* live backlight brightness for the Preferences slider */
-#include "clock.h"        /* timezone picker + DST-aware zone list */
+#include "power.h"        /* live backlight brightness + battery gauge for the dashboard */
+#include "clock.h"        /* timezone picker + DST-aware zone list + world-time helper */
+#include "dash.h"         /* lock-screen dashboard: weather cache + moon/sun math */
 #include "lvgl.h"
 #include <string.h>
 #include <strings.h>      /* strncasecmp for the Address Look Up filter */
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <math.h>         /* sqrt() for the dashboard moon disc */
 
 #define TITLE_H     24
 #define FEEDS_PATH  "/sdcard/feeds.txt"       /* News reader's RSS source list */
@@ -3434,6 +3436,338 @@ static void clock_tick(lv_timer_t *t){
     lv_label_set_text(clock_lbl, b);
 }
 
+/* ===================== Lock-screen dashboard (roadmap: product) =============
+ * A full-screen, info-dense glance view drawn in the mono Palm LCD: big clock,
+ * two world times, cached weather (temp / rain / air + a 6-hour strip), battery,
+ * next event + next due, sunrise/sunset, and the moon phase. It renders entirely
+ * OFFLINE -- weather comes from an SD snapshot refreshed on HotSync (dash.c); the
+ * clock/agenda/astronomy are computed on-device. Pool-safe: one I1 canvas for all
+ * the graphics (clock digits, moon, rain bars) plus flat labels; no draw-layer
+ * widgets. Swipe up to unlock into the launcher. */
+#define DASH_CW LCD_W
+#define DASH_CH LCD_H
+static lv_obj_t *g_lock;                 /* the overlay root, or NULL when unlocked */
+static lv_obj_t *g_dash_cv;              /* the I1 graphics canvas */
+static lv_obj_t *g_dash_time_ap;         /* AM/PM label (repositioned to the clock width) */
+static WxCache   g_wx;                    /* weather snapshot for this lock session */
+static int       g_havewx;                /* 1 if g_wx is valid */
+static uint8_t   dash_buf[LV_CANVAS_BUF_SIZE(DASH_CW, DASH_CH, 1, 1) + 16];
+
+/* 4x7 pixel digits 0-9 (top row first; a set bit = leftmost of 4 columns). Drawn
+ * scaled onto the canvas so the hero clock needs no large font. */
+static const uint8_t DASH_DIG[10][7] = {
+    {6,9,9,9,9,9,6},{2,6,2,2,2,2,7},{6,9,1,2,4,8,15},{14,1,1,6,1,1,14},
+    {1,3,5,9,15,1,1},{15,8,14,1,1,9,6},{6,8,8,14,9,9,6},{15,1,2,2,4,4,4},
+    {6,9,9,6,9,9,6},{6,9,9,7,1,1,6},
+};
+static const char *DASH_DOW_L[] = {"Sunday","Monday","Tuesday","Wednesday",
+                                   "Thursday","Friday","Saturday"};
+static const char *DASH_DOW_S[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+static const char *DASH_MON_L[] = {"","January","February","March","April","May",
+    "June","July","August","September","October","November","December"};
+
+static int ti_wday(time_t t){ struct tm x; localtime_r(&t,&x); return x.tm_wday; }
+static int localtime_mon(time_t t){ struct tm x; localtime_r(&t,&x); return x.tm_mon+1; }
+static int localtime_mday(time_t t){ struct tm x; localtime_r(&t,&x); return x.tm_mday; }
+static const char *month_long(int m){ return (m>=1&&m<=12)?DASH_MON_L[m]:""; }
+
+/* "Nm" / "Nh" / "Nd" since the weather snapshot was made (for the status strip). */
+static const char *dash_age_str(const WxCache *w){
+    static char b[24];
+    int mins = dash_weather_age_min(w);
+    if(mins < 60)      snprintf(b,sizeof b,"%dm ago",mins);
+    else if(mins < 1440) snprintf(b,sizeof b,"%dh ago",mins/60);
+    else               snprintf(b,sizeof b,"%dd ago",mins/1440);
+    return b;
+}
+/* US-AQI band word. */
+static const char *aqi_word(int aqi){
+    if(aqi<=50) return "Good";
+    if(aqi<=100) return "Moderate";
+    if(aqi<=150) return "Unhealthy*";       /* sensitive groups */
+    if(aqi<=200) return "Unhealthy";
+    if(aqi<=300) return "Very unhealthy";
+    return "Hazardous";
+}
+
+static void dpx(int x,int y){
+    if(x<0||y<0||x>=DASH_CW||y>=DASH_CH) return;
+    lv_color_t on = { .blue = 1 };
+    lv_canvas_set_px(g_dash_cv, x, y, on, LV_OPA_COVER);
+}
+static void dfill(int x,int y,int w,int h){
+    for(int j=0;j<h;j++) for(int i=0;i<w;i++) dpx(x+i,y+j);
+}
+static void dhdots(int x0,int x1,int y){ for(int x=x0;x<=x1;x+=3) dpx(x,y); }
+
+/* draw a "H:MM" string in the big 4x7 font at scale s; returns pixel width drawn. */
+static int dash_bigtime(int x,int y,const char *str,int s){
+    int x0=x;
+    for(const char *p=str; *p; p++){
+        if(*p==':'){
+            dfill(x + s/2, y + 2*s, s, s);
+            dfill(x + s/2, y + 4*s, s, s);
+            x += 2*s + s;
+        } else if(*p>='0' && *p<='9'){
+            const uint8_t *g = DASH_DIG[*p-'0'];
+            for(int r=0;r<7;r++) for(int c=0;c<4;c++)
+                if(g[r] & (8>>c)) dfill(x + c*s, y + r*s, s, s);
+            x += 4*s + s;
+        }
+    }
+    return x - x0;
+}
+static int dash_bigtime_w(const char *str,int s){
+    int w=0; for(const char *p=str; *p; p++) w += (*p==':') ? 3*s : 5*s;
+    return w>0 ? w-s : 0;                 /* drop the trailing inter-glyph gap */
+}
+
+/* moon disc: illuminated fraction k=illum/100, lit on the right when waxing. */
+static void dash_moon_draw(int cx,int cy,int r,int illum,int waxing){
+    double k = illum/100.0;
+    for(int dy=-r; dy<=r; dy++){
+        double span = (r*r - dy*dy);
+        span = span>0 ? sqrt(span) : 0;
+        double xt = span*(2.0*k - 1.0);
+        for(int dx=-r; dx<=r; dx++){
+            double dist = sqrt((double)(dx*dx + dy*dy));
+            if(dist > r+0.5) continue;
+            int lit = waxing ? (dx >= xt) : (dx <= -xt);
+            if(dist > r-0.9 || !lit) dpx(cx+dx, cy+dy);   /* outline + shadow are ink */
+        }
+    }
+}
+
+/* soonest upcoming appointment -> "2:30p  Dentist" (1 if found). Recurrence is not
+ * expanded (the base date is used); good enough for a glance. */
+typedef struct { long best; char line[64]; int found; } NextEv;
+static void next_ev_cb(uint32_t uid,const char *pri,const char *sec,void *ctx){
+    (void)pri; (void)sec;
+    NextEv *n = ctx;
+    Appt a;
+    if(!data_get_cal(uid,&a)) return;
+    if(a.year < 2000) return;
+    struct tm ti; memset(&ti,0,sizeof ti);
+    ti.tm_year=a.year-1900; ti.tm_mon=a.month-1; ti.tm_mday=a.day;
+    ti.tm_hour=a.hasTime?a.sH:0; ti.tm_min=a.hasTime?a.sM:0; ti.tm_isdst=-1;
+    time_t t = mktime(&ti);
+    time_t now=0; time(&now);
+    if(a.hasTime){
+        if(t < now) return;                     /* timed event already started/passed */
+    } else {                                    /* all-day: keep only today or later */
+        struct tm nt; localtime_r(&now,&nt);
+        long ad = (a.year*10000L)+(a.month*100L)+a.day;
+        long nd = ((nt.tm_year+1900)*10000L)+((nt.tm_mon+1)*100L)+nt.tm_mday;
+        if(ad < nd) return;
+    }
+    if(n->found && t >= n->best) return;
+    n->best=(long)t; n->found=1;
+    if(a.hasTime){
+        int h=a.sH%12; if(h==0) h=12;
+        snprintf(n->line,sizeof n->line,"%d:%02d%s  %.40s",
+                 h,a.sM,a.sH<12?"a":"p",a.description);
+    } else {
+        snprintf(n->line,sizeof n->line,"all day  %.40s",a.description);
+    }
+}
+static int dash_next_event(char *out,int cap){
+    NextEv n; n.best=0; n.found=0; n.line[0]=0;
+    data_datebook(next_ev_cb,&n);
+    if(!n.found) return 0;
+    snprintf(out,cap,"%s",n.line); return 1;
+}
+
+/* soonest-due incomplete to-do (overdue sorts first) -> "Today  Pay rent". */
+typedef struct { long best; char line[64]; int found; } NextTd;
+static void next_td_cb(uint32_t uid,const char *pri,const char *sec,void *ctx){
+    (void)pri; (void)sec;
+    NextTd *n = ctx;
+    Todo t;
+    if(!data_get_todo(uid,&t)) return;
+    if(t.completed || !t.hasDue) return;
+    struct tm ti; memset(&ti,0,sizeof ti);
+    ti.tm_year=t.dueY-1900; ti.tm_mon=t.dueM-1; ti.tm_mday=t.dueD; ti.tm_isdst=-1;
+    time_t due = mktime(&ti);
+    if(n->found && due >= n->best) return;
+    n->best=(long)due; n->found=1;
+    time_t now=0; time(&now); struct tm nt; localtime_r(&now,&nt);
+    const char *when;
+    char wb[16];
+    if(t.dueY==nt.tm_year+1900 && t.dueM==nt.tm_mon+1 && t.dueD==nt.tm_mday) when="Today";
+    else if(due < now){ when="Overdue"; }
+    else { struct tm dt; localtime_r(&due,&dt); snprintf(wb,sizeof wb,"%s %d",CAL_MON[t.dueM],t.dueD); when=wb; }
+    snprintf(n->line,sizeof n->line,"%s  %.40s",when,t.description);
+}
+static int dash_next_due(char *out,int cap){
+    NextTd n; n.best=0; n.found=0; n.line[0]=0;
+    data_todo(next_td_cb,&n);
+    if(!n.found) return 0;
+    snprintf(out,cap,"%s",n.line); return 1;
+}
+
+/* a small left-aligned label on the overlay at (x,y), Palm font, optional bold. */
+static lv_obj_t *dash_lbl(int x,int y,const char *txt,int bold){
+    lv_obj_t *l = lv_label_create(g_lock);
+    lv_obj_set_style_text_font(l, bold?&lv_font_palm_bold:&lv_font_palm, 0);
+    lv_label_set_text(l, txt);
+    lv_obj_set_pos(l, x, y);
+    return l;
+}
+
+/* swipe-up detection (same robust manual scheme the News reader uses). */
+static int g_lock_py, g_lock_ly;
+static void lock_press_cb(lv_event_t *e){ (void)e;
+    lv_point_t p; lv_indev_get_point(lv_indev_active(),&p); g_lock_py=g_lock_ly=p.y; }
+static void lock_pressing_cb(lv_event_t *e){ (void)e;
+    lv_point_t p; lv_indev_get_point(lv_indev_active(),&p); if(p.y>0) g_lock_ly=p.y; }
+static void lock_release_cb(lv_event_t *e){ (void)e;
+    if(g_lock_py - g_lock_ly > 40){                 /* dragged up -> unlock */
+        if(g_lock){ lv_obj_del(g_lock); g_lock=NULL; g_dash_cv=NULL; g_dash_time_ap=NULL; }
+    }
+}
+
+/* paint the canvas graphics + (re)set the time labels from the current clock. */
+static void dash_paint(void){
+    if(!g_lock || !g_dash_cv) return;
+    lv_color_t bg = { .blue = 0 };
+    lv_canvas_fill_bg(g_dash_cv, bg, LV_OPA_COVER);
+
+    time_t now=0; time(&now); struct tm ti; localtime_r(&now,&ti);
+    int h12 = ti.tm_hour%12; if(h12==0) h12=12;
+    char tb[8]; snprintf(tb,sizeof tb,"%d:%02d",h12,ti.tm_min);
+    int s=7, tw=dash_bigtime_w(tb,s), tx=10, ty=30;
+    dash_bigtime(tx,ty,tb,s);
+    if(g_dash_time_ap){
+        lv_label_set_text(g_dash_time_ap, ti.tm_hour<12?"AM":"PM");
+        lv_obj_set_pos(g_dash_time_ap, tx+tw+8, ty+2);
+    }
+    /* zone separators + unlock chevron */
+    dhdots(10,DASH_CW-10,104);
+    dhdots(10,DASH_CW-10,140);
+    dhdots(10,DASH_CW-10,220);
+    dhdots(10,DASH_CW-10,262);
+    for(int i=0;i<6;i++){ dpx(DASH_CW/2-6+i,306-i); dpx(DASH_CW/2+6-i,306-i); }
+
+    /* hourly rain-probability bars (fill_bg above wiped the canvas, so all the
+     * graphics are redrawn here, not in ui_show_lock). */
+    if(g_havewx){
+        for(int i=0;i<g_wx.nhours && i<6;i++){
+            int cx = 22 + i*39, bh = g_wx.hr[i].rain*28/100;
+            dfill(cx-7,190-bh,15,bh?bh:1);
+            dhdots(cx-8,cx+8,191);
+        }
+    }
+    /* moon disc (far right, clear of its label) */
+    { int illum=0,wax=1;
+      dash_moon(now,&illum,&wax,NULL);
+      dash_moon_draw(224,282,13,illum,wax); }
+}
+
+void ui_show_lock(void){
+    if(g_lock){ dash_paint(); return; }             /* already showing -> just refresh */
+    time_t now=0; time(&now);
+    dash_weather_seed_sample(WX_PATH);
+    WxCache wx; int havewx = dash_weather_load(&wx);
+    g_wx = wx; g_havewx = havewx;                    /* dash_paint() draws the bars from this */
+
+    g_lock = lv_obj_create(lv_screen_active());     /* on the active screen (like News),
+                                                       so the swipe events fire reliably */
+    lv_obj_set_size(g_lock, LCD_W, LCD_H);
+    lv_obj_set_pos(g_lock, 0, 0);
+    lv_obj_set_style_radius(g_lock, 0, 0);
+    lv_obj_set_style_border_width(g_lock, 0, 0);
+    lv_obj_set_style_bg_color(g_lock, COL_BODY, 0);
+    lv_obj_set_style_pad_all(g_lock, 0, 0);
+    lv_obj_set_style_text_font(g_lock, &lv_font_palm, 0);
+    lv_obj_clear_flag(g_lock, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(g_lock, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_lock, lock_press_cb,    LV_EVENT_PRESSED,  NULL);
+    lv_obj_add_event_cb(g_lock, lock_pressing_cb, LV_EVENT_PRESSING, NULL);
+    lv_obj_add_event_cb(g_lock, lock_release_cb,  LV_EVENT_RELEASED, NULL);
+
+    g_dash_cv = lv_canvas_create(g_lock);
+    lv_canvas_set_buffer(g_dash_cv, dash_buf, DASH_CW, DASH_CH, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_palette(g_dash_cv, 0, lv_color_to_32(COL_BODY, 0xFF));
+    lv_canvas_set_palette(g_dash_cv, 1, lv_color_to_32(COL_LINE, 0xFF));
+    lv_obj_set_pos(g_dash_cv, 0, 0);
+    lv_obj_clear_flag(g_dash_cv, LV_OBJ_FLAG_CLICKABLE);
+
+    /* ---- status strip ---- */
+    char sb[48];
+    snprintf(sb,sizeof sb,"%s \xC2\xB7 %s %d",
+             DASH_DOW_S[ti_wday(now)], CAL_MON[localtime_mon(now)], localtime_mday(now));
+    dash_lbl(6,4,sb,0);
+    int bp = power_battery_pct();
+    if(havewx) snprintf(sb,sizeof sb,"synced %s \xC2\xB7 ", dash_age_str(&wx));
+    else       snprintf(sb,sizeof sb," ");
+    if(bp>=0) snprintf(sb+strlen(sb),sizeof sb-strlen(sb),"%d%%",bp);
+    else      snprintf(sb+strlen(sb),sizeof sb-strlen(sb),"USB");
+    lv_obj_t *sr=dash_lbl(0,4,sb,0); lv_obj_align(sr,LV_ALIGN_TOP_RIGHT,-6,4);
+
+    /* ---- AM/PM + world times (right of the hero clock) ---- */
+    g_dash_time_ap = dash_lbl(0,0,"",1);
+    char wtb[24];
+    clock_zone_hhmm("Europe/London", now, wtb, sizeof wtb);
+    { char l[32]; snprintf(l,sizeof l,"LON %s",wtb); lv_obj_t*o=dash_lbl(0,30,l,0); lv_obj_align(o,LV_ALIGN_TOP_RIGHT,-8,30); }
+    clock_zone_hhmm("Asia/Tokyo", now, wtb, sizeof wtb);
+    { char l[32]; snprintf(l,sizeof l,"TOK %s",wtb); lv_obj_t*o=dash_lbl(0,46,l,0); lv_obj_align(o,LV_ALIGN_TOP_RIGHT,-8,46); }
+
+    /* ---- date line ---- */
+    { char db[40]; snprintf(db,sizeof db,"%s, %s %d",
+        DASH_DOW_L[ti_wday(now)], month_long(localtime_mon(now)), localtime_mday(now));
+      dash_lbl(10,82,db,0); }
+
+    /* ---- weather ---- */
+    if(havewx){
+        char wl[48];
+        snprintf(wl,sizeof wl,"%d\xC2\xB0  %s",wx.cur_tempF,dash_wcode_desc(wx.cur_code));
+        dash_lbl(10,110,wl,1);
+        if(wx.aqi>=0){ snprintf(wl,sizeof wl,"Air %d \xC2\xB7 %s",wx.aqi,aqi_word(wx.aqi)); dash_lbl(10,126,wl,0); }
+        /* 6-hour strip: temp (top), rain bar (canvas), hour + rain% (bottom) */
+        for(int i=0;i<wx.nhours && i<6;i++){
+            int cx = 22 + i*39;
+            char c[12];
+            int hh=wx.hr[i].hour24%12; if(hh==0) hh=12;
+            snprintf(c,sizeof c,"%d\xC2\xB0",wx.hr[i].tempF); dash_lbl(cx-8,146,c,0);
+            /* the rain bar itself is drawn on the canvas in dash_paint() */
+            snprintf(c,sizeof c,"%d%s",hh,wx.hr[i].hour24<12?"a":"p"); dash_lbl(cx-8,196,c,0);
+            snprintf(c,sizeof c,"%d%%",wx.hr[i].rain);     dash_lbl(cx-8,208,c,0);
+        }
+    } else {
+        dash_lbl(10,118,"Weather syncs on HotSync",0);
+    }
+
+    /* ---- agenda ---- */
+    { char e[64];
+      if(dash_next_event(e,sizeof e)){ char l[80]; snprintf(l,sizeof l,"NEXT  %s",e); dash_lbl(10,226,l,0); }
+      else dash_lbl(10,226,"NEXT  no upcoming events",0);
+      if(dash_next_due(e,sizeof e)){ char l[80]; snprintf(l,sizeof l,"DUE   %s",e); dash_lbl(10,244,l,0); }
+      else dash_lbl(10,244,"DUE   nothing due",0); }
+
+    /* ---- sun + moon ---- */
+    if(havewx && wx.sunrise_min>=0){
+        char sun[24];
+        int rh=wx.sunrise_min/60, rm=wx.sunrise_min%60, sh=wx.sunset_min/60, sm=wx.sunset_min%60;
+        int rh12=rh%12; if(rh12==0) rh12=12; int sh12=sh%12; if(sh12==0) sh12=12;
+        snprintf(sun,sizeof sun,"Rise  %d:%02d%s",rh12,rm,rh<12?"a":"p"); dash_lbl(10,268,sun,0);
+        snprintf(sun,sizeof sun,"Set   %d:%02d%s",sh12,sm,sh<12?"a":"p"); dash_lbl(10,284,sun,0);
+    }
+    { int illum=0; const char *nm="";
+      dash_moon(now,&illum,NULL,&nm);       /* the disc is drawn on the canvas in dash_paint() */
+      char ml[24]; snprintf(ml,sizeof ml,"%s",nm);
+      lv_obj_t*o=dash_lbl(0,266,ml,0); lv_obj_align(o,LV_ALIGN_TOP_RIGHT,-54,266);
+      snprintf(ml,sizeof ml,"%d%% lit",illum);
+      o=dash_lbl(0,282,ml,0); lv_obj_align(o,LV_ALIGN_TOP_RIGHT,-54,282); }
+
+    /* ---- unlock hint ---- */
+    { lv_obj_t*o=dash_lbl(0,308,"swipe up to unlock",0); lv_obj_align(o,LV_ALIGN_BOTTOM_MID,0,-2); }
+
+    dash_paint();
+}
+
+/* keep the locked clock fresh (minute tick); no-op while unlocked. */
+static void dash_tick(lv_timer_t *t){ (void)t; if(g_lock) dash_paint(); }
+
 void ui_init(void){
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, COL_BODY, 0);
@@ -3536,4 +3870,9 @@ void ui_init(void){
     lv_obj_align(graf_echo_lbl, LV_ALIGN_BOTTOM_MID, 0, -1);
 
     show_launcher();
+
+    /* the lock-screen dashboard is the first thing shown (over the launcher); the
+     * port layer re-raises it on every wake. A 15 s timer keeps its clock fresh. */
+    lv_timer_create(dash_tick, 15000, NULL);
+    ui_show_lock();
 }

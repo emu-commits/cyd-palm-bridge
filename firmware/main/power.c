@@ -87,3 +87,7 @@ void power_backlight(int on){
 }
 
 int power_screen_off(void){ return g_off; }
+
+/* No calibrated battery gauge yet (see power.h + the DEVICE-LATER task): the GPIO34
+ * divider read needs on-bench calibration before it can show an honest percentage. */
+int power_battery_pct(void){ return -1; }

@@ -9,3 +9,5 @@ void power_init(void)              {}
 void power_set_brightness(int pct) { if(pct < 0) pct = 0; if(pct > 100) pct = 100; g_bright = pct; }
 void power_backlight(int on)       { (void)on; }
 int  power_screen_off(void)        { return 0; }
+/* the sim has no battery -- report a sample level so the dashboard tile renders. */
+int  power_battery_pct(void)       { return 72; }
