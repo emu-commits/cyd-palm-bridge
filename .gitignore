@@ -31,6 +31,7 @@
 /rss_test
 /rss_asan
 /news_test
+/feeds_test
 
 # ESP-IDF firmware
 /firmware/build/

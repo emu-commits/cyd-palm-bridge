@@ -27,6 +27,10 @@ char graffiti_recognize(int digits);
  * draw a stroke guide. */
 const float *graffiti_letter_template(char c, int *npairs);
 
+/* like graffiti_letter_template but for ANY trainable glyph: a-z, 0-9, and the
+ * punctuation set. NULL for glyphs drawn as a tap (e.g. '.'). Trainer guide. */
+const float *graffiti_glyph_template(char c, int *npairs);
+
 /* $1 match distance of the last recognized letter/digit (lower = better). Used by
  * the trainer for a graded score. Valid right after graffiti_recognize(). */
 float graffiti_last_distance(void);

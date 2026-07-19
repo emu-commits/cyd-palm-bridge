@@ -5,7 +5,8 @@ CORE    = bridge/pdb.c bridge/datebook.c bridge/address.c bridge/ical.c bridge/v
           bridge/find.c
 
 all: roundtrip bridge_cli incremental synctoken category bigsync multiapp \
-     uidmatch idempotent streamparse find_test calc_test config_test rss_test news_test
+     uidmatch idempotent streamparse find_test calc_test config_test rss_test news_test \
+     feeds_test
 
 dirs:
 	@mkdir -p pdb state
@@ -69,6 +70,9 @@ rss_test: tests/rss_test.c bridge/rss.c | dirs
 news_test: tests/news_test.c bridge/news.c | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
+feeds_test: tests/feeds_test.c bridge/feeds.c | dirs
+	$(CC) $(CFLAGS) -o $@ $^
+
 # malformed-input hardening, built with AddressSanitizer + UBSan
 fuzz_test: tests/fuzz_test.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -o $@ $^
@@ -77,7 +81,7 @@ fuzz_test: tests/fuzz_test.c $(CORE) | dirs
 rss_asan: tests/rss_test.c bridge/rss.c | dirs
 	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -o $@ $^
 
-test: roundtrip find_test calc_test config_test streamparse rss_test news_test
+test: roundtrip find_test calc_test config_test streamparse rss_test news_test feeds_test
 	./roundtrip
 	./find_test
 	./calc_test
@@ -85,6 +89,7 @@ test: roundtrip find_test calc_test config_test streamparse rss_test news_test
 	./streamparse
 	./rss_test
 	./news_test
+	./feeds_test
 
 # parser hardening sweep (sanitizer build; a bit slower)
 ftest: fuzz_test rss_asan
@@ -112,6 +117,6 @@ mtest: multiapp
 clean:
 	rm -f roundtrip bridge_cli incremental synctoken category bigsync multiapp \
 	      uidmatch idempotent streamparse find_test calc_test config_test fuzz_test \
-	      rss_test rss_asan news_test pdb/_rt_*.pdb
+	      rss_test rss_asan news_test feeds_test pdb/_rt_*.pdb
 
 .PHONY: all dirs test itest stest ctest btest mtest clean
