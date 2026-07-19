@@ -76,11 +76,16 @@ with a **feasibility check on the base CYD** before committing to a build.
      Graffiti strip (Latin recognizer untouched); deterministic SRS keyed per kana,
      romaji noted on first sight + every miss, persisted to `/sdcard/kana_train.dat`.
      Fully sim-verifiable (the answer is typed romaji, no stroke recognition).
-   - **Tier 2 (write the kana) — next; GATE.** Per-stroke sequenced matcher (new
-     module), numbered-model canvas + draw zone, ~30 KB kana stroke set on SD.
-     **Verify on real hardware that per-stroke kana recognition feels good AND the
-     Latin Graffiti is unchanged before starting any kanji work.**
-   - **Tiers 3–5 (kanji: kun'yomi/gloss, vocab, writing) — CONDITIONAL on Tier 2.**
+   - **Tier 2 (write the kana) — BUILT `[sim]`.** Sound/Write toggle in the Kana
+     app; Write shows the numbered KanjiVG stroke model and matches each drawn
+     stroke (`kana_write.c`, a separate `$1` — Latin recognizer untouched) against
+     the expected next stroke, enforcing official order. Stroke data:
+     `kana_strokes.c` (~28 KB, from `tools/gen_kana_strokes.py`, CC BY-SA). Own SRS
+     state (`KT02`). Emulator-verified end to end. **GATE before Tier 3:** tune the
+     per-stroke accept threshold (`KW_THRESH`) on real resistive hardware and
+     confirm the feel; the emulator proves mechanics, not panel accuracy.
+   - **Tiers 3–5 (kanji: kun'yomi/gloss, vocab, writing) — CONDITIONAL on Tier 2
+     on-device tuning.** The KanjiVG→polyline pipeline is now proven on kana.
      Dataset: KanjiVG (CC BY-SA, attribution/share-alike) resampled to polylines,
      WaniKani ordering, per-level subset (< 1 MB on SD). Kanji rendered from the
      same stroke data (avoids a large CJK font); kana readings use `lv_font_kana`.
