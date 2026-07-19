@@ -1313,8 +1313,8 @@ static int      ka_correct, ka_total, ka_streak, ka_best;   /* per-session stats
 static int      ka_reveal;        /* SOUND: show the romaji note for the current target */
 static char     ka_buf[8];        /* SOUND: romaji drawn so far */
 static int      ka_len;
-static int      kw_cur;           /* WRITE: index of the next stroke to draw */
-static int      kw_err;           /* WRITE: this attempt had a rejected stroke */
+static int      kw_cur;           /* WRITE: index of the next stroke to draw (also how
+                                   * many are "locked in" and shown solid so far) */
 static const uint32_t KA_INTV[KA_BURNED+1] = { 0, 0, 3, 6, 10, 16, 0 };
 static lv_obj_t *ka_kana, *ka_prompt, *ka_answer, *ka_typed, *ka_feedback, *ka_score;
 static lv_obj_t *ka_strokes_lbl, *ka_model, *ka_modelbl;
@@ -1369,7 +1369,7 @@ static int ka_pick(void){
     return best;
 }
 static void ka_set_target(int t){
-    ka_target=t; ka_len=0; ka_buf[0]=0; kw_cur=0; kw_err=0;
+    ka_target=t; ka_len=0; ka_buf[0]=0; kw_cur=0;
     ka_reveal = (t>=0 && ka_wmode==0 && !ka_intro[t]) ? 1 : 0;   /* SOUND: note on first sight */
 }
 
@@ -1379,11 +1379,16 @@ static void ka_mplot(int x,int y){
     lv_color_t on = { .blue = 1 };
     lv_canvas_set_px(ka_model, x, y, on, LV_OPA_COVER);
 }
-static void ka_mline(int x0,int y0,int x1,int y1,int thick){
-    int dx=abs(x1-x0), sx=x0<x1?1:-1, dy=-abs(y1-y0), sy=y0<y1?1:-1, err=dx+dy;
+/* style: 0 = dotted guide (a stroke not yet drawn), 1 = solid "locked in" (a stroke
+ * the user has correctly drawn -- stays visible until the kana is finished or a
+ * wrong stroke restarts it). */
+static void ka_mline(int x0,int y0,int x1,int y1,int style){
+    int dx=abs(x1-x0), sx=x0<x1?1:-1, dy=-abs(y1-y0), sy=y0<y1?1:-1, err=dx+dy, k=0;
     for(;;){
-        ka_mplot(x0,y0);
-        if(thick){ ka_mplot(x0+1,y0); ka_mplot(x0,y0+1); }
+        if(style || (k++ & 1)==0){          /* solid: every pixel; dotted: every other */
+            ka_mplot(x0,y0);
+            if(style){ ka_mplot(x0+1,y0); ka_mplot(x0,y0+1); }   /* thicken the locked-in stroke */
+        }
         if(x0==x1&&y0==y1) break;
         int e2=2*err;
         if(e2>=dy){ err+=dy; x0+=sx; }
@@ -1409,15 +1414,15 @@ static void ka_draw_model(void){
     #define MX(v) (pad + (int)((v)*span/108))
     for(int si=0; si<ks->n; si++){
         const KStroke *st = &ks->s[si];
-        int thick = (si==kw_cur);
+        int solid = (si < kw_cur);                 /* already drawn correctly -> locked in */
         for(int j=0;j+1<st->npts;j++)
             ka_mline(MX(st->pts[2*j]),   MX(st->pts[2*j+1]),
-                     MX(st->pts[2*(j+1)]),MX(st->pts[2*(j+1)+1]), thick);
+                     MX(st->pts[2*(j+1)]),MX(st->pts[2*(j+1)+1]), solid);
         int sx=MX(st->pts[0]), sy=MX(st->pts[1]);
         /* number the stroke at its start (offset up-left, clamped) */
         int nx=sx-5, ny=sy-6; if(nx<0)nx=0; if(ny<0)ny=0; if(nx>KW_GW-3)nx=KW_GW-3; if(ny>KW_GH-5)ny=KW_GH-5;
         ka_mdigit(nx, ny, si+1);
-        if(si==kw_cur)                             /* start dot on the current stroke */
+        if(si==kw_cur)                             /* start dot marks the stroke to draw next */
             for(int a=-1;a<=1;a++) for(int b=-1;b<=1;b++) ka_mplot(sx+a, sy+b);
     }
     #undef MX
@@ -1500,9 +1505,10 @@ static void ka_input(char c){
 
 /* WRITE: on each pen-up, match the raw stroke against the expected NEXT stroke.
  * Runs as graf_capture_hook (before recognition, buffer intact) and consumes the
- * stroke. A match advances; a miss flags the attempt (redraw the same stroke).
- * When the last stroke lands: a clean run promotes/burns, an error-marked run
- * demotes -- enforcing correct shape, direction and order to master the kana. */
+ * stroke. A correct stroke locks in (stays solid on the model) and advances; the
+ * last stroke completing promotes/burns the kana. A WRONG stroke is a miss:
+ * demote, reschedule soon, and START OVER from stroke 1 (the locked-in strokes
+ * clear) -- enforcing the whole character in correct shape, direction and order. */
 static int kw_capture(void){
     if(ka_target<0) return 1;
     static int16_t raw[512];
@@ -1511,31 +1517,27 @@ static int kw_capture(void){
     const KanaStrokes *ks = &KANA_STROKES[ka_target];
     if(kw_cur >= ks->n) kw_cur = 0;
     float d = kana_stroke_dist(raw, un, &ks->s[kw_cur]);
-    if(d < KW_THRESH){
+    if(d < KW_THRESH){                             /* correct stroke -> lock it in */
         kw_cur++;
-        if(kw_cur >= ks->n){                       /* character complete */
-            ka_total++;
-            if(!kw_err){
-                ka_correct++; ka_streak++; if(ka_streak>ka_best) ka_best=ka_streak;
-                int nl = kw_lvl[ka_target] + 1;
-                if(nl>=KA_BURNED){ kw_lvl[ka_target]=KA_BURNED;
-                    if(ka_feedback) lv_label_set_text(ka_feedback, "Mastered -- burned!"); }
-                else { kw_lvl[ka_target]=(uint8_t)nl; kw_due[ka_target]=ka_tick+KA_INTV[nl];
-                    if(ka_feedback) lv_label_set_text_fmt(ka_feedback, "Correct!  (Lv %d)", nl); }
-            } else {
-                ka_streak=0;
-                int nl = kw_lvl[ka_target] - 1; if(nl<1) nl=1;
-                kw_lvl[ka_target]=(uint8_t)nl; kw_due[ka_target]=ka_tick;
-                if(ka_feedback) lv_label_set_text(ka_feedback, "done -- some strokes off, again");
-            }
+        if(kw_cur >= ks->n){                       /* whole kana drawn cleanly */
+            ka_total++; ka_correct++; ka_streak++; if(ka_streak>ka_best) ka_best=ka_streak;
+            int nl = kw_lvl[ka_target] + 1;
+            if(nl>=KA_BURNED){ kw_lvl[ka_target]=KA_BURNED;
+                if(ka_feedback) lv_label_set_text(ka_feedback, "Mastered -- burned!"); }
+            else { kw_lvl[ka_target]=(uint8_t)nl; kw_due[ka_target]=ka_tick+KA_INTV[nl];
+                if(ka_feedback) lv_label_set_text_fmt(ka_feedback, "Correct!  (Lv %d)", nl); }
             ka_tick++; ka_save();
             ka_set_target(ka_pick());
         } else if(ka_feedback){
             lv_label_set_text_fmt(ka_feedback, "stroke %d ok", kw_cur);   /* kw_cur = next now */
         }
-    } else {
-        kw_err = 1;
-        if(ka_feedback) lv_label_set_text_fmt(ka_feedback, "stroke %d: follow the model", kw_cur+1);
+    } else {                                       /* wrong stroke -> miss + start over */
+        ka_total++; ka_streak=0;
+        int nl = kw_lvl[ka_target] - 1; if(nl<1) nl=1;
+        kw_lvl[ka_target]=(uint8_t)nl; kw_due[ka_target]=ka_tick;
+        ka_tick++; ka_save();
+        kw_cur = 0;                                /* clear progress: restart from stroke 1 */
+        if(ka_feedback) lv_label_set_text(ka_feedback, "wrong stroke -- start from 1");
     }
     ka_render();
     return 1;                                      /* consume: no letter recognition */
