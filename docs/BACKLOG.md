@@ -65,18 +65,26 @@ with a **feasibility check on the base CYD** before committing to a build.
      template when it's a closer match, calibrating to this hand + resistive panel.
    Pool-safe throughout (labels + one canvas; heap peak 0 in the sim).
 
-3. **Japanese kanji trainer — extend the training app `[sim]` + dataset work.**
-   Reuse the SRS engine + stroke scoring from (2) for kanji. **Stroke-order data:
-   KanjiVG** (github.com/KanjiVG/kanjivg, CC BY-SA) — per-character SVG stroke
-   paths *with order*. **Learning sequence:** a WaniKani-style ordering (community
-   repos expose the level/sequence lists). The real work is a **build-time
-   pipeline**: parse KanjiVG SVG paths → resample into our recognizer's point
-   format (or a compact polyline), pack into a device-friendly binary indexed by
-   codepoint, and pick a subset (e.g. WaniKani levels) that fits 4 MB flash / SD.
-   *Feasibility to settle:* processed dataset size; per-kanji stroke count vs. the
-   recognizer; and **CJK rendering** — the bitmap font is Latin-only, so kanji
-   display likely needs a small embedded CJK subset font *or* drawing the KanjiVG
-   outlines directly. Note KanjiVG's CC BY-SA attribution/share-alike terms.
+3. **Japanese trainer — extend the training app `[sim]` + dataset work.**
+   Five tiers, evaluated in **`docs/KANA_TRAINER.md`** (full feasibility + the
+   key insight: stroke-order enforcement decomposes multi-stroke recognition into
+   *N ordered single-stroke* matches, reusing `$1` in a separate module — zero risk
+   to the Latin recognizer, no keyboard "kana mode" needed).
+   - **Tier 1 (kana → sound) — DONE `[sim]`.** New `Kana` launcher app: shows a
+     kana (hiragana then katakana) with the new **`lv_font_kana`** bitmap subset
+     (IPAGothic via `lv_font_conv`), you answer the SOUND by drawing romaji in the
+     Graffiti strip (Latin recognizer untouched); deterministic SRS keyed per kana,
+     romaji noted on first sight + every miss, persisted to `/sdcard/kana_train.dat`.
+     Fully sim-verifiable (the answer is typed romaji, no stroke recognition).
+   - **Tier 2 (write the kana) — next; GATE.** Per-stroke sequenced matcher (new
+     module), numbered-model canvas + draw zone, ~30 KB kana stroke set on SD.
+     **Verify on real hardware that per-stroke kana recognition feels good AND the
+     Latin Graffiti is unchanged before starting any kanji work.**
+   - **Tiers 3–5 (kanji: kun'yomi/gloss, vocab, writing) — CONDITIONAL on Tier 2.**
+     Dataset: KanjiVG (CC BY-SA, attribution/share-alike) resampled to polylines,
+     WaniKani ordering, per-level subset (< 1 MB on SD). Kanji rendered from the
+     same stroke data (avoids a large CJK font); kana readings use `lv_font_kana`.
+     Tier 5 is the tightest 2.8″ layout and the highest recognition-accuracy risk.
 
 4. **RSS reader — a TikTok-swipe, text-only feed `[sim]`. Feasibility: GO; code
    DONE (device runtime-verify pending).** A full-screen, one-item-per-view reader swiped vertically (headline

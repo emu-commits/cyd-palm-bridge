@@ -20,6 +20,8 @@
 #include "find.h"         /* global search engine (bridge/find.c) */
 #include "news.h"         /* RSS reader's on-SD article store */
 #include "feeds.h"        /* RSS feed list (Preferences manager + HotSync fetch) */
+#include "lv_font_kana.h" /* hiragana+katakana bitmap subset (Kana trainer) */
+#include "kana_data.h"    /* ordered gojuon table (Kana trainer, roadmap #3) */
 #include "appcfg.h"
 #include "power.h"        /* live backlight brightness for the Preferences slider */
 #include "clock.h"        /* timezone picker + DST-aware zone list */
@@ -42,15 +44,16 @@ static lv_obj_t *content;      /* the swappable view area */
 static lv_obj_t *title_lbl;
 static lv_obj_t *clock_lbl;    /* live clock in the title bar (Palm) */
 
-static const char *APPS[] = { "Date Book", "Address", "To Do List", "Memo Pad", "HotSync", "Graffiti", "News" };
+static const char *APPS[] = { "Date Book", "Address", "To Do List", "Memo Pad", "HotSync", "Graffiti", "News", "Kana" };
 /* authentic Palm app launcher icons (from PumpkinOS) */
 static const lv_image_dsc_t *APP_ICONS[] = { &icon_datebook, &icon_address,
                                              &icon_todo, &icon_memo, &icon_hotsync,
-                                             &icon_graffiti, &icon_news };
+                                             &icon_graffiti, &icon_news, &icon_kana };
 #define NAPPS ((int)(sizeof(APPS)/sizeof(APPS[0])))
 
 static void show_launcher(void);
 static void show_trainer(void);
+static void show_kana(void);
 static void show_news(void);
 static void show_app(const char *name);
 
@@ -169,10 +172,11 @@ static lv_obj_t *g_findtbl;           /* Find results table                     
 static void (*graf_char_hook)(char c);
 static int  (*graf_capture_hook)(void);
 static int  g_trainer_open;      /* the Graffiti trainer is the live screen (menu Reset) */
+static int  g_kana_open;         /* the Kana trainer is the live screen (menu Reset) */
 static void kill_kb(void){
     g_form=NULL; active_ta=NULL; edit_cat_lbl=NULL; g_listtbl=NULL; g_findtbl=NULL;
     graf_char_hook=NULL; graf_capture_hook=NULL;
-    g_trainer_open=0;
+    g_trainer_open=0; g_kana_open=0;
     free_rowuids();
     free_finds();
     kill_hs();
@@ -997,6 +1001,7 @@ static void show_app(const char *name){
     if(!strcmp(name, "HotSync")){ show_hotsync(); return; }
     if(!strcmp(name, "Graffiti")){ show_trainer(); return; }
     if(!strcmp(name, "News")){ show_news(); return; }
+    if(!strcmp(name, "Kana")){ show_kana(); return; }
     cur_app = NULL;
     lv_obj_clean(content);
     lv_label_set_text(title_lbl, name);
@@ -1268,6 +1273,187 @@ static void show_trainer(void){
 static void tr_reset_progress(void){
     tr_reset_mem();
     tr_save();
+}
+
+/* ===================== Kana Trainer (roadmap #3, Tier 1) =====================
+ * A learn-the-syllabary drill: shows a kana (hiragana, then katakana), and you
+ * answer its SOUND by drawing the Hepburn romaji in the Graffiti strip -- one
+ * Latin letter at a time (ku = draw 'k' then 'u'), reusing the existing letter
+ * recognizer with ZERO changes (Tier 2's stroke-writing challenge is separate).
+ * Same deterministic SRS as the Graffiti trainer: each kana has a level 1..5 and
+ * a due tick; a correct answer promotes + reschedules later (burns past level 5),
+ * a wrong answer demotes + reschedules immediately. The romaji answer is NOTED on
+ * a kana's first introduction and again on every wrong attempt. Progress persists
+ * to SD. Pool-safe: labels only (kana shown with the lv_font_kana bitmap subset),
+ * no layer-alloc widgets. Input arrives via graf_char_hook (cleared by kill_kb). */
+#define KA_MAX    96              /* >= KANA_N (92); compile-time array bound */
+#define KA_BURNED 6               /* level 6 = burned (retired until reset) */
+#define KA_SAVE   "/sdcard/kana_train.dat"
+#define KA_MAGIC  0x4B543031u     /* 'KT01' */
+static uint8_t  ka_lvl[KA_MAX];   /* 1..5 active, 6 = burned */
+static uint32_t ka_due[KA_MAX];   /* scheduler tick at which the kana is next due */
+static uint8_t  ka_intro[KA_MAX]; /* 1 = answered correctly at least once (past "first time") */
+static uint32_t ka_tick;          /* global answered-trial counter (drives scheduling) */
+static int      ka_target;        /* index into KANA, -1 = none left (all burned) */
+static int      ka_correct, ka_total, ka_streak, ka_best;
+static int      ka_reveal;        /* show the romaji note for the current target */
+static char     ka_buf[8];        /* romaji drawn so far */
+static int      ka_len;
+static const uint32_t KA_INTV[KA_BURNED+1] = { 0, 0, 3, 6, 10, 16, 0 };
+static lv_obj_t *ka_kana, *ka_prompt, *ka_answer, *ka_typed, *ka_feedback, *ka_score;
+
+static int ka_count(void){ int n = KANA_N; return n > KA_MAX ? KA_MAX : n; }
+
+static void ka_reset_mem(void){
+    for(int i=0;i<KA_MAX;i++){ ka_lvl[i]=1; ka_due[i]=0; ka_intro[i]=0; }
+    ka_tick=0;
+}
+static void ka_load(void){
+    ka_reset_mem();
+    FILE *f=fopen(KA_SAVE,"rb"); if(!f) return;
+    uint32_t magic=0, tick=0; int n=ka_count();
+    if(fread(&magic,4,1,f)==1 && magic==KA_MAGIC &&
+       fread(&tick,4,1,f)==1 &&
+       fread(ka_lvl,1,n,f)==(size_t)n &&
+       fread(ka_due,4,n,f)==(size_t)n &&
+       fread(ka_intro,1,n,f)==(size_t)n){
+        ka_tick=tick;
+        for(int i=0;i<n;i++){ if(ka_lvl[i]<1) ka_lvl[i]=1; if(ka_lvl[i]>KA_BURNED) ka_lvl[i]=KA_BURNED; }
+    } else ka_reset_mem();
+    fclose(f);
+}
+static void ka_save(void){
+    FILE *f=fopen(KA_SAVE,"wb"); if(!f) return;
+    uint32_t magic=KA_MAGIC; int n=ka_count();
+    fwrite(&magic,4,1,f); fwrite(&ka_tick,4,1,f);
+    fwrite(ka_lvl,1,n,f); fwrite(ka_due,4,n,f); fwrite(ka_intro,1,n,f);
+    fclose(f);
+}
+/* deterministic pick: the non-burned kana with the smallest due tick (ties by
+ * order). Returns -1 when every kana is burned. */
+static int ka_pick(void){
+    int best=-1; uint32_t bestdue=0; int n=ka_count();
+    for(int i=0;i<n;i++){
+        if(ka_lvl[i]>=KA_BURNED) continue;
+        if(best<0 || ka_due[i]<bestdue){ best=i; bestdue=ka_due[i]; }
+    }
+    return best;
+}
+static void ka_set_target(int t){
+    ka_target=t; ka_len=0; ka_buf[0]=0;
+    ka_reveal = (t>=0 && !ka_intro[t]) ? 1 : 0;   /* note the answer on first sight */
+}
+
+static void ka_render(void){
+    int n=ka_count();
+    if(ka_target<0){
+        if(ka_kana)     lv_label_set_text(ka_kana, "");
+        if(ka_prompt)   lv_label_set_text(ka_prompt, "All burned!");
+        if(ka_answer)   lv_label_set_text(ka_answer, "every kana mastered -- reset to replay");
+        if(ka_typed)    lv_label_set_text(ka_typed, "");
+        if(ka_score)    lv_label_set_text(ka_score, "");
+        return;
+    }
+    const KanaEntry *k=&KANA[ka_target];
+    if(ka_kana)   lv_label_set_text(ka_kana, k->kana);
+    if(ka_prompt) lv_label_set_text_fmt(ka_prompt, "%s   Lv %d/5",
+                        k->script ? "Katakana" : "Hiragana", ka_lvl[ka_target]);
+    if(ka_answer){
+        if(ka_reveal) lv_label_set_text_fmt(ka_answer, "sound:  %s", k->romaji);
+        else          lv_label_set_text(ka_answer, "draw the sound");
+    }
+    if(ka_typed) lv_label_set_text(ka_typed, ka_len ? ka_buf : "_");
+    if(ka_score){
+        int burned=0; for(int i=0;i<n;i++) if(ka_lvl[i]>=KA_BURNED) burned++;
+        lv_label_set_text_fmt(ka_score, "%d/%d  streak %d (best %d)  %d/%d burned",
+                              ka_correct, ka_total, ka_streak, ka_best, burned, n);
+    }
+}
+
+/* score the drawn romaji letter by letter against the target's Hepburn reading and
+ * apply the deterministic SRS. Partial-but-correct prefixes just advance the echo;
+ * a full match promotes/burns; a divergence demotes, re-reveals the answer, and
+ * keeps the target for an immediate retry. */
+static void ka_input(char c){
+    if(ka_target<0) return;
+    if(c==' '||c=='\n'||c==GRAF_SHIFT||c==GRAF_PUNCT) return;   /* gestures, not letters */
+    if(c=='\b'){ if(ka_len>0){ ka_len--; ka_buf[ka_len]=0; } ka_render(); return; }
+    if(c<'a'||c>'z') return;                                    /* romaji is a-z only */
+    if(ka_len < (int)sizeof ka_buf - 1){ ka_buf[ka_len++]=c; ka_buf[ka_len]=0; }
+    const char *want = KANA[ka_target].romaji;
+    int wl = (int)strlen(want);
+    if(strncmp(ka_buf, want, ka_len)==0){          /* still on track */
+        if(ka_len==wl){                            /* full romaji drawn -> correct */
+            ka_total++; ka_correct++; ka_streak++; if(ka_streak>ka_best) ka_best=ka_streak;
+            ka_intro[ka_target]=1;
+            int nl = ka_lvl[ka_target] + 1;
+            if(nl>=KA_BURNED){
+                ka_lvl[ka_target]=KA_BURNED;
+                if(ka_feedback) lv_label_set_text_fmt(ka_feedback, "Mastered %s -- burned!", want);
+            } else {
+                ka_lvl[ka_target]=(uint8_t)nl; ka_due[ka_target]=ka_tick+KA_INTV[nl];
+                if(ka_feedback) lv_label_set_text_fmt(ka_feedback, "Correct!  %s  (Lv %d)", want, nl);
+            }
+            ka_tick++; ka_save();
+            ka_set_target(ka_pick());
+        } else if(ka_feedback){
+            lv_label_set_text(ka_feedback, "keep going...");
+        }
+    } else {                                       /* wrong letter -> miss */
+        ka_total++; ka_streak=0;
+        int nl = ka_lvl[ka_target] - 1; if(nl<1) nl=1;
+        ka_lvl[ka_target]=(uint8_t)nl; ka_due[ka_target]=ka_tick;
+        if(ka_feedback) lv_label_set_text_fmt(ka_feedback, "was:  %s  - try again", want);
+        ka_tick++; ka_save();
+        ka_len=0; ka_buf[0]=0; ka_reveal=1;        /* re-show the answer, keep target */
+    }
+    ka_render();
+}
+
+static void show_kana(void){
+    kill_kb();
+    cur_app=NULL; cur_uid=0;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, "Kana");
+    update_cat_trigger();
+    ka_load();
+    ka_correct=ka_total=ka_streak=ka_best=0;
+    ka_set_target(ka_pick());
+
+    ka_kana = lv_label_create(content);
+    lv_obj_set_style_text_font(ka_kana, &lv_font_kana, 0);
+    lv_obj_align(ka_kana, LV_ALIGN_TOP_MID, 0, 6);
+
+    ka_prompt = lv_label_create(content);
+    lv_obj_set_style_text_font(ka_prompt, &lv_font_palm_bold, 0);
+    lv_obj_align(ka_prompt, LV_ALIGN_TOP_MID, 0, 56);
+
+    ka_answer = lv_label_create(content);
+    lv_obj_set_style_text_font(ka_answer, &lv_font_palm, 0);
+    lv_obj_align(ka_answer, LV_ALIGN_TOP_MID, 0, 78);
+
+    ka_typed = lv_label_create(content);
+    lv_obj_set_style_text_font(ka_typed, &lv_font_palm_bold, 0);
+    lv_obj_align(ka_typed, LV_ALIGN_TOP_MID, 0, 100);
+
+    ka_feedback = lv_label_create(content);
+    lv_obj_set_style_text_font(ka_feedback, &lv_font_palm, 0);
+    lv_obj_align(ka_feedback, LV_ALIGN_TOP_MID, 0, 124);
+    lv_label_set_text(ka_feedback, "draw the romaji in the strip below");
+
+    ka_score = lv_label_create(content);
+    lv_obj_set_style_text_font(ka_score, &lv_font_palm, 0);
+    lv_obj_align(ka_score, LV_ALIGN_BOTTOM_MID, 0, -2);
+
+    ka_render();
+    graf_char_hook = ka_input;      /* AFTER kill_kb cleared it: route strokes here */
+    g_kana_open = 1;                /* enables Menu > Reset progress */
+}
+
+/* wipe all Kana trainer progress (Menu > Reset progress). */
+static void ka_reset_progress(void){
+    ka_reset_mem();
+    ka_save();
 }
 
 /* ===================== News (RSS reader, roadmap #4) =========================
@@ -2044,6 +2230,7 @@ static void act_delete(lv_event_t *e){ (void)e;
 static void act_categories(lv_event_t *e){ (void)e; menu_close(); cat_trigger_cb(NULL); }
 static void act_prefs(lv_event_t *e){ (void)e; menu_close(); show_prefs(); }
 static void act_tr_reset(lv_event_t *e){ (void)e; menu_close(); tr_reset_progress(); show_trainer(); }
+static void act_ka_reset(lv_event_t *e){ (void)e; menu_close(); ka_reset_progress(); show_kana(); }
 static void act_toggle_done(lv_event_t *e){ (void)e; menu_close();
     g_todo_show_done = !g_todo_show_done; if(cur_app) app_reopen(cur_app); }
 static void act_toggle_sort(lv_event_t *e){ (void)e; menu_close();
@@ -2188,6 +2375,8 @@ static void menu_open(void){
     menu_item(panel, "Preferences", act_prefs);
     if(g_trainer_open)
         menu_item(panel, "Reset progress", act_tr_reset);   /* Graffiti trainer only */
+    if(g_kana_open)
+        menu_item(panel, "Reset progress", act_ka_reset);   /* Kana trainer only */
     if(data_demo_present())
         menu_item(panel, "Remove demo data", act_remove_demo);
 #ifdef UI_DEVTOOLS
