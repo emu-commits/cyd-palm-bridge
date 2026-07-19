@@ -181,7 +181,10 @@ static void fetch_news(void){
         int st = dav_fetch_url(f->url, NEWS_TMP);
         if(st>=200 && st<300){
             char feed[NEWS_FEED_CAP];
-            snprintf(feed, sizeof feed, "%s", f->name[0] ? f->name : "News");
+            /* explicit precision: the name (FEED_NAME_CAP) can exceed feed's cap,
+             * so bound the copy so the compiler can prove no truncation UB. */
+            snprintf(feed, sizeof feed, "%.*s", (int)sizeof feed - 1,
+                     f->name[0] ? f->name : "News");
             rss_parse_file(NEWS_TMP, NEWS_MAX_FEED, news_item_cb, (void*)feed);
         } else {
             ESP_LOGW(TAG,"news: feed '%s' GET st=%d", f->name, st);
