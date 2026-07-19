@@ -30,18 +30,21 @@ with a **feasibility check on the base CYD** before committing to a build.
    synthesizes noisy strokes from each template and reports per-glyph accuracy +
    confusions, across **all three sets** — letters, digits, and punctuation (the
    two-step punct-shift arm is simulated). Used it to separate the worst letter
-   collisions — letters **97.5% → 99.6%** mean at 3 px jitter (h→k 72→92, g→o and
-   p→d fixed, no glyph below 92%); digits and punctuation both ~100%. This cycle
-   also **reshaped `G` and `S`**: `G` is now a **capital-G** (a C sweep with the
-   inward crossbar spur) instead of the old lowercase circle-plus-descender, and
-   `S` is a **more proportional two-lobe** stroke that survives a fast hand — both
-   with the gate still green (`q` even climbed to 100%). `X` is now modelled as the
-   real **single continuous stroke** (first diagonal, a bridge up the right edge
-   from bottom-right to top-right, then the second diagonal) rather than a
-   two-stroke cross. The trainer's guides draw straight from these templates, so
-   they updated for free. **Still to do:** the writing *feel* (ink-trail /
-   char-echo UX) and final threshold tuning against real on-device `graf` telemetry
-   (the synthetic model is a proxy).
+   collisions — letters **97.5% → 99.7%** mean at 3 px jitter (h→k 72→92, no glyph
+   below 92%); digits and punctuation both 100%. Reshaped several glyphs from the
+   on-glass feedback: `S` is a **more proportional two-lobe** stroke that survives a
+   fast hand; `X` is the real **single continuous stroke** (first diagonal, a bridge
+   up the right edge from bottom-right to top-right, then the second diagonal) rather
+   than a two-stroke cross; `G` went from the old inward-crossbar capital (which
+   stayed loop-like and read as `O` on-device) to a **wide-open C with a full-width
+   horizontal mid-bar** — maximally distinct from a circle, taking g 98%→100% with
+   `O` still 100%; and `?` gained the **straight downward tail** the stroke
+   naturally ends on (without it, a natural downward flick read as `)`). The
+   trainer's guides draw straight from these templates, so they updated for free.
+   **Still to do:** the writing *feel* (ink-trail / char-echo UX) and final threshold
+   tuning against real on-device `graf` telemetry (the synthetic model is a proxy);
+   for a hand the built-ins still misread, **Train mode** records a per-device
+   template that wins when closer (the calibration path for e.g. G↔O).
 
 2. **Graffiti training app — a spaced-repetition (SRS) trainer `[sim]`. DONE.**
    A **launcher app** ("Graffiti", its own icon) with two modes:
@@ -206,10 +209,19 @@ plus the full **RSS reader** — streaming parser, on-SD store, swipe reader app
 and the HotSync fetch phase (all merged; only the on-glass live-fetch verify
 remains).
 
-A follow-up polishing pass then: reshaped Graffiti **`G` (capital) and `S`**
-(proportional) with the gate still green; rebuilt the trainer on a **deterministic
-5-level SRS with a burn state**, extended to **digits + punctuation**, with a
-**Menu > Reset progress**; and turned the RSS reader's sources into a managed
-**feed list** (`bridge/feeds.c` + `feeds_test`) — 10 pre-seeded world feeds, a
-**Preferences checkbox manager** with a keyboard URL editor, and a sim **HotSync**
-that fills News from the enabled feeds so the whole loop demos in the browser.
+A follow-up polishing pass then: reshaped Graffiti **`G`, `S`, `X` and `?`** from
+on-glass feedback (`G` a wide-open C + full-width mid-bar so it no longer reads as
+`O`; `S` a proportional two-lobe; `X` one continuous stroke; `?` with a downward
+tail so it stops reading as `)`) — gate green throughout; rebuilt the trainer on a
+**deterministic 5-level SRS with a burn state**, extended to **digits +
+punctuation**, with a **Menu > Reset progress**; and turned the RSS reader's
+sources into a managed **feed list** (`bridge/feeds.c` + `feeds_test`) — 10
+pre-seeded world feeds, a **Preferences checkbox manager** with a keyboard URL
+editor, and a sim **HotSync** that fills News from the enabled feeds so the whole
+loop demos in the browser.
+
+Real feeds *in the browser emulator* remain gated on CORS: feed servers don't send
+`Access-Control-Allow-Origin`, so an in-page `fetch()` is blocked and would need an
+opt-in CORS proxy (public = fragile/third-party; self-hosted = infra). Public feeds
+are low-risk (only the URL is exposed); credentialed iCloud sync in-browser stays
+the harder S5 item. On device the fetch is direct, no proxy.
