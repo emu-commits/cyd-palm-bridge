@@ -16,6 +16,14 @@ It is GPLv3 because it reuses assets derived from **PumpkinOS**
 - **Launcher / silkscreen icons** — the Palm app and silkscreen bitmaps
   (`firmware/main/palm_icons.c`, `firmware/main/palm_icons.h`).
 
+It additionally embeds a **kana bitmap font** and the Kana app icon
+(`firmware/main/lv_font_kana.c`, the `icon_kana` bitmap in
+`firmware/main/palm_icons.c`) derived from **IPAGothic** (IPA Font,
+https://moji.or.jp/ipafont/), distributed under the **IPA Font License v1.0**.
+Only a hiragana/katakana subset is rasterized into an LVGL bitmap font; the
+original TTF is not redistributed. IPAGothic is © Information-technology
+Promotion Agency, Japan (IPA).
+
 PumpkinOS was also used as a *format and layout oracle* (a reference for the Palm
 PDB record layouts and app screen structure) when writing the clean-room codecs
 below; no PumpkinOS source code is compiled into the host bridge.
