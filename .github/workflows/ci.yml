@@ -66,6 +66,8 @@ jobs:
         run: sudo mkdir -p /sdcard && sudo chmod 777 /sdcard
       - name: Graffiti recognizer accuracy gate
         run: make -C sim graf
+      - name: Minesweeper board-logic gate
+        run: make -C sim mines
       - name: Build + run the scripted UI tour (real ui.c, screenshots)
         run: make -C sim smoke
       - name: Convert screenshots to PNG
@@ -75,6 +77,10 @@ jobs:
         with:
           name: sim-screenshots
           path: sim/build/shots/*.png
+      - name: Install 32-bit toolchain (device-sized 24 KB LVGL pool)
+        run: sudo apt-get update && sudo apt-get install -y gcc-multilib libc6-dev-i386
+      - name: 32-bit pool smoke (true 24 KB pool, like wasm/device)
+        run: make -C sim smoke32
 
   simulator-wasm:
     name: Simulator wasm (browser build)

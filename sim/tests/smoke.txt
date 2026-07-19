@@ -54,7 +54,7 @@ t 300
 # 8th app) opens a one-item-per-view feed (seeded with samples in the sim).
 # Press-drag UP navigates to the next article. Pool-safe (labels + content swap on
 # a gesture surface; a regression here would HANG or fail to advance).
-c 62 160
+c 46 160
 t 400
 s news_reader
 d 120 185
@@ -74,7 +74,7 @@ t 300
 # the Graffiti strip (reusing the Latin recognizer, untouched). Draw a caret '^'
 # (= 'a') to answer -> "Correct!" + deterministic advance to the next kana.
 # Pool-safe (labels only; a regression here would HANG or misrender the kana).
-c 158 160
+c 120 160
 t 400
 s kana_open
 d 48 300
@@ -299,7 +299,7 @@ t 500
 s hotsync_news
 c 18 225
 t 300
-c 62 160
+c 46 160
 t 500
 s news_from_sync
 # Preferences > News feeds: the checkbox manager + the URL editor keyboard. Pin the
@@ -340,6 +340,29 @@ t 400
 s feed_editor
 c 31 40
 t 300
+c 18 225
+t 300
+# Games (product roadmap): launcher app row 3 col 3 (the die icon) opens a menu;
+# Minesweeper draws its 9x9 board on a 1-bpp canvas. The first tap is always safe and
+# floods open; then switch to Flag mode and flag a cell. Pool-safe (canvas + labels).
+c 194 160
+t 300
+s games_menu
+c 120 55
+t 400
+s minesweeper
+# on the fresh board every cell is unrevealed: switch to Flag mode and flag one
+c 220 40
+t 200
+c 56 58
+t 300
+s mines_flagged
+# back to Dig, tap an interior cell -> first tap is safe and floods open
+c 220 40
+t 200
+c 120 110
+t 300
+s mines_dug
 c 18 225
 t 300
 # I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.

@@ -118,9 +118,19 @@ I1 canvas + labels; sim heap peak 600 B). Key files:
   `lv_bar/slider/arc/meter` alloc draw layers → WDT freeze. Verify sim heap peak
   stays ~0 in the smoke run.
 - **Verify in the sim** via `make -C sim smoke` + screenshots (convert PPM→PNG with
-  Pillow). Gates: `make -C sim smoke`, `make -C sim graf`, `make test`, `make ftest`;
-  firmware + wasm build in CI. `emcc` is not installed locally — rely on the CI wasm
-  job. The sim smoke test navigates by pixel coordinates (launcher grid geometry
+  Pillow). Gates: `make -C sim smoke`, `make -C sim graf`, `make -C sim mines`,
+  `make test`, `make ftest`; firmware + wasm build in CI. `emcc` is not installed
+  locally. The sim smoke test navigates by pixel coordinates (launcher grid geometry
   matters: adding an app reflows row 3).
+- **THE 24 KB POOL TRAP (learned the hard way):** the 64-bit native sim uses a **48 KB**
+  LVGL pool (LP64 objects are ~2× bigger), but the **wasm build + the device use the
+  true 24 KB**. So a screen with too many widgets can pass the native smoke yet **fail
+  to boot on wasm/device** (pool exhaustion → NULL alloc → crash/freeze), and CI only
+  *compiles* wasm. **Guard:** `make -C sim smoke32` builds the smoke **32-bit** (real
+  24 KB pool) and runs it — now a CI step (needs `gcc-multilib libc6-dev-i386`). Repro
+  a suspected pool issue locally with `sudo apt-get install -y gcc-multilib
+  libc6-dev-i386` then `make -C sim smoke32`. The lock screen keeps its footprint down
+  by **not coexisting with other screens**: it clears the content area and defers the
+  launcher, so the pool only ever holds the chrome + one screen.
 - **Device-only verifies** (real resistive-panel accuracy, live RSS fetch, sync
   self-heal) cannot be started off-bench.

@@ -28,6 +28,7 @@
 #include "power.h"        /* live backlight brightness + battery gauge for the dashboard */
 #include "clock.h"        /* timezone picker + DST-aware zone list + world-time helper */
 #include "dash.h"         /* lock-screen dashboard: weather cache + moon/sun math */
+#include "minesweeper.h"  /* Games: Minesweeper board logic */
 #include "lvgl.h"
 #include <string.h>
 #include <strings.h>      /* strncasecmp for the Address Look Up filter */
@@ -48,17 +49,19 @@ static lv_obj_t *content;      /* the swappable view area */
 static lv_obj_t *title_lbl;
 static lv_obj_t *clock_lbl;    /* live clock in the title bar (Palm) */
 
-static const char *APPS[] = { "Date Book", "Address", "To Do List", "Memo Pad", "HotSync", "Graffiti", "News", "Kana" };
+static const char *APPS[] = { "Date Book", "Address", "To Do List", "Memo Pad", "HotSync", "Graffiti", "News", "Kana", "Games" };
 /* authentic Palm app launcher icons (from PumpkinOS) */
 static const lv_image_dsc_t *APP_ICONS[] = { &icon_datebook, &icon_address,
                                              &icon_todo, &icon_memo, &icon_hotsync,
-                                             &icon_graffiti, &icon_news, &icon_kana };
+                                             &icon_graffiti, &icon_news, &icon_kana, &icon_games };
 #define NAPPS ((int)(sizeof(APPS)/sizeof(APPS[0])))
 
 static void show_launcher(void);
 static void show_trainer(void);
 static void show_kana(void);
 static void show_news(void);
+static void show_games(void);
+static void show_minesweeper(void);
 static void show_app(const char *name);
 
 /* a borderless, non-scrolling panel with a solid fill */
@@ -1006,6 +1009,7 @@ static void show_app(const char *name){
     if(!strcmp(name, "Graffiti")){ show_trainer(); return; }
     if(!strcmp(name, "News")){ show_news(); return; }
     if(!strcmp(name, "Kana")){ show_kana(); return; }
+    if(!strcmp(name, "Games")){ show_games(); return; }
     cur_app = NULL;
     lv_obj_clean(content);
     lv_label_set_text(title_lbl, name);
@@ -3623,6 +3627,11 @@ static void lock_pressing_cb(lv_event_t *e){ (void)e;
 static void lock_release_cb(lv_event_t *e){ (void)e;
     if(g_lock_py - g_lock_ly > 40){                 /* dragged up -> unlock */
         if(g_lock){ lv_obj_del(g_lock); g_lock=NULL; g_dash_cv=NULL; g_dash_time_ap=NULL; }
+        /* the launcher is built lazily on the FIRST unlock (at boot the content area
+         * is empty behind the lock, so the launcher grid and the dashboard never share
+         * the 24 KB pool). Later wakes re-lock over whatever app is showing, so only
+         * rebuild the launcher when nothing is there. */
+        if(lv_obj_get_child_count(content) == 0) show_launcher();
     }
 }
 
@@ -3665,6 +3674,12 @@ static void dash_paint(void){
 
 void ui_show_lock(void){
     if(g_lock){ dash_paint(); return; }             /* already showing -> just refresh */
+    /* Free whatever app view is in the content area first. The lock covers the whole
+     * screen anyway, and this keeps the 24 KB LVGL pool holding only the chrome + the
+     * dashboard at once (never chrome + an app + the dashboard). The content area is
+     * left empty, so unlocking rebuilds the launcher (see lock_release_cb). */
+    lv_obj_clean(content);
+    kill_kb();
     time_t now=0; time(&now);
     dash_weather_seed_sample(WX_PATH);
     WxCache wx; int havewx = dash_weather_load(&wx);
@@ -3768,6 +3783,150 @@ void ui_show_lock(void){
 /* keep the locked clock fresh (minute tick); no-op while unlocked. */
 static void dash_tick(lv_timer_t *t){ (void)t; if(g_lock) dash_paint(); }
 
+/* ========================= Games (product roadmap) ==========================
+ * A "Games" launcher app opening a small menu of low-RAM games. First up:
+ * Minesweeper -- board logic in minesweeper.c (pure/testable), the view here on a
+ * 1-bpp canvas (grid + stipple for unrevealed, the DASH_DIG font for counts, discs
+ * for mines). A Dig/Flag mode toggle picks what a tap does (clearer than long-press
+ * on a resistive panel). Pool-safe: one canvas + a few labels/buttons. */
+#define MSW 9
+#define MSH 9
+#define MSMINES 10
+#define MSC 16                                  /* cell size in px */
+#define MSCW (MSW*MSC+1)
+#define MSCH (MSH*MSC+1)
+static MsGame    g_ms;
+static lv_obj_t *g_ms_cv, *g_ms_status, *g_ms_modelbl;
+static int       g_ms_flag;                     /* 1 = taps place flags, 0 = dig */
+static uint32_t  g_ms_seq;                       /* varies the board each New */
+static uint8_t   ms_buf[LV_CANVAS_BUF_SIZE(MSCW, MSCH, 1, 1) + 16];
+
+static void mpx(int x,int y){
+    if(!g_ms_cv || x<0 || y<0 || x>=MSCW || y>=MSCH) return;
+    lv_color_t on = { .blue = 1 };
+    lv_canvas_set_px(g_ms_cv, x, y, on, LV_OPA_COVER);
+}
+static void mfill(int x,int y,int w,int h){ for(int j=0;j<h;j++) for(int i=0;i<w;i++) mpx(x+i,y+j); }
+static void mdigit(int x,int y,int d){
+    if(d<1||d>9) return;
+    const uint8_t *g = DASH_DIG[d];
+    for(int r=0;r<7;r++) for(int c=0;c<4;c++) if(g[r] & (8>>c)) mpx(x+c,y+r);
+}
+static void mdisc(int cx,int cy,int r){
+    for(int dy=-r;dy<=r;dy++) for(int dx=-r;dx<=r;dx++) if(dx*dx+dy*dy<=r*r) mpx(cx+dx,cy+dy);
+}
+static void ms_render(void){
+    if(!g_ms_cv) return;
+    lv_color_t bg = { .blue = 0 };
+    lv_canvas_fill_bg(g_ms_cv, bg, LV_OPA_COVER);
+    for(int r=0;r<=MSH;r++) for(int x=0;x<MSCW;x++) mpx(x, r*MSC);   /* grid */
+    for(int c=0;c<=MSW;c++) for(int y=0;y<MSCH;y++) mpx(c*MSC, y);
+    for(int r=0;r<MSH;r++) for(int c=0;c<MSW;c++){
+        int x0=c*MSC, y0=r*MSC; uint8_t cb=ms_at(&g_ms,r,c); int mine=cb&MS_MINE;
+        if(cb & MS_REVEALED){
+            if(mine) mdisc(x0+MSC/2, y0+MSC/2, 4);
+            else { int a=ms_adj(&g_ms,r,c); if(a>0) mdigit(x0+MSC/2-2, y0+MSC/2-3, a); }
+        } else {
+            for(int j=2;j<MSC-1;j++) for(int i=2;i<MSC-1;i++) if((i+j)&1) mpx(x0+i,y0+j);
+            if(cb & MS_FLAG) mfill(x0+4,y0+4,MSC-8,MSC-8);           /* flag = solid block */
+            if(g_ms.state==MS_LOST && mine) mdisc(x0+MSC/2, y0+MSC/2, 4);
+        }
+    }
+    if(g_ms_status){
+        if(g_ms.state==MS_WON)      lv_label_set_text(g_ms_status, "You win!");
+        else if(g_ms.state==MS_LOST)lv_label_set_text(g_ms_status, "Boom! tap New");
+        else lv_label_set_text_fmt(g_ms_status, "%d mines - %d flags", g_ms.mines, ms_flags(&g_ms));
+    }
+}
+static void ms_new_game(void){
+    time_t t=0; time(&t);
+    ms_new(&g_ms, MSW, MSH, MSMINES, (uint32_t)t ^ (g_ms_seq++ * 2654435761u));
+    g_ms_flag = 0;
+}
+static void ms_tap_cb(lv_event_t *e){ (void)e;
+    lv_point_t p; lv_indev_get_point(lv_indev_active(), &p);
+    lv_area_t a; lv_obj_get_coords(g_ms_cv, &a);
+    int lx=p.x-a.x1, ly=p.y-a.y1;
+    if(lx<0||ly<0||lx>=MSCW||ly>=MSCH) return;
+    int c=lx/MSC, r=ly/MSC;
+    if(g_ms_flag) ms_flag(&g_ms,r,c); else ms_reveal(&g_ms,r,c);
+    ms_render();
+}
+static void ms_mode_cb(lv_event_t *e){ (void)e;
+    g_ms_flag = !g_ms_flag;
+    if(g_ms_modelbl) lv_label_set_text(g_ms_modelbl, g_ms_flag ? "Flag" : "Dig");
+}
+static void ms_newbtn_cb(lv_event_t *e){ (void)e;
+    ms_new_game();
+    if(g_ms_modelbl) lv_label_set_text(g_ms_modelbl, "Dig");
+    ms_render();
+}
+static void show_minesweeper(void){
+    kill_kb(); cur_app=NULL; cur_uid=0;
+    g_ms_cv=g_ms_status=g_ms_modelbl=NULL;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, "Minesweeper");
+    update_cat_trigger();
+
+    g_ms_status = lv_label_create(content);
+    lv_obj_align(g_ms_status, LV_ALIGN_TOP_LEFT, 6, 5);
+
+    lv_obj_t *mode = lv_button_create(content);
+    lv_obj_set_style_radius(mode, 0, 0);
+    lv_obj_set_style_pad_all(mode, 3, 0);
+    lv_obj_align(mode, LV_ALIGN_TOP_RIGHT, -4, 2);
+    lv_obj_add_event_cb(mode, ms_mode_cb, LV_EVENT_CLICKED, NULL);
+    g_ms_modelbl = lv_label_create(mode);
+    lv_label_set_text(g_ms_modelbl, "Dig");
+
+    lv_obj_t *nb = lv_button_create(content);
+    lv_obj_set_style_radius(nb, 0, 0);
+    lv_obj_set_style_pad_all(nb, 3, 0);
+    lv_obj_align(nb, LV_ALIGN_TOP_RIGHT, -52, 2);
+    lv_obj_add_event_cb(nb, ms_newbtn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *nbl = lv_label_create(nb); lv_label_set_text(nbl, "New");
+
+    g_ms_cv = lv_canvas_create(content);
+    lv_canvas_set_buffer(g_ms_cv, ms_buf, MSCW, MSCH, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_palette(g_ms_cv, 0, lv_color_to_32(COL_BODY, 0xFF));
+    lv_canvas_set_palette(g_ms_cv, 1, lv_color_to_32(COL_LINE, 0xFF));
+    lv_obj_align(g_ms_cv, LV_ALIGN_TOP_MID, 0, 26);
+    lv_obj_add_flag(g_ms_cv, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_ms_cv, ms_tap_cb, LV_EVENT_CLICKED, NULL);
+
+    ms_new_game();
+    ms_render();
+}
+
+static void games_pick_cb(lv_event_t *e){
+    const char *g = lv_event_get_user_data(e);
+    if(!strcmp(g,"mines")) show_minesweeper();
+}
+static void show_games(void){
+    kill_kb(); cur_app=NULL; cur_uid=0;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, "Games");
+    update_cat_trigger();
+
+    lv_obj_t *box = lv_obj_create(content);
+    lv_obj_set_size(box, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_radius(box, 0, 0);
+    lv_obj_set_style_border_width(box, 0, 0);
+    lv_obj_set_style_bg_color(box, COL_BODY, 0);
+    lv_obj_set_style_pad_all(box, 10, 0);
+    lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(box, 8, 0);
+
+    lv_obj_t *b = lv_button_create(box);
+    lv_obj_set_width(b, lv_pct(100));
+    lv_obj_set_style_radius(b, 0, 0);
+    lv_obj_add_event_cb(b, games_pick_cb, LV_EVENT_CLICKED, (void*)"mines");
+    lv_obj_t *bl = lv_label_create(b); lv_label_set_text(bl, "Minesweeper"); lv_obj_center(bl);
+
+    lv_obj_t *soon = lv_label_create(box);
+    lv_label_set_text(soon, "More games soon.");
+}
+
 void ui_init(void){
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, COL_BODY, 0);
@@ -3869,10 +4028,11 @@ void ui_init(void){
     lv_obj_set_style_text_font(graf_echo_lbl, &lv_font_palm_bold, 0);
     lv_obj_align(graf_echo_lbl, LV_ALIGN_BOTTOM_MID, 0, -1);
 
-    show_launcher();
-
-    /* the lock-screen dashboard is the first thing shown (over the launcher); the
-     * port layer re-raises it on every wake. A 15 s timer keeps its clock fresh. */
+    /* Boot straight to the lock-screen dashboard; the launcher is built lazily on
+     * unlock (see lock_release_cb) so its icon grid and the dashboard never occupy
+     * the 24 KB LVGL pool at once -- that overflowed the pool on the 32-bit wasm
+     * build (the 64-bit native sim's 48 KB pool hid it). A 15 s timer keeps the
+     * locked clock fresh; the port layer re-raises the lock on every wake. */
     lv_timer_create(dash_tick, 15000, NULL);
     ui_show_lock();
 }
