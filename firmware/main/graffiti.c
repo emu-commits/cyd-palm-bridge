@@ -125,7 +125,7 @@ T(t_c,'c', 9,2, 4,1, 1,5, 4,9, 9,8)                            /* open-right C *
 T(t_d,'d', 3,10, 3,0, 8,3, 8,7, 3,10)                          /* up, then right bowl */
 T(t_e,'e', 8,1, 4,2, 7,5, 4,8, 8,9)                            /* reverse 3 */
 T(t_f,'f', 8,1, 3,1, 3,10)                                     /* top bar + down */
-T(t_g,'g', 8,3, 4,1, 1,5, 4,9, 8,7, 7,10, 4,10)              /* circle + hooked descender */
+T(t_g,'g', 8,3, 4,1, 1,5, 3,9, 7,9, 8,6, 5,6)               /* capital G: C sweep + inward crossbar */
 T(t_h,'h', 2,0, 2,10, 2,6, 5,4, 8,6, 8,10)                    /* stem + rounded n-hump */
 T(t_i,'i', 5,0, 5,10)                                          /* vertical */
 T(t_j,'j', 7,0, 7,8, 5,10, 2,9)                               /* J hook */
@@ -137,7 +137,7 @@ T(t_o,'o', 8,2, 4,1, 1,4, 2,8, 6,10, 9,7, 8,3, 4,1)          /* circle */
 T(t_p,'p', 2,10, 2,0, 6,0, 8,2, 6,4, 2,4)                    /* long stem + compact top bowl */
 T(t_q,'q', 7,1, 4,1, 2,3, 4,5, 7,5, 8,3, 7,1, 7,9)          /* top circle + straight tail */
 T(t_r,'r', 2,10, 2,0, 7,2, 3,5, 8,10)                        /* stem, bowl, leg to BR */
-T(t_s,'s', 8,2, 4,1, 3,4, 6,6, 7,8, 3,9)                     /* S curve */
+T(t_s,'s', 8,3, 5,1, 2,3, 4,5, 8,7, 5,9, 2,8)               /* proportional S: two even lobes */
 T(t_t,'t', 2,1, 8,1, 8,10)                                   /* along top, then down */
 T(t_u,'u', 1,0, 1,8, 5,10, 9,8, 9,0)                         /* U */
 T(t_v,'v', 0,0, 5,10, 10,0)                                  /* V */
@@ -150,7 +150,7 @@ static const Tmpl LTMPL[] = {
     {'a',t_a,3},{'b',t_b,6},{'c',t_c,5},{'d',t_d,5},{'e',t_e,5},{'f',t_f,3},
     {'g',t_g,7},{'h',t_h,6},{'i',t_i,2},{'j',t_j,4},{'k',t_k,6},{'l',t_l,3},
     {'m',t_m,5},{'n',t_n,4},{'o',t_o,8},{'p',t_p,6},{'q',t_q,8},{'r',t_r,5},
-    {'s',t_s,6},{'t',t_t,3},{'u',t_u,5},{'v',t_v,3},{'w',t_w,5},{'x',t_x,5},
+    {'s',t_s,7},{'t',t_t,3},{'u',t_u,5},{'v',t_v,3},{'w',t_w,5},{'x',t_x,5},
     {'y',t_y,5},{'z',t_z,4},
 };
 #define NLTMPL ((int)(sizeof(LTMPL)/sizeof(LTMPL[0])))
@@ -365,6 +365,19 @@ const float *graffiti_letter_template(char c, int *npairs){
     const Tmpl *t = &LTMPL[c - 'a'];
     if(npairs) *npairs = t->n;
     return t->pts;
+}
+
+/* runtime accessor for ANY trainable glyph (letter, digit, or punctuation): the
+ * ideal stroke as control points (grid ~0..10, y down). Covers a-z, 0-9 and the
+ * punctuation set. Returns NULL for glyphs with no drawn stroke (e.g. '.', the tap
+ * that follows the punctuation shift). Used by the trainer to draw its guide. */
+const float *graffiti_glyph_template(char c, int *npairs){
+    const Tmpl *set = NULL; int n = 0;
+    if(c>='a' && c<='z'){ set=LTMPL; n=NLTMPL; }
+    else if(c>='0' && c<='9'){ set=DTMPL; n=NDTMPL; }
+    else { set=PTMPL; n=NPTMPL; }
+    for(int i=0;i<n;i++) if(set[i].c==c){ if(npairs)*npairs=set[i].n; return set[i].pts; }
+    return NULL;
 }
 
 #ifdef GRAF_TEST_HOOKS

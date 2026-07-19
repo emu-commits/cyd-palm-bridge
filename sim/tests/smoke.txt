@@ -231,6 +231,62 @@ s graffiti_ink
 u
 t 400
 s graffiti_lookup
+# News feeds + offline HotSync (roadmap #4 polish). "Sync Now" here has no network,
+# so it rebuilds the News store from the ENABLED feeds with sample items -- the same
+# HotSync step that streams real RSS on device. A hang/crash here fails the run.
+c 18 225
+t 300
+c 120 110
+t 400
+s hotsync_prefetch
+c 120 175
+t 500
+s hotsync_news
+c 18 225
+t 300
+c 120 160
+t 500
+s news_from_sync
+# Preferences > News feeds: the checkbox manager + the URL editor keyboard. Pin the
+# list to the bottom (the feeds row lives below Discover), tap it, toggle a feed,
+# open the editor. Pool-safe (lv_table + one textarea + one button-matrix).
+c 18 225
+t 300
+c 18 300
+t 300
+c 80 52
+t 500
+d 120 195
+t 20
+m 120 60
+t 20
+u
+t 150
+d 120 195
+t 20
+m 120 60
+t 20
+u
+t 150
+d 120 195
+t 20
+m 120 60
+t 20
+u
+t 500
+c 120 156
+t 500
+s feeds_manager
+c 16 65
+t 300
+s feeds_toggled
+c 200 65
+t 400
+s feed_editor
+c 31 40
+t 300
+c 18 225
+t 300
 # I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.
 # (CI starts on a fresh /sdcard, so the seed + manifest exist here.)
 c 18 225

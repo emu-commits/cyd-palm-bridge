@@ -12,6 +12,7 @@
 #include "sync.h"
 #include "rss.h"          /* RSS reader: feed parser */
 #include "news.h"         /* RSS reader: on-SD article store */
+#include "feeds.h"        /* RSS reader: the enabled feed sources */
 #include "secrets.h"
 #include "appcfg.h"
 #include "clock.h"
@@ -154,11 +155,12 @@ static char *abspath(char *href, DavCtx *d){
 }
 
 /* ---- News feeds (RSS reader, roadmap #4 stage C) ----------------------------
- * After the PIM sync (Wi-Fi still up), stream each configured feed to SD, parse it
+ * After the PIM sync (Wi-Fi still up), stream each ENABLED feed to SD, parse it
  * in a sliding window, and rebuild the news store. Bounded RAM: the fetch spools
  * to SD (dav_fetch_url), the parser keeps only one item, news_add writes to SD.
- * Feed URLs come from config.ini (news_feed1..3). No credentials -- feeds are
- * public. Compile-verified here; runtime-verified on device. */
+ * Feed sources come from the on-SD feed list (bridge/feeds.c), edited in
+ * Preferences > News feeds. No credentials -- feeds are public. Compile-verified
+ * here; runtime-verified on device. */
 #define NEWS_TMP        "/sdcard/.rsstmp"
 #define NEWS_MAX_TOTAL  30      /* whole store cap */
 #define NEWS_MAX_FEED   15      /* per-feed cap */
@@ -167,31 +169,22 @@ static void news_item_cb(const char *title, const char *text, void *ctx){
     if(s_news_added >= NEWS_MAX_TOTAL) return;
     if(news_add((const char*)ctx, title, text, 0)) s_news_added++;
 }
-/* a short human label for a feed = its host, minus scheme and leading "www." */
-static void feed_label(const char *url, char *out, int cap){
-    const char *p = strstr(url,"://"); p = p ? p+3 : url;
-    if(!strncmp(p,"www.",4)) p += 4;
-    int j=0; for(; p[j] && p[j]!='/' && j<cap-1; j++) out[j]=p[j];
-    out[j]=0;
-    if(!out[0]) snprintf(out,cap,"News");
-}
 static void fetch_news(void){
-    const Config *cfg = appcfg();
-    int any=0;
-    for(int i=0;i<3;i++) if(cfg->news_feed[i][0]) any=1;
-    if(!any) return;                                   /* no feeds configured */
+    if(feeds_enabled_count() == 0) return;             /* no feeds enabled */
     setst("Fetching news...");
     if(!news_begin()){ ESP_LOGW(TAG,"news: store open failed"); return; }
     s_news_added=0;
-    for(int i=0;i<3 && s_news_added<NEWS_MAX_TOTAL; i++){
-        const char *url = cfg->news_feed[i];
-        if(!url[0]) continue;
-        int st = dav_fetch_url(url, NEWS_TMP);
+    int nf = feeds_count();
+    for(int i=0; i<nf && s_news_added<NEWS_MAX_TOTAL; i++){
+        const Feed *f = feeds_get(i);
+        if(!f || !f->enabled || !f->url[0]) continue;
+        int st = dav_fetch_url(f->url, NEWS_TMP);
         if(st>=200 && st<300){
-            char feed[NEWS_FEED_CAP]; feed_label(url, feed, sizeof feed);
+            char feed[NEWS_FEED_CAP];
+            snprintf(feed, sizeof feed, "%s", f->name[0] ? f->name : "News");
             rss_parse_file(NEWS_TMP, NEWS_MAX_FEED, news_item_cb, (void*)feed);
         } else {
-            ESP_LOGW(TAG,"news: feed %d GET st=%d", i+1, st);
+            ESP_LOGW(TAG,"news: feed '%s' GET st=%d", f->name, st);
         }
         remove(NEWS_TMP);
     }

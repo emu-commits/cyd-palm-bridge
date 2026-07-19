@@ -31,26 +31,34 @@ with a **feasibility check on the base CYD** before committing to a build.
    confusions, across **all three sets** — letters, digits, and punctuation (the
    two-step punct-shift arm is simulated). Used it to separate the worst letter
    collisions — letters **97.5% → 99.6%** mean at 3 px jitter (h→k 72→92, g→o and
-   p→d fixed, no glyph below 92%); digits and punctuation both 100% (punct was
-   already well-separated). **Still to do:** the writing *feel* (ink-trail /
-   char-echo UX), the `X` 2-stroke exception, and final threshold tuning against
-   real on-device `graf` telemetry (the synthetic model is a proxy). This is the
-   foundation for the trainer below.
+   p→d fixed, no glyph below 92%); digits and punctuation both ~100%. This cycle
+   also **reshaped `G` and `S`**: `G` is now a **capital-G** (a C sweep with the
+   inward crossbar spur) instead of the old lowercase circle-plus-descender, and
+   `S` is a **more proportional two-lobe** stroke that survives a fast hand — both
+   with the gate still green (`q` even climbed to 100%). The trainer's guides draw
+   straight from these templates, so they updated for free. **Still to do:** the
+   writing *feel* (ink-trail / char-echo UX), the `X` 2-stroke exception, and final
+   threshold tuning against real on-device `graf` telemetry (the synthetic model is
+   a proxy).
 
 2. **Graffiti training app — a spaced-repetition (SRS) trainer `[sim]`. DONE.**
    A **launcher app** ("Graffiti", its own icon) with two modes:
-   - **Drill** — shows a target letter + its **stroke guide** (drawn on an I1 canvas
-     from the recognizer's template, start dot for direction); you write it, and it's
-     scored by the real recognizer with a **graded %** (from the $1 match distance)
-     and scheduled by a **per-letter Leitner box** (weak letters resurface more;
-     persisted to `/sdcard/graf_train.dat`).
+   - **Drill** — shows a target glyph + its **stroke guide** (drawn on an I1 canvas
+     from the recognizer's template, start dot for direction); you write it, scored
+     by the real recognizer with a **graded %** (from the $1 match distance). The
+     schedule is a **deterministic** (never-random) SRS: every glyph has a **level
+     1–5** and a due "tick"; a correct stroke promotes it a level (longer interval →
+     resurfaces less often) and, past level 5, **burns** it (retired until reset); a
+     wrong stroke demotes a level and reschedules it immediately (resurfaces more
+     often). The next glyph shown is always the non-burned one with the smallest due
+     tick — fully reproducible. The set spans **letters + digits + punctuation**
+     (the prompt nudges you to the 123 pad / punct-shift as needed). Progress
+     persists to `/sdcard/graf_train.dat`; **Menu > Reset progress** wipes it.
    - **Train** — records *your own* stroke for each letter as a **per-device
      template** (`graffiti_capture_user`, stored ~3.3 KB, persisted to
      `/sdcard/graf_user.dat`, loaded at boot). Recognition then prefers a user
      template when it's a closer match, calibrating to this hand + resistive panel.
-   Pool-safe throughout (labels + one canvas; heap peak 0 in the sim). Both open
-   feasibility questions (pool storage/scoring; capture smoothness) are settled.
-   *Nice-to-haves later:* a "reset my templates" control and a fuller confidence UI.
+   Pool-safe throughout (labels + one canvas; heap peak 0 in the sim).
 
 3. **Japanese kanji trainer — extend the training app `[sim]` + dataset work.**
    Reuse the SRS engine + stroke scoring from (2) for kanji. **Stroke-order data:
@@ -84,18 +92,30 @@ with a **feasibility check on the base CYD** before committing to a build.
      headless host *and* real touch, where LVGL's gesture heuristic isn't). Seeded
      with sample articles until a real fetch runs. Pool-safe (labels + content swap
      on a gesture surface). Smoke-gated.
-   - **C — DONE (compile-verified):** the HotSync fetch phase. `config.ini` gains
-     `news_feed1..3`; a new device-only `dav_fetch_url()` streams a public feed to
-     SD (reusing the `esp_http_client`/mbedTLS path + the spool-to-SD pattern, no
-     auth); `fetch_news()` runs after the PIM sync (Wi-Fi still up) — for each feed,
-     GET → `rss_parse_file` → `news_add`, capped per-feed and overall, then
+   - **C — DONE (compile-verified):** the HotSync fetch phase. A new device-only
+     `dav_fetch_url()` streams a public feed to SD (reusing the
+     `esp_http_client`/mbedTLS path + the spool-to-SD pattern, no auth);
+     `fetch_news()` runs after the PIM sync (Wi-Fi still up) — for each **enabled**
+     feed, GET → `rss_parse_file` → `news_add`, capped per-feed and overall, then
      `news_commit`. Compiles in the ESP-IDF CI build; **runtime-verify on device**
-     (the sim uses the HotSync stub, so this path isn't exercised there). On glass,
-     confirm: a feed fetches, items appear in News, sync stays reasonably quick, and
-     heap holds during the fetch.
+     (only the live network GET is unexercised off-glass). On glass, confirm: a feed
+     fetches, items appear in News, sync stays reasonably quick, and heap holds
+     during the fetch.
+   - **D — DONE:** **feed management.** A portable, host-gated store
+     (`bridge/feeds.c`, `feeds_test`) keeps the source list on SD (`feeds.txt`:
+     `on/off · name · url`, ~4 KB fixed table, no heap) and ships **10 reputable
+     world-English feeds** pre-seeded on first run (BBC/NPR/Guardian/Al Jazeera on
+     by default). **Preferences > News feeds** is a pool-safe `lv_table` with a
+     **checkbox column** (tap = enable/disable, the To Do pattern) and a URL
+     **editor on the tap keyboard** (Add/Edit/Delete; names auto-derive from the
+     host). Replaces the old `config.ini news_feed1..3`.
+   - **E — DONE (sim):** the **web-emulator HotSync** now populates News. The sim
+     has no network, so "Sync Now" rebuilds the News store from the enabled feeds
+     with sample items — the whole loop (add/enable a feed → HotSync → swipe the
+     reader) is demoable in the browser and smoke-gated.
 
    **The RSS reader is now feature-complete in code** (parser + store + reader app +
-   fetch phase), sim/host-verified except the live network fetch.
+   fetch phase + feed manager), sim/host-verified except the live network GET.
 
 **Also open (infrastructure, needs a decision):**
 - **S5 — real sync in the sim `[sim]`.** A `fetch()`-based DAV transport behind
@@ -183,3 +203,11 @@ gate) and the **Graffiti SRS trainer** (Drill/Train, per-device user templates),
 plus the full **RSS reader** — streaming parser, on-SD store, swipe reader app,
 and the HotSync fetch phase (all merged; only the on-glass live-fetch verify
 remains).
+
+A follow-up polishing pass then: reshaped Graffiti **`G` (capital) and `S`**
+(proportional) with the gate still green; rebuilt the trainer on a **deterministic
+5-level SRS with a burn state**, extended to **digits + punctuation**, with a
+**Menu > Reset progress**; and turned the RSS reader's sources into a managed
+**feed list** (`bridge/feeds.c` + `feeds_test`) — 10 pre-seeded world feeds, a
+**Preferences checkbox manager** with a keyboard URL editor, and a sim **HotSync**
+that fills News from the enabled feeds so the whole loop demos in the browser.

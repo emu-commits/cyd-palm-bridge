@@ -19,6 +19,7 @@
 #include "calc.h"
 #include "find.h"         /* global search engine (bridge/find.c) */
 #include "news.h"         /* RSS reader's on-SD article store */
+#include "feeds.h"        /* RSS feed list (Preferences manager + HotSync fetch) */
 #include "appcfg.h"
 #include "power.h"        /* live backlight brightness for the Preferences slider */
 #include "clock.h"        /* timezone picker + DST-aware zone list */
@@ -30,6 +31,7 @@
 #include <time.h>
 
 #define TITLE_H     24
+#define FEEDS_PATH  "/sdcard/feeds.txt"       /* News reader's RSS source list */
 #define COL_TITLE   lv_color_hex(0x000000)   /* black title bar (Palm: white-on-black) */
 #define COL_TITLE_FG lv_color_hex(0xFFFFFF)  /* title text/glyphs on the black bar */
 #define COL_BODY    lv_color_hex(0xFFFFFF)   /* white app body   */
@@ -121,6 +123,8 @@ static void show_detail(uint32_t uid);
 static void show_edit(uint32_t uid);
 static void show_prefs(void);
 static void show_discover(void);
+static void show_feeds(void);
+static void show_feed_edit(int idx);
 static void update_cat_trigger(void);
 static void cat_trigger_cb(lv_event_t *e);
 static void details_open(void);
@@ -164,9 +168,11 @@ static lv_obj_t *g_findtbl;           /* Find results table                     
  * teardown so they can't outlive the trainer. */
 static void (*graf_char_hook)(char c);
 static int  (*graf_capture_hook)(void);
+static int  g_trainer_open;      /* the Graffiti trainer is the live screen (menu Reset) */
 static void kill_kb(void){
     g_form=NULL; active_ta=NULL; edit_cat_lbl=NULL; g_listtbl=NULL; g_findtbl=NULL;
     graf_char_hook=NULL; graf_capture_hook=NULL;
+    g_trainer_open=0;
     free_rowuids();
     free_finds();
     kill_hs();
@@ -1001,42 +1007,82 @@ static void show_app(const char *name){
 }
 
 /* ===================== Graffiti Trainer (roadmap #2) =========================
- * A learn-to-write drill: shows a target letter + its stroke guide (drawn from the
+ * A learn-to-write drill: shows a target glyph + its stroke guide (drawn from the
  * recognizer's own template), you draw it in the Graffiti strip, and it scores the
- * stroke and schedules the next with a per-letter Leitner spaced-repetition box
- * (weak letters resurface more; boxes persist to the SD card). Pool-safe: labels +
- * one I1 canvas for the guide (the ink-strip pattern), no layer-alloc widgets.
+ * stroke and schedules the next with a DETERMINISTIC spaced-repetition system --
+ * never random. Each glyph has a level 1..5 and a due "tick"; a correct stroke
+ * promotes it a level (longer interval -> shows up less often) and, past level 5,
+ * BURNS it (retired until Menu > Reset progress). A wrong stroke demotes a level
+ * and reschedules it immediately (shows up more often). The next glyph is always
+ * the non-burned one with the smallest due tick (ties by order) -- fully
+ * reproducible. The set is letters + digits + punctuation. Progress persists to
+ * SD. Pool-safe: labels + one I1 canvas for the guide, no layer-alloc widgets.
  * Input arrives through graf_char_hook (set on entry, cleared by kill_kb). */
 #define TR_GW 96
 #define TR_GH 96
 #define TR_USER "/sdcard/graf_user.dat"
 static uint8_t   tr_guide_buf[LV_CANVAS_BUF_SIZE(TR_GW, TR_GH, 1, 1) + 16];
 static lv_obj_t *tr_guide, *tr_prompt, *tr_score, *tr_feedback, *tr_mode_lbl;
-static uint8_t   tr_box[26];        /* Leitner box 0..4 per letter (0 = due most) */
-static int       tr_target;         /* current target letter index 0..25 */
-static int       tr_correct, tr_total, tr_streak, tr_best;
-static int       tr_mode;           /* 0 = Drill (quiz), 1 = Train (record my strokes) */
-static int       tr_train_idx;      /* Train mode walks a..z in order */
-static unsigned  tr_rng = 0x1234abcdu;
-static int tr_rand(void){ tr_rng = tr_rng*1103515245u + 12345u; return (int)((tr_rng>>16) & 0x7fff); }
 
-#define TR_SAVE "/sdcard/graf_train.dat"
-static void tr_load(void){
-    FILE *f = fopen(TR_SAVE, "rb");
-    if(f){ if(fread(tr_box,1,26,f) != 26) memset(tr_box,0,26); fclose(f); }
-    else memset(tr_box,0,26);
-    for(int i=0;i<26;i++) if(tr_box[i]>4) tr_box[i]=4;
+/* the trainable glyph set. Letters lead (indices 0..25) so Train mode -- which
+ * captures per-device templates and is letters-only -- can index them directly. */
+static const char TR_G[] = {
+    'a','b','c','d','e','f','g','h','i','j','k','l','m',
+    'n','o','p','q','r','s','t','u','v','w','x','y','z',
+    '0','1','2','3','4','5','6','7','8','9',
+    '@',',','/','-','\'','(',')','?','.'
+};
+#define TR_NG     ((int)(sizeof TR_G))
+#define TR_BURNED 6                 /* level 6 = burned (retired until reset) */
+
+static uint8_t  tr_lvl[TR_NG];      /* 1..5 active, 6 = burned */
+static uint32_t tr_due[TR_NG];      /* scheduler tick at which the glyph is next due */
+static uint32_t tr_tick;            /* global answered-trial counter (drives scheduling) */
+static int      tr_target;          /* index into TR_G, -1 = none left (all burned) */
+static int      tr_correct, tr_total, tr_streak, tr_best;
+static int      tr_mode;            /* 0 = Drill (quiz), 1 = Train (record my strokes) */
+static int      tr_train_idx;       /* Train mode walks a..z in order */
+
+/* review interval (in scheduler ticks) once a CORRECT answer promotes a glyph to
+ * level L: higher level -> longer interval -> resurfaces less often. */
+static const uint32_t TR_INTV[TR_BURNED+1] = { 0, 0, 3, 6, 10, 16, 0 };
+
+#define TR_SAVE  "/sdcard/graf_train.dat"
+#define TR_MAGIC 0x47543032u        /* 'GT02' (supersedes the old 26-byte box file) */
+static void tr_reset_mem(void){
+    for(int i=0;i<TR_NG;i++){ tr_lvl[i]=1; tr_due[i]=0; }
+    tr_tick=0;
 }
-static void tr_save(void){ FILE *f=fopen(TR_SAVE,"wb"); if(f){ fwrite(tr_box,1,26,f); fclose(f); } }
+static void tr_load(void){
+    tr_reset_mem();
+    FILE *f = fopen(TR_SAVE, "rb"); if(!f) return;
+    uint32_t magic=0, tick=0;
+    if(fread(&magic,4,1,f)==1 && magic==TR_MAGIC &&
+       fread(&tick,4,1,f)==1 &&
+       fread(tr_lvl,1,TR_NG,f)==(size_t)TR_NG &&
+       fread(tr_due,4,TR_NG,f)==(size_t)TR_NG){
+        tr_tick = tick;
+        for(int i=0;i<TR_NG;i++){ if(tr_lvl[i]<1) tr_lvl[i]=1; if(tr_lvl[i]>TR_BURNED) tr_lvl[i]=TR_BURNED; }
+    } else tr_reset_mem();          /* old/short/foreign file: start fresh */
+    fclose(f);
+}
+static void tr_save(void){
+    FILE *f=fopen(TR_SAVE,"wb"); if(!f) return;
+    uint32_t magic=TR_MAGIC;
+    fwrite(&magic,4,1,f); fwrite(&tr_tick,4,1,f);
+    fwrite(tr_lvl,1,TR_NG,f); fwrite(tr_due,4,TR_NG,f);
+    fclose(f);
+}
 
-/* weighted pick: weight = 5 - box (weak letters heavier), the current one excluded */
+/* deterministic pick: the non-burned glyph with the smallest due tick (ties resolve
+ * to the lowest index). Returns -1 when every glyph is burned. */
 static int tr_pick(void){
-    int w[26], sum=0;
-    for(int i=0;i<26;i++){ int wi = 5 - tr_box[i]; if(wi<1) wi=1; if(i==tr_target) wi=0; w[i]=wi; sum+=wi; }
-    if(sum<=0) return (tr_target+1)%26;
-    int r = tr_rand() % sum;
-    for(int i=0;i<26;i++){ r -= w[i]; if(r<0) return i; }
-    return 0;
+    int best=-1; uint32_t bestdue=0;
+    for(int i=0;i<TR_NG;i++){
+        if(tr_lvl[i]>=TR_BURNED) continue;
+        if(best<0 || tr_due[i]<bestdue){ best=i; bestdue=tr_due[i]; }
+    }
+    return best;
 }
 
 static void tr_plot(int x, int y){
@@ -1054,11 +1100,16 @@ static void tr_line(int x0,int y0,int x1,int y1){    /* Bresenham, 2px weight */
         if(e2<=dx){ err+=dx; y0+=sy; }
     }
 }
-static void tr_draw_guide(int letter){
+static void tr_draw_guide(int gi){
     lv_color_t bg = { .blue = 0 };
     lv_canvas_fill_bg(tr_guide, bg, LV_OPA_COVER);
-    int np; const float *p = graffiti_letter_template((char)('a'+letter), &np);
-    if(!p || np<1) return;
+    if(gi<0) return;
+    int np=0; const float *p = graffiti_glyph_template(TR_G[gi], &np);
+    if(!p || np<1){                               /* no drawn stroke (e.g. '.'): a dot */
+        int cx=TR_GW/2, cy=TR_GH/2;
+        for(int a=-2;a<=2;a++) for(int b=-2;b<=2;b++) if(a*a+b*b<=4) tr_plot(cx+a,cy+b);
+        return;
+    }
     const int pad=14, span=TR_GW-2*pad;
     #define GX(i) (pad + (int)(p[2*(i)]  /10.0f*span))
     #define GY(i) (pad + (int)(p[2*(i)+1]/10.0f*span))
@@ -1069,37 +1120,70 @@ static void tr_draw_guide(int letter){
     #undef GY
 }
 
+/* how the current target is entered, so the prompt can nudge the user to the right
+ * pad / punctuation shift (letters need no hint). */
+static const char *tr_hint(char c){
+    if(c>='0' && c<='9')       return "  (123 pad)";
+    if(c=='.')                 return "  (tap twice)";
+    if(!(c>='a' && c<='z'))    return "  (tap, then draw)";   /* punctuation shift */
+    return "";
+}
+
 static void tr_render(void){
     tr_draw_guide(tr_target);
-    if(tr_prompt) lv_label_set_text_fmt(tr_prompt, "%s  %c",
-                                        tr_mode ? "Trace:" : "Write:", 'a'+tr_target);
-    if(tr_mode_lbl) lv_label_set_text(tr_mode_lbl, tr_mode ? "Drill" : "Train");
+    if(tr_mode){                                  /* Train (record my strokes), letters only */
+        if(tr_prompt)   lv_label_set_text_fmt(tr_prompt, "Trace:  %c", TR_G[tr_target]);
+        if(tr_mode_lbl) lv_label_set_text(tr_mode_lbl, "Drill");
+        if(tr_score)    lv_label_set_text_fmt(tr_score, "recorded %d/26 letters", graffiti_user_count());
+        return;
+    }
+    if(tr_mode_lbl) lv_label_set_text(tr_mode_lbl, "Train");
+    if(tr_target < 0){                            /* every glyph mastered/burned */
+        if(tr_prompt) lv_label_set_text(tr_prompt, "All burned!");
+        if(tr_score)  lv_label_set_text(tr_score, "every glyph mastered -- reset to replay");
+        return;
+    }
+    char c = TR_G[tr_target];
+    if(tr_prompt) lv_label_set_text_fmt(tr_prompt, "Write:  %c   Lv %d/5%s", c, tr_lvl[tr_target], tr_hint(c));
     if(tr_score){
-        if(tr_mode) lv_label_set_text_fmt(tr_score, "recorded %d/26 letters", graffiti_user_count());
-        else        lv_label_set_text_fmt(tr_score, "%d/%d  streak %d (best %d)",
-                                          tr_correct, tr_total, tr_streak, tr_best);
+        int burned=0; for(int i=0;i<TR_NG;i++) if(tr_lvl[i]>=TR_BURNED) burned++;
+        lv_label_set_text_fmt(tr_score, "%d/%d  streak %d (best %d)  %d/%d burned",
+                              tr_correct, tr_total, tr_streak, tr_best, burned, TR_NG);
     }
 }
 
-/* Drill mode: score the recognized character, with a quality %% from the $1 match
- * distance (0 == perfect, LET_THRESH == just-accepted). */
+/* Drill mode: score the recognized glyph (quality %% from the $1 distance) and
+ * apply the deterministic SRS -- correct promotes + reschedules later (or burns
+ * past level 5), wrong demotes + reschedules immediately for a retry. */
 static void trainer_input(char c){
-    if(c < 'a' || c > 'z') return;                /* ignore space/backspace/etc. */
+    if(tr_target < 0) return;                                 /* nothing left to drill */
+    if(c==' '||c=='\b'||c=='\n'||c==GRAF_SHIFT||c==GRAF_PUNCT) return;  /* gestures, not glyphs */
+    char want = TR_G[tr_target];
     int pct = (int)(100.0f * (1.0f - graffiti_last_distance()/32.0f));
     if(pct<0) pct=0;
     if(pct>100) pct=100;
     tr_total++;
-    if(c == 'a'+tr_target){
+    if(c == want){
         tr_correct++; tr_streak++; if(tr_streak>tr_best) tr_best=tr_streak;
-        if(tr_box[tr_target]<4) tr_box[tr_target]++;
-        if(tr_feedback) lv_label_set_text_fmt(tr_feedback, "Nice!  %d%%", pct);
-        tr_target = tr_pick();                    /* advance on success */
+        int nl = tr_lvl[tr_target] + 1;
+        if(nl >= TR_BURNED){
+            tr_lvl[tr_target] = TR_BURNED;                    /* mastered -> retire it */
+            if(tr_feedback) lv_label_set_text_fmt(tr_feedback, "Mastered '%c' -- burned!", want);
+        } else {
+            tr_lvl[tr_target] = (uint8_t)nl;
+            tr_due[tr_target] = tr_tick + TR_INTV[nl];        /* longer interval */
+            if(tr_feedback) lv_label_set_text_fmt(tr_feedback, "Nice!  %d%%  (Lv %d)", pct, nl);
+        }
+        tr_tick++; tr_save();
+        tr_target = tr_pick();                                /* advance deterministically */
     } else {
-        tr_streak=0;
-        if(tr_box[tr_target]>0) tr_box[tr_target]--;
+        tr_streak = 0;
+        int nl = tr_lvl[tr_target] - 1; if(nl<1) nl=1;
+        tr_lvl[tr_target] = (uint8_t)nl;
+        tr_due[tr_target] = tr_tick;                          /* soonest -> comes back more often */
         if(tr_feedback) lv_label_set_text_fmt(tr_feedback, "read '%c' (%d%%) - try again", c, pct);
-    }                                             /* wrong: keep the same target */
-    tr_save();
+        tr_tick++; tr_save();                                 /* keep target: immediate retry */
+    }
     tr_render();
 }
 
@@ -1143,7 +1227,7 @@ static void show_trainer(void){
     tr_load();
     tr_correct=tr_total=tr_streak=tr_best=0;
     tr_mode=0; tr_train_idx=0;
-    tr_target=0; tr_target=tr_pick();
+    tr_target=tr_pick();
 
     tr_prompt = lv_label_create(content);
     lv_obj_set_style_text_font(tr_prompt, &lv_font_palm_bold, 0);
@@ -1177,6 +1261,13 @@ static void show_trainer(void){
 
     tr_render();
     graf_char_hook = trainer_input;    /* AFTER kill_kb cleared it: route strokes here */
+    g_trainer_open = 1;                /* enables Menu > Reset progress */
+}
+
+/* wipe all trainer progress (Menu > Reset progress). */
+static void tr_reset_progress(void){
+    tr_reset_mem();
+    tr_save();
 }
 
 /* ===================== News (RSS reader, roadmap #4) =========================
@@ -1550,6 +1641,127 @@ static void show_pref_edit(int i){
     lv_obj_add_event_cb(bm, prefkb_cb, LV_EVENT_VALUE_CHANGED, NULL);
 }
 
+/* ---- News feeds manager (Preferences -> "News feeds...") --------------------
+ * The RSS reader's sources: an lv_table (the pool-safe record-list widget) with a
+ * checkbox column (tap col 0 = enable/disable, like To Do) and a name column (tap
+ * = edit). "Add" opens the same editor for a new feed. The URL is typed on the tap
+ * keyboard (the Preferences field pattern); the name is auto-derived from the host.
+ * The list persists to feeds.txt on every change, and HotSync fetches the enabled
+ * feeds. See bridge/feeds.c. */
+static void feeds_back_cb(lv_event_t *e){ (void)e; show_prefs(); }
+static void feeds_add_cb(lv_event_t *e){ (void)e; show_feed_edit(-1); }
+static void feeds_tbl_click_cb(lv_event_t *e){
+    lv_obj_t *t = lv_event_get_target(e);
+    uint32_t r=LV_TABLE_CELL_NONE, c=LV_TABLE_CELL_NONE;
+    lv_table_get_selected_cell(t, &r, &c);
+    if(r==LV_TABLE_CELL_NONE || (int)r >= feeds_count()) return;
+    if(c==0){ feeds_toggle((int)r); feeds_save(FEEDS_PATH); show_feeds(); }   /* checkbox */
+    else      show_feed_edit((int)r);                                        /* name -> edit */
+}
+static void show_feeds(void){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, "News Feeds");
+    update_cat_trigger();
+
+    lv_obj_t *back = lv_button_create(content);
+    lv_obj_set_size(back, 58, 26); lv_obj_align(back, LV_ALIGN_TOP_LEFT, 2, 2);
+    lv_obj_t *bl=lv_label_create(back); lv_label_set_text(bl,"Prefs"); lv_obj_center(bl);
+    lv_obj_add_event_cb(back, feeds_back_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *add = lv_button_create(content);
+    lv_obj_set_size(add, 54, 26); lv_obj_align(add, LV_ALIGN_TOP_RIGHT, -2, 2);
+    lv_obj_t *al=lv_label_create(add); lv_label_set_text(al,"Add"); lv_obj_center(al);
+    lv_obj_add_event_cb(add, feeds_add_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *t = lv_table_create(content);
+    lv_obj_set_size(t, LCD_W, PDA_H - TITLE_H - 32);
+    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 32);
+    lv_obj_set_style_radius(t, 0, 0);
+    lv_obj_set_style_border_width(t, 0, 0);
+    lv_obj_set_style_pad_all(t, 4, LV_PART_ITEMS);
+    lv_table_set_column_width(t, 0, 34);
+    lv_table_set_column_width(t, 1, LCD_W - 34 - 4);
+    int n = feeds_count();
+    if(n==0){
+        lv_table_set_cell_value(t, 0, 1, "No feeds -- tap Add");
+    } else {
+        for(int i=0;i<n;i++){
+            const Feed *f = feeds_get(i);
+            lv_table_set_cell_value(t, i, 0, f->enabled ? "[x]" : "[ ]");
+            char host[FEED_NAME_CAP]; feeds_host_label(f->url, host, sizeof host);
+            lv_table_set_cell_value(t, i, 1, f->name[0] ? f->name : host);
+        }
+    }
+    lv_obj_add_event_cb(t, feeds_tbl_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
+}
+
+/* ---- add / edit one feed (URL on the tap keyboard; name auto-derived) ---- */
+static int fe_edit_idx;                     /* -1 = adding a new feed */
+static void fe_cancel_cb(lv_event_t *e){ (void)e; show_feeds(); }
+static void fe_save_cb(lv_event_t *e){ (void)e;
+    const char *url = lv_textarea_get_text(g_fields[0]);
+    if(url && url[0]){
+        if(fe_edit_idx < 0) feeds_add(url, "");                 /* name from host */
+        else { const Feed *f = feeds_get(fe_edit_idx);
+               char nm[FEED_NAME_CAP]; snprintf(nm, sizeof nm, "%s", f ? f->name : "");
+               feeds_set(fe_edit_idx, url, nm); }               /* keep the existing name */
+        feeds_save(FEEDS_PATH);
+    }
+    show_feeds();
+    toast_show("Saved");
+}
+static void fe_delete_cb(lv_event_t *e){ (void)e;
+    if(fe_edit_idx >= 0){ feeds_remove(fe_edit_idx); feeds_save(FEEDS_PATH); }
+    show_feeds();
+    toast_show("Removed");
+}
+static void show_feed_edit(int idx){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0; fe_edit_idx = idx;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, idx<0 ? "Add Feed" : "Edit Feed");
+    update_cat_trigger();
+
+    lv_obj_t *cancel = lv_button_create(content);
+    lv_obj_set_size(cancel, 58, 28); lv_obj_align(cancel, LV_ALIGN_TOP_LEFT, 2, 2);
+    lv_obj_t *cl=lv_label_create(cancel); lv_label_set_text(cl,"Cancel"); lv_obj_center(cl);
+    lv_obj_add_event_cb(cancel, fe_cancel_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *save = lv_button_create(content);
+    lv_obj_set_size(save, 54, 28); lv_obj_align(save, LV_ALIGN_TOP_RIGHT, -2, 2);
+    lv_obj_t *sl=lv_label_create(save); lv_label_set_text(sl,"Save"); lv_obj_center(sl);
+    lv_obj_add_event_cb(save, fe_save_cb, LV_EVENT_CLICKED, NULL);
+    if(idx >= 0){
+        lv_obj_t *del = lv_button_create(content);
+        lv_obj_set_size(del, 56, 28); lv_obj_align(del, LV_ALIGN_TOP_MID, 0, 2);
+        lv_obj_t *dl=lv_label_create(del); lv_label_set_text(dl,"Delete"); lv_obj_center(dl);
+        lv_obj_add_event_cb(del, fe_delete_cb, LV_EVENT_CLICKED, NULL);
+    }
+
+    lv_obj_t *lb = lv_label_create(content);
+    lv_label_set_text(lb, "Feed URL (RSS/Atom)");
+    lv_obj_set_pos(lb, 4, 36);
+    const Feed *f = (idx>=0) ? feeds_get(idx) : NULL;
+    lv_obj_t *ta = lv_textarea_create(content);
+    lv_textarea_set_one_line(ta, true);
+    lv_textarea_set_max_length(ta, FEED_URL_CAP-1);
+    lv_textarea_set_text(ta, f ? f->url : "https://");
+    lv_obj_set_width(ta, LCD_W - 16);
+    lv_obj_set_pos(ta, 4, 52);
+    lv_obj_add_event_cb(ta, ta_click_cb, LV_EVENT_CLICKED, NULL);
+    g_fields[0] = ta; g_nfields = 1; active_ta = ta;
+    lv_obj_add_state(ta, LV_STATE_FOCUSED);
+
+    lv_obj_t *bm = lv_buttonmatrix_create(content);
+    lv_obj_set_size(bm, LCD_W - 4, (PDA_H - TITLE_H) - 92);
+    lv_obj_align(bm, LV_ALIGN_BOTTOM_MID, 0, -2);
+    lv_buttonmatrix_set_map(bm, KB_LOWER);
+    lv_obj_set_style_radius(bm, 0, 0);
+    lv_obj_set_style_radius(bm, 0, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(bm, 0, 0);
+    lv_obj_add_event_cb(bm, prefkb_cb, LV_EVENT_VALUE_CHANGED, NULL);
+}
+
 /* ---- timezone picker (replaces the free-text TZ editor) ----
  * Picks from clock.c's built-in DST-aware zone list, so the chosen zone always
  * resolves to a POSIX rule string and DST fires automatically. The header shows
@@ -1619,6 +1831,7 @@ static void pf_disc_row_cb(lv_event_t *e){ (void)e;
     show_discover();
 }
 static void pf_bright_row_cb(lv_event_t *e){ (void)e; br_open(); }
+static void pf_feeds_row_cb(lv_event_t *e){ (void)e; show_feeds(); }
 static void pf_saverow_cb(lv_event_t *e){ (void)e;
     int rc = appcfg_save();
     /* I4: success is a transient toast (like record save); a write FAILURE stays a
@@ -1664,6 +1877,8 @@ static void show_prefs(void){
     snprintf(row, sizeof row, "Brightness: %d%%", c->brightness);
     g_pf_bright_btn = pf_add(list, row, pf_bright_row_cb, 0);
     pf_add(list, "Discover collections...", pf_disc_row_cb, 0);
+    snprintf(row, sizeof row, "News feeds... (%d on)", feeds_enabled_count());
+    pf_add(list, row, pf_feeds_row_cb, 0);
     pf_add(list, "Save to config.ini", pf_saverow_cb, 0);
 }
 
@@ -1828,6 +2043,7 @@ static void act_delete(lv_event_t *e){ (void)e;
 }
 static void act_categories(lv_event_t *e){ (void)e; menu_close(); cat_trigger_cb(NULL); }
 static void act_prefs(lv_event_t *e){ (void)e; menu_close(); show_prefs(); }
+static void act_tr_reset(lv_event_t *e){ (void)e; menu_close(); tr_reset_progress(); show_trainer(); }
 static void act_toggle_done(lv_event_t *e){ (void)e; menu_close();
     g_todo_show_done = !g_todo_show_done; if(cur_app) app_reopen(cur_app); }
 static void act_toggle_sort(lv_event_t *e){ (void)e; menu_close();
@@ -1970,6 +2186,8 @@ static void menu_open(void){
         menu_item(panel, g_todo_sort_due ? "Sort by Priority" : "Sort by Due Date", act_toggle_sort);
     }
     menu_item(panel, "Preferences", act_prefs);
+    if(g_trainer_open)
+        menu_item(panel, "Reset progress", act_tr_reset);   /* Graffiti trainer only */
     if(data_demo_present())
         menu_item(panel, "Remove demo data", act_remove_demo);
 #ifdef UI_DEVTOOLS
@@ -2857,6 +3075,10 @@ void ui_init(void){
     /* per-device Graffiti calibration (trainer's training mode): if the user has
      * recorded their own strokes, load them so recognition uses them system-wide. */
     graffiti_user_load("/sdcard/graf_user.dat");
+
+    /* News reader's RSS sources: load the SD list, seeding the built-in feeds on
+     * first run so News works out of the box (edit via Preferences > News feeds). */
+    feeds_load_or_seed(FEEDS_PATH);
 
     /* title bar: app title + category picker (F2), black rule underneath (Palm).
      * Home/Menu live on the silkscreen buttons below, not here. */
