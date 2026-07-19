@@ -3627,6 +3627,11 @@ static void lock_pressing_cb(lv_event_t *e){ (void)e;
 static void lock_release_cb(lv_event_t *e){ (void)e;
     if(g_lock_py - g_lock_ly > 40){                 /* dragged up -> unlock */
         if(g_lock){ lv_obj_del(g_lock); g_lock=NULL; g_dash_cv=NULL; g_dash_time_ap=NULL; }
+        /* the launcher is built lazily on the FIRST unlock (at boot the content area
+         * is empty behind the lock, so the launcher grid and the dashboard never share
+         * the 24 KB pool). Later wakes re-lock over whatever app is showing, so only
+         * rebuild the launcher when nothing is there. */
+        if(lv_obj_get_child_count(content) == 0) show_launcher();
     }
 }
 
@@ -3669,6 +3674,12 @@ static void dash_paint(void){
 
 void ui_show_lock(void){
     if(g_lock){ dash_paint(); return; }             /* already showing -> just refresh */
+    /* Free whatever app view is in the content area first. The lock covers the whole
+     * screen anyway, and this keeps the 24 KB LVGL pool holding only the chrome + the
+     * dashboard at once (never chrome + an app + the dashboard). The content area is
+     * left empty, so unlocking rebuilds the launcher (see lock_release_cb). */
+    lv_obj_clean(content);
+    kill_kb();
     time_t now=0; time(&now);
     dash_weather_seed_sample(WX_PATH);
     WxCache wx; int havewx = dash_weather_load(&wx);
@@ -4017,10 +4028,11 @@ void ui_init(void){
     lv_obj_set_style_text_font(graf_echo_lbl, &lv_font_palm_bold, 0);
     lv_obj_align(graf_echo_lbl, LV_ALIGN_BOTTOM_MID, 0, -1);
 
-    show_launcher();
-
-    /* the lock-screen dashboard is the first thing shown (over the launcher); the
-     * port layer re-raises it on every wake. A 15 s timer keeps its clock fresh. */
+    /* Boot straight to the lock-screen dashboard; the launcher is built lazily on
+     * unlock (see lock_release_cb) so its icon grid and the dashboard never occupy
+     * the 24 KB LVGL pool at once -- that overflowed the pool on the 32-bit wasm
+     * build (the 64-bit native sim's 48 KB pool hid it). A 15 s timer keeps the
+     * locked clock fresh; the port layer re-raises the lock on every wake. */
     lv_timer_create(dash_tick, 15000, NULL);
     ui_show_lock();
 }

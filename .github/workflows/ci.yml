@@ -77,6 +77,10 @@ jobs:
         with:
           name: sim-screenshots
           path: sim/build/shots/*.png
+      - name: Install 32-bit toolchain (device-sized 24 KB LVGL pool)
+        run: sudo apt-get update && sudo apt-get install -y gcc-multilib libc6-dev-i386
+      - name: 32-bit pool smoke (true 24 KB pool, like wasm/device)
+        run: make -C sim smoke32
 
   simulator-wasm:
     name: Simulator wasm (browser build)
