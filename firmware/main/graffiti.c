@@ -125,7 +125,7 @@ T(t_c,'c', 9,2, 4,1, 1,5, 4,9, 9,8)                            /* open-right C *
 T(t_d,'d', 3,10, 3,0, 8,3, 8,7, 3,10)                          /* up, then right bowl */
 T(t_e,'e', 8,1, 4,2, 7,5, 4,8, 8,9)                            /* reverse 3 */
 T(t_f,'f', 8,1, 3,1, 3,10)                                     /* top bar + down */
-T(t_g,'g', 8,3, 4,1, 1,5, 3,9, 7,9, 8,6, 5,6)               /* capital G: C sweep + inward crossbar */
+T(t_g,'g', 9,2, 4,1, 1,5, 4,9, 8,9, 9,5, 3,5)               /* capital G: wide-open C + a full-width mid-bar (kept clear of 'o') */
 T(t_h,'h', 2,0, 2,10, 2,6, 5,4, 8,6, 8,10)                    /* stem + rounded n-hump */
 T(t_i,'i', 5,0, 5,10)                                          /* vertical */
 T(t_j,'j', 7,0, 7,8, 5,10, 2,9)                               /* J hook */
@@ -190,11 +190,11 @@ T(p_dsh, '-', 2,5, 8,5)                             /* horizontal, left to right
 T(p_apo, '\'',5,1, 5,8)                             /* short vertical, top down */
 T(p_lp,  '(', 7,1, 3,5, 7,9)                        /* left paren (open right) */
 T(p_rp,  ')', 3,1, 7,5, 3,9)                        /* right paren (open left) */
-T(p_qm,  '?', 2,3, 5,1, 8,4, 5,7)                   /* question hook */
+T(p_qm,  '?', 2,3, 5,1, 8,4, 5,6, 5,9)              /* question hook + straight downward tail */
 #undef T
 static const Tmpl PTMPL[] = {
     {'@',p_at,7},{',',p_com,3},{'/',p_sla,2},{'-',p_dsh,2},
-    {'\'',p_apo,2},{'(',p_lp,3},{')',p_rp,3},{'?',p_qm,4},
+    {'\'',p_apo,2},{'(',p_lp,3},{')',p_rp,3},{'?',p_qm,5},
 };
 #define NPTMPL ((int)(sizeof(PTMPL)/sizeof(PTMPL[0])))
 
