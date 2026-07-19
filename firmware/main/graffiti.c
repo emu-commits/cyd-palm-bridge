@@ -142,7 +142,7 @@ T(t_t,'t', 2,1, 8,1, 8,10)                                   /* along top, then 
 T(t_u,'u', 1,0, 1,8, 5,10, 9,8, 9,0)                         /* U */
 T(t_v,'v', 0,0, 5,10, 10,0)                                  /* V */
 T(t_w,'w', 0,0, 3,10, 5,4, 7,10, 10,0)                       /* W */
-T(t_x,'x', 1,1, 9,9, 5,5, 9,1, 1,9)                          /* cross (2-stroke; see backlog) */
+T(t_x,'x', 1,1, 9,9, 9,1, 1,9)                              /* one stroke: TL->BR, bridge up right edge, TR->BL */
 T(t_y,'y', 2,0, 5,6, 8,0, 5,6, 4,10)                         /* Y w/ tail */
 T(t_z,'z', 0,0, 9,0, 0,9, 9,9)                               /* Z */
 #undef T
@@ -150,7 +150,7 @@ static const Tmpl LTMPL[] = {
     {'a',t_a,3},{'b',t_b,6},{'c',t_c,5},{'d',t_d,5},{'e',t_e,5},{'f',t_f,3},
     {'g',t_g,7},{'h',t_h,6},{'i',t_i,2},{'j',t_j,4},{'k',t_k,6},{'l',t_l,3},
     {'m',t_m,5},{'n',t_n,4},{'o',t_o,8},{'p',t_p,6},{'q',t_q,8},{'r',t_r,5},
-    {'s',t_s,7},{'t',t_t,3},{'u',t_u,5},{'v',t_v,3},{'w',t_w,5},{'x',t_x,5},
+    {'s',t_s,7},{'t',t_t,3},{'u',t_u,5},{'v',t_v,3},{'w',t_w,5},{'x',t_x,4},
     {'y',t_y,5},{'z',t_z,4},
 };
 #define NLTMPL ((int)(sizeof(LTMPL)/sizeof(LTMPL[0])))

@@ -35,11 +35,13 @@ with a **feasibility check on the base CYD** before committing to a build.
    also **reshaped `G` and `S`**: `G` is now a **capital-G** (a C sweep with the
    inward crossbar spur) instead of the old lowercase circle-plus-descender, and
    `S` is a **more proportional two-lobe** stroke that survives a fast hand — both
-   with the gate still green (`q` even climbed to 100%). The trainer's guides draw
-   straight from these templates, so they updated for free. **Still to do:** the
-   writing *feel* (ink-trail / char-echo UX), the `X` 2-stroke exception, and final
-   threshold tuning against real on-device `graf` telemetry (the synthetic model is
-   a proxy).
+   with the gate still green (`q` even climbed to 100%). `X` is now modelled as the
+   real **single continuous stroke** (first diagonal, a bridge up the right edge
+   from bottom-right to top-right, then the second diagonal) rather than a
+   two-stroke cross. The trainer's guides draw straight from these templates, so
+   they updated for free. **Still to do:** the writing *feel* (ink-trail /
+   char-echo UX) and final threshold tuning against real on-device `graf` telemetry
+   (the synthetic model is a proxy).
 
 2. **Graffiti training app — a spaced-repetition (SRS) trainer `[sim]`. DONE.**
    A **launcher app** ("Graffiti", its own icon) with two modes:
