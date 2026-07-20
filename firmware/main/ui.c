@@ -3870,6 +3870,30 @@ static void ms_new_game(void){
     ms_new(&g_ms, MSW, MSH, MSMINES, (uint32_t)t ^ (g_ms_seq++ * 2654435761u));
     g_ms_flag = 0;
 }
+
+/* Persist the in-progress board so it survives leaving the app. MsGame is plain
+ * POD (no pointers), so a magic-tagged blob of the whole struct is enough; the
+ * magic + size + w/h guard against a stale/foreign file. Saved after each move
+ * and on New; restored when the screen reopens. */
+#define MS_SAV       "/sdcard/mines.sav"
+#define MS_SAV_MAGIC 0x4D534731u                 /* "MSG1" */
+static void ms_save(void){
+    FILE *f = fopen(MS_SAV, "wb"); if(!f) return;
+    uint32_t magic = MS_SAV_MAGIC;
+    fwrite(&magic, sizeof magic, 1, f);
+    fwrite(&g_ms, sizeof g_ms, 1, f);
+    fclose(f);
+}
+static int ms_load(void){
+    FILE *f = fopen(MS_SAV, "rb"); if(!f) return 0;
+    uint32_t magic = 0; MsGame tmp; int ok = 0;
+    if(fread(&magic, sizeof magic, 1, f) == 1 && magic == MS_SAV_MAGIC &&
+       fread(&tmp, sizeof tmp, 1, f) == 1 && tmp.w == MSW && tmp.h == MSH){
+        g_ms = tmp; ok = 1;
+    }
+    fclose(f);
+    return ok;
+}
 static void ms_tap_cb(lv_event_t *e){ (void)e;
     lv_point_t p; lv_indev_get_point(lv_indev_active(), &p);
     lv_area_t a; lv_obj_get_coords(g_ms_cv, &a);
@@ -3878,6 +3902,7 @@ static void ms_tap_cb(lv_event_t *e){ (void)e;
     int c=lx/MSC, r=ly/MSC;
     if(g_ms_flag) ms_flag(&g_ms,r,c); else ms_reveal(&g_ms,r,c);
     ms_render();
+    ms_save();
 }
 static void ms_mode_cb(lv_event_t *e){ (void)e;
     g_ms_flag = !g_ms_flag;
@@ -3887,6 +3912,7 @@ static void ms_newbtn_cb(lv_event_t *e){ (void)e;
     ms_new_game();
     if(g_ms_modelbl) lv_label_set_text(g_ms_modelbl, "Dig");
     ms_render();
+    ms_save();
 }
 static void show_minesweeper(void){
     kill_kb(); cur_app=NULL; cur_uid=0;
@@ -3925,7 +3951,8 @@ static void show_minesweeper(void){
     lv_obj_clear_flag(g_ms_cv, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(g_ms_cv, ms_tap_cb, LV_EVENT_PRESSED, NULL);
 
-    ms_new_game();
+    if(!ms_load()) ms_new_game();
+    g_ms_flag = 0;                              /* restored board opens in Dig mode */
     ms_render();
 }
 
@@ -3964,6 +3991,31 @@ static lv_obj_t *g_wd_cv, *g_wd_status;
 static uint32_t  g_wd_seq;
 static uint8_t   wd_buf[LV_CANVAS_BUF_SIZE(WDCW, WDCH, 1, 1) + 16];
 static const char *WD_KROW[3] = { "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM" };
+
+/* Persist the in-progress puzzle so it survives leaving the app. WdGame is plain
+ * POD; a magic-tagged blob of the struct is enough (magic + size guard a stale/
+ * foreign file). Saved after each keystroke/submit and on New; restored on open,
+ * so a half-finished guess grid is exactly where you left it. */
+#define WD_SAV       "/sdcard/wordie.sav"
+#define WD_SAV_MAGIC 0x57444731u                 /* "WDG1" */
+static void wd_save(void){
+    FILE *f = fopen(WD_SAV, "wb"); if(!f) return;
+    uint32_t magic = WD_SAV_MAGIC;
+    fwrite(&magic, sizeof magic, 1, f);
+    fwrite(&g_wd, sizeof g_wd, 1, f);
+    fclose(f);
+}
+static int wd_load(void){
+    FILE *f = fopen(WD_SAV, "rb"); if(!f) return 0;
+    uint32_t magic = 0; WdGame tmp; int ok = 0;
+    if(fread(&magic, sizeof magic, 1, f) == 1 && magic == WD_SAV_MAGIC &&
+       fread(&tmp, sizeof tmp, 1, f) == 1 &&
+       tmp.answer[0] >= 'A' && tmp.answer[0] <= 'Z' && tmp.nrows <= WD_ROWS){
+        g_wd = tmp; ok = 1;
+    }
+    fclose(f);
+    return ok;
+}
 
 static void wdpx(int x,int y,int v){
     if(!g_wd_cv || x<0 || y<0 || x>=WDCW || y>=WDCH) return;
@@ -4050,6 +4102,7 @@ static void wd_key_tap(int lx,int ly){
         else { int i=(lx-36)/24; if(i>=0 && i<7) wd_addch(&g_wd, WD_KROW[2][i]); }
     } else return;
     wd_render();
+    wd_save();
 }
 static void wd_tap_cb(lv_event_t *e){ (void)e;
     lv_point_t p; lv_indev_get_point(lv_indev_active(), &p);
@@ -4064,6 +4117,7 @@ static void wordie_input(char c){
     else if((c>='a'&&c<='z')||(c>='A'&&c<='Z')) wd_addch(&g_wd, c);
     else return;
     wd_render();
+    wd_save();
 }
 static void wd_new_daily(void){
     time_t t = 0; time(&t);
@@ -4072,6 +4126,7 @@ static void wd_new_daily(void){
 static void wd_newbtn_cb(lv_event_t *e){ (void)e;
     wd_random(&g_wd, (uint32_t)time(NULL) ^ (g_wd_seq++ * 2654435761u));
     wd_render();
+    wd_save();
 }
 static void show_wordie(void){
     kill_kb(); cur_app=NULL; cur_uid=0;
@@ -4100,7 +4155,7 @@ static void show_wordie(void){
     lv_obj_clear_flag(g_wd_cv, LV_OBJ_FLAG_SCROLLABLE);      /* resistive-robust (see News/Mines) */
     lv_obj_add_event_cb(g_wd_cv, wd_tap_cb, LV_EVENT_PRESSED, NULL);
 
-    wd_new_daily();
+    if(!wd_load()) wd_new_daily();
     wd_render();
     graf_char_hook = wordie_input;         /* AFTER kill_kb cleared it: route strokes here */
 }

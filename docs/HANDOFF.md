@@ -5,7 +5,19 @@ next session can pick up without re-deriving. Authoritative detail lives in
 `docs/BACKLOG.md` (roadmap + changelog) and `docs/KANA_TRAINER.md` (the Japanese
 trainer's full Tier 1–5 analysis).
 
-_Last updated: 2026-07-20 (Wordie word game; games folder + Kana folded into Graffiti + minesweeper tap fix)._
+_Last updated: 2026-07-20 (game state persistence; Wordie word game; games folder + Kana folded into Graffiti + minesweeper tap fix)._
+
+## Game state persistence (2026-07-20)
+
+Both games now remember their in-progress state across leaving the app. `MsGame`/
+`WdGame` are plain PODs, so each is saved as a magic-tagged blob of the whole struct
+(`/sdcard/mines.sav`, `/sdcard/wordie.sav`) after every move/keystroke and on New,
+and restored when the screen reopens (`ms_save/ms_load`, `wd_save/wd_load` in
+`ui.c`). A stale/foreign file is rejected by the magic + a light sanity check
+(board dims for Mines; uppercase answer + row count for Wordie). Reopening a game
+lands exactly where you left it (or on the finished result); New starts fresh.
+Smoke gate: `mines_persist`/`wordie_persist` screenshots must byte-match the
+pre-exit `mines_dug`/`wordie_scored`. This does NOT yet cover win/streak *stats*.
 
 ## Wordie (2026-07-20)
 
@@ -25,8 +37,9 @@ for trademark (NYT owns "Wordle").
   knockout letter; PRESENT = double border; ABSENT = letter with a diagonal slash.
 - `icon_wordie` (a 3x3 guess grid) in `palm_icons.c`. Registered in `GAMES[]`/
   `GAME_ICONS[]` next to Mines.
+- The in-progress puzzle now persists across exits (see "Game state persistence").
 - NOT YET: a guess-validity dictionary (any 5 letters is accepted as a guess) and
-  win/streak persistence -- reasonable follow-ups.
+  win/streak *stats* -- reasonable follow-ups.
 
 ## Latest cycle (2026-07-20)
 
