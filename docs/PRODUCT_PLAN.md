@@ -147,12 +147,20 @@ on-device first-run wizard + a printed quick-start card (§4), not an App Store 
 
 ## 3) Games — the delight hook
 
-> **Status: Minesweeper BUILT (emulator + host-test verified).** A new **Games**
-> launcher app (die icon) opens a menu; Minesweeper is the first game — a 9×9 board
-> on a 1-bpp canvas, Dig/Flag mode toggle, first-tap-safe flood-reveal, win/lose.
-> Logic is pure C in `minesweeper.c` with a host gate (`make -C sim mines`, wired
-> into CI); the view is in `ui.c`. Pool-safe (sim heap peak 600 B). **Next games:**
-> a Word clone, then Sudoku, then Zip.
+> **Status: Minesweeper + Wordie BUILT (emulator + host-test verified).** The **Games**
+> launcher app (die icon) opens an **icon folder** (a grid mirroring the app launcher,
+> one icon per game):
+> - **Minesweeper** — a 9×9 board on a 1-bpp canvas, Dig/Flag mode toggle,
+>   first-tap-safe flood-reveal, win/lose. `minesweeper.c` + `make -C sim mines`.
+> - **Wordie** (the Word clone, renamed off "Wordle") — a five-letter, six-guess game.
+>   The guess grid AND an on-screen QWERTY keyboard are drawn mono on one 1-bpp canvas;
+>   923-word answer bank, deterministic daily word from the date, Wordle two-pass
+>   scoring. Mono state language: CORRECT = filled/knockout, PRESENT = double border,
+>   ABSENT = slashed. The Graffiti strip also types. `wordie.c` + `make -C sim wordie`.
+>
+> Both are pure C with host gates wired into CI; the views are in `ui.c` (canvas-drawn,
+> so pool-cheap — smoke32 peak ~600 B). **Next games:** Sudoku (Graffiti-digit entry),
+> then Zip.
 
 **Verdict: GO. All four are low-RAM and pool-safe.** This is what turns "an organizer"
 into "a thing I want on my desk." Build a **shared game foundation** (a grid renderer

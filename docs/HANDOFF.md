@@ -5,7 +5,28 @@ next session can pick up without re-deriving. Authoritative detail lives in
 `docs/BACKLOG.md` (roadmap + changelog) and `docs/KANA_TRAINER.md` (the Japanese
 trainer's full Tier 1–5 analysis).
 
-_Last updated: 2026-07-20 (games folder + Kana folded into Graffiti + minesweeper tap fix)._
+_Last updated: 2026-07-20 (Wordie word game; games folder + Kana folded into Graffiti + minesweeper tap fix)._
+
+## Wordie (2026-07-20)
+
+A five-letter, six-guess word game -- the second game in the Games folder. Renamed
+for trademark (NYT owns "Wordle").
+- **`firmware/main/wordie.c/.h`** -- pure C, host-testable: a 923-word answer bank,
+  deterministic daily word (`wd_daily(g, day)`, day = `time()/86400`, wraps mod bank)
+  + a seeded "New" puzzle, letter entry, and Wordle two-pass scoring (correct/present/
+  absent with proper duplicate handling). Host gate: `make -C sim wordie`
+  (`sim/tests/wordie_test.c`), wired as a CI step.
+- **`firmware/main/ui.c`** (search `show_wordie`) -- the guess grid AND an on-screen
+  QWERTY keyboard are drawn mono on ONE 1-bpp canvas (`wd_buf`, static BSS -- not the
+  pool), so it's pool-cheap (smoke32 peak ~600 B). A hand-rolled 5x7 uppercase font
+  (`WD_FONT`) draws letters. Taps hit-test into keys via `LV_EVENT_PRESSED`; the
+  physical Graffiti strip ALSO types (backspace=del, newline=submit).
+- **Mono state language** (grid tiles and keys share it): CORRECT = solid black tile,
+  knockout letter; PRESENT = double border; ABSENT = letter with a diagonal slash.
+- `icon_wordie` (a 3x3 guess grid) in `palm_icons.c`. Registered in `GAMES[]`/
+  `GAME_ICONS[]` next to Mines.
+- NOT YET: a guess-validity dictionary (any 5 letters is accepted as a guess) and
+  win/streak persistence -- reasonable follow-ups.
 
 ## Latest cycle (2026-07-20)
 
