@@ -49,11 +49,13 @@ static lv_obj_t *content;      /* the swappable view area */
 static lv_obj_t *title_lbl;
 static lv_obj_t *clock_lbl;    /* live clock in the title bar (Palm) */
 
-static const char *APPS[] = { "Date Book", "Address", "To Do List", "Memo Pad", "HotSync", "Graffiti", "News", "Kana", "Games" };
+/* Kana is NOT a top-level app -- it lives inside Graffiti (a handwriting sibling of
+ * the Latin drill), reached by the "あ" button there. Keeps the launcher focused. */
+static const char *APPS[] = { "Date Book", "Address", "To Do List", "Memo Pad", "HotSync", "Graffiti", "News", "Games" };
 /* authentic Palm app launcher icons (from PumpkinOS) */
 static const lv_image_dsc_t *APP_ICONS[] = { &icon_datebook, &icon_address,
                                              &icon_todo, &icon_memo, &icon_hotsync,
-                                             &icon_graffiti, &icon_news, &icon_kana, &icon_games };
+                                             &icon_graffiti, &icon_news, &icon_games };
 #define NAPPS ((int)(sizeof(APPS)/sizeof(APPS[0])))
 
 static void show_launcher(void);
@@ -1008,7 +1010,6 @@ static void show_app(const char *name){
     if(!strcmp(name, "HotSync")){ show_hotsync(); return; }
     if(!strcmp(name, "Graffiti")){ show_trainer(); return; }
     if(!strcmp(name, "News")){ show_news(); return; }
-    if(!strcmp(name, "Kana")){ show_kana(); return; }
     if(!strcmp(name, "Games")){ show_games(); return; }
     cur_app = NULL;
     lv_obj_clean(content);
@@ -1231,6 +1232,8 @@ static void tr_mode_toggle(lv_event_t *e){
     tr_render();
 }
 
+static void graffiti_to_kana_cb(lv_event_t *e){ (void)e; show_kana(); }
+
 static void show_trainer(void){
     kill_kb();
     cur_app=NULL; cur_uid=0;
@@ -1254,6 +1257,18 @@ static void show_trainer(void){
     tr_mode_lbl = lv_label_create(mb);
     lv_obj_center(tr_mode_lbl);
     lv_obj_add_event_cb(mb, tr_mode_toggle, LV_EVENT_CLICKED, NULL);
+
+    /* Kana lives here (handwriting sibling of the Latin drill): a compact "あ" button
+     * to its left switches into the kana trainer. */
+    lv_obj_t *kb = lv_button_create(content);
+    lv_obj_set_size(kb, 30, 26);
+    lv_obj_align(kb, LV_ALIGN_TOP_RIGHT, -64, 2);
+    lv_obj_set_style_radius(kb, 0, 0);
+    lv_obj_add_event_cb(kb, graffiti_to_kana_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *kbl = lv_label_create(kb);
+    lv_obj_set_style_text_font(kbl, &lv_font_kana, 0);
+    lv_label_set_text(kbl, "\xe3\x81\x82");   /* U+3042 HIRAGANA A */
+    lv_obj_center(kbl);
 
     tr_guide = lv_canvas_create(content);
     lv_canvas_set_buffer(tr_guide, tr_guide_buf, TR_GW, TR_GH, LV_COLOR_FORMAT_I1);
@@ -1556,6 +1571,8 @@ static void kana_toggle_mode(lv_event_t *e){ (void)e;
     kana_build(ka_wmode);
 }
 
+static void kana_to_graffiti_cb(lv_event_t *e){ (void)e; show_trainer(); }
+
 /* build the Kana screen for `mode` (0 Sound / 1 Write): clears content, lays out
  * the widgets that mode needs, wires the right Graffiti hook, and renders. */
 static void kana_build(int mode){
@@ -1572,6 +1589,14 @@ static void kana_build(int mode){
     lv_label_set_text(ka_modelbl, mode==0 ? "Write" : "Sound");
     lv_obj_center(ka_modelbl);
     lv_obj_add_event_cb(mb, kana_toggle_mode, LV_EVENT_CLICKED, NULL);
+
+    /* back to the Latin Graffiti drill (Kana is folded in under Graffiti) */
+    lv_obj_t *bb = lv_button_create(content);
+    lv_obj_set_size(bb, 34, 26);
+    lv_obj_align(bb, LV_ALIGN_TOP_RIGHT, -64, 2);
+    lv_obj_set_style_radius(bb, 0, 0);
+    lv_obj_add_event_cb(bb, kana_to_graffiti_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *bbl = lv_label_create(bb); lv_label_set_text(bbl, "ABC"); lv_obj_center(bbl);
 
     ka_prompt = lv_label_create(content);
     lv_obj_set_style_text_font(ka_prompt, &lv_font_palm_bold, 0);
@@ -3892,15 +3917,26 @@ static void show_minesweeper(void){
     lv_canvas_set_palette(g_ms_cv, 1, lv_color_to_32(COL_LINE, 0xFF));
     lv_obj_align(g_ms_cv, LV_ALIGN_TOP_MID, 0, 26);
     lv_obj_add_flag(g_ms_cv, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(g_ms_cv, ms_tap_cb, LV_EVENT_CLICKED, NULL);
+    /* PRESSED (not CLICKED) + no self-scroll: on the resistive panel a tap jitters
+     * a pixel or two, and CLICKED is suppressed when that jitter looks like a scroll
+     * -- so taps silently did nothing on the device. Fire on press-down, like News. */
+    lv_obj_clear_flag(g_ms_cv, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(g_ms_cv, ms_tap_cb, LV_EVENT_PRESSED, NULL);
 
     ms_new_game();
     ms_render();
 }
 
+/* The Games "folder": an icon grid mirroring the app launcher (each game is a
+ * tappable icon + label), so it reads as a sub-folder of the main launcher rather
+ * than a list of text buttons. Add a game by extending GAMES[] + its dispatch. */
+static const char           *GAMES[]      = { "Mines" };
+static const lv_image_dsc_t *GAME_ICONS[] = { &icon_mines };
+#define NGAMES ((int)(sizeof(GAMES)/sizeof(GAMES[0])))
+
 static void games_pick_cb(lv_event_t *e){
     const char *g = lv_event_get_user_data(e);
-    if(!strcmp(g,"mines")) show_minesweeper();
+    if(!strcmp(g,"Mines")) show_minesweeper();
 }
 static void show_games(void){
     kill_kb(); cur_app=NULL; cur_uid=0;
@@ -3908,23 +3944,37 @@ static void show_games(void){
     lv_label_set_text(title_lbl, "Games");
     update_cat_trigger();
 
-    lv_obj_t *box = lv_obj_create(content);
-    lv_obj_set_size(box, lv_pct(100), lv_pct(100));
-    lv_obj_set_style_radius(box, 0, 0);
-    lv_obj_set_style_border_width(box, 0, 0);
-    lv_obj_set_style_bg_color(box, COL_BODY, 0);
-    lv_obj_set_style_pad_all(box, 10, 0);
-    lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(box, 8, 0);
+    lv_obj_t *grid = lv_obj_create(content);
+    lv_obj_set_size(grid, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_radius(grid, 0, 0);
+    lv_obj_set_style_border_width(grid, 0, 0);
+    lv_obj_set_style_bg_color(grid, COL_BODY, 0);
+    lv_obj_set_style_pad_all(grid, 6, 0);
+    lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
 
-    lv_obj_t *b = lv_button_create(box);
-    lv_obj_set_width(b, lv_pct(100));
-    lv_obj_set_style_radius(b, 0, 0);
-    lv_obj_add_event_cb(b, games_pick_cb, LV_EVENT_CLICKED, (void*)"mines");
-    lv_obj_t *bl = lv_label_create(b); lv_label_set_text(bl, "Minesweeper"); lv_obj_center(bl);
+    for(int i=0;i<NGAMES;i++){
+        lv_obj_t *cell = lv_obj_create(grid);
+        lv_obj_set_size(cell, 68, 52);
+        lv_obj_set_style_radius(cell, 0, 0);
+        lv_obj_set_style_border_width(cell, 0, 0);
+        lv_obj_set_style_bg_opa(cell, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_pad_all(cell, 2, 0);
+        lv_obj_set_style_pad_row(cell, 3, 0);
+        lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_add_flag(cell, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(cell, games_pick_cb, LV_EVENT_CLICKED, (void *)GAMES[i]);
 
-    lv_obj_t *soon = lv_label_create(box);
-    lv_label_set_text(soon, "More games soon.");
+        lv_obj_t *img = lv_image_create(cell);
+        lv_image_set_src(img, GAME_ICONS[i]);
+        lv_obj_set_style_image_recolor(img, COL_LINE, 0);
+        lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);
+
+        lv_obj_t *lbl = lv_label_create(cell);
+        lv_label_set_text(lbl, GAMES[i]);
+        lv_obj_set_style_text_font(lbl, &lv_font_palm, 0);
+    }
 }
 
 void ui_init(void){

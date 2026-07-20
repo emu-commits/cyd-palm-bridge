@@ -7,6 +7,7 @@ extern const lv_image_dsc_t icon_graffiti;
 extern const lv_image_dsc_t icon_news;
 extern const lv_image_dsc_t icon_kana;      /* Kana trainer (roadmap #3, Tier 1) */
 extern const lv_image_dsc_t icon_games;     /* Games launcher (product roadmap) */
+extern const lv_image_dsc_t icon_mines;     /* Minesweeper (Games sub-launcher) */
 /* silkscreen buttons (flank the Graffiti area) */
 extern const lv_image_dsc_t silk_home, silk_menu, silk_find, silk_calc;
 #endif
