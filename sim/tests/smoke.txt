@@ -50,8 +50,8 @@ t 400
 s trainer_trained
 c 18 225
 t 300
-# News (RSS reader, roadmap #4): launcher app (row 3 col 1, now that Kana is the
-# 8th app) opens a one-item-per-view feed (seeded with samples in the sim).
+# News (RSS reader, roadmap #4): launcher app (row 3 col 1) opens a one-item-per-view
+# feed (seeded with samples in the sim).
 # Press-drag UP navigates to the next article. Pool-safe (labels + content swap on
 # a gesture surface; a regression here would HANG or fail to advance).
 c 46 160
@@ -68,13 +68,16 @@ t 400
 s news_reader_next
 c 18 225
 t 300
-# Kana trainer (roadmap #3, Tier 1): launcher app (row 3 col 2, the 'a' icon).
+# Kana trainer (roadmap #3, Tier 1): NOW folded under Graffiti -- open the Graffiti
+# app (row 2 col 3) and tap the compact "あ" button (top row, left of Drill/Train).
 # Shows a kana (first target: hiragana 'a') rendered with the lv_font_kana bitmap
 # subset + its romaji note, and you answer the SOUND by drawing romaji letters in
 # the Graffiti strip (reusing the Latin recognizer, untouched). Draw a caret '^'
 # (= 'a') to answer -> "Correct!" + deterministic advance to the next kana.
 # Pool-safe (labels only; a regression here would HANG or misrender the kana).
-c 120 160
+c 200 110
+t 400
+c 161 38
 t 400
 s kana_open
 d 48 300
@@ -342,10 +345,12 @@ c 31 40
 t 300
 c 18 225
 t 300
-# Games (product roadmap): launcher app row 3 col 3 (the die icon) opens a menu;
-# Minesweeper draws its 9x9 board on a 1-bpp canvas. The first tap is always safe and
-# floods open; then switch to Flag mode and flag a cell. Pool-safe (canvas + labels).
-c 194 160
+# Games (product roadmap): launcher app row 3 col 2 (the die icon) opens the Games
+# FOLDER -- an icon grid mirroring the launcher, one icon per game. Tap the Minesweeper
+# mine icon to open it. Minesweeper draws its 9x9 board on a 1-bpp canvas; the first tap
+# is always safe and floods open; then switch to Flag mode and flag a cell. The board
+# takes taps via PRESSED (resistive-panel robust). Pool-safe (canvas + labels).
+c 169 160
 t 300
 s games_menu
 c 120 55

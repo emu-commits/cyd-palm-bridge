@@ -5,7 +5,22 @@ next session can pick up without re-deriving. Authoritative detail lives in
 `docs/BACKLOG.md` (roadmap + changelog) and `docs/KANA_TRAINER.md` (the Japanese
 trainer's full Tier 1–5 analysis).
 
-_Last updated: 2026-07-19 (product pivot)._
+_Last updated: 2026-07-20 (games folder + Kana folded into Graffiti + minesweeper tap fix)._
+
+## Latest cycle (2026-07-20)
+
+Three user-reported fixes on the games/launcher structure:
+- **Minesweeper taps did nothing on the device.** The board canvas used `LV_EVENT_CLICKED`,
+  which the resistive panel suppresses when a tap jitters (reads as a scroll). Switched to
+  `LV_EVENT_PRESSED` + cleared `LV_OBJ_FLAG_SCROLLABLE` on the canvas -- the same
+  resistive-robust pattern the News reader uses. (Worked in the sim either way; device-only bug.)
+- **Games is now an icon sub-folder**, not a text-button list: `show_games()` renders an icon
+  grid mirroring the app launcher. Each game is a tappable icon + label (`GAMES[]`/`GAME_ICONS[]`
+  -- extend both to add a game). Minesweeper got its own `icon_mines` (spiked mine, `palm_icons.c`).
+- **Kana folded into Graffiti.** Removed the top-level Kana launcher app; the Graffiti trainer
+  now has a compact "あ" button (top row, left of Drill/Train) that opens the kana trainer, and
+  the kana screen has an "ABC" button back to the Latin drill. Graffiti is the handwriting hub.
+  Launcher is back to 8 apps (row 3 = News, Games).
 
 ## Direction change (read first)
 
