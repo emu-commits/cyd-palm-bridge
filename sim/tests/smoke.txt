@@ -370,6 +370,16 @@ t 300
 s mines_dug
 c 18 225
 t 300
+# Persistence: leave to the launcher, reopen Games -> Mines, and the dug board is
+# restored exactly (saved to /sdcard after every move). mines_persist must match
+# mines_dug, not a fresh board.
+c 169 160
+t 300
+c 70 55
+t 400
+s mines_persist
+c 18 225
+t 300
 # Wordie: the second game in the folder. Open Games, tap the Wordie tile (right icon),
 # then type a 5-letter guess on the canvas-drawn on-screen keyboard and submit (OK). The
 # row scores with mono state tiles: filled=correct, double-border=present, slashed=absent;
@@ -394,6 +404,16 @@ s wordie_typed
 c 18 193
 t 300
 s wordie_scored
+c 18 225
+t 300
+# Persistence: leave to the launcher, reopen Games -> Wordie, and the scored guess
+# grid + keyboard states are restored (saved to /sdcard after every keystroke).
+# wordie_persist must match wordie_scored, not a fresh daily.
+c 169 160
+t 300
+c 169 55
+t 400
+s wordie_persist
 c 18 225
 t 300
 # I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.
