@@ -346,14 +346,14 @@ t 300
 c 18 225
 t 300
 # Games (product roadmap): launcher app row 3 col 2 (the die icon) opens the Games
-# FOLDER -- an icon grid mirroring the launcher, one icon per game. Tap the Minesweeper
-# mine icon to open it. Minesweeper draws its 9x9 board on a 1-bpp canvas; the first tap
-# is always safe and floods open; then switch to Flag mode and flag a cell. The board
-# takes taps via PRESSED (resistive-panel robust). Pool-safe (canvas + labels).
+# FOLDER -- an icon grid mirroring the launcher, one icon per game (Mines, Wordie).
+# Tap the Minesweeper mine icon (left) to open it. Minesweeper draws its 9x9 board on a
+# 1-bpp canvas; the first tap is always safe and floods open; then switch to Flag mode and
+# flag a cell. The board takes taps via PRESSED (resistive-panel robust). Pool-safe.
 c 169 160
 t 300
 s games_menu
-c 120 55
+c 70 55
 t 400
 s minesweeper
 # on the fresh board every cell is unrevealed: switch to Flag mode and flag one
@@ -368,6 +368,32 @@ t 200
 c 120 110
 t 300
 s mines_dug
+c 18 225
+t 300
+# Wordie: the second game in the folder. Open Games, tap the Wordie tile (right icon),
+# then type a 5-letter guess on the canvas-drawn on-screen keyboard and submit (OK). The
+# row scores with mono state tiles: filled=correct, double-border=present, slashed=absent;
+# used keys pick up the same states. Grid + keyboard are ONE pool-cheap I1 canvas; taps
+# hit-test via PRESSED. (The physical Graffiti strip also types letters on the device.)
+c 169 160
+t 300
+c 169 55
+t 400
+s wordie_open
+c 24 175
+t 60
+c 156 157
+t 60
+c 72 175
+t 60
+c 180 157
+t 60
+c 204 157
+t 80
+s wordie_typed
+c 18 193
+t 300
+s wordie_scored
 c 18 225
 t 300
 # I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.

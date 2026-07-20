@@ -29,6 +29,7 @@
 #include "clock.h"        /* timezone picker + DST-aware zone list + world-time helper */
 #include "dash.h"         /* lock-screen dashboard: weather cache + moon/sun math */
 #include "minesweeper.h"  /* Games: Minesweeper board logic */
+#include "wordie.h"       /* Games: Wordie word-game logic */
 #include "lvgl.h"
 #include <string.h>
 #include <strings.h>      /* strncasecmp for the Address Look Up filter */
@@ -64,6 +65,7 @@ static void show_kana(void);
 static void show_news(void);
 static void show_games(void);
 static void show_minesweeper(void);
+static void show_wordie(void);
 static void show_app(const char *name);
 
 /* a borderless, non-scrolling panel with a solid fill */
@@ -3927,16 +3929,193 @@ static void show_minesweeper(void){
     ms_render();
 }
 
+/* ========================= Wordie (Games) ==================================
+ * A five-letter, six-guess word game (wordie.c holds the pure logic). The guess
+ * grid AND an on-screen QWERTY keyboard are drawn mono on ONE 1-bpp canvas, so it
+ * stays pool-cheap (one canvas + a couple of labels/buttons -- no per-cell widgets
+ * that would blow the 24 KB object pool). Taps hit-test into keys; the physical
+ * Graffiti strip also types letters. Mono state language, applied to both the grid
+ * cells and the keys:
+ *     CORRECT  -> solid black tile, knockout (white) letter
+ *     PRESENT  -> double border, black letter
+ *     ABSENT   -> border + a diagonal slash through the letter ("eliminated")
+ *     typed    -> single border, black letter   (empty -> single border only)   */
+
+/* compact 5x7 uppercase font (bit4 = leftmost of 5), rendered by wd_glyph. */
+static const uint8_t WD_FONT[26][7] = {
+  {14,17,17,31,17,17,17},{30,17,30,17,17,17,30},{14,17,16,16,16,17,14},{28,18,17,17,17,18,28},{31,16,30,16,16,16,31},{31,16,30,16,16,16,16},
+  {14,17,16,23,17,17,15},{17,17,31,17,17,17,17},{31,4,4,4,4,4,31},{7,2,2,2,18,18,12},{17,18,20,24,20,18,17},{16,16,16,16,16,16,31},
+  {17,27,21,21,17,17,17},{17,25,21,19,17,17,17},{14,17,17,17,17,17,14},{30,17,17,30,16,16,16},{14,17,17,17,21,18,13},{30,17,17,30,20,18,17},
+  {15,16,16,14,1,1,30},{31,4,4,4,4,4,4},{17,17,17,17,17,17,14},{17,17,17,17,17,10,4},{17,17,17,21,21,27,17},{17,17,10,4,10,17,17},
+  {17,17,10,4,4,4,4},{31,1,2,4,8,16,31},
+};
+
+#define WDCW   240                          /* canvas size */
+#define WDCH   152
+#define WD_CW  22                           /* grid cell w/h */
+#define WD_CH  15
+#define WD_GX0 65                           /* grid origin ((240-5*22)/2, 2) */
+#define WD_GY0 2
+#define WD_KY0 96                           /* keyboard top; 3 rows of WD_KEYH */
+#define WD_KEYH 18
+
+static WdGame    g_wd;
+static lv_obj_t *g_wd_cv, *g_wd_status;
+static uint32_t  g_wd_seq;
+static uint8_t   wd_buf[LV_CANVAS_BUF_SIZE(WDCW, WDCH, 1, 1) + 16];
+static const char *WD_KROW[3] = { "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM" };
+
+static void wdpx(int x,int y,int v){
+    if(!g_wd_cv || x<0 || y<0 || x>=WDCW || y>=WDCH) return;
+    lv_color_t col = { .blue = (uint8_t)(v ? 1 : 0) };       /* I1: blue&1 = palette idx */
+    lv_canvas_set_px(g_wd_cv, x, y, col, LV_OPA_COVER);
+}
+static void wd_glyph(int x,int y,char ch,int s,int v){       /* ch at (x,y), scale s */
+    if(ch<'A' || ch>'Z') return;
+    const uint8_t *g = WD_FONT[ch-'A'];
+    for(int r=0;r<7;r++) for(int c=0;c<5;c++) if(g[r] & (16>>c))
+        for(int dy=0;dy<s;dy++) for(int dx=0;dx<s;dx++) wdpx(x+c*s+dx, y+r*s+dy, v);
+}
+static void wd_rect(int x,int y,int w,int h,int v){
+    for(int i=0;i<w;i++){ wdpx(x+i,y,v); wdpx(x+i,y+h-1,v); }
+    for(int j=0;j<h;j++){ wdpx(x,y+j,v); wdpx(x+w-1,y+j,v); }
+}
+static void wd_fill(int x,int y,int w,int h,int v){ for(int j=0;j<h;j++) for(int i=0;i<w;i++) wdpx(x+i,y+j,v); }
+static void wd_slash(int x,int y,int w,int h){               /* one corner-to-corner diagonal */
+    int steps = (w>h?w:h); if(steps<2) return;
+    for(int i=0;i<steps;i++) wdpx(x + i*(w-1)/(steps-1), y + i*(h-1)/(steps-1), 1);
+}
+/* one grid cell / key tile: state = WD_ABSENT/PRESENT/CORRECT, or -1 empty, -2 typed. */
+static void wd_tile(int x,int y,int w,int h,char ch,int state){
+    int letx = x + (w-10)/2, lety = y + (h-14)/2;           /* letter is 10x14 (5x7 @2) */
+    if(state == WD_CORRECT){
+        wd_fill(x, y, w, h, 1);
+        if(ch) wd_glyph(letx, lety, ch, 2, 0);              /* knockout */
+        return;
+    }
+    wd_rect(x, y, w, h, 1);
+    if(state == WD_PRESENT) wd_rect(x+2, y+2, w-4, h-4, 1); /* double border */
+    if(ch) wd_glyph(letx, lety, ch, 2, 1);
+    if(state == WD_ABSENT) wd_slash(x+1, y+1, w-2, h-2);
+}
+static void wd_key(int x,int y,int w,const char *label,char ch,int keystate){
+    int kh = WD_KEYH - 2;
+    if(keystate == WK_CORRECT){
+        wd_fill(x, y, w, kh, 1);
+        if(ch) wd_glyph(x+(w-10)/2, y+2, ch, 2, 0);
+        return;
+    }
+    wd_rect(x, y, w, kh, 1);
+    if(keystate == WK_PRESENT) wd_rect(x+2, y+2, w-4, kh-4, 1);
+    if(ch) wd_glyph(x+(w-10)/2, y+2, ch, 2, 1);
+    else if(label){                                          /* ENTER/DEL: scale-1 caption */
+        int lw = (int)strlen(label)*6 - 1, lx = x + (w-lw)/2;
+        for(const char *p=label; *p; p++){ wd_glyph(lx, y+(kh-7)/2, *p, 1, 1); lx += 6; }
+    }
+    if(keystate == WK_ABSENT) wd_slash(x, y, w, kh);
+}
+static void wd_render(void){
+    if(!g_wd_cv) return;
+    lv_color_t bg = { .blue = 0 };
+    lv_canvas_fill_bg(g_wd_cv, bg, LV_OPA_COVER);
+    for(int r=0;r<WD_ROWS;r++) for(int c=0;c<WD_LEN;c++){
+        int x = WD_GX0 + c*WD_CW, y = WD_GY0 + r*WD_CH;
+        char ch = 0; int state = -1;
+        if(r < g_wd.nrows){ ch = g_wd.guess[r][c]; state = g_wd.mark[r][c]; }
+        else if(r == g_wd.nrows && c < g_wd.cur){ ch = g_wd.row[c]; state = -2; }
+        wd_tile(x, y, WD_CW, WD_CH, ch, state);
+    }
+    int y0 = WD_KY0;
+    for(int i=0;i<10;i++){ char ch=WD_KROW[0][i]; wd_key(i*24,      y0,           24, NULL, ch, g_wd.key[ch-'A']); }
+    for(int i=0;i<9;i++){  char ch=WD_KROW[1][i]; wd_key(12+i*24,   y0+WD_KEYH,   24, NULL, ch, g_wd.key[ch-'A']); }
+    int y2 = y0 + 2*WD_KEYH;
+    wd_key(2, y2, 34, "OK", 0, WK_UNUSED);
+    for(int i=0;i<7;i++){ char ch=WD_KROW[2][i]; wd_key(36+i*24,    y2,           24, NULL, ch, g_wd.key[ch-'A']); }
+    wd_key(204, y2, 34, "DEL", 0, WK_UNUSED);
+
+    if(g_wd_status){
+        if(g_wd.state == WD_WON)       lv_label_set_text_fmt(g_wd_status, "Solved in %d!", g_wd.nrows);
+        else if(g_wd.state == WD_LOST) lv_label_set_text_fmt(g_wd_status, "Answer: %s", g_wd.answer);
+        else                           lv_label_set_text_fmt(g_wd_status, "Guess %d/%d", g_wd.nrows+1, WD_ROWS);
+    }
+}
+static void wd_key_tap(int lx,int ly){
+    if(ly < WD_KY0) return;                                  /* taps above the keyboard: ignore */
+    int row = (ly - WD_KY0) / WD_KEYH;
+    if(row == 0){ int i = lx/24; if(i>=0 && i<10) wd_addch(&g_wd, WD_KROW[0][i]); }
+    else if(row == 1){ if(lx<12) return; int i=(lx-12)/24; if(i>=0 && i<9) wd_addch(&g_wd, WD_KROW[1][i]); }
+    else if(row == 2){
+        if(lx < 36)        wd_enter(&g_wd);
+        else if(lx >= 204) wd_del(&g_wd);
+        else { int i=(lx-36)/24; if(i>=0 && i<7) wd_addch(&g_wd, WD_KROW[2][i]); }
+    } else return;
+    wd_render();
+}
+static void wd_tap_cb(lv_event_t *e){ (void)e;
+    lv_point_t p; lv_indev_get_point(lv_indev_active(), &p);
+    lv_area_t a; lv_obj_get_coords(g_wd_cv, &a);
+    wd_key_tap(p.x - a.x1, p.y - a.y1);
+}
+/* the Graffiti strip also drives Wordie: a letter types, backspace deletes, the
+ * newline gesture submits (set as graf_char_hook while the screen is open). */
+static void wordie_input(char c){
+    if(c == '\b')      wd_del(&g_wd);
+    else if(c == '\n') wd_enter(&g_wd);
+    else if((c>='a'&&c<='z')||(c>='A'&&c<='Z')) wd_addch(&g_wd, c);
+    else return;
+    wd_render();
+}
+static void wd_new_daily(void){
+    time_t t = 0; time(&t);
+    wd_daily(&g_wd, (long)(t / 86400L));                     /* same date -> same word */
+}
+static void wd_newbtn_cb(lv_event_t *e){ (void)e;
+    wd_random(&g_wd, (uint32_t)time(NULL) ^ (g_wd_seq++ * 2654435761u));
+    wd_render();
+}
+static void show_wordie(void){
+    kill_kb(); cur_app=NULL; cur_uid=0;
+    g_wd_cv = g_wd_status = NULL;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, "Wordie");
+    update_cat_trigger();
+
+    g_wd_status = lv_label_create(content);
+    lv_obj_set_style_text_font(g_wd_status, &lv_font_palm, 0);
+    lv_obj_align(g_wd_status, LV_ALIGN_TOP_LEFT, 6, 6);
+
+    lv_obj_t *nb = lv_button_create(content);
+    lv_obj_set_style_radius(nb, 0, 0);
+    lv_obj_set_style_pad_all(nb, 3, 0);
+    lv_obj_align(nb, LV_ALIGN_TOP_RIGHT, -4, 2);
+    lv_obj_add_event_cb(nb, wd_newbtn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *nl = lv_label_create(nb); lv_label_set_text(nl, "New");
+
+    g_wd_cv = lv_canvas_create(content);
+    lv_canvas_set_buffer(g_wd_cv, wd_buf, WDCW, WDCH, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_palette(g_wd_cv, 0, lv_color_to_32(COL_BODY, 0xFF));
+    lv_canvas_set_palette(g_wd_cv, 1, lv_color_to_32(COL_LINE, 0xFF));
+    lv_obj_align(g_wd_cv, LV_ALIGN_TOP_MID, 0, 28);
+    lv_obj_add_flag(g_wd_cv, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(g_wd_cv, LV_OBJ_FLAG_SCROLLABLE);      /* resistive-robust (see News/Mines) */
+    lv_obj_add_event_cb(g_wd_cv, wd_tap_cb, LV_EVENT_PRESSED, NULL);
+
+    wd_new_daily();
+    wd_render();
+    graf_char_hook = wordie_input;         /* AFTER kill_kb cleared it: route strokes here */
+}
+
 /* The Games "folder": an icon grid mirroring the app launcher (each game is a
  * tappable icon + label), so it reads as a sub-folder of the main launcher rather
  * than a list of text buttons. Add a game by extending GAMES[] + its dispatch. */
-static const char           *GAMES[]      = { "Mines" };
-static const lv_image_dsc_t *GAME_ICONS[] = { &icon_mines };
+static const char           *GAMES[]      = { "Mines", "Wordie" };
+static const lv_image_dsc_t *GAME_ICONS[] = { &icon_mines, &icon_wordie };
 #define NGAMES ((int)(sizeof(GAMES)/sizeof(GAMES[0])))
 
 static void games_pick_cb(lv_event_t *e){
     const char *g = lv_event_get_user_data(e);
-    if(!strcmp(g,"Mines")) show_minesweeper();
+    if(!strcmp(g,"Mines"))       show_minesweeper();
+    else if(!strcmp(g,"Wordie")) show_wordie();
 }
 static void show_games(void){
     kill_kb(); cur_app=NULL; cur_uid=0;
