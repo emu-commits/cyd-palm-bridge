@@ -5,7 +5,38 @@ next session can pick up without re-deriving. Authoritative detail lives in
 `docs/BACKLOG.md` (roadmap + changelog) and `docs/KANA_TRAINER.md` (the Japanese
 trainer's full Tier 1–5 analysis).
 
-_Last updated: 2026-07-21 (Sudoku; Mines timer/high-score; Wordie font/legend/streak; lock-screen seven-seg clock + world-clock settings; game-state persistence)._
+_Last updated: 2026-07-21 (Wordie OK/DEL relocation + caption-overlap fix; Sudoku New-button border, timer/best, conflict-flag guard; Sudoku; Mines timer/high-score; Wordie font/legend/streak; lock-screen seven-seg clock + world-clock settings; game-state persistence)._
+
+## Games polish pass (2026-07-21)
+
+Follow-up fixes on the two newest games (all four validated in the `make -C sim smoke`
+gate + host tests; `ui.c` strict-compiles under `-Wall -Wextra -Werror -Wshadow`):
+
+- **`canvas_text` glyph advance bug (root cause of the reported OK/DEL overlap).**
+  LVGL 9's public `lv_font_glyph_dsc_t.adv_w` is already in **whole pixels** (the
+  fmt_txt driver rounds the internal 1/16-px value before returning it). `canvas_text`
+  / `canvas_text_w` shifted it `>>4` again (a v8-ism), collapsing every advance to ~0
+  so multi-letter captions stacked on one column. These helpers were only ever used
+  for the Wordie OK/DEL captions, so nothing else was affected. Dropped the `>>4`.
+- **Wordie OK / DEL moved to the grid margins.** They were crammed into the bottom
+  key row where the captions collided with the Z..M letters. Now they're bordered
+  command buttons in the empty space beside the guess grid (OK left, DEL right; see
+  `WD_BTN*` / `wd_button`), and the bottom row is just the 7 centred letters. Tap
+  hit-testing checks the two button rects before the keyboard rows (`wd_in`).
+- **Sudoku "New" button lost its bottom border.** The board canvas fills the content
+  height exactly, so a header widget created *before* it had its lower border clipped
+  by the (opaque, later-drawn) canvas. Fixed by creating the canvas FIRST in
+  `show_sudoku` so the header widgets draw on top of its edge.
+- **Sudoku conflict flag = rule violations only (confirmed + guarded).** A slash only
+  ever means a row/column/box duplicate (`sd_conflict`, purely constraint-based); a
+  feasible-but-wrong digit renders clean. This was already the behaviour -- added an
+  explicit `sudoku_test.c` assertion (solve the board, place a legal non-solution
+  digit, assert no conflict) so it stays that way.
+- **Sudoku timer + best time.** A live solve clock (starts on the first digit placed,
+  freezes on solve, 1 Hz tick) and a persisted best (fastest) time, shown
+  "m:ss  Best m:ss" centred in the header. Mirrors the Mines pattern
+  (`sd_elapsed`/`sd_tick`/`g_sd_active`); rides in `sudoku.sav` (magic bumped
+  SDK1 -> SDK2, older files fall back to a fresh clock).
 
 ## Games now use the real Palm font (2026-07-21)
 

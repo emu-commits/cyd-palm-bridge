@@ -405,8 +405,10 @@ s mines_persist
 c 18 225
 t 300
 # Wordie: the second game in the folder. Open Games, tap the Wordie tile (right icon),
-# then type a 5-letter guess on the canvas-drawn on-screen keyboard and submit (OK). The
-# row scores with mono state tiles: filled=correct, double-border=present, slashed=absent;
+# then type a 5-letter guess on the canvas-drawn on-screen keyboard and submit with the OK
+# button (which sits in the LEFT margin beside the grid -- OK/DEL moved off the bottom key
+# row, where their captions used to collide with the Z..M letters; DEL mirrors on the right).
+# The row scores with mono state tiles: filled=correct, double-border=present, slashed=absent;
 # used keys pick up the same states. Grid + keyboard are ONE pool-cheap I1 canvas; taps
 # hit-test via PRESSED. (The physical Graffiti strip also types letters on the device.)
 c 169 160
@@ -425,7 +427,7 @@ t 60
 c 204 167
 t 80
 s wordie_typed
-c 18 199
+c 32 94
 t 300
 s wordie_scored
 c 18 225
