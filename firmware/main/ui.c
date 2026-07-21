@@ -3989,7 +3989,7 @@ static uint32_t ms_elapsed(void){
 }
 static void ms_fmt_mmss(uint32_t sec, char *out, int cap){
     if(sec > 5999) sec = 5999;                   /* cap the readout at 99:59 */
-    snprintf(out, cap, "%u:%02u", sec/60, sec%60);
+    snprintf(out, cap, "%u:%02u", (unsigned)(sec/60), (unsigned)(sec%60));
 }
 
 static void mpx(int x,int y){
@@ -4318,8 +4318,8 @@ static void wd_render(void){
     wd_key(204, y2, 34, "DEL", 0, WK_UNUSED);
 
     if(g_wd_status){
-        char st[16] = "";
-        if(g_wd_streak) snprintf(st, sizeof st, "  Streak %u", g_wd_streak);
+        char st[24] = "";
+        if(g_wd_streak) snprintf(st, sizeof st, "  Streak %u", (unsigned)g_wd_streak);
         if(g_wd.state == WD_WON)       lv_label_set_text_fmt(g_wd_status, "Solved in %d!%s", g_wd.nrows, st);
         else if(g_wd.state == WD_LOST) lv_label_set_text_fmt(g_wd_status, "Answer: %s", g_wd.answer);
         else                           lv_label_set_text_fmt(g_wd_status, "Guess %d/%d%s", g_wd.nrows+1, WD_ROWS, st);
