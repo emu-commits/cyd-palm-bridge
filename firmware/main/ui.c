@@ -190,10 +190,11 @@ static int  (*graf_capture_hook)(void);
 static int  g_trainer_open;      /* the Graffiti trainer is the live screen (menu Reset) */
 static int  g_kana_open;         /* the Kana trainer is the live screen (menu Reset) */
 static int  g_ms_active;         /* the Mines screen is live (1 Hz timer tick guard) */
+static int  g_sd_active;         /* the Sudoku screen is live (1 Hz timer tick guard) */
 static void kill_kb(void){
     g_form=NULL; active_ta=NULL; edit_cat_lbl=NULL; g_listtbl=NULL; g_findtbl=NULL;
     graf_char_hook=NULL; graf_capture_hook=NULL;
-    g_trainer_open=0; g_kana_open=0; g_ms_active=0;
+    g_trainer_open=0; g_kana_open=0; g_ms_active=0; g_sd_active=0;
     free_rowuids();
     free_finds();
     kill_hs();
@@ -4186,11 +4187,14 @@ static void canvas_glyph_c(lv_obj_t *cv, const lv_font_t *font, uint32_t uni, in
     if(!lv_font_get_glyph_dsc(font, &g, uni, 0)) return;
     canvas_glyph_at(cv, font, uni, cx - g.box_w/2, cy - g.box_h/2, v);
 }
-/* pixel width of a string in `font` (sum of advances). */
+/* pixel width of a string in `font` (sum of advances). NB: LVGL 9's public
+ * lv_font_glyph_dsc_t.adv_w is already in whole pixels (the fmt_txt driver rounds
+ * the internal 1/16-px value down before returning it) -- an extra >>4 here is what
+ * stacked the OK/DEL captions on top of each other. */
 static int canvas_text_w(const lv_font_t *font, const char *s){
     int w = 0;
     for(; *s; s++){ lv_font_glyph_dsc_t g;
-        if(lv_font_get_glyph_dsc(font, &g, (uint32_t)(uint8_t)*s, 0)) w += g.adv_w >> 4; }
+        if(lv_font_get_glyph_dsc(font, &g, (uint32_t)(uint8_t)*s, 0)) w += g.adv_w; }
     return w;
 }
 /* left-aligned string at (x,y-top); returns width drawn. */
@@ -4199,7 +4203,7 @@ static int canvas_text(lv_obj_t *cv, const lv_font_t *font, const char *s, int x
     for(; *s; s++){ lv_font_glyph_dsc_t g;
         if(!lv_font_get_glyph_dsc(font, &g, (uint32_t)(uint8_t)*s, 0)) continue;
         canvas_glyph_at(cv, font, (uint32_t)(uint8_t)*s, x, y, v);
-        x += g.adv_w >> 4;
+        x += g.adv_w;
     }
     return x - x0;
 }
@@ -4236,6 +4240,15 @@ static const uint8_t WD_FONT[26][6] = {
 #define WD_LEGY 98                          /* legend strip (below the 6x16 grid) */
 #define WD_KY0 112                          /* keyboard top; 3 rows of WD_KEYH */
 #define WD_KEYH 16
+/* OK (submit) and DEL (backspace) live in the empty margins beside the guess grid
+ * (grid spans x 65..175), not crammed into the bottom key row where their captions
+ * used to collide with the Z..M letters. One on each side, vertically centred on
+ * the grid. */
+#define WD_BTNW 52
+#define WD_BTNH 24
+#define WD_BTNY 34
+#define WD_OKX  6
+#define WD_DELX (WDCW - WD_BTNW - 6)        /* = 182, mirrored on the right */
 
 static WdGame    g_wd;
 static lv_obj_t *g_wd_cv, *g_wd_status;
@@ -4326,6 +4339,13 @@ static void wd_key(int x,int y,int w,const char *label,char ch,int keystate){
     if(keystate == WK_PRESENT) wd_tab(x, y, w, 5);
     if(keystate == WK_ABSENT)  wd_slash(x, y, w, kh);
 }
+/* a plain bordered command button (OK / DEL) with a vertically-centred caption,
+ * drawn in the grid margin. Wider than a key so the whole word clears the border. */
+static void wd_button(int x,int y,int w,int h,const char *label){
+    wd_rect(x, y, w, h, 1);
+    canvas_text(g_wd_cv, &lv_font_palm, label,
+                x + (w - canvas_text_w(&lv_font_palm, label))/2, y + (h-14)/2, 1);
+}
 /* the legend under the grid: a mini sample of each mark + a short caption, so the
  * three tile states are self-explanatory without a separate help screen. */
 static void wd_legend(void){
@@ -4357,9 +4377,10 @@ static void wd_render(void){
     for(int i=0;i<9;i++){  char ch=WD_KROW[1][i]; wd_key(12+i*24,   y0+WD_KEYH,   24, NULL, ch, g_wd.key[ch-'A']); }
     wd_legend();
     int y2 = y0 + 2*WD_KEYH;
-    wd_key(2, y2, 34, "OK", 0, WK_UNUSED);
     for(int i=0;i<7;i++){ char ch=WD_KROW[2][i]; wd_key(36+i*24,    y2,           24, NULL, ch, g_wd.key[ch-'A']); }
-    wd_key(204, y2, 34, "DEL", 0, WK_UNUSED);
+    /* OK / DEL beside the grid (see WD_BTN* -- keeps them off the letter row) */
+    wd_button(WD_OKX,  WD_BTNY, WD_BTNW, WD_BTNH, "OK");
+    wd_button(WD_DELX, WD_BTNY, WD_BTNW, WD_BTNH, "DEL");
 
     if(g_wd_status){
         char st[24] = "";
@@ -4378,16 +4399,18 @@ static void wd_do_enter(void){
         else if(prev == WD_PLAY && g_wd.state == WD_LOST) g_wd_streak = 0;
     }
 }
+static int wd_in(int lx,int ly,int x,int y,int w,int h){ return lx>=x && lx<x+w && ly>=y && ly<y+h; }
 static void wd_key_tap(int lx,int ly){
-    if(ly < WD_KY0) return;                                  /* taps above the keyboard: ignore */
-    int row = (ly - WD_KY0) / WD_KEYH;
-    if(row == 0){ int i = lx/24; if(i>=0 && i<10) wd_addch(&g_wd, WD_KROW[0][i]); }
-    else if(row == 1){ if(lx<12) return; int i=(lx-12)/24; if(i>=0 && i<9) wd_addch(&g_wd, WD_KROW[1][i]); }
-    else if(row == 2){
-        if(lx < 36)        wd_do_enter();
-        else if(lx >= 204) wd_del(&g_wd);
-        else { int i=(lx-36)/24; if(i>=0 && i<7) wd_addch(&g_wd, WD_KROW[2][i]); }
-    } else return;
+    if(wd_in(lx,ly, WD_OKX,  WD_BTNY, WD_BTNW, WD_BTNH))      wd_do_enter();  /* OK (submit) */
+    else if(wd_in(lx,ly, WD_DELX, WD_BTNY, WD_BTNW, WD_BTNH)) wd_del(&g_wd);  /* DEL (backspace) */
+    else if(ly < WD_KY0) return;                             /* rest of the grid area: ignore */
+    else {
+        int row = (ly - WD_KY0) / WD_KEYH;
+        if(row == 0){ int i = lx/24; if(i>=0 && i<10) wd_addch(&g_wd, WD_KROW[0][i]); }
+        else if(row == 1){ if(lx<12) return; int i=(lx-12)/24; if(i>=0 && i<9) wd_addch(&g_wd, WD_KROW[1][i]); }
+        else if(row == 2){ if(lx<36) return; int i=(lx-36)/24; if(i>=0 && i<7) wd_addch(&g_wd, WD_KROW[2][i]); }
+        else return;
+    }
     wd_render();
     wd_save();
 }
@@ -4465,10 +4488,32 @@ static void show_wordie(void){
 #define SD_HOLES 45                         /* ~36 clues: an approachable board */
 
 static SdGame    g_sd;
-static lv_obj_t *g_sd_cv, *g_sd_status;
+static lv_obj_t *g_sd_cv, *g_sd_status, *g_sd_timelbl;
 static int       g_sd_sel;                  /* selected cell index 0..80, or -1 */
 static uint32_t  g_sd_seq;
+static uint32_t  g_sd_start;                /* epoch of the first digit placed (0 = not started) */
+static uint32_t  g_sd_end;                  /* epoch the puzzle was solved (0 = still running) */
+static uint32_t  g_sd_best;                 /* best (fastest) solve in seconds (0 = none yet) */
 static uint8_t   sd_buf[LV_CANVAS_BUF_SIZE(SDCW, SDCH, 1, 1) + 16];
+
+/* elapsed solve seconds: 0 before the first digit, live while solving, frozen once
+ * solved. Wall-clock based like Mines -- leaving mid-puzzle keeps counting, which
+ * only makes that attempt slower, so it can never corrupt the best time. */
+static uint32_t sd_elapsed(void){
+    if(!g_sd_start) return 0;
+    uint32_t now = (uint32_t)time(NULL);
+    uint32_t end = g_sd_end ? g_sd_end : now;
+    return end > g_sd_start ? end - g_sd_start : 0;
+}
+/* fill the time/best readout (shared format with Mines). */
+static void sd_time_text(void){
+    if(!g_sd_timelbl) return;
+    char tb[8], bb[8];
+    ms_fmt_mmss(sd_elapsed(), tb, sizeof tb);
+    if(g_sd_best){ ms_fmt_mmss(g_sd_best, bb, sizeof bb);
+                   lv_label_set_text_fmt(g_sd_timelbl, "%s  Best %s", tb, bb); }
+    else           lv_label_set_text_fmt(g_sd_timelbl, "%s  Best --", tb);
+}
 
 static void sdpx(int x,int y,int v){
     if(!g_sd_cv || x<0 || y<0 || x>=SDCW || y>=SDCH) return;
@@ -4527,16 +4572,24 @@ static void sd_render(void){
         if(g_sd.state==SD_SOLVED) lv_label_set_text(g_sd_status, "Solved!");
         else lv_label_set_text_fmt(g_sd_status, "%d left", sd_remaining(&g_sd));
     }
+    sd_time_text();
+}
+/* 1 Hz tick (created once in ui_init): keep the solve clock live while playing. */
+static void sd_tick(lv_timer_t *t){ (void)t;
+    if(g_sd_active && g_sd_timelbl && g_sd.state==SD_PLAY && g_sd_start) sd_time_text();
 }
 
 #define SD_SAV       "/sdcard/sudoku.sav"
-#define SD_SAV_MAGIC 0x53444B31u                 /* "SDK1" */
+#define SD_SAV_MAGIC 0x53444B32u                 /* "SDK2" (bumped: now carries timer + best) */
 static void sd_save(void){
     FILE *f = fopen(SD_SAV, "wb"); if(!f) return;
     uint32_t magic = SD_SAV_MAGIC;
     fwrite(&magic, sizeof magic, 1, f);
     fwrite(&g_sd, sizeof g_sd, 1, f);
     fwrite(&g_sd_sel, sizeof g_sd_sel, 1, f);
+    fwrite(&g_sd_start, sizeof g_sd_start, 1, f);
+    fwrite(&g_sd_end,   sizeof g_sd_end,   1, f);
+    fwrite(&g_sd_best,  sizeof g_sd_best,  1, f);
     fclose(f);
 }
 static int sd_load(void){
@@ -4546,6 +4599,10 @@ static int sd_load(void){
        fread(&tmp, sizeof tmp, 1, f) == 1){
         g_sd = tmp; ok = 1;
         if(fread(&g_sd_sel, sizeof g_sd_sel, 1, f) != 1 || g_sd_sel < 0 || g_sd_sel >= SD_CELLS) g_sd_sel = -1;
+        /* timer + best follow the board; tolerate a truncated (older) file */
+        if(fread(&g_sd_start, sizeof g_sd_start, 1, f) != 1) g_sd_start = 0;
+        if(fread(&g_sd_end,   sizeof g_sd_end,   1, f) != 1) g_sd_end   = 0;
+        if(fread(&g_sd_best,  sizeof g_sd_best,  1, f) != 1) g_sd_best  = 0;
     }
     fclose(f);
     return ok;
@@ -4559,12 +4616,19 @@ static void sd_select_first_blank(void){
 static void sd_new_game(void){
     sd_new(&g_sd, (uint32_t)time(NULL) ^ (g_sd_seq++ * 2654435761u), SD_HOLES);
     sd_select_first_blank();
+    g_sd_start = g_sd_end = 0;              /* clock starts on the first digit; best is kept */
 }
 static void sd_place(int val){          /* apply a digit (or 0=clear) to the selection */
     if(g_sd_sel < 0) return;
     int r = g_sd_sel/9, c = g_sd_sel%9;
     if(sd_is_given(&g_sd, r, c)) return;
-    sd_set(&g_sd, r, c, val);
+    if(!sd_set(&g_sd, r, c, val)) return;                 /* no change -> nothing to do */
+    if(val && !g_sd_start){ g_sd_start = (uint32_t)time(NULL); g_sd_end = 0; }  /* first digit -> start clock */
+    if(g_sd.state == SD_SOLVED && g_sd_end == 0){         /* just solved -> freeze + score */
+        g_sd_end = (uint32_t)time(NULL);
+        uint32_t el = sd_elapsed();
+        if(el && (g_sd_best == 0 || el < g_sd_best)) g_sd_best = el;            /* new best time */
+    }
     sd_render();
     sd_save();
 }
@@ -4598,22 +4662,14 @@ static void sd_newbtn_cb(lv_event_t *e){ (void)e;
 }
 static void show_sudoku(void){
     kill_kb(); cur_app=NULL; cur_uid=0;
-    g_sd_cv = g_sd_status = NULL;
+    g_sd_cv = g_sd_status = g_sd_timelbl = NULL;
     lv_obj_clean(content);
     lv_label_set_text(title_lbl, "Sudoku");
     update_cat_trigger();
 
-    g_sd_status = lv_label_create(content);
-    lv_obj_set_style_text_font(g_sd_status, &lv_font_palm, 0);
-    lv_obj_align(g_sd_status, LV_ALIGN_TOP_LEFT, 6, 4);
-
-    lv_obj_t *nb = lv_button_create(content);
-    lv_obj_set_style_radius(nb, 0, 0);
-    lv_obj_set_style_pad_all(nb, 2, 0);
-    lv_obj_align(nb, LV_ALIGN_TOP_RIGHT, -4, 1);
-    lv_obj_add_event_cb(nb, sd_newbtn_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *nl = lv_label_create(nb); lv_label_set_text(nl, "New");
-
+    /* Canvas FIRST so the header widgets draw ON TOP of its top edge: the board
+     * fills the content height exactly, so a header created after it would have its
+     * lower border clipped by the canvas (that was the New button's missing bottom). */
     g_sd_cv = lv_canvas_create(content);
     lv_canvas_set_buffer(g_sd_cv, sd_buf, SDCW, SDCH, LV_COLOR_FORMAT_I1);
     lv_canvas_set_palette(g_sd_cv, 0, lv_color_to_32(COL_BODY, 0xFF));
@@ -4623,8 +4679,24 @@ static void show_sudoku(void){
     lv_obj_clear_flag(g_sd_cv, LV_OBJ_FLAG_SCROLLABLE);      /* resistive-robust (see News/Mines) */
     lv_obj_add_event_cb(g_sd_cv, sd_tap_cb, LV_EVENT_PRESSED, NULL);
 
+    g_sd_status = lv_label_create(content);
+    lv_obj_set_style_text_font(g_sd_status, &lv_font_palm, 0);
+    lv_obj_align(g_sd_status, LV_ALIGN_TOP_LEFT, 6, 4);
+
+    g_sd_timelbl = lv_label_create(content);     /* live solve clock + best, centred in the header */
+    lv_obj_set_style_text_font(g_sd_timelbl, &lv_font_palm, 0);
+    lv_obj_align(g_sd_timelbl, LV_ALIGN_TOP_MID, 6, 4);
+
+    lv_obj_t *nb = lv_button_create(content);
+    lv_obj_set_style_radius(nb, 0, 0);
+    lv_obj_set_style_pad_all(nb, 2, 0);
+    lv_obj_align(nb, LV_ALIGN_TOP_RIGHT, -4, 1);
+    lv_obj_add_event_cb(nb, sd_newbtn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *nl = lv_label_create(nb); lv_label_set_text(nl, "New");
+
     if(!sd_load()) sd_new_game();
     if(g_sd_sel < 0) sd_select_first_blank();
+    g_sd_active = 1;                              /* let sd_tick update the clock (cleared in kill_kb) */
     sd_render();
     graf_char_hook = sudoku_input;         /* AFTER kill_kb cleared it: route strokes here */
 }
@@ -4789,5 +4861,6 @@ void ui_init(void){
      * locked clock fresh; the port layer re-raises the lock on every wake. */
     lv_timer_create(dash_tick, 15000, NULL);
     lv_timer_create(ms_tick, 1000, NULL);        /* live Mines clock (no-op unless it's showing) */
+    lv_timer_create(sd_tick, 1000, NULL);        /* live Sudoku clock (no-op unless it's showing) */
     ui_show_lock();
 }

@@ -82,6 +82,26 @@ int main(void){
     sd_set(&g,rr,rc,0);
     CK(sd_conflict(&g,rr,rc)==0, "cleared cell no longer conflicts");
 
+    /* a WRONG-but-feasible digit is NOT a conflict: only true rule violations
+     * (row/col/box duplicates) get flagged in the UI. Compute the unique solution,
+     * then find a blank cell that admits a legal digit other than its solution
+     * value and assert placing it raises no conflict. */
+    uint8_t soln[81]; memcpy(soln, g.given, 81); tst_fill(soln,0);
+    int fr=-1,fc=-1,fv=0;
+    for(int r=0;r<9 && fr<0;r++) for(int c=0;c<9 && fr<0;c++){
+        if(sd_is_given(&g,r,c) || sd_at(&g,r,c)) continue;      /* blank, editable cell */
+        for(int v=1;v<=9;v++){
+            if(v==soln[r*9+c]) continue;                        /* skip the correct answer */
+            if(can_place(g.cell,r*9+c,v)){ fr=r; fc=c; fv=v; break; }   /* legal but wrong */
+        }
+    }
+    CK(fr>=0, "found a blank cell with a feasible-but-wrong digit");
+    sd_set(&g,fr,fc,fv);
+    CK(sd_at(&g,fr,fc)==fv, "feasible-but-wrong digit landed");
+    CK(sd_conflict(&g,fr,fc)==0, "feasible-but-wrong digit is NOT flagged (no slash)");
+    CK(fv != soln[fr*9+fc], "...and it really is the wrong answer");
+    sd_set(&g,fr,fc,0);
+
     /* solving it: compute the unique solution with the reference solver, then fill
      * every blank of a fresh copy of the same puzzle -> SD_SOLVED. */
     uint8_t full[81]; memcpy(full, g.given, 81);
