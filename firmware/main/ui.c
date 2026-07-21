@@ -4160,6 +4160,50 @@ static void show_minesweeper(void){
     ms_render();
 }
 
+/* ---- draw real system-font glyphs onto a 1-bpp canvas -------------------------
+ * The games render everything onto ONE I1 canvas (dozens of grid cells + keys as
+ * separate widgets would exhaust the 24 KB LVGL object pool). lv_font_palm is a
+ * 1-bpp font, so we can copy its glyph bitmaps pixel-for-pixel onto the canvas --
+ * the SAME shapes the rest of the UI's labels use, with no widget and no draw
+ * layer. `v` is the palette index to paint (1 = ink/black, 0 = knockout/white).
+ * These mirror LVGL's own fmt_txt 1-bpp unpacking (bits are MSB-first, packed
+ * continuously across rows). */
+static void canvas_glyph_at(lv_obj_t *cv, const lv_font_t *font, uint32_t uni, int x, int y, int v){
+    lv_font_glyph_dsc_t g;
+    if(!lv_font_get_glyph_dsc(font, &g, uni, 0)) return;
+    const lv_font_fmt_txt_dsc_t *fdsc = (const lv_font_fmt_txt_dsc_t *)g.resolved_font->dsc;
+    const lv_font_fmt_txt_glyph_dsc_t *gd = &fdsc->glyph_dsc[g.gid.index];
+    const uint8_t *bits = &fdsc->glyph_bitmap[gd->bitmap_index];
+    lv_color_t col = { .blue = (uint8_t)(v ? 1 : 0) };
+    int bw = g.box_w, bh = g.box_h, i = 0;
+    for(int gy=0; gy<bh; gy++) for(int gx=0; gx<bw; gx++, i++)
+        if(bits[i>>3] & (0x80 >> (i&7)))
+            lv_canvas_set_px(cv, x+gx, y+gy, col, LV_OPA_COVER);
+}
+/* glyph centred on point (cx,cy) -- for a single char in a cell/key. */
+static void canvas_glyph_c(lv_obj_t *cv, const lv_font_t *font, uint32_t uni, int cx, int cy, int v){
+    lv_font_glyph_dsc_t g;
+    if(!lv_font_get_glyph_dsc(font, &g, uni, 0)) return;
+    canvas_glyph_at(cv, font, uni, cx - g.box_w/2, cy - g.box_h/2, v);
+}
+/* pixel width of a string in `font` (sum of advances). */
+static int canvas_text_w(const lv_font_t *font, const char *s){
+    int w = 0;
+    for(; *s; s++){ lv_font_glyph_dsc_t g;
+        if(lv_font_get_glyph_dsc(font, &g, (uint32_t)(uint8_t)*s, 0)) w += g.adv_w >> 4; }
+    return w;
+}
+/* left-aligned string at (x,y-top); returns width drawn. */
+static int canvas_text(lv_obj_t *cv, const lv_font_t *font, const char *s, int x, int y, int v){
+    int x0 = x;
+    for(; *s; s++){ lv_font_glyph_dsc_t g;
+        if(!lv_font_get_glyph_dsc(font, &g, (uint32_t)(uint8_t)*s, 0)) continue;
+        canvas_glyph_at(cv, font, (uint32_t)(uint8_t)*s, x, y, v);
+        x += g.adv_w >> 4;
+    }
+    return x - x0;
+}
+
 /* ========================= Wordie (Games) ==================================
  * A five-letter, six-guess word game (wordie.c holds the pure logic). The guess
  * grid AND an on-screen QWERTY keyboard are drawn mono on ONE 1-bpp canvas, so it
@@ -4184,14 +4228,14 @@ static const uint8_t WD_FONT[26][6] = {
 };
 
 #define WDCW   240                          /* canvas size */
-#define WDCH   152
+#define WDCH   160
 #define WD_CW  22                           /* grid cell w/h */
-#define WD_CH  14
+#define WD_CH  16                           /* tile height: fits the 14px Palm glyph with margin */
 #define WD_GX0 65                           /* grid origin ((240-5*22)/2) */
-#define WD_GY0 1
-#define WD_LEGY 87                          /* legend strip (below the 6x14 grid) */
-#define WD_KY0 100                          /* keyboard top; 3 rows of WD_KEYH */
-#define WD_KEYH 17
+#define WD_GY0 0
+#define WD_LEGY 98                          /* legend strip (below the 6x16 grid) */
+#define WD_KY0 112                          /* keyboard top; 3 rows of WD_KEYH */
+#define WD_KEYH 16
 
 static WdGame    g_wd;
 static lv_obj_t *g_wd_cv, *g_wd_status;
@@ -4253,33 +4297,32 @@ static void wd_slash(int x,int y,int w,int h){               /* one corner-to-co
 static void wd_tab(int x,int y,int w,int sz){
     for(int j=0;j<sz;j++) for(int i=0;i<=j;i++) wdpx(x+w-1-i, y+1+j, 1);
 }
+/* a letter is drawn in the real Palm system font (canvas_glyph_c), nudged down 1px
+ * so the caps sit optically centred in the tile. */
+static void wd_letter(int cx,int cy,char ch,int v){ canvas_glyph_c(g_wd_cv, &lv_font_palm, (uint32_t)(uint8_t)ch, cx, cy+1, v); }
 /* one grid cell / key tile: state = WD_ABSENT/PRESENT/CORRECT, or -1 empty, -2 typed. */
 static void wd_tile(int x,int y,int w,int h,char ch,int state){
-    int letx = x + (w-10)/2, lety = y + (h-12)/2;           /* letter is 10x12 (5x6 @2) */
     if(state == WD_CORRECT){
         wd_fill(x, y, w, h, 1);
-        if(ch) wd_glyph(letx, lety, ch, 2, 0);              /* knockout */
+        if(ch) wd_letter(x+w/2, y+h/2, ch, 0);              /* knockout (white) letter */
         return;
     }
     wd_rect(x, y, w, h, 1);
-    if(ch) wd_glyph(letx, lety, ch, 2, 1);
+    if(ch) wd_letter(x+w/2, y+h/2, ch, 1);
     if(state == WD_PRESENT) wd_tab(x, y, w, 6);             /* corner tab = in the word */
     if(state == WD_ABSENT)  wd_slash(x+1, y+1, w-2, h-2);   /* slash = not in the word */
 }
 static void wd_key(int x,int y,int w,const char *label,char ch,int keystate){
     int kh = WD_KEYH - 2;
-    int gy = y + (kh-12)/2;
     if(keystate == WK_CORRECT){
         wd_fill(x, y, w, kh, 1);
-        if(ch) wd_glyph(x+(w-10)/2, gy, ch, 2, 0);
+        if(ch) wd_letter(x+w/2, y+kh/2, ch, 0);
         return;
     }
     wd_rect(x, y, w, kh, 1);
-    if(ch) wd_glyph(x+(w-10)/2, gy, ch, 2, 1);
-    else if(label){                                          /* ENTER/DEL: scale-1 caption */
-        int lw = (int)strlen(label)*6 - 1, lx = x + (w-lw)/2;
-        for(const char *p=label; *p; p++){ wd_glyph(lx, y+(kh-6)/2, *p, 1, 1); lx += 6; }
-    }
+    if(ch) wd_letter(x+w/2, y+kh/2, ch, 1);
+    else if(label)                                          /* OK / DEL caption, Palm font */
+        canvas_text(g_wd_cv, &lv_font_palm, label, x + (w - canvas_text_w(&lv_font_palm, label))/2, y + (kh-14)/2, 1);
     if(keystate == WK_PRESENT) wd_tab(x, y, w, 5);
     if(keystate == WK_ABSENT)  wd_slash(x, y, w, kh);
 }
@@ -4394,7 +4437,7 @@ static void show_wordie(void){
     lv_canvas_set_buffer(g_wd_cv, wd_buf, WDCW, WDCH, LV_COLOR_FORMAT_I1);
     lv_canvas_set_palette(g_wd_cv, 0, lv_color_to_32(COL_BODY, 0xFF));
     lv_canvas_set_palette(g_wd_cv, 1, lv_color_to_32(COL_LINE, 0xFF));
-    lv_obj_align(g_wd_cv, LV_ALIGN_TOP_MID, 0, 28);
+    lv_obj_align(g_wd_cv, LV_ALIGN_TOP_MID, 0, 24);
     lv_obj_add_flag(g_wd_cv, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(g_wd_cv, LV_OBJ_FLAG_SCROLLABLE);      /* resistive-robust (see News/Mines) */
     lv_obj_add_event_cb(g_wd_cv, wd_tap_cb, LV_EVENT_PRESSED, NULL);
@@ -4438,13 +4481,6 @@ static void sd_box(int x,int y,int w,int h){
     for(int i=0;i<w;i++){ sdpx(x+i,y,1); sdpx(x+i,y+h-1,1); }
     for(int j=0;j<h;j++){ sdpx(x,y+j,1); sdpx(x+w-1,y+j,1); }
 }
-/* a 4x7 digit (reusing DASH_DIG) at scale s, top-left (x,y). */
-static void sd_digit(int x,int y,int d,int s){
-    if(d<1||d>9) return;
-    const uint8_t *g = DASH_DIG[d];
-    for(int r=0;r<7;r++) for(int c=0;c<4;c++) if(g[r] & (8>>c))
-        for(int dy=0;dy<s;dy++) for(int dx=0;dx<s;dx++) sdpx(x+c*s+dx, y+r*s+dy, 1);
-}
 static void sd_slash(int x,int y,int w,int h){        /* top-left -> bottom-right */
     int steps = (w>h?w:h); if(steps<2) return;
     for(int i=0;i<steps;i++) sdpx(x + i*(w-1)/(steps-1), y + i*(h-1)/(steps-1), 1);
@@ -4474,8 +4510,7 @@ static void sd_render(void){
         int p = r*9 + c, v = g_sd.cell[p];
         if(g_sd.given[p]) for(int j=0;j<4;j++) for(int i=0;i<=j;i++) sdpx(x+2+i, y+2+j, 1);  /* clue tab */
         if(v){
-            int dx = x + (SD_CELL-8)/2, dy = y + (SD_CELL-14)/2;   /* 8x14 = 4x7 @2 */
-            sd_digit(dx, dy, v, 2);
+            canvas_glyph_c(g_sd_cv, &lv_font_palm, (uint32_t)('0'+v), x+SD_CELL/2, y+SD_CELL/2+1, 1);
             if(!g_sd.given[p] && sd_conflict(&g_sd, r, c)) sd_slash(x+3, y+3, SD_CELL-6, SD_CELL-6);
         }
         if(p == g_sd_sel){ sd_box(x+1, y+1, SD_CELL-1, SD_CELL-1);
@@ -4485,7 +4520,7 @@ static void sd_render(void){
     for(int k=0;k<10;k++){
         int x = k*SD_PKW, y = SD_PY0;
         sd_box(x, y, SD_PKW, SD_PKH);
-        if(k<9) sd_digit(x + (SD_PKW-8)/2, y + (SD_PKH-14)/2, k+1, 2);
+        if(k<9) canvas_glyph_c(g_sd_cv, &lv_font_palm, (uint32_t)('1'+k), x+SD_PKW/2, y+SD_PKH/2+1, 1);
         else    sd_ex(x + (SD_PKW-10)/2, y+3, 10, SD_PKH-6);      /* X = erase */
     }
     if(g_sd_status){

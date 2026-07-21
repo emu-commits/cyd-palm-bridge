@@ -414,18 +414,18 @@ t 300
 c 120 55
 t 400
 s wordie_open
-c 24 175
+c 24 183
 t 60
-c 156 157
+c 156 167
 t 60
-c 72 175
+c 72 183
 t 60
-c 180 157
+c 180 167
 t 60
-c 204 157
+c 204 167
 t 80
 s wordie_typed
-c 18 193
+c 18 199
 t 300
 s wordie_scored
 c 18 225

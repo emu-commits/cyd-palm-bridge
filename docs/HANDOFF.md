@@ -7,6 +7,19 @@ trainer's full Tier 1–5 analysis).
 
 _Last updated: 2026-07-21 (Sudoku; Mines timer/high-score; Wordie font/legend/streak; lock-screen seven-seg clock + world-clock settings; game-state persistence)._
 
+## Games now use the real Palm font (2026-07-21)
+
+Wordie and Sudoku drew hand-rolled bitmap fonts on their I1 canvas (the rest of the
+UI uses `lv_font_palm` via `lv_label`, but the games can't host dozens of label
+widgets without blowing the 24 KB object pool). Fixed properly: `lv_font_palm` is
+**1-bpp**, so its glyph bitmaps copy pixel-for-pixel onto the 1-bpp game canvas --
+identical shapes to the labels, no widget, no draw layer, pool-safe (smoke32 peak
+still 612 B). New shared helpers in `ui.c`: `canvas_glyph_at` / `canvas_glyph_c` /
+`canvas_text` / `canvas_text_w` (they mirror LVGL's own fmt_txt 1-bpp unpacking).
+Sudoku digits and Wordie grid/keyboard letters are now the authentic Palm system
+font. Wordie's canvas grew to 160 px (tile height 16) to give the 14 px glyph a
+margin; the small custom font survives only for the tiny legend captions.
+
 ## This batch (2026-07-21)
 
 Four areas, one PR:
