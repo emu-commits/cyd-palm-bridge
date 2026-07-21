@@ -184,10 +184,11 @@ static void (*graf_char_hook)(char c);
 static int  (*graf_capture_hook)(void);
 static int  g_trainer_open;      /* the Graffiti trainer is the live screen (menu Reset) */
 static int  g_kana_open;         /* the Kana trainer is the live screen (menu Reset) */
+static int  g_ms_active;         /* the Mines screen is live (1 Hz timer tick guard) */
 static void kill_kb(void){
     g_form=NULL; active_ta=NULL; edit_cat_lbl=NULL; g_listtbl=NULL; g_findtbl=NULL;
     graf_char_hook=NULL; graf_capture_hook=NULL;
-    g_trainer_open=0; g_kana_open=0;
+    g_trainer_open=0; g_kana_open=0; g_ms_active=0;
     free_rowuids();
     free_finds();
     kill_hs();
@@ -3823,10 +3824,27 @@ static void dash_tick(lv_timer_t *t){ (void)t; if(g_lock) dash_paint(); }
 #define MSCW (MSW*MSC+1)
 #define MSCH (MSH*MSC+1)
 static MsGame    g_ms;
-static lv_obj_t *g_ms_cv, *g_ms_status, *g_ms_modelbl;
+static lv_obj_t *g_ms_cv, *g_ms_status, *g_ms_modelbl, *g_ms_timelbl;
 static int       g_ms_flag;                     /* 1 = taps place flags, 0 = dig */
 static uint32_t  g_ms_seq;                       /* varies the board each New */
+static uint32_t  g_ms_start;                     /* epoch of the first dig (0 = not started) */
+static uint32_t  g_ms_end;                       /* epoch the game ended (0 = still running) */
+static uint32_t  g_ms_best;                      /* best winning time in seconds (0 = none yet) */
 static uint8_t   ms_buf[LV_CANVAS_BUF_SIZE(MSCW, MSCH, 1, 1) + 16];
+
+/* elapsed play seconds: 0 before the first dig, live while playing, frozen at the
+ * end. A simple wall clock -- leaving the app mid-game keeps counting, which only
+ * ever makes that attempt slower, so it can't corrupt the best time. */
+static uint32_t ms_elapsed(void){
+    if(!g_ms_start) return 0;
+    uint32_t now = (uint32_t)time(NULL);
+    uint32_t end = g_ms_end ? g_ms_end : now;
+    return end > g_ms_start ? end - g_ms_start : 0;
+}
+static void ms_fmt_mmss(uint32_t sec, char *out, int cap){
+    if(sec > 5999) sec = 5999;                   /* cap the readout at 99:59 */
+    snprintf(out, cap, "%u:%02u", sec/60, sec%60);
+}
 
 static void mpx(int x,int y){
     if(!g_ms_cv || x<0 || y<0 || x>=MSCW || y>=MSCH) return;
@@ -3864,11 +3882,29 @@ static void ms_render(void){
         else if(g_ms.state==MS_LOST)lv_label_set_text(g_ms_status, "Boom! tap New");
         else lv_label_set_text_fmt(g_ms_status, "%d mines - %d flags", g_ms.mines, ms_flags(&g_ms));
     }
+    if(g_ms_timelbl){
+        char tb[8], bb[8];
+        ms_fmt_mmss(ms_elapsed(), tb, sizeof tb);
+        if(g_ms_best){ ms_fmt_mmss(g_ms_best, bb, sizeof bb);
+                       lv_label_set_text_fmt(g_ms_timelbl, "Time %s   Best %s", tb, bb); }
+        else           lv_label_set_text_fmt(g_ms_timelbl, "Time %s   Best --", tb);
+    }
+}
+/* 1 Hz tick (created once in ui_init): keep the on-screen clock live while playing. */
+static void ms_tick(lv_timer_t *t){ (void)t;
+    if(g_ms_active && g_ms_timelbl && g_ms.state==MS_PLAY && g_ms_start){
+        char tb[8]; ms_fmt_mmss(ms_elapsed(), tb, sizeof tb);
+        char bb[8];
+        if(g_ms_best){ ms_fmt_mmss(g_ms_best, bb, sizeof bb);
+                       lv_label_set_text_fmt(g_ms_timelbl, "Time %s   Best %s", tb, bb); }
+        else           lv_label_set_text_fmt(g_ms_timelbl, "Time %s   Best --", tb);
+    }
 }
 static void ms_new_game(void){
     time_t t=0; time(&t);
     ms_new(&g_ms, MSW, MSH, MSMINES, (uint32_t)t ^ (g_ms_seq++ * 2654435761u));
     g_ms_flag = 0;
+    g_ms_start = g_ms_end = 0;                    /* timer starts on the first dig; best is kept */
 }
 
 /* Persist the in-progress board so it survives leaving the app. MsGame is plain
@@ -3876,12 +3912,15 @@ static void ms_new_game(void){
  * magic + size + w/h guard against a stale/foreign file. Saved after each move
  * and on New; restored when the screen reopens. */
 #define MS_SAV       "/sdcard/mines.sav"
-#define MS_SAV_MAGIC 0x4D534731u                 /* "MSG1" */
+#define MS_SAV_MAGIC 0x4D534732u                 /* "MSG2" (bumped: now carries timer + best) */
 static void ms_save(void){
     FILE *f = fopen(MS_SAV, "wb"); if(!f) return;
     uint32_t magic = MS_SAV_MAGIC;
     fwrite(&magic, sizeof magic, 1, f);
     fwrite(&g_ms, sizeof g_ms, 1, f);
+    fwrite(&g_ms_start, sizeof g_ms_start, 1, f);
+    fwrite(&g_ms_end,   sizeof g_ms_end,   1, f);
+    fwrite(&g_ms_best,  sizeof g_ms_best,  1, f);
     fclose(f);
 }
 static int ms_load(void){
@@ -3890,6 +3929,10 @@ static int ms_load(void){
     if(fread(&magic, sizeof magic, 1, f) == 1 && magic == MS_SAV_MAGIC &&
        fread(&tmp, sizeof tmp, 1, f) == 1 && tmp.w == MSW && tmp.h == MSH){
         g_ms = tmp; ok = 1;
+        /* timer + best follow the board; tolerate a truncated (older) file */
+        if(fread(&g_ms_start, sizeof g_ms_start, 1, f) != 1) g_ms_start = 0;
+        if(fread(&g_ms_end,   sizeof g_ms_end,   1, f) != 1) g_ms_end   = 0;
+        if(fread(&g_ms_best,  sizeof g_ms_best,  1, f) != 1) g_ms_best  = 0;
     }
     fclose(f);
     return ok;
@@ -3900,7 +3943,16 @@ static void ms_tap_cb(lv_event_t *e){ (void)e;
     int lx=p.x-a.x1, ly=p.y-a.y1;
     if(lx<0||ly<0||lx>=MSCW||ly>=MSCH) return;
     int c=lx/MSC, r=ly/MSC;
+    int wasfirst = g_ms.first;
     if(g_ms_flag) ms_flag(&g_ms,r,c); else ms_reveal(&g_ms,r,c);
+    if(wasfirst && !g_ms.first){ g_ms_start = (uint32_t)time(NULL); g_ms_end = 0; }  /* first dig -> start clock */
+    if(g_ms.state != MS_PLAY && g_ms_end == 0){                                       /* game just ended -> freeze */
+        g_ms_end = (uint32_t)time(NULL);
+        if(g_ms.state == MS_WON){
+            uint32_t el = ms_elapsed();
+            if(el && (g_ms_best == 0 || el < g_ms_best)) g_ms_best = el;              /* new high score */
+        }
+    }
     ms_render();
     ms_save();
 }
@@ -3916,13 +3968,17 @@ static void ms_newbtn_cb(lv_event_t *e){ (void)e;
 }
 static void show_minesweeper(void){
     kill_kb(); cur_app=NULL; cur_uid=0;
-    g_ms_cv=g_ms_status=g_ms_modelbl=NULL;
+    g_ms_cv=g_ms_status=g_ms_modelbl=g_ms_timelbl=NULL;
     lv_obj_clean(content);
-    lv_label_set_text(title_lbl, "Minesweeper");
+    lv_label_set_text(title_lbl, "Mines");
     update_cat_trigger();
 
     g_ms_status = lv_label_create(content);
     lv_obj_align(g_ms_status, LV_ALIGN_TOP_LEFT, 6, 5);
+
+    g_ms_timelbl = lv_label_create(content);     /* live timer + best time, below the board */
+    lv_obj_set_style_text_font(g_ms_timelbl, &lv_font_palm, 0);
+    lv_obj_align(g_ms_timelbl, LV_ALIGN_BOTTOM_LEFT, 6, -1);
 
     lv_obj_t *mode = lv_button_create(content);
     lv_obj_set_style_radius(mode, 0, 0);
@@ -3953,6 +4009,7 @@ static void show_minesweeper(void){
 
     if(!ms_load()) ms_new_game();
     g_ms_flag = 0;                              /* restored board opens in Dig mode */
+    g_ms_active = 1;                            /* let ms_tick update the clock (cleared in kill_kb) */
     ms_render();
 }
 
@@ -3961,34 +4018,38 @@ static void show_minesweeper(void){
  * grid AND an on-screen QWERTY keyboard are drawn mono on ONE 1-bpp canvas, so it
  * stays pool-cheap (one canvas + a couple of labels/buttons -- no per-cell widgets
  * that would blow the 24 KB object pool). Taps hit-test into keys; the physical
- * Graffiti strip also types letters. Mono state language, applied to both the grid
- * cells and the keys:
- *     CORRECT  -> solid black tile, knockout (white) letter
- *     PRESENT  -> double border, black letter
- *     ABSENT   -> border + a diagonal slash through the letter ("eliminated")
+ * Graffiti strip also types letters. Mono state language, applied to the grid
+ * cells and the keys (explained by the on-screen legend under the grid):
+ *     CORRECT  -> solid black tile, knockout (white) letter   ("right spot")
+ *     PRESENT  -> letter + a filled corner tab                ("in the word")
+ *     ABSENT   -> letter + a diagonal slash                   ("not in it")
  *     typed    -> single border, black letter   (empty -> single border only)   */
 
-/* compact 5x7 uppercase font (bit4 = leftmost of 5), rendered by wd_glyph. */
-static const uint8_t WD_FONT[26][7] = {
-  {14,17,17,31,17,17,17},{30,17,30,17,17,17,30},{14,17,16,16,16,17,14},{28,18,17,17,17,18,28},{31,16,30,16,16,16,31},{31,16,30,16,16,16,16},
-  {14,17,16,23,17,17,15},{17,17,31,17,17,17,17},{31,4,4,4,4,4,31},{7,2,2,2,18,18,12},{17,18,20,24,20,18,17},{16,16,16,16,16,16,31},
-  {17,27,21,21,17,17,17},{17,25,21,19,17,17,17},{14,17,17,17,17,17,14},{30,17,17,30,16,16,16},{14,17,17,17,21,18,13},{30,17,17,30,20,18,17},
-  {15,16,16,14,1,1,30},{31,4,4,4,4,4,4},{17,17,17,17,17,17,14},{17,17,17,17,17,10,4},{17,17,17,21,21,27,17},{17,17,10,4,10,17,17},
-  {17,17,10,4,4,4,4},{31,1,2,4,8,16,31},
+/* Clean 5x6 uppercase font (cap-height 6, bit4 = leftmost of 5), rendered by
+ * wd_glyph at scale 2 (10x12 px). Shorter than the old 5x7 so the letter clears
+ * the tile edges with a margin instead of touching the bottom. */
+static const uint8_t WD_FONT[26][6] = {
+  {14,17,17,31,17,17},{30,17,30,17,17,30},{15,16,16,16,16,15},{30,17,17,17,17,30},{31,16,30,16,16,31},{31,16,30,16,16,16}, /* A-F */
+  {15,16,23,17,17,14},{17,17,31,17,17,17},{31,4,4,4,4,31},{7,2,2,2,18,12},{17,18,28,18,17,17},{16,16,16,16,16,31},       /* G-L */
+  {17,27,21,17,17,17},{17,25,21,19,17,17},{14,17,17,17,17,14},{30,17,30,16,16,16},{14,17,17,21,18,13},{30,17,30,20,18,17}, /* M-R */
+  {15,16,14,1,1,30},{31,4,4,4,4,4},{17,17,17,17,17,14},{17,17,17,17,10,4},{17,17,17,21,21,10},{17,10,4,4,10,17},           /* S-X */
+  {17,10,4,4,4,4},{31,2,4,8,16,31},                                                                                      /* Y-Z */
 };
 
 #define WDCW   240                          /* canvas size */
 #define WDCH   152
 #define WD_CW  22                           /* grid cell w/h */
-#define WD_CH  15
-#define WD_GX0 65                           /* grid origin ((240-5*22)/2, 2) */
-#define WD_GY0 2
-#define WD_KY0 96                           /* keyboard top; 3 rows of WD_KEYH */
-#define WD_KEYH 18
+#define WD_CH  14
+#define WD_GX0 65                           /* grid origin ((240-5*22)/2) */
+#define WD_GY0 1
+#define WD_LEGY 87                          /* legend strip (below the 6x14 grid) */
+#define WD_KY0 100                          /* keyboard top; 3 rows of WD_KEYH */
+#define WD_KEYH 17
 
 static WdGame    g_wd;
 static lv_obj_t *g_wd_cv, *g_wd_status;
 static uint32_t  g_wd_seq;
+static uint32_t  g_wd_streak;                /* consecutive solves (persisted) */
 static uint8_t   wd_buf[LV_CANVAS_BUF_SIZE(WDCW, WDCH, 1, 1) + 16];
 static const char *WD_KROW[3] = { "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM" };
 
@@ -3997,12 +4058,13 @@ static const char *WD_KROW[3] = { "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM" };
  * foreign file). Saved after each keystroke/submit and on New; restored on open,
  * so a half-finished guess grid is exactly where you left it. */
 #define WD_SAV       "/sdcard/wordie.sav"
-#define WD_SAV_MAGIC 0x57444731u                 /* "WDG1" */
+#define WD_SAV_MAGIC 0x57444732u                 /* "WDG2" (bumped: now carries the streak) */
 static void wd_save(void){
     FILE *f = fopen(WD_SAV, "wb"); if(!f) return;
     uint32_t magic = WD_SAV_MAGIC;
     fwrite(&magic, sizeof magic, 1, f);
     fwrite(&g_wd, sizeof g_wd, 1, f);
+    fwrite(&g_wd_streak, sizeof g_wd_streak, 1, f);
     fclose(f);
 }
 static int wd_load(void){
@@ -4012,6 +4074,7 @@ static int wd_load(void){
        fread(&tmp, sizeof tmp, 1, f) == 1 &&
        tmp.answer[0] >= 'A' && tmp.answer[0] <= 'Z' && tmp.nrows <= WD_ROWS){
         g_wd = tmp; ok = 1;
+        if(fread(&g_wd_streak, sizeof g_wd_streak, 1, f) != 1) g_wd_streak = 0;
     }
     fclose(f);
     return ok;
@@ -4022,10 +4085,10 @@ static void wdpx(int x,int y,int v){
     lv_color_t col = { .blue = (uint8_t)(v ? 1 : 0) };       /* I1: blue&1 = palette idx */
     lv_canvas_set_px(g_wd_cv, x, y, col, LV_OPA_COVER);
 }
-static void wd_glyph(int x,int y,char ch,int s,int v){       /* ch at (x,y), scale s */
+static void wd_glyph(int x,int y,char ch,int s,int v){       /* ch at (x,y), scale s; 5x6 */
     if(ch<'A' || ch>'Z') return;
     const uint8_t *g = WD_FONT[ch-'A'];
-    for(int r=0;r<7;r++) for(int c=0;c<5;c++) if(g[r] & (16>>c))
+    for(int r=0;r<6;r++) for(int c=0;c<5;c++) if(g[r] & (16>>c))
         for(int dy=0;dy<s;dy++) for(int dx=0;dx<s;dx++) wdpx(x+c*s+dx, y+r*s+dy, v);
 }
 static void wd_rect(int x,int y,int w,int h,int v){
@@ -4037,34 +4100,56 @@ static void wd_slash(int x,int y,int w,int h){               /* one corner-to-co
     int steps = (w>h?w:h); if(steps<2) return;
     for(int i=0;i<steps;i++) wdpx(x + i*(w-1)/(steps-1), y + i*(h-1)/(steps-1), 1);
 }
+/* a solid right-triangle tab in the top-right corner -- the PRESENT marker (letter
+ * is in the word, wrong spot). Clearly distinct from CORRECT (whole tile filled)
+ * and ABSENT (slash), and it never collides with the centred letter. */
+static void wd_tab(int x,int y,int w,int sz){
+    for(int j=0;j<sz;j++) for(int i=0;i<=j;i++) wdpx(x+w-1-i, y+1+j, 1);
+}
 /* one grid cell / key tile: state = WD_ABSENT/PRESENT/CORRECT, or -1 empty, -2 typed. */
 static void wd_tile(int x,int y,int w,int h,char ch,int state){
-    int letx = x + (w-10)/2, lety = y + (h-14)/2;           /* letter is 10x14 (5x7 @2) */
+    int letx = x + (w-10)/2, lety = y + (h-12)/2;           /* letter is 10x12 (5x6 @2) */
     if(state == WD_CORRECT){
         wd_fill(x, y, w, h, 1);
         if(ch) wd_glyph(letx, lety, ch, 2, 0);              /* knockout */
         return;
     }
     wd_rect(x, y, w, h, 1);
-    if(state == WD_PRESENT) wd_rect(x+2, y+2, w-4, h-4, 1); /* double border */
     if(ch) wd_glyph(letx, lety, ch, 2, 1);
-    if(state == WD_ABSENT) wd_slash(x+1, y+1, w-2, h-2);
+    if(state == WD_PRESENT) wd_tab(x, y, w, 6);             /* corner tab = in the word */
+    if(state == WD_ABSENT)  wd_slash(x+1, y+1, w-2, h-2);   /* slash = not in the word */
 }
 static void wd_key(int x,int y,int w,const char *label,char ch,int keystate){
     int kh = WD_KEYH - 2;
+    int gy = y + (kh-12)/2;
     if(keystate == WK_CORRECT){
         wd_fill(x, y, w, kh, 1);
-        if(ch) wd_glyph(x+(w-10)/2, y+2, ch, 2, 0);
+        if(ch) wd_glyph(x+(w-10)/2, gy, ch, 2, 0);
         return;
     }
     wd_rect(x, y, w, kh, 1);
-    if(keystate == WK_PRESENT) wd_rect(x+2, y+2, w-4, kh-4, 1);
-    if(ch) wd_glyph(x+(w-10)/2, y+2, ch, 2, 1);
+    if(ch) wd_glyph(x+(w-10)/2, gy, ch, 2, 1);
     else if(label){                                          /* ENTER/DEL: scale-1 caption */
         int lw = (int)strlen(label)*6 - 1, lx = x + (w-lw)/2;
-        for(const char *p=label; *p; p++){ wd_glyph(lx, y+(kh-7)/2, *p, 1, 1); lx += 6; }
+        for(const char *p=label; *p; p++){ wd_glyph(lx, y+(kh-6)/2, *p, 1, 1); lx += 6; }
     }
-    if(keystate == WK_ABSENT) wd_slash(x, y, w, kh);
+    if(keystate == WK_PRESENT) wd_tab(x, y, w, 5);
+    if(keystate == WK_ABSENT)  wd_slash(x, y, w, kh);
+}
+/* the legend under the grid: a mini sample of each mark + a short caption, so the
+ * three tile states are self-explanatory without a separate help screen. */
+static void wd_legend(void){
+    struct { int x; int st; const char *cap; } it[3] = {
+        { 8,   WD_CORRECT, "SPOT" },   /* right letter, right spot */
+        { 92,  WD_PRESENT, "WORD" },   /* right letter, wrong spot */
+        { 176, WD_ABSENT,  "NONE" },   /* not in the word          */
+    };
+    for(int k=0;k<3;k++){
+        int x = it[k].x, y = WD_LEGY;
+        wd_tile(x, y, 12, 12, 0, it[k].st);                 /* blank sample tile */
+        int tx = x + 16;
+        for(const char *p=it[k].cap; *p; p++){ wd_glyph(tx, y+3, *p, 1, 1); tx += 6; }
+    }
 }
 static void wd_render(void){
     if(!g_wd_cv) return;
@@ -4080,15 +4165,27 @@ static void wd_render(void){
     int y0 = WD_KY0;
     for(int i=0;i<10;i++){ char ch=WD_KROW[0][i]; wd_key(i*24,      y0,           24, NULL, ch, g_wd.key[ch-'A']); }
     for(int i=0;i<9;i++){  char ch=WD_KROW[1][i]; wd_key(12+i*24,   y0+WD_KEYH,   24, NULL, ch, g_wd.key[ch-'A']); }
+    wd_legend();
     int y2 = y0 + 2*WD_KEYH;
     wd_key(2, y2, 34, "OK", 0, WK_UNUSED);
     for(int i=0;i<7;i++){ char ch=WD_KROW[2][i]; wd_key(36+i*24,    y2,           24, NULL, ch, g_wd.key[ch-'A']); }
     wd_key(204, y2, 34, "DEL", 0, WK_UNUSED);
 
     if(g_wd_status){
-        if(g_wd.state == WD_WON)       lv_label_set_text_fmt(g_wd_status, "Solved in %d!", g_wd.nrows);
+        char st[16] = "";
+        if(g_wd_streak) snprintf(st, sizeof st, "  Streak %u", g_wd_streak);
+        if(g_wd.state == WD_WON)       lv_label_set_text_fmt(g_wd_status, "Solved in %d!%s", g_wd.nrows, st);
         else if(g_wd.state == WD_LOST) lv_label_set_text_fmt(g_wd_status, "Answer: %s", g_wd.answer);
-        else                           lv_label_set_text_fmt(g_wd_status, "Guess %d/%d", g_wd.nrows+1, WD_ROWS);
+        else                           lv_label_set_text_fmt(g_wd_status, "Guess %d/%d%s", g_wd.nrows+1, WD_ROWS, st);
+    }
+}
+/* submit the current row and fold the result into the win streak: a solve bumps
+ * it, a loss resets it. Only wd_enter can end a game, so this is the one hook. */
+static void wd_do_enter(void){
+    int prev = g_wd.state;
+    if(wd_enter(&g_wd)){
+        if(prev == WD_PLAY && g_wd.state == WD_WON)  g_wd_streak++;
+        else if(prev == WD_PLAY && g_wd.state == WD_LOST) g_wd_streak = 0;
     }
 }
 static void wd_key_tap(int lx,int ly){
@@ -4097,7 +4194,7 @@ static void wd_key_tap(int lx,int ly){
     if(row == 0){ int i = lx/24; if(i>=0 && i<10) wd_addch(&g_wd, WD_KROW[0][i]); }
     else if(row == 1){ if(lx<12) return; int i=(lx-12)/24; if(i>=0 && i<9) wd_addch(&g_wd, WD_KROW[1][i]); }
     else if(row == 2){
-        if(lx < 36)        wd_enter(&g_wd);
+        if(lx < 36)        wd_do_enter();
         else if(lx >= 204) wd_del(&g_wd);
         else { int i=(lx-36)/24; if(i>=0 && i<7) wd_addch(&g_wd, WD_KROW[2][i]); }
     } else return;
@@ -4113,7 +4210,7 @@ static void wd_tap_cb(lv_event_t *e){ (void)e;
  * newline gesture submits (set as graf_char_hook while the screen is open). */
 static void wordie_input(char c){
     if(c == '\b')      wd_del(&g_wd);
-    else if(c == '\n') wd_enter(&g_wd);
+    else if(c == '\n') wd_do_enter();
     else if((c>='a'&&c<='z')||(c>='A'&&c<='Z')) wd_addch(&g_wd, c);
     else return;
     wd_render();
@@ -4318,5 +4415,6 @@ void ui_init(void){
      * build (the 64-bit native sim's 48 KB pool hid it). A 15 s timer keeps the
      * locked clock fresh; the port layer re-raises the lock on every wake. */
     lv_timer_create(dash_tick, 15000, NULL);
+    lv_timer_create(ms_tick, 1000, NULL);        /* live Mines clock (no-op unless it's showing) */
     ui_show_lock();
 }
