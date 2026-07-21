@@ -3632,7 +3632,8 @@ static void dseg_v(int x,int yc,int len,int t){          /* vertical bar, top y=
         for(int y=yc+in;y<=yc+len-in;y++) dpx(x+i,y); }
 }
 static void dash_digit7(int x,int y,int d,int L,int t){
-    if(d<0||d>9) return; uint8_t m=SEG7[d];
+    if(d<0||d>9) return;
+    uint8_t m=SEG7[d];
     if(m&1)  dseg_h(x,   y,     L, t);    /* a top       */
     if(m&2)  dseg_v(x+L, y,     L, t);    /* b top-right */
     if(m&4)  dseg_v(x+L, y+L,   L, t);    /* c bot-right */
