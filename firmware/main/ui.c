@@ -30,6 +30,7 @@
 #include "dash.h"         /* lock-screen dashboard: weather cache + moon/sun math */
 #include "minesweeper.h"  /* Games: Minesweeper board logic */
 #include "wordie.h"       /* Games: Wordie word-game logic */
+#include "sudoku.h"       /* Games: Sudoku board logic */
 #include "lvgl.h"
 #include <string.h>
 #include <strings.h>      /* strncasecmp for the Address Look Up filter */
@@ -66,6 +67,7 @@ static void show_news(void);
 static void show_games(void);
 static void show_minesweeper(void);
 static void show_wordie(void);
+static void show_sudoku(void);
 static void show_app(const char *name);
 
 /* a borderless, non-scrolling panel with a solid fill */
@@ -4401,17 +4403,208 @@ static void show_wordie(void){
     graf_char_hook = wordie_input;         /* AFTER kill_kb cleared it: route strokes here */
 }
 
+/* ========================= Sudoku (Games) ==================================
+ * A 9x9 Sudoku (sudoku.c holds the pure generator + rules). The board AND a
+ * number pad are drawn mono on ONE 1-bpp canvas (pool-cheap, like Wordie). The
+ * on-brand input is the Graffiti digit strip -- draw 1-9 to fill the selected
+ * cell, backspace to clear -- and the number pad gives the same by tap. Clue
+ * cells carry a filled corner tab and can't be edited; a rule-breaking entry gets
+ * a slash; the selected cell gets a thick border. */
+#define SDCW    240
+#define SDCH    164
+#define SD_CELL 16                          /* grid cell px -> 9*16 = 144 */
+#define SD_GX0  ((240 - 9*SD_CELL)/2)       /* = 48, centred */
+#define SD_GY0  0
+#define SD_PY0  146                         /* number pad top */
+#define SD_PKW  24                          /* 10 keys * 24 = 240 */
+#define SD_PKH  17
+#define SD_HOLES 45                         /* ~36 clues: an approachable board */
+
+static SdGame    g_sd;
+static lv_obj_t *g_sd_cv, *g_sd_status;
+static int       g_sd_sel;                  /* selected cell index 0..80, or -1 */
+static uint32_t  g_sd_seq;
+static uint8_t   sd_buf[LV_CANVAS_BUF_SIZE(SDCW, SDCH, 1, 1) + 16];
+
+static void sdpx(int x,int y,int v){
+    if(!g_sd_cv || x<0 || y<0 || x>=SDCW || y>=SDCH) return;
+    lv_color_t col = { .blue = (uint8_t)(v ? 1 : 0) };
+    lv_canvas_set_px(g_sd_cv, x, y, col, LV_OPA_COVER);
+}
+static void sd_hline(int x0,int x1,int y){ for(int x=x0;x<=x1;x++) sdpx(x,y,1); }
+static void sd_vline(int x,int y0,int y1){ for(int y=y0;y<=y1;y++) sdpx(x,y,1); }
+static void sd_box(int x,int y,int w,int h){
+    for(int i=0;i<w;i++){ sdpx(x+i,y,1); sdpx(x+i,y+h-1,1); }
+    for(int j=0;j<h;j++){ sdpx(x,y+j,1); sdpx(x+w-1,y+j,1); }
+}
+/* a 4x7 digit (reusing DASH_DIG) at scale s, top-left (x,y). */
+static void sd_digit(int x,int y,int d,int s){
+    if(d<1||d>9) return;
+    const uint8_t *g = DASH_DIG[d];
+    for(int r=0;r<7;r++) for(int c=0;c<4;c++) if(g[r] & (8>>c))
+        for(int dy=0;dy<s;dy++) for(int dx=0;dx<s;dx++) sdpx(x+c*s+dx, y+r*s+dy, 1);
+}
+static void sd_slash(int x,int y,int w,int h){        /* top-left -> bottom-right */
+    int steps = (w>h?w:h); if(steps<2) return;
+    for(int i=0;i<steps;i++) sdpx(x + i*(w-1)/(steps-1), y + i*(h-1)/(steps-1), 1);
+}
+static void sd_ex(int x,int y,int w,int h){           /* an "X" (both diagonals) */
+    int steps = (w>h?w:h); if(steps<2) return;
+    for(int i=0;i<steps;i++){
+        sdpx(x + i*(w-1)/(steps-1),         y + i*(h-1)/(steps-1), 1);
+        sdpx(x + (w-1) - i*(w-1)/(steps-1), y + i*(h-1)/(steps-1), 1);
+    }
+}
+static void sd_render(void){
+    if(!g_sd_cv) return;
+    lv_color_t bg = { .blue = 0 };
+    lv_canvas_fill_bg(g_sd_cv, bg, LV_OPA_COVER);
+
+    /* grid: thin cell lines, doubled on the 3x3 box boundaries */
+    for(int i=0;i<=9;i++){
+        int gx = SD_GX0 + i*SD_CELL, gy = SD_GY0 + i*SD_CELL;
+        sd_vline(gx, SD_GY0, SD_GY0 + 9*SD_CELL);
+        sd_hline(SD_GX0, SD_GX0 + 9*SD_CELL, gy);
+        if(i%3==0){ sd_vline(gx+1, SD_GY0, SD_GY0 + 9*SD_CELL);
+                    sd_hline(SD_GX0, SD_GX0 + 9*SD_CELL, gy+1); }
+    }
+    for(int r=0;r<9;r++) for(int c=0;c<9;c++){
+        int x = SD_GX0 + c*SD_CELL, y = SD_GY0 + r*SD_CELL;
+        int p = r*9 + c, v = g_sd.cell[p];
+        if(g_sd.given[p]) for(int j=0;j<4;j++) for(int i=0;i<=j;i++) sdpx(x+2+i, y+2+j, 1);  /* clue tab */
+        if(v){
+            int dx = x + (SD_CELL-8)/2, dy = y + (SD_CELL-14)/2;   /* 8x14 = 4x7 @2 */
+            sd_digit(dx, dy, v, 2);
+            if(!g_sd.given[p] && sd_conflict(&g_sd, r, c)) sd_slash(x+3, y+3, SD_CELL-6, SD_CELL-6);
+        }
+        if(p == g_sd_sel){ sd_box(x+1, y+1, SD_CELL-1, SD_CELL-1);
+                           sd_box(x+2, y+2, SD_CELL-3, SD_CELL-3); }
+    }
+    /* number pad: 1..9 then an erase key (X) */
+    for(int k=0;k<10;k++){
+        int x = k*SD_PKW, y = SD_PY0;
+        sd_box(x, y, SD_PKW, SD_PKH);
+        if(k<9) sd_digit(x + (SD_PKW-8)/2, y + (SD_PKH-14)/2, k+1, 2);
+        else    sd_ex(x + (SD_PKW-10)/2, y+3, 10, SD_PKH-6);      /* X = erase */
+    }
+    if(g_sd_status){
+        if(g_sd.state==SD_SOLVED) lv_label_set_text(g_sd_status, "Solved!");
+        else lv_label_set_text_fmt(g_sd_status, "%d left", sd_remaining(&g_sd));
+    }
+}
+
+#define SD_SAV       "/sdcard/sudoku.sav"
+#define SD_SAV_MAGIC 0x53444B31u                 /* "SDK1" */
+static void sd_save(void){
+    FILE *f = fopen(SD_SAV, "wb"); if(!f) return;
+    uint32_t magic = SD_SAV_MAGIC;
+    fwrite(&magic, sizeof magic, 1, f);
+    fwrite(&g_sd, sizeof g_sd, 1, f);
+    fwrite(&g_sd_sel, sizeof g_sd_sel, 1, f);
+    fclose(f);
+}
+static int sd_load(void){
+    FILE *f = fopen(SD_SAV, "rb"); if(!f) return 0;
+    uint32_t magic = 0; SdGame tmp; int ok = 0;
+    if(fread(&magic, sizeof magic, 1, f) == 1 && magic == SD_SAV_MAGIC &&
+       fread(&tmp, sizeof tmp, 1, f) == 1){
+        g_sd = tmp; ok = 1;
+        if(fread(&g_sd_sel, sizeof g_sd_sel, 1, f) != 1 || g_sd_sel < 0 || g_sd_sel >= SD_CELLS) g_sd_sel = -1;
+    }
+    fclose(f);
+    return ok;
+}
+/* pick the first empty, non-clue cell as the initial selection (so Graffiti works
+ * right away); -1 if the board is full. */
+static void sd_select_first_blank(void){
+    g_sd_sel = -1;
+    for(int p=0;p<SD_CELLS;p++) if(!g_sd.given[p] && !g_sd.cell[p]){ g_sd_sel = p; return; }
+}
+static void sd_new_game(void){
+    sd_new(&g_sd, (uint32_t)time(NULL) ^ (g_sd_seq++ * 2654435761u), SD_HOLES);
+    sd_select_first_blank();
+}
+static void sd_place(int val){          /* apply a digit (or 0=clear) to the selection */
+    if(g_sd_sel < 0) return;
+    int r = g_sd_sel/9, c = g_sd_sel%9;
+    if(sd_is_given(&g_sd, r, c)) return;
+    sd_set(&g_sd, r, c, val);
+    sd_render();
+    sd_save();
+}
+static void sd_key_tap(int lx,int ly){
+    if(ly >= SD_GY0 && ly < SD_GY0 + 9*SD_CELL && lx >= SD_GX0 && lx < SD_GX0 + 9*SD_CELL){
+        int c = (lx - SD_GX0)/SD_CELL, r = (ly - SD_GY0)/SD_CELL;     /* select a cell */
+        if(r>=0 && r<9 && c>=0 && c<9){ g_sd_sel = r*9 + c; sd_render(); sd_save(); }
+        return;
+    }
+    if(ly >= SD_PY0 && ly < SD_PY0 + SD_PKH){                          /* number pad */
+        int k = lx / SD_PKW;
+        if(k>=0 && k<9)      sd_place(k+1);
+        else if(k==9)        sd_place(0);
+    }
+}
+static void sd_tap_cb(lv_event_t *e){ (void)e;
+    lv_point_t p; lv_indev_get_point(lv_indev_active(), &p);
+    lv_area_t a; lv_obj_get_coords(g_sd_cv, &a);
+    sd_key_tap(p.x - a.x1, p.y - a.y1);
+}
+/* the Graffiti strip drives Sudoku: a digit fills the selected cell, backspace or
+ * '0' clears it (set as graf_char_hook while the screen is open). */
+static void sudoku_input(char c){
+    if(c>='1' && c<='9') sd_place(c - '0');
+    else if(c=='\b' || c=='0') sd_place(0);
+}
+static void sd_newbtn_cb(lv_event_t *e){ (void)e;
+    sd_new_game();
+    sd_render();
+    sd_save();
+}
+static void show_sudoku(void){
+    kill_kb(); cur_app=NULL; cur_uid=0;
+    g_sd_cv = g_sd_status = NULL;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, "Sudoku");
+    update_cat_trigger();
+
+    g_sd_status = lv_label_create(content);
+    lv_obj_set_style_text_font(g_sd_status, &lv_font_palm, 0);
+    lv_obj_align(g_sd_status, LV_ALIGN_TOP_LEFT, 6, 4);
+
+    lv_obj_t *nb = lv_button_create(content);
+    lv_obj_set_style_radius(nb, 0, 0);
+    lv_obj_set_style_pad_all(nb, 2, 0);
+    lv_obj_align(nb, LV_ALIGN_TOP_RIGHT, -4, 1);
+    lv_obj_add_event_cb(nb, sd_newbtn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *nl = lv_label_create(nb); lv_label_set_text(nl, "New");
+
+    g_sd_cv = lv_canvas_create(content);
+    lv_canvas_set_buffer(g_sd_cv, sd_buf, SDCW, SDCH, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_palette(g_sd_cv, 0, lv_color_to_32(COL_BODY, 0xFF));
+    lv_canvas_set_palette(g_sd_cv, 1, lv_color_to_32(COL_LINE, 0xFF));
+    lv_obj_align(g_sd_cv, LV_ALIGN_TOP_MID, 0, 20);
+    lv_obj_add_flag(g_sd_cv, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(g_sd_cv, LV_OBJ_FLAG_SCROLLABLE);      /* resistive-robust (see News/Mines) */
+    lv_obj_add_event_cb(g_sd_cv, sd_tap_cb, LV_EVENT_PRESSED, NULL);
+
+    if(!sd_load()) sd_new_game();
+    if(g_sd_sel < 0) sd_select_first_blank();
+    sd_render();
+    graf_char_hook = sudoku_input;         /* AFTER kill_kb cleared it: route strokes here */
+}
+
 /* The Games "folder": an icon grid mirroring the app launcher (each game is a
  * tappable icon + label), so it reads as a sub-folder of the main launcher rather
  * than a list of text buttons. Add a game by extending GAMES[] + its dispatch. */
-static const char           *GAMES[]      = { "Mines", "Wordie" };
-static const lv_image_dsc_t *GAME_ICONS[] = { &icon_mines, &icon_wordie };
+static const char           *GAMES[]      = { "Mines", "Wordie", "Sudoku" };
+static const lv_image_dsc_t *GAME_ICONS[] = { &icon_mines, &icon_wordie, &icon_sudoku };
 #define NGAMES ((int)(sizeof(GAMES)/sizeof(GAMES[0])))
 
 static void games_pick_cb(lv_event_t *e){
     const char *g = lv_event_get_user_data(e);
     if(!strcmp(g,"Mines"))       show_minesweeper();
     else if(!strcmp(g,"Wordie")) show_wordie();
+    else if(!strcmp(g,"Sudoku")) show_sudoku();
 }
 static void show_games(void){
     kill_kb(); cur_app=NULL; cur_uid=0;

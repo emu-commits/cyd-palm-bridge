@@ -377,7 +377,7 @@ t 300
 c 169 160
 t 300
 s games_menu
-c 70 55
+c 40 55
 t 400
 s minesweeper
 # on the fresh board every cell is unrevealed: switch to Flag mode and flag one
@@ -399,7 +399,7 @@ t 300
 # mines_dug, not a fresh board.
 c 169 160
 t 300
-c 70 55
+c 40 55
 t 400
 s mines_persist
 c 18 225
@@ -411,7 +411,7 @@ t 300
 # hit-test via PRESSED. (The physical Graffiti strip also types letters on the device.)
 c 169 160
 t 300
-c 169 55
+c 120 55
 t 400
 s wordie_open
 c 24 175
@@ -435,9 +435,31 @@ t 300
 # wordie_persist must match wordie_scored, not a fresh daily.
 c 169 160
 t 300
-c 169 55
+c 120 55
 t 400
 s wordie_persist
+c 18 225
+t 300
+# Sudoku: the third game in the folder. Open Games, tap the Sudoku tile (right icon).
+# The 9x9 board + a number pad are ONE pool-cheap I1 canvas; clue cells carry a corner
+# tab, the first blank is pre-selected (thick border). Tap a number-pad digit to fill
+# it (the physical Graffiti strip also enters digits on the device), then reopen from
+# the folder to confirm the in-progress board persists (saved to /sdcard).
+c 169 160
+t 300
+c 198 55
+t 400
+s sudoku_open
+c 108 196
+t 300
+s sudoku_entered
+c 18 225
+t 300
+c 169 160
+t 300
+c 198 55
+t 400
+s sudoku_persist
 c 18 225
 t 300
 # I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.
