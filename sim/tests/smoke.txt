@@ -260,7 +260,15 @@ m 120 50
 t 30
 u
 t 400
-c 120 140
+d 120 190
+t 30
+m 120 100
+t 30
+m 120 50
+t 30
+u
+t 400
+c 120 90
 t 400
 s prefs_brightness
 c 52 175
@@ -270,6 +278,22 @@ t 300
 s prefs_brightness_stepped
 c 120 30
 t 400
+# Dashboard settings (new): with the prefs list scrolled to the tail, "Lock
+# screen..." sits second from bottom. Open it -> the Lock Screen sub-screen (two
+# world clocks + 12/24h), screenshot, then tap "World clock 1" -> the shared zone
+# picker (lv_table, pool-safe like the timezone picker; a regression HANGS or
+# exhausts the 24 KB pool). Cancel back (no write, so config/dashboard stay at
+# defaults), then Prefs -> home.
+c 120 178
+t 400
+s dash_settings
+c 120 45
+t 400
+s world_picker
+c 32 16
+t 300
+c 30 15
+t 300
 c 18 225
 t 300
 # Graffiti with the C1 ink trail: screenshot MID-stroke, then after recognition

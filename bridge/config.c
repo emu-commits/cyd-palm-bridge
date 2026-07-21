@@ -19,8 +19,11 @@ void config_defaults(Config *c){
     memset(c, 0, sizeof *c);
     setstr(c->dav_base,      sizeof c->dav_base,      "https://caldav.icloud.com");
     setstr(c->dav_card_base, sizeof c->dav_card_base, "https://contacts.icloud.com");
+    setstr(c->world1,        sizeof c->world1,        "Europe/London");   /* lock-screen defaults */
+    setstr(c->world2,        sizeof c->world2,        "Asia/Tokyo");
     c->brightness    = 80;
     c->backlight_sec = 30;     /* dim after 30 s idle */
+    c->clock24       = 0;      /* 12-hour by default */
     c->policy        = CFG_POL_SERVER;
 }
 
@@ -57,8 +60,11 @@ static void apply(Config *c, const char *key, const char *val){
     else if(!strcasecmp(key,"todo_coll")) setstr(c->todo_coll,     sizeof c->todo_coll, val);
     else if(!strcasecmp(key,"card_coll")) setstr(c->card_coll,     sizeof c->card_coll, val);
     else if(!strcasecmp(key,"timezone"))  setstr(c->timezone,      sizeof c->timezone, val);
+    else if(!strcasecmp(key,"world1"))    setstr(c->world1,        sizeof c->world1, val);
+    else if(!strcasecmp(key,"world2"))    setstr(c->world2,        sizeof c->world2, val);
     else if(!strcasecmp(key,"brightness"))    c->brightness    = clampi(atoi(val),0,100);
     else if(!strcasecmp(key,"backlight_sec")) c->backlight_sec = clampi(atoi(val),0,3600);
+    else if(!strcasecmp(key,"clock24"))       c->clock24       = clampi(atoi(val),0,1);
     else if(!strcasecmp(key,"policy"))        c->policy        = config_policy_from_str(val);
     /* unknown key: ignored */
 }
@@ -96,8 +102,11 @@ int config_save(const char *path, const Config *c){
     fprintf(f,"todo_coll = %s\n",     c->todo_coll);
     fprintf(f,"card_coll = %s\n",     c->card_coll);
     fprintf(f,"timezone = %s\n",      c->timezone);
+    fprintf(f,"world1 = %s\n",        c->world1);
+    fprintf(f,"world2 = %s\n",        c->world2);
     fprintf(f,"brightness = %d\n",    c->brightness);
     fprintf(f,"backlight_sec = %d\n", c->backlight_sec);
+    fprintf(f,"clock24 = %d\n",       c->clock24);
     fprintf(f,"policy = %s\n",        config_policy_to_str(c->policy));
     fclose(f);
     return 0;

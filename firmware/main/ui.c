@@ -136,6 +136,9 @@ static void list_view(const AppDef *ad);
 static void show_detail(uint32_t uid);
 static void show_edit(uint32_t uid);
 static void show_prefs(void);
+static void show_dash_settings(void);                          /* Lock Screen settings sub-screen */
+static void world_tag(const char *zone, char *out, int cap);   /* 3-letter world-clock tag */
+static lv_obj_t *pf_add(lv_obj_t *list, const char *text, lv_event_cb_t cb, int ud);
 static void show_discover(void);
 static void show_feeds(void);
 static void show_feed_edit(int idx);
@@ -2168,24 +2171,49 @@ static void show_feed_edit(int idx){
  * Built on lv_table (virtualized), NOT an lv_list of ~24 buttons -- that many
  * buttons exhausted the 24 KB LVGL pool and froze the device (draw-task WDT),
  * the same failure class the record list hit. The table row index == zone index. */
-static void tz_cancel_cb(lv_event_t *e){ (void)e; show_prefs(); }
+/* The same picker serves the system time zone AND the two lock-screen world
+ * clocks -- g_zone_target selects which config field a tap writes. World targets
+ * get a leading "(off)" row so a slot can be cleared; the system zone has none. */
+enum { ZTGT_TZ = 0, ZTGT_W1 = 1, ZTGT_W2 = 2 };
+static int g_zone_target;
+static char *zone_target_buf(Config *c, int *cap){
+    switch(g_zone_target){
+        case ZTGT_W1: *cap=sizeof c->world1; return c->world1;
+        case ZTGT_W2: *cap=sizeof c->world2; return c->world2;
+        default:      *cap=sizeof c->timezone; return c->timezone;
+    }
+}
+/* the picker returns to Preferences for the system zone, or to the Lock Screen
+ * sub-screen for a world clock. */
+static void zone_picker_return(void){
+    if(g_zone_target==ZTGT_TZ) show_prefs(); else show_dash_settings();
+}
+static void tz_cancel_cb(lv_event_t *e){ (void)e; zone_picker_return(); }
 static void tz_tbl_click_cb(lv_event_t *e){
     lv_obj_t *t = lv_event_get_target(e);
     uint32_t r=LV_TABLE_CELL_NONE, c=LV_TABLE_CELL_NONE;
     lv_table_get_selected_cell(t, &r, &c);
-    if(r==LV_TABLE_CELL_NONE || (int)r >= clock_zone_count()) return;
-    const char *z = clock_zone_name((int)r);
+    if(r==LV_TABLE_CELL_NONE) return;
+    int off = (g_zone_target==ZTGT_TZ) ? 0 : 1;   /* world pickers have a "(off)" row 0 */
     Config *cfg = appcfg_mut();
-    snprintf(cfg->timezone, sizeof cfg->timezone, "%s", z);
-    clock_set_tz(z);          /* apply now so the clock/desc update immediately */
+    int cap=0; char *dst = zone_target_buf(cfg, &cap);
+    if(off && (int)r == 0){ dst[0] = 0; }         /* "(off)" -> clear the slot */
+    else {
+        int zi = (int)r - off;
+        if(zi < 0 || zi >= clock_zone_count()) return;
+        const char *z = clock_zone_name(zi);
+        snprintf(dst, cap, "%s", z);
+        if(g_zone_target==ZTGT_TZ) clock_set_tz(z);   /* apply the system zone immediately */
+    }
     appcfg_save();            /* persist to SD now -> survives reboot */
-    show_prefs();
+    zone_picker_return();
 }
-static void show_tz_picker(void){
+static void show_zone_picker(int target){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    g_zone_target = target;
     lv_obj_clean(content);
-    lv_label_set_text(title_lbl, "Time Zone");
+    lv_label_set_text(title_lbl, target==ZTGT_TZ ? "Time Zone" : "World Clock");
     update_cat_trigger();
 
     lv_obj_t *cancel = lv_button_create(content);
@@ -2193,12 +2221,15 @@ static void show_tz_picker(void){
     lv_obj_t *cl=lv_label_create(cancel); lv_label_set_text(cl,"Cancel"); lv_obj_center(cl);
     lv_obj_add_event_cb(cancel, tz_cancel_cb, LV_EVENT_CLICKED, NULL);
 
-    /* header: current zone + live offset/DST status */
-    const Config *c = appcfg();
-    char desc[40]; clock_now_desc(desc, sizeof desc);
+    /* header: the field's current value (+ live offset/DST for the system zone) */
+    int cap=0; const char *cur = zone_target_buf(appcfg_mut(), &cap);
     char hdr[128];
-    snprintf(hdr, sizeof hdr, "%s\n%s",
-             (c->timezone[0]) ? c->timezone : "(unset)", desc);
+    if(target==ZTGT_TZ){
+        char desc[40]; clock_now_desc(desc, sizeof desc);
+        snprintf(hdr, sizeof hdr, "%s\n%s", cur[0]?cur:"(unset)", desc);
+    } else {
+        snprintf(hdr, sizeof hdr, "Clock %d\n%s", target, cur[0]?cur:"(off)");
+    }
     lv_obj_t *hl = lv_label_create(content);
     lv_label_set_text(hl, hdr);
     lv_obj_set_pos(hl, 68, 6);
@@ -2210,21 +2241,64 @@ static void show_tz_picker(void){
     lv_obj_set_style_border_width(t, 0, 0);
     lv_obj_set_style_pad_all(t, 4, LV_PART_ITEMS);
     lv_table_set_column_width(t, 0, LCD_W - 8);
-    int n = clock_zone_count();
-    for(int i=0;i<n;i++) lv_table_set_cell_value(t, i, 0, clock_zone_name(i));
+    int off = (target==ZTGT_TZ) ? 0 : 1, n = clock_zone_count();
+    if(off) lv_table_set_cell_value(t, 0, 0, "(off)");
+    for(int i=0;i<n;i++) lv_table_set_cell_value(t, i+off, 0, clock_zone_name(i));
     lv_obj_add_event_cb(t, tz_tbl_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
+}
+
+/* ---- Lock Screen sub-screen: the dashboard's two world clocks + 12/24h format.
+ * A light lv_list (3 rows + a Back button), so it adds nothing to the Preferences
+ * list's pool footprint. World-clock rows open the shared zone picker; the format
+ * row toggles in place. */
+static void ds_back_cb(lv_event_t *e){ (void)e; show_prefs(); }
+static void ds_world1_cb(lv_event_t *e){ (void)e; show_zone_picker(ZTGT_W1); }
+static void ds_world2_cb(lv_event_t *e){ (void)e; show_zone_picker(ZTGT_W2); }
+static void ds_fmt_cb(lv_event_t *e){ (void)e;
+    Config *c = appcfg_mut(); c->clock24 = !c->clock24; appcfg_save(); show_dash_settings();
+}
+static void show_dash_settings(void){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, "Lock Screen");
+    update_cat_trigger();
+
+    lv_obj_t *back = lv_button_create(content);
+    lv_obj_set_size(back, 58, 26); lv_obj_align(back, LV_ALIGN_TOP_LEFT, 2, 2);
+    lv_obj_t *bl=lv_label_create(back); lv_label_set_text(bl,"Prefs"); lv_obj_center(bl);
+    lv_obj_add_event_cb(back, ds_back_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *list = lv_list_create(content);
+    lv_obj_set_size(list, LCD_W, PDA_H - TITLE_H - 32);
+    lv_obj_align(list, LV_ALIGN_TOP_MID, 0, 32);
+    lv_obj_set_style_radius(list, 0, 0);
+    lv_obj_set_style_border_width(list, 0, 0);
+    lv_obj_set_style_pad_all(list, 0, 0);
+
+    const Config *c = appcfg();
+    char row[80], tag[8];
+    if(c->world1[0]){ world_tag(c->world1, tag, sizeof tag); snprintf(row, sizeof row, "World clock 1: %s (%s)", tag, c->world1); }
+    else snprintf(row, sizeof row, "World clock 1: (off)");
+    pf_add(list, row, ds_world1_cb, 0);
+    if(c->world2[0]){ world_tag(c->world2, tag, sizeof tag); snprintf(row, sizeof row, "World clock 2: %s (%s)", tag, c->world2); }
+    else snprintf(row, sizeof row, "World clock 2: (off)");
+    pf_add(list, row, ds_world2_cb, 0);
+    snprintf(row, sizeof row, "Clock format: %s", c->clock24 ? "24-hour" : "12-hour");
+    pf_add(list, row, ds_fmt_cb, 0);
 }
 
 /* ---- the Preferences list ---- */
 static lv_obj_t *g_pf_bright_btn;   /* the "Brightness: NN%" row, refreshed on stepper close */
 static void pf_row_open_cb(lv_event_t *e){
     int i = (int)(intptr_t)lv_event_get_user_data(e);
-    if(i == PF_TZ){ show_tz_picker(); return; }   /* zone -> picker, not text entry */
+    if(i == PF_TZ){ show_zone_picker(ZTGT_TZ); return; }   /* zone -> picker, not text entry */
     show_pref_edit(i);
 }
 static void pf_pol_row_cb(lv_event_t *e){ (void)e;
     Config *c = appcfg_mut(); c->policy = (c->policy + 1) % 3; appcfg_save(); show_prefs();
 }
+static void pf_dash_row_cb(lv_event_t *e){ (void)e; show_dash_settings(); }
 static void pf_disc_row_cb(lv_event_t *e){ (void)e;
     if(hotsync_busy()){ alert_show("A sync is in progress; try again in a moment."); return; }
     show_discover();
@@ -2278,6 +2352,11 @@ static void show_prefs(void){
     pf_add(list, "Discover collections...", pf_disc_row_cb, 0);
     snprintf(row, sizeof row, "News feeds... (%d on)", feeds_enabled_count());
     pf_add(list, row, pf_feeds_row_cb, 0);
+    /* the lock-screen dashboard settings live behind ONE sub-screen row (like News
+     * feeds) rather than three inline rows -- three more lv_list buttons pushed the
+     * Preferences list past the 24 KB object pool (the brightness popup then failed
+     * to allocate its draw buffer and crashed on the device-sized 32-bit build). */
+    pf_add(list, "Lock screen...", pf_dash_row_cb, 0);
     pf_add(list, "Save to config.ini", pf_saverow_cb, 0);
 }
 
@@ -3532,26 +3611,76 @@ static void dfill(int x,int y,int w,int h){
 }
 static void dhdots(int x0,int x1,int y){ for(int x=x0;x<=x1;x+=3) dpx(x,y); }
 
-/* draw a "H:MM" string in the big 4x7 font at scale s; returns pixel width drawn. */
-static int dash_bigtime(int x,int y,const char *str,int s){
+/* The hero clock is drawn as seven-segment digits: bars with 45-degree bevelled
+ * ends that miter cleanly at the corners, so the big time reads as a smooth
+ * calculator-style clock instead of the old blocky 4x7 bitmap. Segments a..g map
+ * to bits 1,2,4,8,16,32,64. */
+#define SEG_L   18                        /* segment length */
+#define SEG_T   6                         /* segment thickness */
+#define SEG_GAP 5                         /* gap between digit boxes */
+static const uint8_t SEG7[10] = {63,6,91,79,102,109,125,7,127,111};
+static void dseg_h(int xc,int y,int len,int t){          /* horizontal bar, left x=xc, mid-line y */
+    int half=t/2;
+    for(int i=-half;i<=half;i++){ int in=half-(i<0?-i:i);
+        for(int x=xc+in;x<=xc+len-in;x++) dpx(x,y+i); }
+}
+static void dseg_v(int x,int yc,int len,int t){          /* vertical bar, top y=yc, mid-line x */
+    int half=t/2;
+    for(int i=-half;i<=half;i++){ int in=half-(i<0?-i:i);
+        for(int y=yc+in;y<=yc+len-in;y++) dpx(x+i,y); }
+}
+static void dash_digit7(int x,int y,int d,int L,int t){
+    if(d<0||d>9) return; uint8_t m=SEG7[d];
+    if(m&1)  dseg_h(x,   y,     L, t);    /* a top       */
+    if(m&2)  dseg_v(x+L, y,     L, t);    /* b top-right */
+    if(m&4)  dseg_v(x+L, y+L,   L, t);    /* c bot-right */
+    if(m&8)  dseg_h(x,   y+2*L, L, t);    /* d bottom    */
+    if(m&16) dseg_v(x,   y+L,   L, t);    /* e bot-left  */
+    if(m&32) dseg_v(x,   y,     L, t);    /* f top-left  */
+    if(m&64) dseg_h(x,   y+L,   L, t);    /* g middle    */
+}
+/* draw a "H:MM"/"HH:MM" string in the seven-seg clock; returns pixel width drawn. */
+static int dash_bigtime(int x,int y,const char *str){
     int x0=x;
     for(const char *p=str; *p; p++){
         if(*p==':'){
-            dfill(x + s/2, y + 2*s, s, s);
-            dfill(x + s/2, y + 4*s, s, s);
-            x += 2*s + s;
+            int cx = x + SEG_T/2;
+            dfill(cx, y + SEG_L - SEG_T,   SEG_T, SEG_T);
+            dfill(cx, y + SEG_L + SEG_T/2, SEG_T, SEG_T);
+            x += 2*SEG_T + SEG_GAP;
         } else if(*p>='0' && *p<='9'){
-            const uint8_t *g = DASH_DIG[*p-'0'];
-            for(int r=0;r<7;r++) for(int c=0;c<4;c++)
-                if(g[r] & (8>>c)) dfill(x + c*s, y + r*s, s, s);
-            x += 4*s + s;
+            dash_digit7(x, y, *p-'0', SEG_L, SEG_T);
+            x += SEG_L + SEG_T + SEG_GAP;
         }
     }
-    return x - x0;
+    return x - x0 - SEG_GAP;
 }
-static int dash_bigtime_w(const char *str,int s){
-    int w=0; for(const char *p=str; *p; p++) w += (*p==':') ? 3*s : 5*s;
-    return w>0 ? w-s : 0;                 /* drop the trailing inter-glyph gap */
+static int dash_bigtime_w(const char *str){
+    int w=0; for(const char *p=str; *p; p++) w += (*p==':') ? (2*SEG_T+SEG_GAP) : (SEG_L+SEG_T+SEG_GAP);
+    return w>0 ? w-SEG_GAP : 0;
+}
+/* format a zone's wall clock at time t honouring the 12/24h setting, e.g.
+ * "9:34a" (12h) or "09:34" (24h). Empty on a bad zone. */
+static void dash_zone_fmt(const char *zone, time_t t, int h24, char *out, int cap){
+    char hm[16]; clock_zone_hhmm(zone, t, hm, sizeof hm);   /* 24h "HH:MM" */
+    if(!hm[0] || cap<=0){ if(cap>0) out[0]=0; return; }
+    int H = (hm[0]-'0')*10 + (hm[1]-'0');
+    if(h24){ snprintf(out, cap, "%s", hm); return; }
+    int h12 = H%12; if(h12==0) h12=12;
+    snprintf(out, cap, "%d:%c%c%s", h12, hm[3], hm[4], H<12?"a":"p");
+}
+/* short 3-letter tag for a world-clock zone: the city after '/', upper-cased,
+ * first 3 letters (e.g. "Europe/London" -> "LON", "America/New_York" -> "NEW"). */
+static void world_tag(const char *zone, char *out, int cap){
+    if(cap<=0){ return; }
+    const char *city = strrchr(zone, '/');
+    city = city ? city+1 : zone;
+    int n=0;
+    for(; city[n] && n<3 && n<cap-1; n++){
+        char c = city[n];
+        out[n] = (c>='a'&&c<='z') ? (char)(c-'a'+'A') : c;
+    }
+    out[n]=0;
 }
 
 /* moon disc: illuminated fraction k=illum/100, lit on the right when waxing. */
@@ -3670,13 +3799,17 @@ static void dash_paint(void){
     lv_canvas_fill_bg(g_dash_cv, bg, LV_OPA_COVER);
 
     time_t now=0; time(&now); struct tm ti; localtime_r(&now,&ti);
-    int h12 = ti.tm_hour%12; if(h12==0) h12=12;
-    char tb[8]; snprintf(tb,sizeof tb,"%d:%02d",h12,ti.tm_min);
-    int s=7, tw=dash_bigtime_w(tb,s), tx=10, ty=30;
-    dash_bigtime(tx,ty,tb,s);
-    if(g_dash_time_ap){
-        lv_label_set_text(g_dash_time_ap, ti.tm_hour<12?"AM":"PM");
-        lv_obj_set_pos(g_dash_time_ap, tx+tw+8, ty+2);
+    int h24 = appcfg()->clock24;
+    int hh = h24 ? ti.tm_hour : (ti.tm_hour%12 ? ti.tm_hour%12 : 12);
+    char tb[8]; snprintf(tb,sizeof tb,"%d:%02d",hh,ti.tm_min);
+    int tw=dash_bigtime_w(tb), tx=10, ty=28;
+    dash_bigtime(tx,ty,tb);
+    if(g_dash_time_ap){                              /* AM/PM only in 12-hour mode */
+        if(h24){ lv_label_set_text(g_dash_time_ap, ""); }
+        else {
+            lv_label_set_text(g_dash_time_ap, ti.tm_hour<12?"AM":"PM");
+            lv_obj_set_pos(g_dash_time_ap, tx+tw+8, ty+14);
+        }
     }
     /* zone separators + unlock chevron */
     dhdots(10,DASH_CW-10,104);
@@ -3747,18 +3880,29 @@ void ui_show_lock(void){
     else      snprintf(sb+strlen(sb),sizeof sb-strlen(sb),"USB");
     lv_obj_t *sr=dash_lbl(0,4,sb,0); lv_obj_align(sr,LV_ALIGN_TOP_RIGHT,-6,4);
 
-    /* ---- AM/PM + world times (right of the hero clock) ---- */
+    /* ---- AM/PM (positioned beside the hero clock in dash_paint) ---- */
     g_dash_time_ap = dash_lbl(0,0,"",1);
-    char wtb[24];
-    clock_zone_hhmm("Europe/London", now, wtb, sizeof wtb);
-    { char l[32]; snprintf(l,sizeof l,"LON %s",wtb); lv_obj_t*o=dash_lbl(0,30,l,0); lv_obj_align(o,LV_ALIGN_TOP_RIGHT,-8,30); }
-    clock_zone_hhmm("Asia/Tokyo", now, wtb, sizeof wtb);
-    { char l[32]; snprintf(l,sizeof l,"TOK %s",wtb); lv_obj_t*o=dash_lbl(0,46,l,0); lv_obj_align(o,LV_ALIGN_TOP_RIGHT,-8,46); }
+
+    /* ---- world clocks: their OWN row BELOW the clock, so a two-digit hour's
+     * AM/PM can never collide with them. Zones + 12/24h come from Preferences;
+     * an empty zone hides that slot. The 3-letter tag is derived from the city. */
+    { const Config *cf = appcfg();
+      int h24 = cf->clock24;
+      const char *zs[2] = { cf->world1, cf->world2 };
+      int wx0[2] = { 10, 128 };
+      for(int k=0;k<2;k++){
+          if(!zs[k][0]) continue;
+          char tag[8]; world_tag(zs[k], tag, sizeof tag);
+          char tm[16]; dash_zone_fmt(zs[k], now, h24, tm, sizeof tm);
+          char l[28]; snprintf(l,sizeof l,"%s %s", tag, tm);
+          dash_lbl(wx0[k], 74, l, 0);
+      }
+    }
 
     /* ---- date line ---- */
     { char db[40]; snprintf(db,sizeof db,"%s, %s %d",
         DASH_DOW_L[ti_wday(now)], month_long(localtime_mon(now)), localtime_mday(now));
-      dash_lbl(10,82,db,0); }
+      dash_lbl(10,90,db,0); }
 
     /* ---- weather ---- */
     if(havewx){
