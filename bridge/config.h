@@ -26,8 +26,11 @@ typedef struct {
     char todo_coll[192];       /* To Do (Reminders list) collection      */
     char card_coll[192];       /* Address book collection                */
     char timezone[48];         /* e.g. America/New_York ("" = floating)  */
+    char world1[48];           /* lock-screen world clock 1 (IANA zone, "" = off) */
+    char world2[48];           /* lock-screen world clock 2 (IANA zone, "" = off) */
     int  brightness;           /* backlight, 0..100                      */
     int  backlight_sec;        /* idle seconds -> dim backlight, 0=never  */
+    int  clock24;              /* 0 = 12-hour clock, 1 = 24-hour          */
     int  policy;               /* CFG_POL_*                              */
 } Config;
 

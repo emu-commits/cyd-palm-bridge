@@ -159,8 +159,15 @@ on-device first-run wizard + a printed quick-start card (§4), not an App Store 
 >   ABSENT = slashed. The Graffiti strip also types. `wordie.c` + `make -C sim wordie`.
 >
 > Both are pure C with host gates wired into CI; the views are in `ui.c` (canvas-drawn,
-> so pool-cheap — smoke32 peak ~600 B). **Next games:** Sudoku (Graffiti-digit entry),
-> then Zip.
+> so pool-cheap — smoke32 peak ~600 B).
+>
+> **Sudoku SHIPPED (2026-07-21):** `sudoku.c` — a seeded generator that guarantees a
+> unique solution (fill a random grid, dig holes with a solution-counting check),
+> rules + conflict flags + solved detection; `make -C sim sudoku`. View in `ui.c`
+> (`show_sudoku`): 9×9 board + number pad on one I1 canvas, **digit entry via the
+> Graffiti strip** (the on-brand hook) plus the number pad; clue cells locked with a
+> corner tab; persists to `sudoku.sav`. **Next game:** Zip (the last one; most
+> puzzle-generation work — a pre-generated bank on SD).
 
 **Verdict: GO. All four are low-RAM and pool-safe.** This is what turns "an organizer"
 into "a thing I want on my desk." Build a **shared game foundation** (a grid renderer

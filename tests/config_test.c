@@ -13,6 +13,9 @@ int main(void){
     /* defaults */
     Config c; config_defaults(&c);
     CK(c.brightness==80,"default brightness 80");
+    CK(c.clock24==0,"default clock 12-hour");
+    CK(!strcmp(c.world1,"Europe/London"),"default world clock 1");
+    CK(!strcmp(c.world2,"Asia/Tokyo"),"default world clock 2");
     CK(c.policy==CFG_POL_SERVER,"default policy server");
     CK(strstr(c.dav_base,"caldav.icloud.com")!=NULL,"default caldav host");
     CK(strstr(c.dav_card_base,"contacts.icloud.com")!=NULL,"default contacts host");
@@ -26,7 +29,9 @@ int main(void){
     snprintf(c.todo_coll,sizeof c.todo_coll,"123/calendars/UUID-TODO");
     snprintf(c.card_coll,sizeof c.card_coll,"123/carddavhome/card");
     snprintf(c.timezone,sizeof c.timezone,"America/New_York");
-    c.brightness=55; c.backlight_sec=15; c.policy=CFG_POL_BOTH;
+    snprintf(c.world1,sizeof c.world1,"America/Los_Angeles");
+    snprintf(c.world2,sizeof c.world2,"Australia/Sydney");
+    c.brightness=55; c.backlight_sec=15; c.clock24=1; c.policy=CFG_POL_BOTH;
     CK(config_save(PATH,&c)==0,"save ok");
 
     Config d; config_defaults(&d);

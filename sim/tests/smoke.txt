@@ -260,7 +260,15 @@ m 120 50
 t 30
 u
 t 400
-c 120 140
+d 120 190
+t 30
+m 120 100
+t 30
+m 120 50
+t 30
+u
+t 400
+c 120 90
 t 400
 s prefs_brightness
 c 52 175
@@ -270,6 +278,22 @@ t 300
 s prefs_brightness_stepped
 c 120 30
 t 400
+# Dashboard settings (new): with the prefs list scrolled to the tail, "Lock
+# screen..." sits second from bottom. Open it -> the Lock Screen sub-screen (two
+# world clocks + 12/24h), screenshot, then tap "World clock 1" -> the shared zone
+# picker (lv_table, pool-safe like the timezone picker; a regression HANGS or
+# exhausts the 24 KB pool). Cancel back (no write, so config/dashboard stay at
+# defaults), then Prefs -> home.
+c 120 178
+t 400
+s dash_settings
+c 120 45
+t 400
+s world_picker
+c 32 16
+t 300
+c 30 15
+t 300
 c 18 225
 t 300
 # Graffiti with the C1 ink trail: screenshot MID-stroke, then after recognition
@@ -353,7 +377,7 @@ t 300
 c 169 160
 t 300
 s games_menu
-c 70 55
+c 40 55
 t 400
 s minesweeper
 # on the fresh board every cell is unrevealed: switch to Flag mode and flag one
@@ -375,7 +399,7 @@ t 300
 # mines_dug, not a fresh board.
 c 169 160
 t 300
-c 70 55
+c 40 55
 t 400
 s mines_persist
 c 18 225
@@ -387,7 +411,7 @@ t 300
 # hit-test via PRESSED. (The physical Graffiti strip also types letters on the device.)
 c 169 160
 t 300
-c 169 55
+c 120 55
 t 400
 s wordie_open
 c 24 175
@@ -411,9 +435,31 @@ t 300
 # wordie_persist must match wordie_scored, not a fresh daily.
 c 169 160
 t 300
-c 169 55
+c 120 55
 t 400
 s wordie_persist
+c 18 225
+t 300
+# Sudoku: the third game in the folder. Open Games, tap the Sudoku tile (right icon).
+# The 9x9 board + a number pad are ONE pool-cheap I1 canvas; clue cells carry a corner
+# tab, the first blank is pre-selected (thick border). Tap a number-pad digit to fill
+# it (the physical Graffiti strip also enters digits on the device), then reopen from
+# the folder to confirm the in-progress board persists (saved to /sdcard).
+c 169 160
+t 300
+c 198 55
+t 400
+s sudoku_open
+c 108 196
+t 300
+s sudoku_entered
+c 18 225
+t 300
+c 169 160
+t 300
+c 198 55
+t 400
+s sudoku_persist
 c 18 225
 t 300
 # I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.

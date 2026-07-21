@@ -30,6 +30,7 @@
 #include "dash.h"         /* lock-screen dashboard: weather cache + moon/sun math */
 #include "minesweeper.h"  /* Games: Minesweeper board logic */
 #include "wordie.h"       /* Games: Wordie word-game logic */
+#include "sudoku.h"       /* Games: Sudoku board logic */
 #include "lvgl.h"
 #include <string.h>
 #include <strings.h>      /* strncasecmp for the Address Look Up filter */
@@ -66,6 +67,7 @@ static void show_news(void);
 static void show_games(void);
 static void show_minesweeper(void);
 static void show_wordie(void);
+static void show_sudoku(void);
 static void show_app(const char *name);
 
 /* a borderless, non-scrolling panel with a solid fill */
@@ -136,6 +138,9 @@ static void list_view(const AppDef *ad);
 static void show_detail(uint32_t uid);
 static void show_edit(uint32_t uid);
 static void show_prefs(void);
+static void show_dash_settings(void);                          /* Lock Screen settings sub-screen */
+static void world_tag(const char *zone, char *out, int cap);   /* 3-letter world-clock tag */
+static lv_obj_t *pf_add(lv_obj_t *list, const char *text, lv_event_cb_t cb, int ud);
 static void show_discover(void);
 static void show_feeds(void);
 static void show_feed_edit(int idx);
@@ -184,10 +189,11 @@ static void (*graf_char_hook)(char c);
 static int  (*graf_capture_hook)(void);
 static int  g_trainer_open;      /* the Graffiti trainer is the live screen (menu Reset) */
 static int  g_kana_open;         /* the Kana trainer is the live screen (menu Reset) */
+static int  g_ms_active;         /* the Mines screen is live (1 Hz timer tick guard) */
 static void kill_kb(void){
     g_form=NULL; active_ta=NULL; edit_cat_lbl=NULL; g_listtbl=NULL; g_findtbl=NULL;
     graf_char_hook=NULL; graf_capture_hook=NULL;
-    g_trainer_open=0; g_kana_open=0;
+    g_trainer_open=0; g_kana_open=0; g_ms_active=0;
     free_rowuids();
     free_finds();
     kill_hs();
@@ -2167,24 +2173,49 @@ static void show_feed_edit(int idx){
  * Built on lv_table (virtualized), NOT an lv_list of ~24 buttons -- that many
  * buttons exhausted the 24 KB LVGL pool and froze the device (draw-task WDT),
  * the same failure class the record list hit. The table row index == zone index. */
-static void tz_cancel_cb(lv_event_t *e){ (void)e; show_prefs(); }
+/* The same picker serves the system time zone AND the two lock-screen world
+ * clocks -- g_zone_target selects which config field a tap writes. World targets
+ * get a leading "(off)" row so a slot can be cleared; the system zone has none. */
+enum { ZTGT_TZ = 0, ZTGT_W1 = 1, ZTGT_W2 = 2 };
+static int g_zone_target;
+static char *zone_target_buf(Config *c, int *cap){
+    switch(g_zone_target){
+        case ZTGT_W1: *cap=sizeof c->world1; return c->world1;
+        case ZTGT_W2: *cap=sizeof c->world2; return c->world2;
+        default:      *cap=sizeof c->timezone; return c->timezone;
+    }
+}
+/* the picker returns to Preferences for the system zone, or to the Lock Screen
+ * sub-screen for a world clock. */
+static void zone_picker_return(void){
+    if(g_zone_target==ZTGT_TZ) show_prefs(); else show_dash_settings();
+}
+static void tz_cancel_cb(lv_event_t *e){ (void)e; zone_picker_return(); }
 static void tz_tbl_click_cb(lv_event_t *e){
     lv_obj_t *t = lv_event_get_target(e);
     uint32_t r=LV_TABLE_CELL_NONE, c=LV_TABLE_CELL_NONE;
     lv_table_get_selected_cell(t, &r, &c);
-    if(r==LV_TABLE_CELL_NONE || (int)r >= clock_zone_count()) return;
-    const char *z = clock_zone_name((int)r);
+    if(r==LV_TABLE_CELL_NONE) return;
+    int off = (g_zone_target==ZTGT_TZ) ? 0 : 1;   /* world pickers have a "(off)" row 0 */
     Config *cfg = appcfg_mut();
-    snprintf(cfg->timezone, sizeof cfg->timezone, "%s", z);
-    clock_set_tz(z);          /* apply now so the clock/desc update immediately */
+    int cap=0; char *dst = zone_target_buf(cfg, &cap);
+    if(off && (int)r == 0){ dst[0] = 0; }         /* "(off)" -> clear the slot */
+    else {
+        int zi = (int)r - off;
+        if(zi < 0 || zi >= clock_zone_count()) return;
+        const char *z = clock_zone_name(zi);
+        snprintf(dst, cap, "%s", z);
+        if(g_zone_target==ZTGT_TZ) clock_set_tz(z);   /* apply the system zone immediately */
+    }
     appcfg_save();            /* persist to SD now -> survives reboot */
-    show_prefs();
+    zone_picker_return();
 }
-static void show_tz_picker(void){
+static void show_zone_picker(int target){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    g_zone_target = target;
     lv_obj_clean(content);
-    lv_label_set_text(title_lbl, "Time Zone");
+    lv_label_set_text(title_lbl, target==ZTGT_TZ ? "Time Zone" : "World Clock");
     update_cat_trigger();
 
     lv_obj_t *cancel = lv_button_create(content);
@@ -2192,12 +2223,15 @@ static void show_tz_picker(void){
     lv_obj_t *cl=lv_label_create(cancel); lv_label_set_text(cl,"Cancel"); lv_obj_center(cl);
     lv_obj_add_event_cb(cancel, tz_cancel_cb, LV_EVENT_CLICKED, NULL);
 
-    /* header: current zone + live offset/DST status */
-    const Config *c = appcfg();
-    char desc[40]; clock_now_desc(desc, sizeof desc);
+    /* header: the field's current value (+ live offset/DST for the system zone) */
+    int cap=0; const char *cur = zone_target_buf(appcfg_mut(), &cap);
     char hdr[128];
-    snprintf(hdr, sizeof hdr, "%s\n%s",
-             (c->timezone[0]) ? c->timezone : "(unset)", desc);
+    if(target==ZTGT_TZ){
+        char desc[40]; clock_now_desc(desc, sizeof desc);
+        snprintf(hdr, sizeof hdr, "%s\n%s", cur[0]?cur:"(unset)", desc);
+    } else {
+        snprintf(hdr, sizeof hdr, "Clock %d\n%s", target, cur[0]?cur:"(off)");
+    }
     lv_obj_t *hl = lv_label_create(content);
     lv_label_set_text(hl, hdr);
     lv_obj_set_pos(hl, 68, 6);
@@ -2209,21 +2243,64 @@ static void show_tz_picker(void){
     lv_obj_set_style_border_width(t, 0, 0);
     lv_obj_set_style_pad_all(t, 4, LV_PART_ITEMS);
     lv_table_set_column_width(t, 0, LCD_W - 8);
-    int n = clock_zone_count();
-    for(int i=0;i<n;i++) lv_table_set_cell_value(t, i, 0, clock_zone_name(i));
+    int off = (target==ZTGT_TZ) ? 0 : 1, n = clock_zone_count();
+    if(off) lv_table_set_cell_value(t, 0, 0, "(off)");
+    for(int i=0;i<n;i++) lv_table_set_cell_value(t, i+off, 0, clock_zone_name(i));
     lv_obj_add_event_cb(t, tz_tbl_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
+}
+
+/* ---- Lock Screen sub-screen: the dashboard's two world clocks + 12/24h format.
+ * A light lv_list (3 rows + a Back button), so it adds nothing to the Preferences
+ * list's pool footprint. World-clock rows open the shared zone picker; the format
+ * row toggles in place. */
+static void ds_back_cb(lv_event_t *e){ (void)e; show_prefs(); }
+static void ds_world1_cb(lv_event_t *e){ (void)e; show_zone_picker(ZTGT_W1); }
+static void ds_world2_cb(lv_event_t *e){ (void)e; show_zone_picker(ZTGT_W2); }
+static void ds_fmt_cb(lv_event_t *e){ (void)e;
+    Config *c = appcfg_mut(); c->clock24 = !c->clock24; appcfg_save(); show_dash_settings();
+}
+static void show_dash_settings(void){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, "Lock Screen");
+    update_cat_trigger();
+
+    lv_obj_t *back = lv_button_create(content);
+    lv_obj_set_size(back, 58, 26); lv_obj_align(back, LV_ALIGN_TOP_LEFT, 2, 2);
+    lv_obj_t *bl=lv_label_create(back); lv_label_set_text(bl,"Prefs"); lv_obj_center(bl);
+    lv_obj_add_event_cb(back, ds_back_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *list = lv_list_create(content);
+    lv_obj_set_size(list, LCD_W, PDA_H - TITLE_H - 32);
+    lv_obj_align(list, LV_ALIGN_TOP_MID, 0, 32);
+    lv_obj_set_style_radius(list, 0, 0);
+    lv_obj_set_style_border_width(list, 0, 0);
+    lv_obj_set_style_pad_all(list, 0, 0);
+
+    const Config *c = appcfg();
+    char row[80], tag[8];
+    if(c->world1[0]){ world_tag(c->world1, tag, sizeof tag); snprintf(row, sizeof row, "World clock 1: %s (%s)", tag, c->world1); }
+    else snprintf(row, sizeof row, "World clock 1: (off)");
+    pf_add(list, row, ds_world1_cb, 0);
+    if(c->world2[0]){ world_tag(c->world2, tag, sizeof tag); snprintf(row, sizeof row, "World clock 2: %s (%s)", tag, c->world2); }
+    else snprintf(row, sizeof row, "World clock 2: (off)");
+    pf_add(list, row, ds_world2_cb, 0);
+    snprintf(row, sizeof row, "Clock format: %s", c->clock24 ? "24-hour" : "12-hour");
+    pf_add(list, row, ds_fmt_cb, 0);
 }
 
 /* ---- the Preferences list ---- */
 static lv_obj_t *g_pf_bright_btn;   /* the "Brightness: NN%" row, refreshed on stepper close */
 static void pf_row_open_cb(lv_event_t *e){
     int i = (int)(intptr_t)lv_event_get_user_data(e);
-    if(i == PF_TZ){ show_tz_picker(); return; }   /* zone -> picker, not text entry */
+    if(i == PF_TZ){ show_zone_picker(ZTGT_TZ); return; }   /* zone -> picker, not text entry */
     show_pref_edit(i);
 }
 static void pf_pol_row_cb(lv_event_t *e){ (void)e;
     Config *c = appcfg_mut(); c->policy = (c->policy + 1) % 3; appcfg_save(); show_prefs();
 }
+static void pf_dash_row_cb(lv_event_t *e){ (void)e; show_dash_settings(); }
 static void pf_disc_row_cb(lv_event_t *e){ (void)e;
     if(hotsync_busy()){ alert_show("A sync is in progress; try again in a moment."); return; }
     show_discover();
@@ -2277,6 +2354,11 @@ static void show_prefs(void){
     pf_add(list, "Discover collections...", pf_disc_row_cb, 0);
     snprintf(row, sizeof row, "News feeds... (%d on)", feeds_enabled_count());
     pf_add(list, row, pf_feeds_row_cb, 0);
+    /* the lock-screen dashboard settings live behind ONE sub-screen row (like News
+     * feeds) rather than three inline rows -- three more lv_list buttons pushed the
+     * Preferences list past the 24 KB object pool (the brightness popup then failed
+     * to allocate its draw buffer and crashed on the device-sized 32-bit build). */
+    pf_add(list, "Lock screen...", pf_dash_row_cb, 0);
     pf_add(list, "Save to config.ini", pf_saverow_cb, 0);
 }
 
@@ -3531,26 +3613,77 @@ static void dfill(int x,int y,int w,int h){
 }
 static void dhdots(int x0,int x1,int y){ for(int x=x0;x<=x1;x+=3) dpx(x,y); }
 
-/* draw a "H:MM" string in the big 4x7 font at scale s; returns pixel width drawn. */
-static int dash_bigtime(int x,int y,const char *str,int s){
+/* The hero clock is drawn as seven-segment digits: bars with 45-degree bevelled
+ * ends that miter cleanly at the corners, so the big time reads as a smooth
+ * calculator-style clock instead of the old blocky 4x7 bitmap. Segments a..g map
+ * to bits 1,2,4,8,16,32,64. */
+#define SEG_L   18                        /* segment length */
+#define SEG_T   6                         /* segment thickness */
+#define SEG_GAP 5                         /* gap between digit boxes */
+static const uint8_t SEG7[10] = {63,6,91,79,102,109,125,7,127,111};
+static void dseg_h(int xc,int y,int len,int t){          /* horizontal bar, left x=xc, mid-line y */
+    int half=t/2;
+    for(int i=-half;i<=half;i++){ int in=half-(i<0?-i:i);
+        for(int x=xc+in;x<=xc+len-in;x++) dpx(x,y+i); }
+}
+static void dseg_v(int x,int yc,int len,int t){          /* vertical bar, top y=yc, mid-line x */
+    int half=t/2;
+    for(int i=-half;i<=half;i++){ int in=half-(i<0?-i:i);
+        for(int y=yc+in;y<=yc+len-in;y++) dpx(x+i,y); }
+}
+static void dash_digit7(int x,int y,int d,int L,int t){
+    if(d<0||d>9) return;
+    uint8_t m=SEG7[d];
+    if(m&1)  dseg_h(x,   y,     L, t);    /* a top       */
+    if(m&2)  dseg_v(x+L, y,     L, t);    /* b top-right */
+    if(m&4)  dseg_v(x+L, y+L,   L, t);    /* c bot-right */
+    if(m&8)  dseg_h(x,   y+2*L, L, t);    /* d bottom    */
+    if(m&16) dseg_v(x,   y+L,   L, t);    /* e bot-left  */
+    if(m&32) dseg_v(x,   y,     L, t);    /* f top-left  */
+    if(m&64) dseg_h(x,   y+L,   L, t);    /* g middle    */
+}
+/* draw a "H:MM"/"HH:MM" string in the seven-seg clock; returns pixel width drawn. */
+static int dash_bigtime(int x,int y,const char *str){
     int x0=x;
     for(const char *p=str; *p; p++){
         if(*p==':'){
-            dfill(x + s/2, y + 2*s, s, s);
-            dfill(x + s/2, y + 4*s, s, s);
-            x += 2*s + s;
+            int cx = x + SEG_T/2;
+            dfill(cx, y + SEG_L - SEG_T,   SEG_T, SEG_T);
+            dfill(cx, y + SEG_L + SEG_T/2, SEG_T, SEG_T);
+            x += 2*SEG_T + SEG_GAP;
         } else if(*p>='0' && *p<='9'){
-            const uint8_t *g = DASH_DIG[*p-'0'];
-            for(int r=0;r<7;r++) for(int c=0;c<4;c++)
-                if(g[r] & (8>>c)) dfill(x + c*s, y + r*s, s, s);
-            x += 4*s + s;
+            dash_digit7(x, y, *p-'0', SEG_L, SEG_T);
+            x += SEG_L + SEG_T + SEG_GAP;
         }
     }
-    return x - x0;
+    return x - x0 - SEG_GAP;
 }
-static int dash_bigtime_w(const char *str,int s){
-    int w=0; for(const char *p=str; *p; p++) w += (*p==':') ? 3*s : 5*s;
-    return w>0 ? w-s : 0;                 /* drop the trailing inter-glyph gap */
+static int dash_bigtime_w(const char *str){
+    int w=0; for(const char *p=str; *p; p++) w += (*p==':') ? (2*SEG_T+SEG_GAP) : (SEG_L+SEG_T+SEG_GAP);
+    return w>0 ? w-SEG_GAP : 0;
+}
+/* format a zone's wall clock at time t honouring the 12/24h setting, e.g.
+ * "9:34a" (12h) or "09:34" (24h). Empty on a bad zone. */
+static void dash_zone_fmt(const char *zone, time_t t, int h24, char *out, int cap){
+    char hm[16]; clock_zone_hhmm(zone, t, hm, sizeof hm);   /* 24h "HH:MM" */
+    if(!hm[0] || cap<=0){ if(cap>0) out[0]=0; return; }
+    int H = (hm[0]-'0')*10 + (hm[1]-'0');
+    if(h24){ snprintf(out, cap, "%s", hm); return; }
+    int h12 = H%12; if(h12==0) h12=12;
+    snprintf(out, cap, "%d:%c%c%s", h12, hm[3], hm[4], H<12?"a":"p");
+}
+/* short 3-letter tag for a world-clock zone: the city after '/', upper-cased,
+ * first 3 letters (e.g. "Europe/London" -> "LON", "America/New_York" -> "NEW"). */
+static void world_tag(const char *zone, char *out, int cap){
+    if(cap<=0){ return; }
+    const char *city = strrchr(zone, '/');
+    city = city ? city+1 : zone;
+    int n=0;
+    for(; city[n] && n<3 && n<cap-1; n++){
+        char c = city[n];
+        out[n] = (c>='a'&&c<='z') ? (char)(c-'a'+'A') : c;
+    }
+    out[n]=0;
 }
 
 /* moon disc: illuminated fraction k=illum/100, lit on the right when waxing. */
@@ -3669,13 +3802,17 @@ static void dash_paint(void){
     lv_canvas_fill_bg(g_dash_cv, bg, LV_OPA_COVER);
 
     time_t now=0; time(&now); struct tm ti; localtime_r(&now,&ti);
-    int h12 = ti.tm_hour%12; if(h12==0) h12=12;
-    char tb[8]; snprintf(tb,sizeof tb,"%d:%02d",h12,ti.tm_min);
-    int s=7, tw=dash_bigtime_w(tb,s), tx=10, ty=30;
-    dash_bigtime(tx,ty,tb,s);
-    if(g_dash_time_ap){
-        lv_label_set_text(g_dash_time_ap, ti.tm_hour<12?"AM":"PM");
-        lv_obj_set_pos(g_dash_time_ap, tx+tw+8, ty+2);
+    int h24 = appcfg()->clock24;
+    int hh = h24 ? ti.tm_hour : (ti.tm_hour%12 ? ti.tm_hour%12 : 12);
+    char tb[8]; snprintf(tb,sizeof tb,"%d:%02d",hh,ti.tm_min);
+    int tw=dash_bigtime_w(tb), tx=10, ty=28;
+    dash_bigtime(tx,ty,tb);
+    if(g_dash_time_ap){                              /* AM/PM only in 12-hour mode */
+        if(h24){ lv_label_set_text(g_dash_time_ap, ""); }
+        else {
+            lv_label_set_text(g_dash_time_ap, ti.tm_hour<12?"AM":"PM");
+            lv_obj_set_pos(g_dash_time_ap, tx+tw+8, ty+14);
+        }
     }
     /* zone separators + unlock chevron */
     dhdots(10,DASH_CW-10,104);
@@ -3746,18 +3883,29 @@ void ui_show_lock(void){
     else      snprintf(sb+strlen(sb),sizeof sb-strlen(sb),"USB");
     lv_obj_t *sr=dash_lbl(0,4,sb,0); lv_obj_align(sr,LV_ALIGN_TOP_RIGHT,-6,4);
 
-    /* ---- AM/PM + world times (right of the hero clock) ---- */
+    /* ---- AM/PM (positioned beside the hero clock in dash_paint) ---- */
     g_dash_time_ap = dash_lbl(0,0,"",1);
-    char wtb[24];
-    clock_zone_hhmm("Europe/London", now, wtb, sizeof wtb);
-    { char l[32]; snprintf(l,sizeof l,"LON %s",wtb); lv_obj_t*o=dash_lbl(0,30,l,0); lv_obj_align(o,LV_ALIGN_TOP_RIGHT,-8,30); }
-    clock_zone_hhmm("Asia/Tokyo", now, wtb, sizeof wtb);
-    { char l[32]; snprintf(l,sizeof l,"TOK %s",wtb); lv_obj_t*o=dash_lbl(0,46,l,0); lv_obj_align(o,LV_ALIGN_TOP_RIGHT,-8,46); }
+
+    /* ---- world clocks: their OWN row BELOW the clock, so a two-digit hour's
+     * AM/PM can never collide with them. Zones + 12/24h come from Preferences;
+     * an empty zone hides that slot. The 3-letter tag is derived from the city. */
+    { const Config *cf = appcfg();
+      int h24 = cf->clock24;
+      const char *zs[2] = { cf->world1, cf->world2 };
+      int wx0[2] = { 10, 128 };
+      for(int k=0;k<2;k++){
+          if(!zs[k][0]) continue;
+          char tag[8]; world_tag(zs[k], tag, sizeof tag);
+          char tm[16]; dash_zone_fmt(zs[k], now, h24, tm, sizeof tm);
+          char l[28]; snprintf(l,sizeof l,"%s %s", tag, tm);
+          dash_lbl(wx0[k], 74, l, 0);
+      }
+    }
 
     /* ---- date line ---- */
     { char db[40]; snprintf(db,sizeof db,"%s, %s %d",
         DASH_DOW_L[ti_wday(now)], month_long(localtime_mon(now)), localtime_mday(now));
-      dash_lbl(10,82,db,0); }
+      dash_lbl(10,90,db,0); }
 
     /* ---- weather ---- */
     if(havewx){
@@ -3823,10 +3971,27 @@ static void dash_tick(lv_timer_t *t){ (void)t; if(g_lock) dash_paint(); }
 #define MSCW (MSW*MSC+1)
 #define MSCH (MSH*MSC+1)
 static MsGame    g_ms;
-static lv_obj_t *g_ms_cv, *g_ms_status, *g_ms_modelbl;
+static lv_obj_t *g_ms_cv, *g_ms_status, *g_ms_modelbl, *g_ms_timelbl;
 static int       g_ms_flag;                     /* 1 = taps place flags, 0 = dig */
 static uint32_t  g_ms_seq;                       /* varies the board each New */
+static uint32_t  g_ms_start;                     /* epoch of the first dig (0 = not started) */
+static uint32_t  g_ms_end;                       /* epoch the game ended (0 = still running) */
+static uint32_t  g_ms_best;                      /* best winning time in seconds (0 = none yet) */
 static uint8_t   ms_buf[LV_CANVAS_BUF_SIZE(MSCW, MSCH, 1, 1) + 16];
+
+/* elapsed play seconds: 0 before the first dig, live while playing, frozen at the
+ * end. A simple wall clock -- leaving the app mid-game keeps counting, which only
+ * ever makes that attempt slower, so it can't corrupt the best time. */
+static uint32_t ms_elapsed(void){
+    if(!g_ms_start) return 0;
+    uint32_t now = (uint32_t)time(NULL);
+    uint32_t end = g_ms_end ? g_ms_end : now;
+    return end > g_ms_start ? end - g_ms_start : 0;
+}
+static void ms_fmt_mmss(uint32_t sec, char *out, int cap){
+    if(sec > 5999) sec = 5999;                   /* cap the readout at 99:59 */
+    snprintf(out, cap, "%u:%02u", (unsigned)(sec/60), (unsigned)(sec%60));
+}
 
 static void mpx(int x,int y){
     if(!g_ms_cv || x<0 || y<0 || x>=MSCW || y>=MSCH) return;
@@ -3864,11 +4029,29 @@ static void ms_render(void){
         else if(g_ms.state==MS_LOST)lv_label_set_text(g_ms_status, "Boom! tap New");
         else lv_label_set_text_fmt(g_ms_status, "%d mines - %d flags", g_ms.mines, ms_flags(&g_ms));
     }
+    if(g_ms_timelbl){
+        char tb[8], bb[8];
+        ms_fmt_mmss(ms_elapsed(), tb, sizeof tb);
+        if(g_ms_best){ ms_fmt_mmss(g_ms_best, bb, sizeof bb);
+                       lv_label_set_text_fmt(g_ms_timelbl, "Time %s   Best %s", tb, bb); }
+        else           lv_label_set_text_fmt(g_ms_timelbl, "Time %s   Best --", tb);
+    }
+}
+/* 1 Hz tick (created once in ui_init): keep the on-screen clock live while playing. */
+static void ms_tick(lv_timer_t *t){ (void)t;
+    if(g_ms_active && g_ms_timelbl && g_ms.state==MS_PLAY && g_ms_start){
+        char tb[8]; ms_fmt_mmss(ms_elapsed(), tb, sizeof tb);
+        char bb[8];
+        if(g_ms_best){ ms_fmt_mmss(g_ms_best, bb, sizeof bb);
+                       lv_label_set_text_fmt(g_ms_timelbl, "Time %s   Best %s", tb, bb); }
+        else           lv_label_set_text_fmt(g_ms_timelbl, "Time %s   Best --", tb);
+    }
 }
 static void ms_new_game(void){
     time_t t=0; time(&t);
     ms_new(&g_ms, MSW, MSH, MSMINES, (uint32_t)t ^ (g_ms_seq++ * 2654435761u));
     g_ms_flag = 0;
+    g_ms_start = g_ms_end = 0;                    /* timer starts on the first dig; best is kept */
 }
 
 /* Persist the in-progress board so it survives leaving the app. MsGame is plain
@@ -3876,12 +4059,15 @@ static void ms_new_game(void){
  * magic + size + w/h guard against a stale/foreign file. Saved after each move
  * and on New; restored when the screen reopens. */
 #define MS_SAV       "/sdcard/mines.sav"
-#define MS_SAV_MAGIC 0x4D534731u                 /* "MSG1" */
+#define MS_SAV_MAGIC 0x4D534732u                 /* "MSG2" (bumped: now carries timer + best) */
 static void ms_save(void){
     FILE *f = fopen(MS_SAV, "wb"); if(!f) return;
     uint32_t magic = MS_SAV_MAGIC;
     fwrite(&magic, sizeof magic, 1, f);
     fwrite(&g_ms, sizeof g_ms, 1, f);
+    fwrite(&g_ms_start, sizeof g_ms_start, 1, f);
+    fwrite(&g_ms_end,   sizeof g_ms_end,   1, f);
+    fwrite(&g_ms_best,  sizeof g_ms_best,  1, f);
     fclose(f);
 }
 static int ms_load(void){
@@ -3890,6 +4076,10 @@ static int ms_load(void){
     if(fread(&magic, sizeof magic, 1, f) == 1 && magic == MS_SAV_MAGIC &&
        fread(&tmp, sizeof tmp, 1, f) == 1 && tmp.w == MSW && tmp.h == MSH){
         g_ms = tmp; ok = 1;
+        /* timer + best follow the board; tolerate a truncated (older) file */
+        if(fread(&g_ms_start, sizeof g_ms_start, 1, f) != 1) g_ms_start = 0;
+        if(fread(&g_ms_end,   sizeof g_ms_end,   1, f) != 1) g_ms_end   = 0;
+        if(fread(&g_ms_best,  sizeof g_ms_best,  1, f) != 1) g_ms_best  = 0;
     }
     fclose(f);
     return ok;
@@ -3900,7 +4090,16 @@ static void ms_tap_cb(lv_event_t *e){ (void)e;
     int lx=p.x-a.x1, ly=p.y-a.y1;
     if(lx<0||ly<0||lx>=MSCW||ly>=MSCH) return;
     int c=lx/MSC, r=ly/MSC;
+    int wasfirst = g_ms.first;
     if(g_ms_flag) ms_flag(&g_ms,r,c); else ms_reveal(&g_ms,r,c);
+    if(wasfirst && !g_ms.first){ g_ms_start = (uint32_t)time(NULL); g_ms_end = 0; }  /* first dig -> start clock */
+    if(g_ms.state != MS_PLAY && g_ms_end == 0){                                       /* game just ended -> freeze */
+        g_ms_end = (uint32_t)time(NULL);
+        if(g_ms.state == MS_WON){
+            uint32_t el = ms_elapsed();
+            if(el && (g_ms_best == 0 || el < g_ms_best)) g_ms_best = el;              /* new high score */
+        }
+    }
     ms_render();
     ms_save();
 }
@@ -3916,13 +4115,17 @@ static void ms_newbtn_cb(lv_event_t *e){ (void)e;
 }
 static void show_minesweeper(void){
     kill_kb(); cur_app=NULL; cur_uid=0;
-    g_ms_cv=g_ms_status=g_ms_modelbl=NULL;
+    g_ms_cv=g_ms_status=g_ms_modelbl=g_ms_timelbl=NULL;
     lv_obj_clean(content);
-    lv_label_set_text(title_lbl, "Minesweeper");
+    lv_label_set_text(title_lbl, "Mines");
     update_cat_trigger();
 
     g_ms_status = lv_label_create(content);
     lv_obj_align(g_ms_status, LV_ALIGN_TOP_LEFT, 6, 5);
+
+    g_ms_timelbl = lv_label_create(content);     /* live timer + best time, below the board */
+    lv_obj_set_style_text_font(g_ms_timelbl, &lv_font_palm, 0);
+    lv_obj_align(g_ms_timelbl, LV_ALIGN_BOTTOM_LEFT, 6, -1);
 
     lv_obj_t *mode = lv_button_create(content);
     lv_obj_set_style_radius(mode, 0, 0);
@@ -3953,6 +4156,7 @@ static void show_minesweeper(void){
 
     if(!ms_load()) ms_new_game();
     g_ms_flag = 0;                              /* restored board opens in Dig mode */
+    g_ms_active = 1;                            /* let ms_tick update the clock (cleared in kill_kb) */
     ms_render();
 }
 
@@ -3961,34 +4165,38 @@ static void show_minesweeper(void){
  * grid AND an on-screen QWERTY keyboard are drawn mono on ONE 1-bpp canvas, so it
  * stays pool-cheap (one canvas + a couple of labels/buttons -- no per-cell widgets
  * that would blow the 24 KB object pool). Taps hit-test into keys; the physical
- * Graffiti strip also types letters. Mono state language, applied to both the grid
- * cells and the keys:
- *     CORRECT  -> solid black tile, knockout (white) letter
- *     PRESENT  -> double border, black letter
- *     ABSENT   -> border + a diagonal slash through the letter ("eliminated")
+ * Graffiti strip also types letters. Mono state language, applied to the grid
+ * cells and the keys (explained by the on-screen legend under the grid):
+ *     CORRECT  -> solid black tile, knockout (white) letter   ("right spot")
+ *     PRESENT  -> letter + a filled corner tab                ("in the word")
+ *     ABSENT   -> letter + a diagonal slash                   ("not in it")
  *     typed    -> single border, black letter   (empty -> single border only)   */
 
-/* compact 5x7 uppercase font (bit4 = leftmost of 5), rendered by wd_glyph. */
-static const uint8_t WD_FONT[26][7] = {
-  {14,17,17,31,17,17,17},{30,17,30,17,17,17,30},{14,17,16,16,16,17,14},{28,18,17,17,17,18,28},{31,16,30,16,16,16,31},{31,16,30,16,16,16,16},
-  {14,17,16,23,17,17,15},{17,17,31,17,17,17,17},{31,4,4,4,4,4,31},{7,2,2,2,18,18,12},{17,18,20,24,20,18,17},{16,16,16,16,16,16,31},
-  {17,27,21,21,17,17,17},{17,25,21,19,17,17,17},{14,17,17,17,17,17,14},{30,17,17,30,16,16,16},{14,17,17,17,21,18,13},{30,17,17,30,20,18,17},
-  {15,16,16,14,1,1,30},{31,4,4,4,4,4,4},{17,17,17,17,17,17,14},{17,17,17,17,17,10,4},{17,17,17,21,21,27,17},{17,17,10,4,10,17,17},
-  {17,17,10,4,4,4,4},{31,1,2,4,8,16,31},
+/* Clean 5x6 uppercase font (cap-height 6, bit4 = leftmost of 5), rendered by
+ * wd_glyph at scale 2 (10x12 px). Shorter than the old 5x7 so the letter clears
+ * the tile edges with a margin instead of touching the bottom. */
+static const uint8_t WD_FONT[26][6] = {
+  {14,17,17,31,17,17},{30,17,30,17,17,30},{15,16,16,16,16,15},{30,17,17,17,17,30},{31,16,30,16,16,31},{31,16,30,16,16,16}, /* A-F */
+  {15,16,23,17,17,14},{17,17,31,17,17,17},{31,4,4,4,4,31},{7,2,2,2,18,12},{17,18,28,18,17,17},{16,16,16,16,16,31},       /* G-L */
+  {17,27,21,17,17,17},{17,25,21,19,17,17},{14,17,17,17,17,14},{30,17,30,16,16,16},{14,17,17,21,18,13},{30,17,30,20,18,17}, /* M-R */
+  {15,16,14,1,1,30},{31,4,4,4,4,4},{17,17,17,17,17,14},{17,17,17,17,10,4},{17,17,17,21,21,10},{17,10,4,4,10,17},           /* S-X */
+  {17,10,4,4,4,4},{31,2,4,8,16,31},                                                                                      /* Y-Z */
 };
 
 #define WDCW   240                          /* canvas size */
 #define WDCH   152
 #define WD_CW  22                           /* grid cell w/h */
-#define WD_CH  15
-#define WD_GX0 65                           /* grid origin ((240-5*22)/2, 2) */
-#define WD_GY0 2
-#define WD_KY0 96                           /* keyboard top; 3 rows of WD_KEYH */
-#define WD_KEYH 18
+#define WD_CH  14
+#define WD_GX0 65                           /* grid origin ((240-5*22)/2) */
+#define WD_GY0 1
+#define WD_LEGY 87                          /* legend strip (below the 6x14 grid) */
+#define WD_KY0 100                          /* keyboard top; 3 rows of WD_KEYH */
+#define WD_KEYH 17
 
 static WdGame    g_wd;
 static lv_obj_t *g_wd_cv, *g_wd_status;
 static uint32_t  g_wd_seq;
+static uint32_t  g_wd_streak;                /* consecutive solves (persisted) */
 static uint8_t   wd_buf[LV_CANVAS_BUF_SIZE(WDCW, WDCH, 1, 1) + 16];
 static const char *WD_KROW[3] = { "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM" };
 
@@ -3997,12 +4205,13 @@ static const char *WD_KROW[3] = { "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM" };
  * foreign file). Saved after each keystroke/submit and on New; restored on open,
  * so a half-finished guess grid is exactly where you left it. */
 #define WD_SAV       "/sdcard/wordie.sav"
-#define WD_SAV_MAGIC 0x57444731u                 /* "WDG1" */
+#define WD_SAV_MAGIC 0x57444732u                 /* "WDG2" (bumped: now carries the streak) */
 static void wd_save(void){
     FILE *f = fopen(WD_SAV, "wb"); if(!f) return;
     uint32_t magic = WD_SAV_MAGIC;
     fwrite(&magic, sizeof magic, 1, f);
     fwrite(&g_wd, sizeof g_wd, 1, f);
+    fwrite(&g_wd_streak, sizeof g_wd_streak, 1, f);
     fclose(f);
 }
 static int wd_load(void){
@@ -4012,6 +4221,7 @@ static int wd_load(void){
        fread(&tmp, sizeof tmp, 1, f) == 1 &&
        tmp.answer[0] >= 'A' && tmp.answer[0] <= 'Z' && tmp.nrows <= WD_ROWS){
         g_wd = tmp; ok = 1;
+        if(fread(&g_wd_streak, sizeof g_wd_streak, 1, f) != 1) g_wd_streak = 0;
     }
     fclose(f);
     return ok;
@@ -4022,10 +4232,10 @@ static void wdpx(int x,int y,int v){
     lv_color_t col = { .blue = (uint8_t)(v ? 1 : 0) };       /* I1: blue&1 = palette idx */
     lv_canvas_set_px(g_wd_cv, x, y, col, LV_OPA_COVER);
 }
-static void wd_glyph(int x,int y,char ch,int s,int v){       /* ch at (x,y), scale s */
+static void wd_glyph(int x,int y,char ch,int s,int v){       /* ch at (x,y), scale s; 5x6 */
     if(ch<'A' || ch>'Z') return;
     const uint8_t *g = WD_FONT[ch-'A'];
-    for(int r=0;r<7;r++) for(int c=0;c<5;c++) if(g[r] & (16>>c))
+    for(int r=0;r<6;r++) for(int c=0;c<5;c++) if(g[r] & (16>>c))
         for(int dy=0;dy<s;dy++) for(int dx=0;dx<s;dx++) wdpx(x+c*s+dx, y+r*s+dy, v);
 }
 static void wd_rect(int x,int y,int w,int h,int v){
@@ -4037,34 +4247,56 @@ static void wd_slash(int x,int y,int w,int h){               /* one corner-to-co
     int steps = (w>h?w:h); if(steps<2) return;
     for(int i=0;i<steps;i++) wdpx(x + i*(w-1)/(steps-1), y + i*(h-1)/(steps-1), 1);
 }
+/* a solid right-triangle tab in the top-right corner -- the PRESENT marker (letter
+ * is in the word, wrong spot). Clearly distinct from CORRECT (whole tile filled)
+ * and ABSENT (slash), and it never collides with the centred letter. */
+static void wd_tab(int x,int y,int w,int sz){
+    for(int j=0;j<sz;j++) for(int i=0;i<=j;i++) wdpx(x+w-1-i, y+1+j, 1);
+}
 /* one grid cell / key tile: state = WD_ABSENT/PRESENT/CORRECT, or -1 empty, -2 typed. */
 static void wd_tile(int x,int y,int w,int h,char ch,int state){
-    int letx = x + (w-10)/2, lety = y + (h-14)/2;           /* letter is 10x14 (5x7 @2) */
+    int letx = x + (w-10)/2, lety = y + (h-12)/2;           /* letter is 10x12 (5x6 @2) */
     if(state == WD_CORRECT){
         wd_fill(x, y, w, h, 1);
         if(ch) wd_glyph(letx, lety, ch, 2, 0);              /* knockout */
         return;
     }
     wd_rect(x, y, w, h, 1);
-    if(state == WD_PRESENT) wd_rect(x+2, y+2, w-4, h-4, 1); /* double border */
     if(ch) wd_glyph(letx, lety, ch, 2, 1);
-    if(state == WD_ABSENT) wd_slash(x+1, y+1, w-2, h-2);
+    if(state == WD_PRESENT) wd_tab(x, y, w, 6);             /* corner tab = in the word */
+    if(state == WD_ABSENT)  wd_slash(x+1, y+1, w-2, h-2);   /* slash = not in the word */
 }
 static void wd_key(int x,int y,int w,const char *label,char ch,int keystate){
     int kh = WD_KEYH - 2;
+    int gy = y + (kh-12)/2;
     if(keystate == WK_CORRECT){
         wd_fill(x, y, w, kh, 1);
-        if(ch) wd_glyph(x+(w-10)/2, y+2, ch, 2, 0);
+        if(ch) wd_glyph(x+(w-10)/2, gy, ch, 2, 0);
         return;
     }
     wd_rect(x, y, w, kh, 1);
-    if(keystate == WK_PRESENT) wd_rect(x+2, y+2, w-4, kh-4, 1);
-    if(ch) wd_glyph(x+(w-10)/2, y+2, ch, 2, 1);
+    if(ch) wd_glyph(x+(w-10)/2, gy, ch, 2, 1);
     else if(label){                                          /* ENTER/DEL: scale-1 caption */
         int lw = (int)strlen(label)*6 - 1, lx = x + (w-lw)/2;
-        for(const char *p=label; *p; p++){ wd_glyph(lx, y+(kh-7)/2, *p, 1, 1); lx += 6; }
+        for(const char *p=label; *p; p++){ wd_glyph(lx, y+(kh-6)/2, *p, 1, 1); lx += 6; }
     }
-    if(keystate == WK_ABSENT) wd_slash(x, y, w, kh);
+    if(keystate == WK_PRESENT) wd_tab(x, y, w, 5);
+    if(keystate == WK_ABSENT)  wd_slash(x, y, w, kh);
+}
+/* the legend under the grid: a mini sample of each mark + a short caption, so the
+ * three tile states are self-explanatory without a separate help screen. */
+static void wd_legend(void){
+    struct { int x; int st; const char *cap; } it[3] = {
+        { 8,   WD_CORRECT, "SPOT" },   /* right letter, right spot */
+        { 92,  WD_PRESENT, "WORD" },   /* right letter, wrong spot */
+        { 176, WD_ABSENT,  "NONE" },   /* not in the word          */
+    };
+    for(int k=0;k<3;k++){
+        int x = it[k].x, y = WD_LEGY;
+        wd_tile(x, y, 12, 12, 0, it[k].st);                 /* blank sample tile */
+        int tx = x + 16;
+        for(const char *p=it[k].cap; *p; p++){ wd_glyph(tx, y+3, *p, 1, 1); tx += 6; }
+    }
 }
 static void wd_render(void){
     if(!g_wd_cv) return;
@@ -4080,15 +4312,27 @@ static void wd_render(void){
     int y0 = WD_KY0;
     for(int i=0;i<10;i++){ char ch=WD_KROW[0][i]; wd_key(i*24,      y0,           24, NULL, ch, g_wd.key[ch-'A']); }
     for(int i=0;i<9;i++){  char ch=WD_KROW[1][i]; wd_key(12+i*24,   y0+WD_KEYH,   24, NULL, ch, g_wd.key[ch-'A']); }
+    wd_legend();
     int y2 = y0 + 2*WD_KEYH;
     wd_key(2, y2, 34, "OK", 0, WK_UNUSED);
     for(int i=0;i<7;i++){ char ch=WD_KROW[2][i]; wd_key(36+i*24,    y2,           24, NULL, ch, g_wd.key[ch-'A']); }
     wd_key(204, y2, 34, "DEL", 0, WK_UNUSED);
 
     if(g_wd_status){
-        if(g_wd.state == WD_WON)       lv_label_set_text_fmt(g_wd_status, "Solved in %d!", g_wd.nrows);
+        char st[24] = "";
+        if(g_wd_streak) snprintf(st, sizeof st, "  Streak %u", (unsigned)g_wd_streak);
+        if(g_wd.state == WD_WON)       lv_label_set_text_fmt(g_wd_status, "Solved in %d!%s", g_wd.nrows, st);
         else if(g_wd.state == WD_LOST) lv_label_set_text_fmt(g_wd_status, "Answer: %s", g_wd.answer);
-        else                           lv_label_set_text_fmt(g_wd_status, "Guess %d/%d", g_wd.nrows+1, WD_ROWS);
+        else                           lv_label_set_text_fmt(g_wd_status, "Guess %d/%d%s", g_wd.nrows+1, WD_ROWS, st);
+    }
+}
+/* submit the current row and fold the result into the win streak: a solve bumps
+ * it, a loss resets it. Only wd_enter can end a game, so this is the one hook. */
+static void wd_do_enter(void){
+    int prev = g_wd.state;
+    if(wd_enter(&g_wd)){
+        if(prev == WD_PLAY && g_wd.state == WD_WON)  g_wd_streak++;
+        else if(prev == WD_PLAY && g_wd.state == WD_LOST) g_wd_streak = 0;
     }
 }
 static void wd_key_tap(int lx,int ly){
@@ -4097,7 +4341,7 @@ static void wd_key_tap(int lx,int ly){
     if(row == 0){ int i = lx/24; if(i>=0 && i<10) wd_addch(&g_wd, WD_KROW[0][i]); }
     else if(row == 1){ if(lx<12) return; int i=(lx-12)/24; if(i>=0 && i<9) wd_addch(&g_wd, WD_KROW[1][i]); }
     else if(row == 2){
-        if(lx < 36)        wd_enter(&g_wd);
+        if(lx < 36)        wd_do_enter();
         else if(lx >= 204) wd_del(&g_wd);
         else { int i=(lx-36)/24; if(i>=0 && i<7) wd_addch(&g_wd, WD_KROW[2][i]); }
     } else return;
@@ -4113,7 +4357,7 @@ static void wd_tap_cb(lv_event_t *e){ (void)e;
  * newline gesture submits (set as graf_char_hook while the screen is open). */
 static void wordie_input(char c){
     if(c == '\b')      wd_del(&g_wd);
-    else if(c == '\n') wd_enter(&g_wd);
+    else if(c == '\n') wd_do_enter();
     else if((c>='a'&&c<='z')||(c>='A'&&c<='Z')) wd_addch(&g_wd, c);
     else return;
     wd_render();
@@ -4160,17 +4404,208 @@ static void show_wordie(void){
     graf_char_hook = wordie_input;         /* AFTER kill_kb cleared it: route strokes here */
 }
 
+/* ========================= Sudoku (Games) ==================================
+ * A 9x9 Sudoku (sudoku.c holds the pure generator + rules). The board AND a
+ * number pad are drawn mono on ONE 1-bpp canvas (pool-cheap, like Wordie). The
+ * on-brand input is the Graffiti digit strip -- draw 1-9 to fill the selected
+ * cell, backspace to clear -- and the number pad gives the same by tap. Clue
+ * cells carry a filled corner tab and can't be edited; a rule-breaking entry gets
+ * a slash; the selected cell gets a thick border. */
+#define SDCW    240
+#define SDCH    164
+#define SD_CELL 16                          /* grid cell px -> 9*16 = 144 */
+#define SD_GX0  ((240 - 9*SD_CELL)/2)       /* = 48, centred */
+#define SD_GY0  0
+#define SD_PY0  146                         /* number pad top */
+#define SD_PKW  24                          /* 10 keys * 24 = 240 */
+#define SD_PKH  17
+#define SD_HOLES 45                         /* ~36 clues: an approachable board */
+
+static SdGame    g_sd;
+static lv_obj_t *g_sd_cv, *g_sd_status;
+static int       g_sd_sel;                  /* selected cell index 0..80, or -1 */
+static uint32_t  g_sd_seq;
+static uint8_t   sd_buf[LV_CANVAS_BUF_SIZE(SDCW, SDCH, 1, 1) + 16];
+
+static void sdpx(int x,int y,int v){
+    if(!g_sd_cv || x<0 || y<0 || x>=SDCW || y>=SDCH) return;
+    lv_color_t col = { .blue = (uint8_t)(v ? 1 : 0) };
+    lv_canvas_set_px(g_sd_cv, x, y, col, LV_OPA_COVER);
+}
+static void sd_hline(int x0,int x1,int y){ for(int x=x0;x<=x1;x++) sdpx(x,y,1); }
+static void sd_vline(int x,int y0,int y1){ for(int y=y0;y<=y1;y++) sdpx(x,y,1); }
+static void sd_box(int x,int y,int w,int h){
+    for(int i=0;i<w;i++){ sdpx(x+i,y,1); sdpx(x+i,y+h-1,1); }
+    for(int j=0;j<h;j++){ sdpx(x,y+j,1); sdpx(x+w-1,y+j,1); }
+}
+/* a 4x7 digit (reusing DASH_DIG) at scale s, top-left (x,y). */
+static void sd_digit(int x,int y,int d,int s){
+    if(d<1||d>9) return;
+    const uint8_t *g = DASH_DIG[d];
+    for(int r=0;r<7;r++) for(int c=0;c<4;c++) if(g[r] & (8>>c))
+        for(int dy=0;dy<s;dy++) for(int dx=0;dx<s;dx++) sdpx(x+c*s+dx, y+r*s+dy, 1);
+}
+static void sd_slash(int x,int y,int w,int h){        /* top-left -> bottom-right */
+    int steps = (w>h?w:h); if(steps<2) return;
+    for(int i=0;i<steps;i++) sdpx(x + i*(w-1)/(steps-1), y + i*(h-1)/(steps-1), 1);
+}
+static void sd_ex(int x,int y,int w,int h){           /* an "X" (both diagonals) */
+    int steps = (w>h?w:h); if(steps<2) return;
+    for(int i=0;i<steps;i++){
+        sdpx(x + i*(w-1)/(steps-1),         y + i*(h-1)/(steps-1), 1);
+        sdpx(x + (w-1) - i*(w-1)/(steps-1), y + i*(h-1)/(steps-1), 1);
+    }
+}
+static void sd_render(void){
+    if(!g_sd_cv) return;
+    lv_color_t bg = { .blue = 0 };
+    lv_canvas_fill_bg(g_sd_cv, bg, LV_OPA_COVER);
+
+    /* grid: thin cell lines, doubled on the 3x3 box boundaries */
+    for(int i=0;i<=9;i++){
+        int gx = SD_GX0 + i*SD_CELL, gy = SD_GY0 + i*SD_CELL;
+        sd_vline(gx, SD_GY0, SD_GY0 + 9*SD_CELL);
+        sd_hline(SD_GX0, SD_GX0 + 9*SD_CELL, gy);
+        if(i%3==0){ sd_vline(gx+1, SD_GY0, SD_GY0 + 9*SD_CELL);
+                    sd_hline(SD_GX0, SD_GX0 + 9*SD_CELL, gy+1); }
+    }
+    for(int r=0;r<9;r++) for(int c=0;c<9;c++){
+        int x = SD_GX0 + c*SD_CELL, y = SD_GY0 + r*SD_CELL;
+        int p = r*9 + c, v = g_sd.cell[p];
+        if(g_sd.given[p]) for(int j=0;j<4;j++) for(int i=0;i<=j;i++) sdpx(x+2+i, y+2+j, 1);  /* clue tab */
+        if(v){
+            int dx = x + (SD_CELL-8)/2, dy = y + (SD_CELL-14)/2;   /* 8x14 = 4x7 @2 */
+            sd_digit(dx, dy, v, 2);
+            if(!g_sd.given[p] && sd_conflict(&g_sd, r, c)) sd_slash(x+3, y+3, SD_CELL-6, SD_CELL-6);
+        }
+        if(p == g_sd_sel){ sd_box(x+1, y+1, SD_CELL-1, SD_CELL-1);
+                           sd_box(x+2, y+2, SD_CELL-3, SD_CELL-3); }
+    }
+    /* number pad: 1..9 then an erase key (X) */
+    for(int k=0;k<10;k++){
+        int x = k*SD_PKW, y = SD_PY0;
+        sd_box(x, y, SD_PKW, SD_PKH);
+        if(k<9) sd_digit(x + (SD_PKW-8)/2, y + (SD_PKH-14)/2, k+1, 2);
+        else    sd_ex(x + (SD_PKW-10)/2, y+3, 10, SD_PKH-6);      /* X = erase */
+    }
+    if(g_sd_status){
+        if(g_sd.state==SD_SOLVED) lv_label_set_text(g_sd_status, "Solved!");
+        else lv_label_set_text_fmt(g_sd_status, "%d left", sd_remaining(&g_sd));
+    }
+}
+
+#define SD_SAV       "/sdcard/sudoku.sav"
+#define SD_SAV_MAGIC 0x53444B31u                 /* "SDK1" */
+static void sd_save(void){
+    FILE *f = fopen(SD_SAV, "wb"); if(!f) return;
+    uint32_t magic = SD_SAV_MAGIC;
+    fwrite(&magic, sizeof magic, 1, f);
+    fwrite(&g_sd, sizeof g_sd, 1, f);
+    fwrite(&g_sd_sel, sizeof g_sd_sel, 1, f);
+    fclose(f);
+}
+static int sd_load(void){
+    FILE *f = fopen(SD_SAV, "rb"); if(!f) return 0;
+    uint32_t magic = 0; SdGame tmp; int ok = 0;
+    if(fread(&magic, sizeof magic, 1, f) == 1 && magic == SD_SAV_MAGIC &&
+       fread(&tmp, sizeof tmp, 1, f) == 1){
+        g_sd = tmp; ok = 1;
+        if(fread(&g_sd_sel, sizeof g_sd_sel, 1, f) != 1 || g_sd_sel < 0 || g_sd_sel >= SD_CELLS) g_sd_sel = -1;
+    }
+    fclose(f);
+    return ok;
+}
+/* pick the first empty, non-clue cell as the initial selection (so Graffiti works
+ * right away); -1 if the board is full. */
+static void sd_select_first_blank(void){
+    g_sd_sel = -1;
+    for(int p=0;p<SD_CELLS;p++) if(!g_sd.given[p] && !g_sd.cell[p]){ g_sd_sel = p; return; }
+}
+static void sd_new_game(void){
+    sd_new(&g_sd, (uint32_t)time(NULL) ^ (g_sd_seq++ * 2654435761u), SD_HOLES);
+    sd_select_first_blank();
+}
+static void sd_place(int val){          /* apply a digit (or 0=clear) to the selection */
+    if(g_sd_sel < 0) return;
+    int r = g_sd_sel/9, c = g_sd_sel%9;
+    if(sd_is_given(&g_sd, r, c)) return;
+    sd_set(&g_sd, r, c, val);
+    sd_render();
+    sd_save();
+}
+static void sd_key_tap(int lx,int ly){
+    if(ly >= SD_GY0 && ly < SD_GY0 + 9*SD_CELL && lx >= SD_GX0 && lx < SD_GX0 + 9*SD_CELL){
+        int c = (lx - SD_GX0)/SD_CELL, r = (ly - SD_GY0)/SD_CELL;     /* select a cell */
+        if(r>=0 && r<9 && c>=0 && c<9){ g_sd_sel = r*9 + c; sd_render(); sd_save(); }
+        return;
+    }
+    if(ly >= SD_PY0 && ly < SD_PY0 + SD_PKH){                          /* number pad */
+        int k = lx / SD_PKW;
+        if(k>=0 && k<9)      sd_place(k+1);
+        else if(k==9)        sd_place(0);
+    }
+}
+static void sd_tap_cb(lv_event_t *e){ (void)e;
+    lv_point_t p; lv_indev_get_point(lv_indev_active(), &p);
+    lv_area_t a; lv_obj_get_coords(g_sd_cv, &a);
+    sd_key_tap(p.x - a.x1, p.y - a.y1);
+}
+/* the Graffiti strip drives Sudoku: a digit fills the selected cell, backspace or
+ * '0' clears it (set as graf_char_hook while the screen is open). */
+static void sudoku_input(char c){
+    if(c>='1' && c<='9') sd_place(c - '0');
+    else if(c=='\b' || c=='0') sd_place(0);
+}
+static void sd_newbtn_cb(lv_event_t *e){ (void)e;
+    sd_new_game();
+    sd_render();
+    sd_save();
+}
+static void show_sudoku(void){
+    kill_kb(); cur_app=NULL; cur_uid=0;
+    g_sd_cv = g_sd_status = NULL;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, "Sudoku");
+    update_cat_trigger();
+
+    g_sd_status = lv_label_create(content);
+    lv_obj_set_style_text_font(g_sd_status, &lv_font_palm, 0);
+    lv_obj_align(g_sd_status, LV_ALIGN_TOP_LEFT, 6, 4);
+
+    lv_obj_t *nb = lv_button_create(content);
+    lv_obj_set_style_radius(nb, 0, 0);
+    lv_obj_set_style_pad_all(nb, 2, 0);
+    lv_obj_align(nb, LV_ALIGN_TOP_RIGHT, -4, 1);
+    lv_obj_add_event_cb(nb, sd_newbtn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *nl = lv_label_create(nb); lv_label_set_text(nl, "New");
+
+    g_sd_cv = lv_canvas_create(content);
+    lv_canvas_set_buffer(g_sd_cv, sd_buf, SDCW, SDCH, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_palette(g_sd_cv, 0, lv_color_to_32(COL_BODY, 0xFF));
+    lv_canvas_set_palette(g_sd_cv, 1, lv_color_to_32(COL_LINE, 0xFF));
+    lv_obj_align(g_sd_cv, LV_ALIGN_TOP_MID, 0, 20);
+    lv_obj_add_flag(g_sd_cv, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(g_sd_cv, LV_OBJ_FLAG_SCROLLABLE);      /* resistive-robust (see News/Mines) */
+    lv_obj_add_event_cb(g_sd_cv, sd_tap_cb, LV_EVENT_PRESSED, NULL);
+
+    if(!sd_load()) sd_new_game();
+    if(g_sd_sel < 0) sd_select_first_blank();
+    sd_render();
+    graf_char_hook = sudoku_input;         /* AFTER kill_kb cleared it: route strokes here */
+}
+
 /* The Games "folder": an icon grid mirroring the app launcher (each game is a
  * tappable icon + label), so it reads as a sub-folder of the main launcher rather
  * than a list of text buttons. Add a game by extending GAMES[] + its dispatch. */
-static const char           *GAMES[]      = { "Mines", "Wordie" };
-static const lv_image_dsc_t *GAME_ICONS[] = { &icon_mines, &icon_wordie };
+static const char           *GAMES[]      = { "Mines", "Wordie", "Sudoku" };
+static const lv_image_dsc_t *GAME_ICONS[] = { &icon_mines, &icon_wordie, &icon_sudoku };
 #define NGAMES ((int)(sizeof(GAMES)/sizeof(GAMES[0])))
 
 static void games_pick_cb(lv_event_t *e){
     const char *g = lv_event_get_user_data(e);
     if(!strcmp(g,"Mines"))       show_minesweeper();
     else if(!strcmp(g,"Wordie")) show_wordie();
+    else if(!strcmp(g,"Sudoku")) show_sudoku();
 }
 static void show_games(void){
     kill_kb(); cur_app=NULL; cur_uid=0;
@@ -4318,5 +4753,6 @@ void ui_init(void){
      * build (the 64-bit native sim's 48 KB pool hid it). A 15 s timer keeps the
      * locked clock fresh; the port layer re-raises the lock on every wake. */
     lv_timer_create(dash_tick, 15000, NULL);
+    lv_timer_create(ms_tick, 1000, NULL);        /* live Mines clock (no-op unless it's showing) */
     ui_show_lock();
 }

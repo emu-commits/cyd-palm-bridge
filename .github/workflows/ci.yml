@@ -70,6 +70,8 @@ jobs:
         run: make -C sim mines
       - name: Wordie word-logic gate
         run: make -C sim wordie
+      - name: Sudoku board-logic gate
+        run: make -C sim sudoku
       - name: Build + run the scripted UI tour (real ui.c, screenshots)
         run: make -C sim smoke
       - name: Convert screenshots to PNG
