@@ -5,7 +5,39 @@ next session can pick up without re-deriving. Authoritative detail lives in
 `docs/BACKLOG.md` (roadmap + changelog) and `docs/KANA_TRAINER.md` (the Japanese
 trainer's full Tier 1–5 analysis).
 
-_Last updated: 2026-07-20 (game state persistence; Wordie word game; games folder + Kana folded into Graffiti + minesweeper tap fix)._
+_Last updated: 2026-07-21 (Sudoku; Mines timer/high-score; Wordie font/legend/streak; lock-screen seven-seg clock + world-clock settings; game-state persistence)._
+
+## This batch (2026-07-21)
+
+Four areas, one PR:
+
+- **Mines** -- renamed the title to "Mines" (matches the icon). Added a live play
+  timer (starts on first dig, freezes at win/lose, 1 Hz tick) and a persistent
+  best-time high score, shown "Time m:ss  Best m:ss" below the board. Both ride in
+  `mines.sav` (magic MSG2).
+- **Wordie** -- new cleaner 5x6 letter font (10x12 px, centred with a margin so it
+  no longer touches the tile bottoms). New mono state language + an on-screen
+  **legend** under the grid: CORRECT = filled tile (SPOT), PRESENT = corner tab
+  (WORD), ABSENT = slash (NONE). Added a persistent **streak** counter (`wordie.sav`
+  magic WDG2).
+- **Sudoku** (NEW, third game) -- `firmware/main/sudoku.c/.h`, pure C + host gate
+  (`make -C sim sudoku`): a seeded generator that guarantees a UNIQUE solution
+  (fill a random solution, dig holes with a solution-counting check), rules, and
+  solved detection. View in `ui.c` (`show_sudoku`): 9x9 board + number pad on ONE
+  I1 canvas; clue cells carry a corner tab and reject edits, the selected cell gets
+  a thick border, conflicts are slashed. **On-brand input: the Graffiti digit strip
+  fills the selected cell** (number pad does the same by tap). Persists to
+  `sudoku.sav`. `icon_sudoku` in `palm_icons.c`; in `GAMES[]`/`GAME_ICONS[]`.
+- **Lock screen** -- replaced the blocky hero clock with a **seven-segment** renderer
+  (bevelled, mitred bars). Moved the two world clocks to their own row **below** the
+  clock so a two-digit hour's AM/PM can't overlap them (the reported bug). New
+  **Preferences -> "Lock screen..."** sub-screen picks each world-clock zone (shared
+  zone picker, with "(off)") and toggles **12h/24h**. New Config fields
+  `world1`/`world2`/`clock24` round-trip in `config.ini` (covered by the config host
+  gate). NOTE: grouping the three dashboard settings behind ONE sub-screen row (not
+  three inline Preferences rows) was necessary -- three extra `lv_list` buttons
+  pushed the Preferences list past the 24 KB pool and the brightness popup then
+  crashed on the 32-bit build. `smoke32` peak 612 B.
 
 ## Game state persistence (2026-07-20)
 
@@ -37,9 +69,10 @@ for trademark (NYT owns "Wordle").
   knockout letter; PRESENT = double border; ABSENT = letter with a diagonal slash.
 - `icon_wordie` (a 3x3 guess grid) in `palm_icons.c`. Registered in `GAMES[]`/
   `GAME_ICONS[]` next to Mines.
-- The in-progress puzzle now persists across exits (see "Game state persistence").
-- NOT YET: a guess-validity dictionary (any 5 letters is accepted as a guess) and
-  win/streak *stats* -- reasonable follow-ups.
+- The in-progress puzzle persists across exits (see "Game state persistence"), and
+  a consecutive-solve **streak** counter is shown + persisted (2026-07-21 batch).
+- NOT YET: a guess-validity dictionary (any 5 letters is accepted as a guess) --
+  a reasonable follow-up.
 
 ## Latest cycle (2026-07-20)
 
