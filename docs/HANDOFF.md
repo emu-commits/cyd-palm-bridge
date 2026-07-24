@@ -5,7 +5,100 @@ next session can pick up without re-deriving. Authoritative detail lives in
 `docs/BACKLOG.md` (roadmap + changelog) and `docs/KANA_TRAINER.md` (the Japanese
 trainer's full Tier 1–5 analysis).
 
-_Last updated: 2026-07-21 (Wordie OK/DEL relocation + caption-overlap fix; Sudoku New-button border, timer/best, conflict-flag guard; Sudoku; Mines timer/high-score; Wordie font/legend/streak; lock-screen seven-seg clock + world-clock settings; game-state persistence)._
+_Last updated: 2026-07-24 (**Zip** -- the fourth and FINAL game; pausable play clocks for
+Mines/Sudoku/Zip; one shared game canvas buffer, -12.5 KB BSS. Previously: Wordie OK/DEL
+relocation + caption-overlap fix; Sudoku New-button border, timer/best, conflict-flag guard;
+Sudoku; Mines timer/high-score; Wordie font/legend/streak; lock-screen seven-seg clock +
+world-clock settings; game-state persistence)._
+
+## Zip + pausable play clocks (2026-07-24) — the games are DONE
+
+The last game shipped. Gates: `make -C sim games` (mines/wordie/sudoku/**zip**/**clock**),
+`make -C sim smoke`, and `make -C sim smoke32` (the true 24 KB pool) all green; `ui.c`
+and `zip.c` strict-compile under `-Wall -Wextra -Werror -Wshadow` (`zip.c` also clean
+under `-Wconversion`).
+
+### 1. The game timers now PAUSE when the game is off screen
+
+The bug: both clocks stored a single "started at" epoch and displayed `now - start`, so
+they kept counting while the game was closed — leave a half-solved Sudoku, come back
+after lunch, and it read 47:00.
+
+The fix is a small shared state machine, **`firmware/main/playclock.h`**: a `PlayClock`
+banks elapsed seconds into `accum` on pause and opens a fresh `run` segment on resume,
+so only on-screen time counts. Every call takes `now` as a parameter instead of calling
+`time()`, which makes the whole thing deterministic and host-testable — **`make -C sim
+clock`** (25 assertions, no sleeping) is the gate.
+
+Wiring in `ui.c`:
+- **Pause** in `kill_kb()` via `games_pause_clocks()`. That is the one function every
+  screen teardown already goes through (including `ui_show_lock`, so locking the device
+  pauses too), which makes it the reliable definition of "you left the game". It banks
+  the segment *and* saves, so the last few seconds before leaving aren't lost.
+- **Resume** with `pc_resume()` at the end of each `show_*()`.
+- **Persistence stores a `pc_snapshot()`**, which is always *paused*. A reboot or a flat
+  battery therefore can never charge the player for time the device was off; the screen
+  resumes the clock explicitly when it opens. Save magics bumped: `MSG2`→`MSG3`,
+  `SDK2`→`SDK3` (old files fall back to a fresh clock).
+
+Verified end to end in the sim, not just in the unit gate: the smoke script's
+`zip_clock_running` → 3 s away → `zip_clock_resumed` screenshots show the readout
+advancing by ~1 s (the on-screen tail), not by the 3 s spent elsewhere. That needed a
+new harness command, **`w <ms>`** (real wall-clock wait, still pumping LVGL) — `t` only
+moves LVGL's simulated tick, under which anything reading `time(NULL)` stands still.
+
+### 2. Zip — a 6x6 one-line path puzzle (`firmware/main/zip.c/.h`)
+
+Start on **1**, hit the numbers in ascending order, cover **every** cell with a single
+unbroken path: a Hamiltonian path with ordered waypoints. Host-gated by
+`make -C sim zip` (40 assertions incl. an independent reference solver).
+
+**Generation — the interesting part.** The obvious approach (drop N waypoints evenly
+along a random Hamiltonian path) produces *bad puzzles*: measured, 10 evenly spaced
+numbers still left **2–41 solutions**. So it generates the way `sudoku.c` does, in
+reverse: number **every** cell of the reference path (trivially unique — the numbers
+spell out the answer), then remove numbers one at a time in a seeded random order,
+keeping a removal only while **exactly one** solution survives. What's left is minimal:
+no number in it is redundant. Measured over 2000 seeds → **5..12 numbers, centred on
+7–9** (the same feel as the original game), **2.4 ms** per board on the host.
+
+That is affordable only because of the **connectivity prune**: after each step, every
+unvisited cell must still be reachable through unvisited cells. It collapses an
+exhaustive count on 36 cells to a few *thousand* nodes, so a whole New game is ~35 cheap
+counts. Searches also carry a node budget, so no seed can ever spin the watchdog.
+
+**Input is a drag**, which is what this puzzle wants: `LV_EVENT_PRESSED` starts,
+`LV_EVENT_PRESSING` continues (never `CLICKED` — see the Mines lesson). `zp_touch()` is
+the single entry point and it is forgiving on purpose: touching a cell already on the
+path **retraces** to it (so a wrong turn needs no button), and a touch two cells away
+**bridges through a shared free neighbour** — which is what makes a fast drag or a
+diagonal finger sweep work on a resistive panel. Out-of-order numbers are refused *as
+you draw*, so `zp_solved()` is just "all 36 cells covered".
+
+**Rendering** (one I1 canvas, Sudoku's grammar): numbers are filled discs with knockout
+digits (readable once the path covers them), the path is a 7 px ink band, the grid is
+dotted so the band is what the eye follows. Two subtleties found by looking at 4x
+zooms: `dx²+dy² <= r²` leaves a one-pixel spike at each cardinal extreme of a 17 px disc
+(trim the threshold by `r`), and the "you are here" marker can't be a border on a
+numbered cell — black on black vanishes — so a numbered head becomes a **hollow** disc
+with a black digit while a plain head gets Sudoku's double border.
+
+Also: Undo/Clear are canvas-drawn buttons on a row below the grid (they fire on
+`PRESSED` only, so a drag across them is inert), the Graffiti strip's backspace undoes,
+`New` reseeds, and state persists to `zip.sav` (`ZIP1`). Clear and Undo keep the clock
+running — they're the same attempt; only `New` resets it.
+
+**RAM:** `ZpGame` is 116 bytes, `zip.c` statics ~330 B, worst-case stack ~3.2 KB
+(measured with `-fstack-usage`; the neighbour table exists to keep the 36-deep frames
+small, since LVGL runs on a 12 KB-stack task).
+
+### 3. One canvas buffer for all four games (−12.5 KB BSS)
+
+The games are mutually exclusive screens — each `show_*()` calls `kill_kb()` +
+`lv_obj_clean(content)`, deleting the previous canvas before the next is created — so
+four private I1 buffers were pure waste: **17.5 KB** of BSS on a 320 KB-DRAM, no-PSRAM
+board. They now share one `game_cv_buf` sized to the largest board (240x164, **4.9 KB**).
+Sudoku and Zip are the same size; Mines and Wordie simply use less of it.
 
 ## Games polish pass (2026-07-21)
 
@@ -212,20 +305,44 @@ I1 canvas + labels; sim heap peak 600 B). Key files:
 
 ## Next steps / open gates (in priority order)
 
-0. **DEVICE-LATER for the dashboard (before the product is "done"):** the live weather
+0. **The games are feature-complete — Zip was the last one.** Four games (Mines,
+   Wordie, Sudoku, Zip), each with pure host-gated logic, a pausable clock, a persisted
+   best time, and SD-backed state. Nothing further is planned for them; what remains is
+   **on-glass verification**, below.
+
+1. **SHIP GATE — on-device pass for the games (cannot be done off-bench).** Everything
+   below is written and sim-verified, and only the physical panel can settle it:
+   - **Zip's drag feel.** The bridge-through-a-neighbour rule was tuned against a mouse.
+     On a resistive panel confirm a fast diagonal sweep draws the path you meant, and
+     that retracing back over the band rewinds cleanly. `ZP_CELL` (24 px) is the knob if
+     the target is too small for a fingertip.
+   - **Zip's `New` latency.** Generation is 2.4 ms on the host; the ESP32 is ~15-30x
+     slower, so expect ~40-80 ms. Confirm the button feels instant and the WDT stays
+     quiet; if a seed ever stalls, lower the `count_paths` budget in `zp_new`.
+   - **The clocks across a real power cycle.** Start a game, leave it, pull power, boot
+     again: the clock must resume at the banked time (the save stores a *paused*
+     snapshot), and the best times must survive.
+   - **Re-measure heap/BSS** after the shared-canvas change (expect ~12.5 KB more free).
+
+2. **Should the clock pause when the backlight times out?** Today a game left open on
+   the desk keeps counting: the screen is still "open" as far as `ui.c` knows. Pausing
+   there needs a hook from `idle_step()` in `lvgl_port.c` into `games_pause_clocks()`.
+   It is a genuine polish item, deliberately not built blind — decide it on glass, where
+   you can see how long the timeout actually is.
+
+3. **DEVICE-LATER for the dashboard (before the product is "done"):** the live weather
    fetch (Open-Meteo HTTPS during HotSync, *after* DAV frees its TLS buffers, stream-
    parsed into `WX_PATH`) and the battery ADC on GPIO34 (calibrate, then return a real
-   `power_battery_pct()`). Neither is sim-verifiable. Then: **alarms that fire** and the
-   **games**.
+   `power_battery_pct()`). Neither is sim-verifiable. Then **alarms that fire**.
 
-1. **Tier 2 on-device tuning — THE GATE before any kanji work.** The emulator proves
+4. **Tier 2 on-device tuning — THE GATE before any kanji work.** The emulator proves
    the *mechanics* only; whether the per-stroke matcher *feels* right on the physical
    resistive panel is unproven. On real hardware, tune `KW_THRESH` (and consider
    per-stroke leniency for tiny/short strokes). Do **not** start Tier 3 before this.
-2. **Quick UX follow-up if the user asks** (not yet approved): Sound mode uses strict
+5. **Quick UX follow-up if the user asks** (not yet approved): Sound mode uses strict
    Hepburn (`shi/tsu/chi/fu/wo`). If drawing `si/tu/ti/hu/o` should count, add
    accepted alternates in `ka_input` (`ui.c`).
-3. **Tiers 3–5 (kanji)** — CONDITIONAL on #1. The KanjiVG→polyline pipeline is now
+6. **Tiers 3–5 (kanji)** — CONDITIONAL on #4. The KanjiVG→polyline pipeline is now
    proven on kana and extends directly. Needs: WaniKani ordering + vocab dataset;
    CJK **rendering** (draw kanji from stroke data on the canvas, or a subset font);
    the tightest 2.8″ layout is Tier 5. Full plan in `docs/KANA_TRAINER.md`.
@@ -258,5 +375,12 @@ I1 canvas + labels; sim heap peak 600 B). Key files:
   libc6-dev-i386` then `make -C sim smoke32`. The lock screen keeps its footprint down
   by **not coexisting with other screens**: it clears the content area and defers the
   launcher, so the pool only ever holds the chrome + one screen.
+- **`smoke32` leaves 32-bit objects behind.** It runs `make clean` and rebuilds
+  everything `-m32`, so the next plain `make -C sim host`/`smoke` fails to link against
+  the 32-bit `liblvgl.a`. Always `make -C sim clean` after a `smoke32` run.
+- **The sim's `t <ms>` is SIMULATED time.** It advances LVGL's tick only; anything
+  reading `time(NULL)` (the game play clocks, the dashboard) does not move under it. Use
+  the `w <ms>` harness command for real wall-clock seconds, sparingly — it burns actual
+  CI time.
 - **Device-only verifies** (real resistive-panel accuracy, live RSS fetch, sync
   self-heal) cannot be started off-bench.

@@ -7,6 +7,9 @@
  *
  * Script commands (one per line; '#' comments):
  *   t <ms>          advance simulated time
+ *   w <ms>          wait <ms> of REAL wall-clock time (still pumping LVGL), for the
+ *                   few behaviours tied to time(NULL) rather than LVGL ticks --
+ *                   notably the games' play clocks (firmware/main/playclock.h)
  *   d <x> <y>       pointer down at (x,y)
  *   m <x> <y>       pointer move (while down; use for Graffiti strokes)
  *   u               pointer up
@@ -22,6 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include "sim_port.h"
 #include "sim_heap.h"
 #include "ui.h"
@@ -30,6 +34,22 @@
 #include "clock.h"
 
 static const char *s_shotdir = "build/shots";
+
+/* Pump the UI for `ms` of REAL time. `t` advances only LVGL's simulated tick, so
+ * anything reading time(NULL) -- the game play clocks -- stands still under it.
+ * This burns actual seconds, so scripts should use it sparingly. */
+static void wall_wait(int ms){
+    struct timespec t0, now;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    for(;;){
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        long el = (now.tv_sec - t0.tv_sec) * 1000L + (now.tv_nsec - t0.tv_nsec) / 1000000L;
+        if(el >= ms) return;
+        sim_step(20);
+        struct timespec nap = { 0, 15 * 1000 * 1000 };   /* 15 ms, so we don't spin */
+        nanosleep(&nap, NULL);
+    }
+}
 
 static int shot(const char *name){
     char path[256];
@@ -71,6 +91,7 @@ int main(int argc, char **argv){
         char name[128];
         if(line[0] == '#' || line[0] == '\n') continue;
         if(sscanf(line, "t %d", &ms) == 1)            sim_step(ms);
+        else if(sscanf(line, "w %d", &ms) == 1)       wall_wait(ms);
         else if(sscanf(line, "d %d %d", &x, &y) == 2){ sim_touch(x, y, 1); sim_step(30); }
         else if(sscanf(line, "m %d %d", &x, &y) == 2){ sim_touch(x, y, 1); sim_step(15); }
         else if(line[0] == 'u')                       { sim_touch(0, 0, 0); sim_step(50); }

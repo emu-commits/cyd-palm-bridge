@@ -31,6 +31,8 @@
 #include "minesweeper.h"  /* Games: Minesweeper board logic */
 #include "wordie.h"       /* Games: Wordie word-game logic */
 #include "sudoku.h"       /* Games: Sudoku board logic */
+#include "zip.h"          /* Games: Zip path-puzzle logic */
+#include "playclock.h"    /* Games: pausable play timer (shared by Mines/Sudoku/Zip) */
 #include "lvgl.h"
 #include <string.h>
 #include <strings.h>      /* strncasecmp for the Address Look Up filter */
@@ -191,10 +193,16 @@ static int  g_trainer_open;      /* the Graffiti trainer is the live screen (men
 static int  g_kana_open;         /* the Kana trainer is the live screen (menu Reset) */
 static int  g_ms_active;         /* the Mines screen is live (1 Hz timer tick guard) */
 static int  g_sd_active;         /* the Sudoku screen is live (1 Hz timer tick guard) */
+static int  g_zp_active;         /* the Zip screen is live (1 Hz timer tick guard)    */
+/* Bank + persist the open game's play clock. Every screen teardown goes through
+ * kill_kb(), which makes it the one place that reliably means "you left the game"
+ * -- so the timers stop there and restart in the matching show_*(). */
+static void games_pause_clocks(void);
 static void kill_kb(void){
+    games_pause_clocks();        /* BEFORE the active flags are cleared below */
     g_form=NULL; active_ta=NULL; edit_cat_lbl=NULL; g_listtbl=NULL; g_findtbl=NULL;
     graf_char_hook=NULL; graf_capture_hook=NULL;
-    g_trainer_open=0; g_kana_open=0; g_ms_active=0; g_sd_active=0;
+    g_trainer_open=0; g_kana_open=0; g_ms_active=0; g_sd_active=0; g_zp_active=0;
     free_rowuids();
     free_finds();
     kill_hs();
@@ -3965,6 +3973,19 @@ static void dash_tick(lv_timer_t *t){ (void)t; if(g_lock) dash_paint(); }
  * 1-bpp canvas (grid + stipple for unrevealed, the DASH_DIG font for counts, discs
  * for mines). A Dig/Flag mode toggle picks what a tap does (clearer than long-press
  * on a resistive panel). Pool-safe: one canvas + a few labels/buttons. */
+/* ---- ONE 1-bpp canvas buffer, shared by every game ----------------------------
+ * The four games are mutually exclusive screens: each show_*() calls kill_kb() and
+ * lv_obj_clean(content), which deletes the previous canvas before the next one is
+ * created, so two game canvases can never be live at once. Private buffers cost
+ * ~18 KB of BSS on a board with 320 KB of DRAM and no PSRAM; one buffer sized to
+ * the largest board costs 5 KB. LVGL reads the buffer only while drawing, and a
+ * screen swap always happens between draws (from an event callback, never mid-
+ * render), so the reuse is safe. Sized for the biggest game canvas -- Sudoku and
+ * Zip are both 240x164; a smaller canvas simply uses less of it. */
+#define GAME_CVW 240
+#define GAME_CVH 164
+static uint8_t game_cv_buf[LV_CANVAS_BUF_SIZE(GAME_CVW, GAME_CVH, 1, 1) + 16];
+
 #define MSW 9
 #define MSH 9
 #define MSMINES 10
@@ -3975,20 +3996,12 @@ static MsGame    g_ms;
 static lv_obj_t *g_ms_cv, *g_ms_status, *g_ms_modelbl, *g_ms_timelbl;
 static int       g_ms_flag;                     /* 1 = taps place flags, 0 = dig */
 static uint32_t  g_ms_seq;                       /* varies the board each New */
-static uint32_t  g_ms_start;                     /* epoch of the first dig (0 = not started) */
-static uint32_t  g_ms_end;                       /* epoch the game ended (0 = still running) */
+static PlayClock g_ms_clk;                       /* pausable play timer (playclock.h) */
 static uint32_t  g_ms_best;                      /* best winning time in seconds (0 = none yet) */
-static uint8_t   ms_buf[LV_CANVAS_BUF_SIZE(MSCW, MSCH, 1, 1) + 16];
 
-/* elapsed play seconds: 0 before the first dig, live while playing, frozen at the
- * end. A simple wall clock -- leaving the app mid-game keeps counting, which only
- * ever makes that attempt slower, so it can't corrupt the best time. */
-static uint32_t ms_elapsed(void){
-    if(!g_ms_start) return 0;
-    uint32_t now = (uint32_t)time(NULL);
-    uint32_t end = g_ms_end ? g_ms_end : now;
-    return end > g_ms_start ? end - g_ms_start : 0;
-}
+/* elapsed PLAY seconds: 0 before the first dig, live while the screen is open,
+ * paused the moment you leave, frozen when the game ends. */
+static uint32_t ms_elapsed(void){ return pc_secs(&g_ms_clk, (uint32_t)time(NULL)); }
 static void ms_fmt_mmss(uint32_t sec, char *out, int cap){
     if(sec > 5999) sec = 5999;                   /* cap the readout at 99:59 */
     snprintf(out, cap, "%u:%02u", (unsigned)(sec/60), (unsigned)(sec%60));
@@ -4040,7 +4053,7 @@ static void ms_render(void){
 }
 /* 1 Hz tick (created once in ui_init): keep the on-screen clock live while playing. */
 static void ms_tick(lv_timer_t *t){ (void)t;
-    if(g_ms_active && g_ms_timelbl && g_ms.state==MS_PLAY && g_ms_start){
+    if(g_ms_active && g_ms_timelbl && g_ms.state==MS_PLAY && g_ms_clk.run){
         char tb[8]; ms_fmt_mmss(ms_elapsed(), tb, sizeof tb);
         char bb[8];
         if(g_ms_best){ ms_fmt_mmss(g_ms_best, bb, sizeof bb);
@@ -4052,7 +4065,7 @@ static void ms_new_game(void){
     time_t t=0; time(&t);
     ms_new(&g_ms, MSW, MSH, MSMINES, (uint32_t)t ^ (g_ms_seq++ * 2654435761u));
     g_ms_flag = 0;
-    g_ms_start = g_ms_end = 0;                    /* timer starts on the first dig; best is kept */
+    pc_reset(&g_ms_clk);                          /* timer starts on the first dig; best is kept */
 }
 
 /* Persist the in-progress board so it survives leaving the app. MsGame is plain
@@ -4060,15 +4073,16 @@ static void ms_new_game(void){
  * magic + size + w/h guard against a stale/foreign file. Saved after each move
  * and on New; restored when the screen reopens. */
 #define MS_SAV       "/sdcard/mines.sav"
-#define MS_SAV_MAGIC 0x4D534732u                 /* "MSG2" (bumped: now carries timer + best) */
+#define MS_SAV_MAGIC 0x4D534733u                 /* "MSG3" (bumped: pausable PlayClock) */
 static void ms_save(void){
     FILE *f = fopen(MS_SAV, "wb"); if(!f) return;
     uint32_t magic = MS_SAV_MAGIC;
+    /* store a PAUSED snapshot: a reboot must never charge for time powered off */
+    PlayClock clk = pc_snapshot(&g_ms_clk, (uint32_t)time(NULL));
     fwrite(&magic, sizeof magic, 1, f);
     fwrite(&g_ms, sizeof g_ms, 1, f);
-    fwrite(&g_ms_start, sizeof g_ms_start, 1, f);
-    fwrite(&g_ms_end,   sizeof g_ms_end,   1, f);
-    fwrite(&g_ms_best,  sizeof g_ms_best,  1, f);
+    fwrite(&clk,  sizeof clk,  1, f);
+    fwrite(&g_ms_best, sizeof g_ms_best, 1, f);
     fclose(f);
 }
 static int ms_load(void){
@@ -4077,10 +4091,11 @@ static int ms_load(void){
     if(fread(&magic, sizeof magic, 1, f) == 1 && magic == MS_SAV_MAGIC &&
        fread(&tmp, sizeof tmp, 1, f) == 1 && tmp.w == MSW && tmp.h == MSH){
         g_ms = tmp; ok = 1;
-        /* timer + best follow the board; tolerate a truncated (older) file */
-        if(fread(&g_ms_start, sizeof g_ms_start, 1, f) != 1) g_ms_start = 0;
-        if(fread(&g_ms_end,   sizeof g_ms_end,   1, f) != 1) g_ms_end   = 0;
-        if(fread(&g_ms_best,  sizeof g_ms_best,  1, f) != 1) g_ms_best  = 0;
+        /* clock + best follow the board; tolerate a truncated (older) file. The
+         * stored clock is always paused -- show_minesweeper() resumes it. */
+        if(fread(&g_ms_clk,  sizeof g_ms_clk,  1, f) != 1) pc_reset(&g_ms_clk);
+        if(fread(&g_ms_best, sizeof g_ms_best, 1, f) != 1) g_ms_best = 0;
+        g_ms_clk.run = 0;
     }
     fclose(f);
     return ok;
@@ -4093,9 +4108,10 @@ static void ms_tap_cb(lv_event_t *e){ (void)e;
     int c=lx/MSC, r=ly/MSC;
     int wasfirst = g_ms.first;
     if(g_ms_flag) ms_flag(&g_ms,r,c); else ms_reveal(&g_ms,r,c);
-    if(wasfirst && !g_ms.first){ g_ms_start = (uint32_t)time(NULL); g_ms_end = 0; }  /* first dig -> start clock */
-    if(g_ms.state != MS_PLAY && g_ms_end == 0){                                       /* game just ended -> freeze */
-        g_ms_end = (uint32_t)time(NULL);
+    uint32_t now = (uint32_t)time(NULL);
+    if(wasfirst && !g_ms.first) pc_start(&g_ms_clk, now);        /* first dig -> start clock */
+    if(g_ms.state != MS_PLAY && !g_ms_clk.done){                 /* game just ended -> freeze */
+        pc_stop(&g_ms_clk, now);
         if(g_ms.state == MS_WON){
             uint32_t el = ms_elapsed();
             if(el && (g_ms_best == 0 || el < g_ms_best)) g_ms_best = el;              /* new high score */
@@ -4144,7 +4160,7 @@ static void show_minesweeper(void){
     lv_obj_t *nbl = lv_label_create(nb); lv_label_set_text(nbl, "New");
 
     g_ms_cv = lv_canvas_create(content);
-    lv_canvas_set_buffer(g_ms_cv, ms_buf, MSCW, MSCH, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_buffer(g_ms_cv, game_cv_buf, MSCW, MSCH, LV_COLOR_FORMAT_I1);
     lv_canvas_set_palette(g_ms_cv, 0, lv_color_to_32(COL_BODY, 0xFF));
     lv_canvas_set_palette(g_ms_cv, 1, lv_color_to_32(COL_LINE, 0xFF));
     lv_obj_align(g_ms_cv, LV_ALIGN_TOP_MID, 0, 26);
@@ -4157,6 +4173,7 @@ static void show_minesweeper(void){
 
     if(!ms_load()) ms_new_game();
     g_ms_flag = 0;                              /* restored board opens in Dig mode */
+    pc_resume(&g_ms_clk, (uint32_t)time(NULL)); /* the clock only runs while you are here */
     g_ms_active = 1;                            /* let ms_tick update the clock (cleared in kill_kb) */
     ms_render();
 }
@@ -4254,7 +4271,6 @@ static WdGame    g_wd;
 static lv_obj_t *g_wd_cv, *g_wd_status;
 static uint32_t  g_wd_seq;
 static uint32_t  g_wd_streak;                /* consecutive solves (persisted) */
-static uint8_t   wd_buf[LV_CANVAS_BUF_SIZE(WDCW, WDCH, 1, 1) + 16];
 static const char *WD_KROW[3] = { "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM" };
 
 /* Persist the in-progress puzzle so it survives leaving the app. WdGame is plain
@@ -4457,7 +4473,7 @@ static void show_wordie(void){
     lv_obj_t *nl = lv_label_create(nb); lv_label_set_text(nl, "New");
 
     g_wd_cv = lv_canvas_create(content);
-    lv_canvas_set_buffer(g_wd_cv, wd_buf, WDCW, WDCH, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_buffer(g_wd_cv, game_cv_buf, WDCW, WDCH, LV_COLOR_FORMAT_I1);
     lv_canvas_set_palette(g_wd_cv, 0, lv_color_to_32(COL_BODY, 0xFF));
     lv_canvas_set_palette(g_wd_cv, 1, lv_color_to_32(COL_LINE, 0xFF));
     lv_obj_align(g_wd_cv, LV_ALIGN_TOP_MID, 0, 24);
@@ -4491,20 +4507,13 @@ static SdGame    g_sd;
 static lv_obj_t *g_sd_cv, *g_sd_status, *g_sd_timelbl;
 static int       g_sd_sel;                  /* selected cell index 0..80, or -1 */
 static uint32_t  g_sd_seq;
-static uint32_t  g_sd_start;                /* epoch of the first digit placed (0 = not started) */
-static uint32_t  g_sd_end;                  /* epoch the puzzle was solved (0 = still running) */
+static PlayClock g_sd_clk;                  /* pausable solve timer (playclock.h) */
 static uint32_t  g_sd_best;                 /* best (fastest) solve in seconds (0 = none yet) */
-static uint8_t   sd_buf[LV_CANVAS_BUF_SIZE(SDCW, SDCH, 1, 1) + 16];
 
-/* elapsed solve seconds: 0 before the first digit, live while solving, frozen once
- * solved. Wall-clock based like Mines -- leaving mid-puzzle keeps counting, which
- * only makes that attempt slower, so it can never corrupt the best time. */
-static uint32_t sd_elapsed(void){
-    if(!g_sd_start) return 0;
-    uint32_t now = (uint32_t)time(NULL);
-    uint32_t end = g_sd_end ? g_sd_end : now;
-    return end > g_sd_start ? end - g_sd_start : 0;
-}
+/* elapsed SOLVE seconds: 0 before the first digit, live while the screen is open,
+ * paused when you leave it, frozen once solved. A half-finished puzzle you come
+ * back to tomorrow resumes where its clock stopped. */
+static uint32_t sd_elapsed(void){ return pc_secs(&g_sd_clk, (uint32_t)time(NULL)); }
 /* fill the time/best readout (shared format with Mines). */
 static void sd_time_text(void){
     if(!g_sd_timelbl) return;
@@ -4576,20 +4585,20 @@ static void sd_render(void){
 }
 /* 1 Hz tick (created once in ui_init): keep the solve clock live while playing. */
 static void sd_tick(lv_timer_t *t){ (void)t;
-    if(g_sd_active && g_sd_timelbl && g_sd.state==SD_PLAY && g_sd_start) sd_time_text();
+    if(g_sd_active && g_sd_timelbl && g_sd.state==SD_PLAY && g_sd_clk.run) sd_time_text();
 }
 
 #define SD_SAV       "/sdcard/sudoku.sav"
-#define SD_SAV_MAGIC 0x53444B32u                 /* "SDK2" (bumped: now carries timer + best) */
+#define SD_SAV_MAGIC 0x53444B33u                 /* "SDK3" (bumped: pausable PlayClock) */
 static void sd_save(void){
     FILE *f = fopen(SD_SAV, "wb"); if(!f) return;
     uint32_t magic = SD_SAV_MAGIC;
+    PlayClock clk = pc_snapshot(&g_sd_clk, (uint32_t)time(NULL));   /* paused snapshot */
     fwrite(&magic, sizeof magic, 1, f);
     fwrite(&g_sd, sizeof g_sd, 1, f);
     fwrite(&g_sd_sel, sizeof g_sd_sel, 1, f);
-    fwrite(&g_sd_start, sizeof g_sd_start, 1, f);
-    fwrite(&g_sd_end,   sizeof g_sd_end,   1, f);
-    fwrite(&g_sd_best,  sizeof g_sd_best,  1, f);
+    fwrite(&clk, sizeof clk, 1, f);
+    fwrite(&g_sd_best, sizeof g_sd_best, 1, f);
     fclose(f);
 }
 static int sd_load(void){
@@ -4599,10 +4608,11 @@ static int sd_load(void){
        fread(&tmp, sizeof tmp, 1, f) == 1){
         g_sd = tmp; ok = 1;
         if(fread(&g_sd_sel, sizeof g_sd_sel, 1, f) != 1 || g_sd_sel < 0 || g_sd_sel >= SD_CELLS) g_sd_sel = -1;
-        /* timer + best follow the board; tolerate a truncated (older) file */
-        if(fread(&g_sd_start, sizeof g_sd_start, 1, f) != 1) g_sd_start = 0;
-        if(fread(&g_sd_end,   sizeof g_sd_end,   1, f) != 1) g_sd_end   = 0;
-        if(fread(&g_sd_best,  sizeof g_sd_best,  1, f) != 1) g_sd_best  = 0;
+        /* clock + best follow the board; tolerate a truncated (older) file. The
+         * stored clock is always paused -- show_sudoku() resumes it. */
+        if(fread(&g_sd_clk,  sizeof g_sd_clk,  1, f) != 1) pc_reset(&g_sd_clk);
+        if(fread(&g_sd_best, sizeof g_sd_best, 1, f) != 1) g_sd_best = 0;
+        g_sd_clk.run = 0;
     }
     fclose(f);
     return ok;
@@ -4616,16 +4626,17 @@ static void sd_select_first_blank(void){
 static void sd_new_game(void){
     sd_new(&g_sd, (uint32_t)time(NULL) ^ (g_sd_seq++ * 2654435761u), SD_HOLES);
     sd_select_first_blank();
-    g_sd_start = g_sd_end = 0;              /* clock starts on the first digit; best is kept */
+    pc_reset(&g_sd_clk);                    /* clock starts on the first digit; best is kept */
 }
 static void sd_place(int val){          /* apply a digit (or 0=clear) to the selection */
     if(g_sd_sel < 0) return;
     int r = g_sd_sel/9, c = g_sd_sel%9;
     if(sd_is_given(&g_sd, r, c)) return;
     if(!sd_set(&g_sd, r, c, val)) return;                 /* no change -> nothing to do */
-    if(val && !g_sd_start){ g_sd_start = (uint32_t)time(NULL); g_sd_end = 0; }  /* first digit -> start clock */
-    if(g_sd.state == SD_SOLVED && g_sd_end == 0){         /* just solved -> freeze + score */
-        g_sd_end = (uint32_t)time(NULL);
+    uint32_t now = (uint32_t)time(NULL);
+    if(val) pc_start(&g_sd_clk, now);                     /* first digit -> start clock */
+    if(g_sd.state == SD_SOLVED && !g_sd_clk.done){        /* just solved -> freeze + score */
+        pc_stop(&g_sd_clk, now);
         uint32_t el = sd_elapsed();
         if(el && (g_sd_best == 0 || el < g_sd_best)) g_sd_best = el;            /* new best time */
     }
@@ -4671,7 +4682,7 @@ static void show_sudoku(void){
      * fills the content height exactly, so a header created after it would have its
      * lower border clipped by the canvas (that was the New button's missing bottom). */
     g_sd_cv = lv_canvas_create(content);
-    lv_canvas_set_buffer(g_sd_cv, sd_buf, SDCW, SDCH, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_buffer(g_sd_cv, game_cv_buf, SDCW, SDCH, LV_COLOR_FORMAT_I1);
     lv_canvas_set_palette(g_sd_cv, 0, lv_color_to_32(COL_BODY, 0xFF));
     lv_canvas_set_palette(g_sd_cv, 1, lv_color_to_32(COL_LINE, 0xFF));
     lv_obj_align(g_sd_cv, LV_ALIGN_TOP_MID, 0, 20);
@@ -4696,16 +4707,281 @@ static void show_sudoku(void){
 
     if(!sd_load()) sd_new_game();
     if(g_sd_sel < 0) sd_select_first_blank();
+    pc_resume(&g_sd_clk, (uint32_t)time(NULL));   /* the clock only runs while you are here */
     g_sd_active = 1;                              /* let sd_tick update the clock (cleared in kill_kb) */
     sd_render();
     graf_char_hook = sudoku_input;         /* AFTER kill_kb cleared it: route strokes here */
 }
 
+/* ========================= Zip (Games) =====================================
+ * A one-line path puzzle on a 6x6 grid (zip.c holds the pure generator + rules):
+ * start on 1, hit the numbers in order, and cover EVERY cell with a single
+ * unbroken path. The board plus the Undo/Clear buttons are drawn mono on ONE 1-bpp
+ * canvas -- 36 cells as widgets would exhaust the 24 KB object pool.
+ *
+ * Input is a DRAG, which is what this puzzle wants and what the earlier games
+ * taught us to build for: LV_EVENT_PRESSED starts it and LV_EVENT_PRESSING
+ * continues it (never CLICKED -- a resistive tap jitters and LVGL then suppresses
+ * CLICKED as a scroll), and zp_touch() bridges a two-cell jump when the pen outruns
+ * the sampler or cuts a diagonal. Retracing over your own path rewinds it, so a
+ * wrong turn needs no button. The Graffiti strip's backspace is Undo.
+ *
+ * Mono visual language, sharing Sudoku's grammar:
+ *     numbers      -> filled disc with a knockout digit (readable through the path)
+ *     path         -> a 7 px ink band joining cell centres
+ *     where you are-> the double border Sudoku uses for its selected cell
+ *     empty cells  -> a dotted grid, so the band is what your eye lands on         */
+#define ZPCW     240                        /* canvas w/h (shares game_cv_buf) */
+#define ZPCH     164
+#define ZP_CELL  24                         /* 6*24 = 144: a comfortable finger target */
+#define ZP_GX0   ((ZPCW - ZP_N*ZP_CELL)/2)  /* = 48, centred */
+#define ZP_GY0   0
+#define ZP_GW    (ZP_N*ZP_CELL)
+#define ZP_BAND  7                          /* path thickness (odd, so it centres) */
+#define ZP_BY0   147                        /* the Undo/Clear row, below the grid */
+#define ZP_BH    17
+#define ZP_BW    84
+#define ZP_UNDOX 28
+#define ZP_CLRX  (ZPCW - ZP_BW - ZP_UNDOX)  /* = 128, mirrored on the right */
+
+static ZpGame    g_zp;
+static lv_obj_t *g_zp_cv, *g_zp_status, *g_zp_timelbl;
+static uint32_t  g_zp_seq;                  /* varies the board each New */
+static PlayClock g_zp_clk;                  /* pausable solve timer (playclock.h) */
+static uint32_t  g_zp_best;                 /* fastest solve in seconds (0 = none yet) */
+
+static uint32_t zp_elapsed(void){ return pc_secs(&g_zp_clk, (uint32_t)time(NULL)); }
+static void zp_time_text(void){
+    if(!g_zp_timelbl) return;
+    char tb[8], bb[8];
+    ms_fmt_mmss(zp_elapsed(), tb, sizeof tb);
+    if(g_zp_best){ ms_fmt_mmss(g_zp_best, bb, sizeof bb);
+                   lv_label_set_text_fmt(g_zp_timelbl, "%s  Best %s", tb, bb); }
+    else           lv_label_set_text_fmt(g_zp_timelbl, "%s  Best --", tb);
+}
+
+static void zppx(int x,int y,int v){
+    if(!g_zp_cv || x<0 || y<0 || x>=ZPCW || y>=ZPCH) return;
+    lv_color_t col = { .blue = (uint8_t)(v ? 1 : 0) };
+    lv_canvas_set_px(g_zp_cv, x, y, col, LV_OPA_COVER);
+}
+static void zp_fill(int x,int y,int w,int h,int v){
+    for(int j=0;j<h;j++) for(int i=0;i<w;i++) zppx(x+i,y+j,v);
+}
+static void zp_box(int x,int y,int w,int h){
+    for(int i=0;i<w;i++){ zppx(x+i,y,1); zppx(x+i,y+h-1,1); }
+    for(int j=0;j<h;j++){ zppx(x,y+j,1); zppx(x+w-1,y+j,1); }
+}
+/* `<= r*r` puts a single pixel at each of the four cardinal extremes, which reads
+ * as a spike on a 17 px disc; trimming the threshold by r rounds those rows off. */
+static void zp_disc(int cx,int cy,int r,int v){
+    for(int dy=-r;dy<=r;dy++) for(int dx=-r;dx<=r;dx++)
+        if(dx*dx+dy*dy <= r*r - r) zppx(cx+dx,cy+dy,v);
+}
+#define ZP_DISC_R (ZP_CELL/2 - 3)
+#define ZP_CX(c) (ZP_GX0 + (c)*ZP_CELL + ZP_CELL/2)
+#define ZP_CY(r) (ZP_GY0 + (r)*ZP_CELL + ZP_CELL/2)
+
+/* the path band between two orthogonally adjacent cells (or a stub on one cell). */
+static void zp_link(int a,int b){
+    int x0=ZP_CX(a%ZP_N), y0=ZP_CY(a/ZP_N), x1=ZP_CX(b%ZP_N), y1=ZP_CY(b/ZP_N);
+    if(x0>x1){ int t=x0; x0=x1; x1=t; }
+    if(y0>y1){ int t=y0; y0=y1; y1=t; }
+    zp_fill(x0-ZP_BAND/2, y0-ZP_BAND/2, (x1-x0)+ZP_BAND, (y1-y0)+ZP_BAND, 1);
+}
+/* a 1- or 2-digit waypoint number, centred in its disc (`ink` picks knockout or
+ * black, so the same helper serves a filled disc and the hollow head ring). */
+static void zp_numtext(int cx,int cy,int n,int ink){
+    char nb[4]; snprintf(nb, sizeof nb, "%d", n);
+    lv_font_glyph_dsc_t gd; int bh = 10;
+    if(lv_font_get_glyph_dsc(&lv_font_palm, &gd, '0', 0)) bh = gd.box_h;
+    int w = canvas_text_w(&lv_font_palm, nb);
+    canvas_text(g_zp_cv, &lv_font_palm, nb, cx - w/2, cy - bh/2, ink);
+}
+static void zp_button(int x,int y,int w,int h,const char *label){
+    zp_box(x, y, w, h);
+    canvas_text(g_zp_cv, &lv_font_palm, label,
+                x + (w - canvas_text_w(&lv_font_palm, label))/2, y + (h-14)/2, 1);
+}
+static void zp_render(void){
+    if(!g_zp_cv) return;
+    lv_color_t bg = { .blue = 0 };
+    lv_canvas_fill_bg(g_zp_cv, bg, LV_OPA_COVER);
+
+    /* dotted interior grid + a solid outer frame: the cells recede so the path
+     * band is what the eye follows (the same trick as Mines' stipple). */
+    for(int i=1;i<ZP_N;i++){
+        int gx = ZP_GX0 + i*ZP_CELL, gy = ZP_GY0 + i*ZP_CELL;
+        for(int y=ZP_GY0;y<=ZP_GY0+ZP_GW;y++) if((y+gx)&1) zppx(gx,y,1);
+        for(int x=ZP_GX0;x<=ZP_GX0+ZP_GW;x++) if((x+gy)&1) zppx(x,gy,1);
+    }
+    zp_box(ZP_GX0, ZP_GY0, ZP_GW+1, ZP_GW+1);
+
+    for(int i=1;i<g_zp.plen;i++) zp_link(g_zp.path[i-1], g_zp.path[i]);
+
+    /* Numbers on top of the band, so they stay readable once the path covers them.
+     * The cell the pen is on is called out two ways, because a double border drawn
+     * over a solid disc would be black-on-black and vanish: a plain cell gets
+     * Sudoku's double border, a numbered one becomes a HOLLOW disc with a black
+     * digit. Either way "you are here" is unmistakable. */
+    int h = zp_head(&g_zp);
+    int mark = (h >= 0 && g_zp.state != ZP_SOLVED) ? h : -1;
+    for(int p=0;p<ZP_CELLS;p++){
+        if(!g_zp.num[p]) continue;
+        int cx = ZP_CX(p%ZP_N), cy = ZP_CY(p/ZP_N);
+        zp_disc(cx, cy, ZP_DISC_R, 1);
+        if(p == mark){
+            zp_disc(cx, cy, ZP_DISC_R - 2, 0);
+            zp_numtext(cx, cy, g_zp.num[p], 1);
+        } else {
+            zp_numtext(cx, cy, g_zp.num[p], 0);
+        }
+    }
+    if(mark >= 0 && !g_zp.num[mark]){
+        int x = ZP_GX0 + (mark%ZP_N)*ZP_CELL, y = ZP_GY0 + (mark/ZP_N)*ZP_CELL;
+        zp_box(x+1, y+1, ZP_CELL-1, ZP_CELL-1);
+        zp_box(x+2, y+2, ZP_CELL-3, ZP_CELL-3);
+    }
+
+    zp_button(ZP_UNDOX, ZP_BY0, ZP_BW, ZP_BH, "Undo");
+    zp_button(ZP_CLRX,  ZP_BY0, ZP_BW, ZP_BH, "Clear");
+
+    if(g_zp_status){
+        if(g_zp.state==ZP_SOLVED) lv_label_set_text(g_zp_status, "Zipped!");
+        else lv_label_set_text_fmt(g_zp_status, "%d left", zp_remaining(&g_zp));
+    }
+    zp_time_text();
+}
+/* 1 Hz tick (created once in ui_init): keep the solve clock live while playing. */
+static void zp_tick(lv_timer_t *t){ (void)t;
+    if(g_zp_active && g_zp_timelbl && g_zp.state==ZP_PLAY && g_zp_clk.run) zp_time_text();
+}
+
+#define ZP_SAV       "/sdcard/zip.sav"
+#define ZP_SAV_MAGIC 0x5A495031u                  /* "ZIP1" */
+static void zp_save(void){
+    FILE *f = fopen(ZP_SAV, "wb"); if(!f) return;
+    uint32_t magic = ZP_SAV_MAGIC;
+    PlayClock clk = pc_snapshot(&g_zp_clk, (uint32_t)time(NULL));   /* paused snapshot */
+    fwrite(&magic, sizeof magic, 1, f);
+    fwrite(&g_zp, sizeof g_zp, 1, f);
+    fwrite(&clk, sizeof clk, 1, f);
+    fwrite(&g_zp_best, sizeof g_zp_best, 1, f);
+    fclose(f);
+}
+static int zp_load(void){
+    FILE *f = fopen(ZP_SAV, "rb"); if(!f) return 0;
+    uint32_t magic = 0; ZpGame tmp; int ok = 0;
+    if(fread(&magic, sizeof magic, 1, f) == 1 && magic == ZP_SAV_MAGIC &&
+       fread(&tmp, sizeof tmp, 1, f) == 1 &&
+       tmp.plen >= 1 && tmp.plen <= ZP_CELLS && tmp.nnum >= 2){
+        g_zp = tmp; ok = 1;
+        if(fread(&g_zp_clk,  sizeof g_zp_clk,  1, f) != 1) pc_reset(&g_zp_clk);
+        if(fread(&g_zp_best, sizeof g_zp_best, 1, f) != 1) g_zp_best = 0;
+        g_zp_clk.run = 0;                         /* stored paused; resumed on open */
+    }
+    fclose(f);
+    return ok;
+}
+static void zp_new_game(void){
+    zp_new(&g_zp, (uint32_t)time(NULL) ^ (g_zp_seq++ * 2654435761u));
+    pc_reset(&g_zp_clk);                          /* fresh clock; best is kept */
+}
+/* one place for "the path changed": run the clock, score a solve, redraw, persist. */
+static void zp_after_move(void){
+    uint32_t now = (uint32_t)time(NULL);
+    if(g_zp.plen > 1) pc_start(&g_zp_clk, now);   /* first step off the '1' starts it */
+    if(g_zp.state == ZP_SOLVED && !g_zp_clk.done){
+        pc_stop(&g_zp_clk, now);
+        uint32_t el = zp_elapsed();
+        if(el && (g_zp_best == 0 || el < g_zp_best)) g_zp_best = el;   /* new best */
+    }
+    zp_render();
+    zp_save();
+}
+static void zp_tap_cb(lv_event_t *e){
+    lv_event_code_t code = lv_event_get_code(e);
+    lv_point_t p; lv_indev_get_point(lv_indev_active(), &p);
+    lv_area_t a; lv_obj_get_coords(g_zp_cv, &a);
+    int lx = p.x - a.x1, ly = p.y - a.y1;
+    if(lx >= ZP_GX0 && lx < ZP_GX0 + ZP_GW && ly >= ZP_GY0 && ly < ZP_GY0 + ZP_GW){
+        int c = (lx - ZP_GX0)/ZP_CELL, r = (ly - ZP_GY0)/ZP_CELL;
+        if(zp_touch(&g_zp, r*ZP_N + c)) zp_after_move();
+        return;
+    }
+    /* the buttons act once per press, not on every sample of a drag over them */
+    if(code != LV_EVENT_PRESSED) return;
+    if(ly < ZP_BY0 || ly >= ZP_BY0 + ZP_BH) return;
+    if(lx >= ZP_UNDOX && lx < ZP_UNDOX + ZP_BW){ if(zp_undo(&g_zp)) zp_after_move(); }
+    else if(lx >= ZP_CLRX && lx < ZP_CLRX + ZP_BW){ zp_clear(&g_zp); zp_after_move(); }
+}
+/* the Graffiti strip's backspace undoes a step (the clock keeps running: Clear and
+ * Undo are part of the same attempt, only New resets it). */
+static void zip_input(char c){
+    if(c=='\b' && zp_undo(&g_zp)) zp_after_move();
+}
+static void zp_newbtn_cb(lv_event_t *e){ (void)e;
+    zp_new_game();
+    zp_render();
+    zp_save();
+}
+static void show_zip(void){
+    kill_kb(); cur_app=NULL; cur_uid=0;
+    g_zp_cv = g_zp_status = g_zp_timelbl = NULL;
+    lv_obj_clean(content);
+    lv_label_set_text(title_lbl, "Zip");
+    update_cat_trigger();
+
+    /* Canvas FIRST so the header widgets draw ON TOP of its top edge -- the board
+     * fills the content height exactly, and a header created afterwards would have
+     * its lower border clipped (that was Sudoku's missing New-button bottom). */
+    g_zp_cv = lv_canvas_create(content);
+    lv_canvas_set_buffer(g_zp_cv, game_cv_buf, ZPCW, ZPCH, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_palette(g_zp_cv, 0, lv_color_to_32(COL_BODY, 0xFF));
+    lv_canvas_set_palette(g_zp_cv, 1, lv_color_to_32(COL_LINE, 0xFF));
+    lv_obj_align(g_zp_cv, LV_ALIGN_TOP_MID, 0, 20);
+    lv_obj_add_flag(g_zp_cv, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(g_zp_cv, LV_OBJ_FLAG_SCROLLABLE);      /* resistive-robust */
+    lv_obj_add_event_cb(g_zp_cv, zp_tap_cb, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(g_zp_cv, zp_tap_cb, LV_EVENT_PRESSING, NULL);   /* drag to draw */
+
+    g_zp_status = lv_label_create(content);
+    lv_obj_set_style_text_font(g_zp_status, &lv_font_palm, 0);
+    lv_obj_align(g_zp_status, LV_ALIGN_TOP_LEFT, 6, 4);
+
+    g_zp_timelbl = lv_label_create(content);
+    lv_obj_set_style_text_font(g_zp_timelbl, &lv_font_palm, 0);
+    lv_obj_align(g_zp_timelbl, LV_ALIGN_TOP_MID, 6, 4);
+
+    lv_obj_t *nb = lv_button_create(content);
+    lv_obj_set_style_radius(nb, 0, 0);
+    lv_obj_set_style_pad_all(nb, 2, 0);
+    lv_obj_align(nb, LV_ALIGN_TOP_RIGHT, -4, 1);
+    lv_obj_add_event_cb(nb, zp_newbtn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *nl = lv_label_create(nb); lv_label_set_text(nl, "New");
+
+    if(!zp_load()) zp_new_game();
+    pc_resume(&g_zp_clk, (uint32_t)time(NULL));   /* the clock only runs while you are here */
+    g_zp_active = 1;
+    zp_render();
+    graf_char_hook = zip_input;            /* AFTER kill_kb cleared it: route strokes here */
+}
+
+/* Bank + persist the play clock of whichever game screen is closing (see the
+ * forward declaration next to kill_kb). Guarded on the screen's live flag so a
+ * game that was never opened this session never touches the SD card. */
+static void games_pause_clocks(void){
+    uint32_t now = (uint32_t)time(NULL);
+    if(g_ms_active && g_ms_clk.run){ pc_pause(&g_ms_clk, now); ms_save(); }
+    if(g_sd_active && g_sd_clk.run){ pc_pause(&g_sd_clk, now); sd_save(); }
+    if(g_zp_active && g_zp_clk.run){ pc_pause(&g_zp_clk, now); zp_save(); }
+}
+
 /* The Games "folder": an icon grid mirroring the app launcher (each game is a
  * tappable icon + label), so it reads as a sub-folder of the main launcher rather
  * than a list of text buttons. Add a game by extending GAMES[] + its dispatch. */
-static const char           *GAMES[]      = { "Mines", "Wordie", "Sudoku" };
-static const lv_image_dsc_t *GAME_ICONS[] = { &icon_mines, &icon_wordie, &icon_sudoku };
+static const char           *GAMES[]      = { "Mines", "Wordie", "Sudoku", "Zip" };
+static const lv_image_dsc_t *GAME_ICONS[] = { &icon_mines, &icon_wordie, &icon_sudoku, &icon_zip };
 #define NGAMES ((int)(sizeof(GAMES)/sizeof(GAMES[0])))
 
 static void games_pick_cb(lv_event_t *e){
@@ -4713,6 +4989,7 @@ static void games_pick_cb(lv_event_t *e){
     if(!strcmp(g,"Mines"))       show_minesweeper();
     else if(!strcmp(g,"Wordie")) show_wordie();
     else if(!strcmp(g,"Sudoku")) show_sudoku();
+    else if(!strcmp(g,"Zip"))    show_zip();
 }
 static void show_games(void){
     kill_kb(); cur_app=NULL; cur_uid=0;
@@ -4862,5 +5139,6 @@ void ui_init(void){
     lv_timer_create(dash_tick, 15000, NULL);
     lv_timer_create(ms_tick, 1000, NULL);        /* live Mines clock (no-op unless it's showing) */
     lv_timer_create(sd_tick, 1000, NULL);        /* live Sudoku clock (no-op unless it's showing) */
+    lv_timer_create(zp_tick, 1000, NULL);        /* live Zip clock (no-op unless it's showing) */
     ui_show_lock();
 }

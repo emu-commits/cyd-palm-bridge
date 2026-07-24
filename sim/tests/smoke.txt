@@ -464,6 +464,94 @@ t 400
 s sudoku_persist
 c 18 225
 t 300
+# Zip: the fourth game, on the folder's SECOND row (row 2 col 1, the snake icon).
+# A 6x6 one-line path puzzle: start on 1, hit the numbers in ascending order, cover
+# every cell. Board + Undo/Clear are ONE pool-cheap I1 canvas; input is a DRAG
+# (PRESSED starts it, PRESSING continues it -- never CLICKED, see Mines).
+#
+# The board is generated from the clock, so a script cannot know where the '1' is.
+# Instead drag a boustrophedon sweep over all 36 cells: every touch before the '1'
+# is correctly refused, and from the moment the pen crosses it the path draws along
+# the sweep until a number would come out of turn. That exercises the whole drag
+# path on ANY board. Cell centres are (60+24c, 56+24r).
+c 169 160
+t 300
+c 120 108
+t 400
+s zip_open
+d 60 56
+m 84 56
+m 108 56
+m 132 56
+m 156 56
+m 180 56
+m 180 80
+m 156 80
+m 132 80
+m 108 80
+m 84 80
+m 60 80
+m 60 104
+m 84 104
+m 108 104
+m 132 104
+m 156 104
+m 180 104
+m 180 128
+m 156 128
+m 132 128
+m 108 128
+m 84 128
+m 60 128
+m 60 152
+m 84 152
+m 108 152
+m 132 152
+m 156 152
+m 180 152
+m 180 176
+m 156 176
+m 132 176
+m 108 176
+m 84 176
+m 60 176
+u
+s zip_drawn
+# The play clocks PAUSE while a game is off screen (firmware/main/playclock.h; the
+# state machine itself is gated by `make -C sim clock`). This checks the ui.c wiring
+# end to end, and needs REAL seconds -- `t` only advances LVGL's tick, so `w` below
+# burns actual wall time. The sweep above started the clock; let ~2 s run on screen,
+# then leave for ~3 s and come back. zip_clock_resumed must read the SAME time as
+# zip_clock_running, NOT that plus the 3 s away (the bug this fixed). Reopening also
+# proves the drawn path itself survives the round trip.
+w 2200
+s zip_clock_running
+c 18 225
+t 300
+w 3000
+c 169 160
+t 300
+c 120 108
+t 400
+s zip_clock_resumed
+# Undo pops one cell; Clear rewinds to the '1'. Both live on the canvas button row
+# (screen y 191..207) and fire on PRESSED only, so a drag across them is inert.
+c 70 199
+t 300
+s zip_undo
+c 170 199
+t 300
+s zip_cleared
+c 18 225
+t 300
+# Persistence: reopen from the folder -- the cleared board comes back, not a new one.
+c 169 160
+t 300
+c 120 108
+t 400
+s zip_persist
+c 18 225
+t 300
 # I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.
 # (CI starts on a fresh /sdcard, so the seed + manifest exist here.)
 c 18 225

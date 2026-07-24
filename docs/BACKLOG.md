@@ -21,9 +21,13 @@ mostly away from the bench via the browser simulator).
 
 ## Next up when we resume (priority order)
 
-The sim-testable charm/intuitiveness backlog is done (see "Recently done"). The
-next arc is about the **input experience** and **new apps**. Each of 2–4 starts
-with a **feasibility check on the base CYD** before committing to a build.
+The sim-testable charm/intuitiveness backlog is done, and so is the **Games app**
+(Zip was the last game — see "Recently done"). Everything sim-testable in the games
+line is complete; what's left for them is the on-glass pass in **`[device]` Games on
+glass** below, which is a **ship gate**.
+
+The remaining arc is the **input experience** and the Japanese trainer. Each of 2–4
+starts with a **feasibility check on the base CYD** before committing to a build.
 
 1. **Graffiti polishing `[sim]`.** *In progress.* Built an offline **accuracy
    harness** (`sim/tests/graf_test.c`, `make -C sim graf`, now a CI gate): it
@@ -174,6 +178,21 @@ with a **feasibility check on the base CYD** before committing to a build.
   a photo-heavy contact live (no delete/dup/loss).
 - **`[device]` config.ini round-trip.** Flash `main`, edit the Preferences form,
   and run a live Discover → assign → Save against a real iCloud account.
+- **`[device]` Games on glass — SHIP GATE.** All four games are sim- and host-verified;
+  four things only the real panel can settle. **(a) Zip's drag feel:** the
+  bridge-through-a-free-neighbour rule was tuned against a mouse — confirm a fast
+  diagonal fingertip sweep draws the intended path and that retracing rewinds cleanly
+  (`ZP_CELL`, 24 px, is the knob if the target is too small). **(b) Zip's `New`
+  latency:** generation is 2.4 ms on the host, so expect ~40–80 ms on a 240 MHz ESP32 —
+  confirm the button feels instant and the WDT stays quiet (lower the `count_paths`
+  budget in `zp_new` if a seed ever stalls). **(c) The play clocks across a real power
+  cycle:** the save holds a *paused* snapshot, so a game resumed after a battery pull
+  must show the banked time, not the wall-clock gap; best times must survive.
+  **(d) Re-measure heap/BSS** after the shared game canvas (expect ~12.5 KB more free).
+- **`[device]` Should a game's clock pause when the backlight times out?** Today a game
+  left open on the desk keeps counting — `ui.c` still considers the screen open. Pausing
+  would need a hook from `idle_step()` (`lvgl_port.c`) into `games_pause_clocks()`.
+  Deliberately not built blind: decide it on glass, where the real timeout is visible.
 - **`[device]` Graffiti tuning.** The letter + punctuation stroke templates are
   coarse starters; tune thresholds from on-device `graf`/`graf pnc` telemetry on
   this exact resistive panel.
@@ -221,6 +240,19 @@ gate) and the **Graffiti SRS trainer** (Drill/Train, per-device user templates),
 plus the full **RSS reader** — streaming parser, on-SD store, swipe reader app,
 and the HotSync fetch phase (all merged; only the on-glass live-fetch verify
 remains).
+
+**The Games app is finished (2026-07-24).** Four games, each with pure host-gated
+logic, a pausable play clock, a persisted best time and SD-backed state: **Mines**,
+**Wordie**, **Sudoku**, and **Zip** — a 6x6 one-line path puzzle (start on 1, hit the
+numbers in order, cover every cell). Zip's generator inverts the naive approach:
+numbering every cell of a random Hamiltonian path is trivially unique, so it *removes*
+numbers while exactly one solution survives (the `sudoku.c` hole-digging pattern),
+yielding minimal boards of 5–12 numbers in ~2.4 ms. Input is a forgiving drag
+(retrace-to-rewind, bridge a skipped cell) rather than taps. Two platform wins landed
+with it: the play clocks now **pause when a game is off screen** (`playclock.h`, gated by
+`make -C sim clock` — they used to count while closed), and all four games **share one
+I1 canvas buffer**, returning **12.5 KB of BSS** on a no-PSRAM board. New gates:
+`make -C sim zip`, `make -C sim clock`, `make -C sim games`.
 
 A follow-up polishing pass then: reshaped Graffiti **`G`, `S`, `X` and `?`** from
 on-glass feedback (`G` a wide-open C + full-width mid-bar so it no longer reads as
