@@ -235,6 +235,27 @@ void zp_clear(ZpGame *g){
     if(s >= 0){ g->path[0] = (uint8_t)s; g->on[s] = 1; g->plen = 1; }
     zp_update_state(g);
 }
+int zp_valid(const ZpGame *g){
+    if(g->nnum < 2 || g->nnum > ZP_CELLS) return 0;
+    if(g->plen < 1 || g->plen > ZP_CELLS) return 0;
+    uint8_t seen[ZP_CELLS + 1];
+    memset(seen, 0, sizeof seen);
+    for(int p = 0; p < ZP_CELLS; p++){
+        uint8_t w = g->num[p];
+        if(w > g->nnum) return 0;
+        if(w && seen[w]++) return 0;                     /* a duplicated number */
+    }
+    for(int i = 1; i <= g->nnum; i++) if(!seen[i]) return 0;   /* must be 1..nnum */
+    if((int)g->path[0] != zp_start_cell(g)) return 0;    /* the path starts on the 1 */
+    memset(seen, 0, ZP_CELLS);
+    for(int i = 0; i < g->plen; i++){
+        int c = g->path[i];
+        if(c >= ZP_CELLS || seen[c]++) return 0;         /* out of range or revisited */
+        if(i && !zp_adjacent(g->path[i-1], c)) return 0; /* single steps only */
+    }
+    for(int p = 0; p < ZP_CELLS; p++) if((g->on[p] != 0) != (seen[p] != 0)) return 0;
+    return 1;
+}
 int zp_next_num(const ZpGame *g){
     int mx = 0;
     for(int i = 0; i < g->plen; i++){ int w = g->num[g->path[i]]; if(w > mx) mx = w; }

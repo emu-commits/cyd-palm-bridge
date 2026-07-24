@@ -4639,6 +4639,10 @@ static void sd_place(int val){          /* apply a digit (or 0=clear) to the sel
         pc_stop(&g_sd_clk, now);
         uint32_t el = sd_elapsed();
         if(el && (g_sd_best == 0 || el < g_sd_best)) g_sd_best = el;            /* new best time */
+    } else if(g_sd.state == SD_PLAY && g_sd_clk.done){   /* erased a digit after solving
+                                                          * -> you are playing again */
+        g_sd_clk.done = 0;
+        pc_resume(&g_sd_clk, now);
     }
     sd_render();
     sd_save();
@@ -4872,9 +4876,10 @@ static void zp_save(void){
 static int zp_load(void){
     FILE *f = fopen(ZP_SAV, "rb"); if(!f) return 0;
     uint32_t magic = 0; ZpGame tmp; int ok = 0;
+    /* zp_valid() is the real guard: without it a corrupt blob could carry a path
+     * byte of 255 and index the 36-entry on[] mask out of bounds. */
     if(fread(&magic, sizeof magic, 1, f) == 1 && magic == ZP_SAV_MAGIC &&
-       fread(&tmp, sizeof tmp, 1, f) == 1 &&
-       tmp.plen >= 1 && tmp.plen <= ZP_CELLS && tmp.nnum >= 2){
+       fread(&tmp, sizeof tmp, 1, f) == 1 && zp_valid(&tmp)){
         g_zp = tmp; ok = 1;
         if(fread(&g_zp_clk,  sizeof g_zp_clk,  1, f) != 1) pc_reset(&g_zp_clk);
         if(fread(&g_zp_best, sizeof g_zp_best, 1, f) != 1) g_zp_best = 0;
@@ -4895,6 +4900,10 @@ static void zp_after_move(void){
         pc_stop(&g_zp_clk, now);
         uint32_t el = zp_elapsed();
         if(el && (g_zp_best == 0 || el < g_zp_best)) g_zp_best = el;   /* new best */
+    } else if(g_zp.state == ZP_PLAY && g_zp_clk.done){   /* undone after a solve -> the
+                                                          * clock runs again */
+        g_zp_clk.done = 0;
+        pc_resume(&g_zp_clk, now);
     }
     zp_render();
     zp_save();

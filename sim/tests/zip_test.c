@@ -186,6 +186,53 @@ int main(void){
        "the bridged path is still made of single steps");
     CK(!zp_adjacent(d.path[0], br), "and the target really was two steps away");
 
+    /* ---- zp_valid(): the guard a loaded save file has to pass ---- */
+    ZpGame v; zp_new(&v, 31337u);
+    CK(zp_valid(&v), "a fresh board is valid");
+    /* the board has a solution, so a legal step off the '1' always exists (zp_touch
+     * may bridge, so this can advance by two) */
+    for(int q = 0; q < ZP_CELLS; q++) if(zp_touch(&v, q)) break;
+    CK(v.plen > 1, "the start always has a legal step");
+    CK(zp_valid(&v), "a board mid-path is valid");
+    {   /* a path byte out of range -- the case that would index on[] past its end */
+        ZpGame b = v; b.plen = 2; b.path[1] = 200;
+        CK(!zp_valid(&b), "rejects a path cell outside the grid");
+    }
+    {   /* on[] disagreeing with path[] */
+        ZpGame b = v; b.on[(b.path[0] + 7) % ZP_CELLS] = 1;
+        CK(!zp_valid(&b), "rejects an on[] mask that disagrees with the path");
+    }
+    {   /* a path that teleports */
+        ZpGame b = v; b.plen = 2;
+        for(int q = 0; q < ZP_CELLS; q++) if(!zp_adjacent(b.path[0], q) && q != b.path[0]){
+            b.path[1] = (uint8_t)q; break; }
+        memset(b.on, 0, sizeof b.on); b.on[b.path[0]] = 1; b.on[b.path[1]] = 1;
+        CK(!zp_valid(&b), "rejects a path with a non-adjacent step");
+    }
+    {   /* numbers with a gap, and a path not starting on the 1 */
+        ZpGame b = v;
+        for(int q = 0; q < ZP_CELLS; q++) if(b.num[q] == 2){ b.num[q] = 0; break; }
+        CK(!zp_valid(&b), "rejects numbers with a gap in the sequence");
+        ZpGame c2 = v; c2.path[0] = (uint8_t)((c2.path[0] + 1) % ZP_CELLS);
+        CK(!zp_valid(&c2), "rejects a path that does not start on the '1'");
+    }
+    {   /* a wholesale-garbage blob, the realistic corruption case */
+        ZpGame b; memset(&b, 0xAB, sizeof b);
+        CK(!zp_valid(&b), "rejects a garbage blob");
+        ZpGame z; memset(&z, 0, sizeof z);
+        CK(!zp_valid(&z), "rejects an all-zero blob");
+    }
+
+    /* ---- undoing a solved board puts it back in play (the UI un-freezes its clock
+     * on exactly this transition, so the state has to flip back) ---- */
+    ZpGame u; zp_new(&u, 4242u);
+    if(ref_solution(&u)){
+        for(int i = 1; i < ref_sol_len; i++) zp_touch(&u, ref_sol[i]);
+        CK(u.state == ZP_SOLVED, "solved before the undo");
+        CK(zp_undo(&u) && u.state == ZP_PLAY, "undo returns a solved board to play");
+        CK(zp_touch(&u, ref_sol[ZP_CELLS-1]) && u.state == ZP_SOLVED, "and it can be re-solved");
+    }
+
     /* ---- the generator over many seeds: always solvable, mostly unique, fast ---- */
     int nsolv = 0, nuniq = 0, minw = 99, maxw = 0;
     const int N = 40;

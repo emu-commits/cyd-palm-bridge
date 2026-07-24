@@ -88,6 +88,13 @@ Also: Undo/Clear are canvas-drawn buttons on a row below the grid (they fire on
 `New` reseeds, and state persists to `zip.sav` (`ZIP1`). Clear and Undo keep the clock
 running — they're the same attempt; only `New` resets it.
 
+A loaded `zip.sav` is vetted by **`zp_valid()`**, not just a magic number: a corrupt
+blob could otherwise carry a path byte of 255 and index the 36-entry `on[]` mask out of
+bounds. It checks numbers are exactly 1..nnum, the path is in range, starts on the '1'
+and steps one cell at a time, and that `on[]` agrees with it. Related edge case, fixed in
+both Sudoku and Zip: un-solving a finished board (erase a digit / Undo) now **un-freezes
+the clock**, since you are playing again.
+
 **RAM:** `ZpGame` is 116 bytes, `zip.c` statics ~330 B, worst-case stack ~3.2 KB
 (measured with `-fstack-usage`; the neighbour table exists to keep the 36-deep frames
 small, since LVGL runs on a 12 KB-stack task).

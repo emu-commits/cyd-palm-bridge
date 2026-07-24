@@ -96,6 +96,12 @@ int zp_solved(const ZpGame *g);
 /* how many cells are not on the path yet. */
 int zp_remaining(const ZpGame *g);
 
+/* 1 if `g` holds a structurally sane game: numbers 1..nnum exactly once each, a
+ * path of in-range cells that starts on the '1' and steps one cell at a time, and an
+ * `on[]` mask that agrees with it. Used to vet a loaded save file -- a corrupt blob
+ * would otherwise index `on[]` with a path byte up to 255. */
+int zp_valid(const ZpGame *g);
+
 /* count full solutions of the puzzle's number layout, stopping at `limit` (so
  * `== 1` is a cheap uniqueness check). Ignores the player's current path. Used by
  * the generator and the host gate. */
