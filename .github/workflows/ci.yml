@@ -72,6 +72,10 @@ jobs:
         run: make -C sim wordie
       - name: Sudoku board-logic gate
         run: make -C sim sudoku
+      - name: Zip path-puzzle logic gate
+        run: make -C sim zip
+      - name: Game play-clock (pause/resume) gate
+        run: make -C sim clock
       - name: Build + run the scripted UI tour (real ui.c, screenshots)
         run: make -C sim smoke
       - name: Convert screenshots to PNG
