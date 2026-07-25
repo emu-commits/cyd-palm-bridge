@@ -12,10 +12,15 @@ mostly away from the bench via the browser simulator).
   flash-verified on return.
 - **`[blocked]`** — has an unmet prerequisite spelled out in the item.
 
-> History lives in `BUILD_PROGRESS.md` (milestone changelog + hard-won lessons).
-> The original design analyses are `UI_ROADMAP.md` (memory/hardware),
-> `ROADMAP.md` (sync/port, done), and `SIMULATOR_PLAN.md` (the emulator).
-> `REVIEW_2026-07-15.md` is the whole-repo review these item IDs come from.
+> **The docs folder is deliberately three files.** This one is what's LEFT;
+> `BUILD_PROGRESS.md` is history + the hard-won lessons + the hardware/RAM reference;
+> `PRODUCT_PLAN.md` is the path to shipping (the consumer-readiness checklist and the
+> locked product decisions). The original design analyses — `UI_ROADMAP.md` (memory/
+> hardware), `ROADMAP.md` (sync/port), `SIMULATOR_PLAN.md` (the emulator),
+> `REVIEW_2026-07-15.md` (the review the `O#`/`M#`/`C#`/`I#` IDs come from) and
+> `KANA_TRAINER.md` — were retired once each had been built or decided against. Their
+> load-bearing facts were salvaged into `BUILD_PROGRESS.md`; the full text is in git
+> history: `git log --diff-filter=D -- docs/`.
 
 ---
 
@@ -69,31 +74,27 @@ starts with a **feasibility check on the base CYD** before committing to a build
      template when it's a closer match, calibrating to this hand + resistive panel.
    Pool-safe throughout (labels + one canvas; heap peak 0 in the sim).
 
-3. **Japanese trainer — extend the training app `[sim]` + dataset work.**
-   Five tiers, evaluated in **`docs/KANA_TRAINER.md`** (full feasibility + the
-   key insight: stroke-order enforcement decomposes multi-stroke recognition into
-   *N ordered single-stroke* matches, reusing `$1` in a separate module — zero risk
-   to the Latin recognizer, no keyboard "kana mode" needed).
-   - **Tier 1 (kana → sound) — DONE `[sim]`.** New `Kana` launcher app: shows a
-     kana (hiragana then katakana) with the new **`lv_font_kana`** bitmap subset
-     (IPAGothic via `lv_font_conv`), you answer the SOUND by drawing romaji in the
-     Graffiti strip (Latin recognizer untouched); deterministic SRS keyed per kana,
-     romaji noted on first sight + every miss, persisted to `/sdcard/kana_train.dat`.
-     Fully sim-verifiable (the answer is typed romaji, no stroke recognition).
-   - **Tier 2 (write the kana) — BUILT `[sim]`.** Sound/Write toggle in the Kana
-     app; Write shows the numbered KanjiVG stroke model and matches each drawn
-     stroke (`kana_write.c`, a separate `$1` — Latin recognizer untouched) against
-     the expected next stroke, enforcing official order. Stroke data:
-     `kana_strokes.c` (~28 KB, from `tools/gen_kana_strokes.py`, CC BY-SA). Own SRS
-     state (`KT02`). Emulator-verified end to end. **GATE before Tier 3:** tune the
-     per-stroke accept threshold (`KW_THRESH`) on real resistive hardware and
-     confirm the feel; the emulator proves mechanics, not panel accuracy.
-   - **Tiers 3–5 (kanji: kun'yomi/gloss, vocab, writing) — CONDITIONAL on Tier 2
-     on-device tuning.** The KanjiVG→polyline pipeline is now proven on kana.
-     Dataset: KanjiVG (CC BY-SA, attribution/share-alike) resampled to polylines,
-     WaniKani ordering, per-level subset (< 1 MB on SD). Kanji rendered from the
-     same stroke data (avoids a large CJK font); kana readings use `lv_font_kana`.
-     Tier 5 is the tightest 2.8″ layout and the highest recognition-accuracy risk.
+3. **Japanese trainer — FROZEN at Tier 2 (product decision, 2026-07-19).**
+   `PRODUCT_PLAN.md` ends the Japanese route here: Tier 2 teaches stroke order, but
+   tracing a model on glass doesn't build the muscle memory that transfers to pen and
+   paper, and the gap only widens at kanji scale (15–20 strokes). It stays in the
+   launcher as a bonus, not a headline. **Built and shipped:**
+   - **Tier 1 (kana → sound):** the `Kana` app shows a kana in the `lv_font_kana`
+     bitmap subset (IPAGothic via `lv_font_conv`); you answer the SOUND by drawing
+     romaji in the Graffiti strip (Latin recognizer untouched). Deterministic SRS per
+     kana, persisted to `/sdcard/kana_train.dat`.
+   - **Tier 2 (write the kana):** a Sound/Write toggle; Write shows the numbered
+     KanjiVG stroke model and matches each drawn stroke (`kana_write.c`, a separate
+     `$1` instance) against the expected next one, enforcing official order. Stroke
+     data in `kana_strokes.c` (~28 KB, from `tools/gen_kana_strokes.py`, CC BY-SA).
+     Own SRS state (`KT02`). Emulator-verified end to end.
+   - **The one open device item:** tune the per-stroke accept threshold (`KW_THRESH`)
+     on the real resistive panel and confirm the feel. Worth doing because Tier 2 is
+     shipping; it is no longer a gate on anything downstream.
+   - **Tiers 3–5 (kanji: kun'yomi/gloss, vocab, writing) are NOT planned.** The full
+     five-tier feasibility analysis lived in `docs/KANA_TRAINER.md`, retired with this
+     decision — recover it from git history if the route is ever reopened. The
+     KanjiVG→polyline pipeline is proven on kana and would extend directly.
 
 4. **RSS reader — a TikTok-swipe, text-only feed `[sim]`. Feasibility: GO; code
    DONE (device runtime-verify pending).** A full-screen, one-item-per-view reader swiped vertically (headline
@@ -156,6 +157,18 @@ starts with a **feasibility check on the base CYD** before committing to a build
 
 ---
 
+## Parked — offered, NOT approved (do not build without a yes)
+
+- **Opt-in CORS-proxy RSS fetch in the web emulator**, so News feeds could sync
+  in-browser. Feed servers send no `Access-Control-Allow-Origin`, so an in-page
+  `fetch()` is blocked; the only routes are a public proxy (fragile, third-party) or a
+  self-hosted one (infra). Would be off by default with a configurable proxy URL.
+  **The user has not said yes.** On device the fetch is direct and needs no proxy, so
+  this only ever buys emulator parity. Public feeds are low-risk (only the URL is
+  exposed); credentialed iCloud sync in-browser is the harder **S5** item above.
+- **BLE + a companion iOS app: dropped, not parked** — see `PRODUCT_PLAN.md` §2 for
+  the reasoning, kept so it isn't relitigated.
+
 ## Needs hardware — features
 
 - **`[device]` C3 — Sound.** PalmOS clicked on taps, chirped on HotSync
@@ -178,6 +191,19 @@ starts with a **feasibility check on the base CYD** before committing to a build
   a photo-heavy contact live (no delete/dup/loss).
 - **`[device]` config.ini round-trip.** Flash `main`, edit the Preferences form,
   and run a live Discover → assign → Save against a real iCloud account.
+- **`[sim]` A short "About this screen" help panel on EVERY screen.** Prompted by a
+  real first-run experience: a new player opened Zip and had no way to learn the rules
+  from the device — they connected all the numbers and could not tell why it still said
+  "4 left" (the cover-every-cell rule). Nothing on screen explains any app.
+  **Shape:** extend the existing **Menu ▸ About** item so it is present on every screen
+  and shows a couple of short paragraphs *for that screen*, not the global About box.
+  Keep the current global About reachable (it carries the GPLv3/PumpkinOS provenance
+  and the C6 honesty lines). **Pool-safe:** one scrollable label in the existing alert/
+  overlay pattern — no new widget classes, no per-screen canvases. Text lives in one
+  static table keyed by screen so it costs flash, not RAM. **Must cover the four games'
+  rules** (Zip's cover-every-cell rule especially, plus retrace-to-rewind, Undo/Clear
+  and what the clock/Best mean), the four PIM apps, Graffiti, HotSync, News and the
+  lock screen. Smoke-gate one screen's panel so the overlay can't regress.
 - **`[device]` Games on glass — SHIP GATE.** All four games are sim- and host-verified;
   four things only the real panel can settle. **(a) Zip's drag feel:** the
   bridge-through-a-free-neighbour rule was tuned against a mouse — confirm a fast

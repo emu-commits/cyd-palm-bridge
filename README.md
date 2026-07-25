@@ -55,7 +55,7 @@ what's next live in [`docs/`](docs/).
 
 The **real firmware UI** (the same `ui.c`, data layer, Graffiti recognizer, Palm
 fonts and icons) also builds for your desktop and your **phone browser** — see
-[`docs/SIMULATOR_PLAN.md`](docs/SIMULATOR_PLAN.md) and [`sim/`](sim/):
+[`sim/`](sim/):
 
 <p>
   <img src="docs/img/sim_launcher.png" width="180" alt="Palm launcher in the simulator">
@@ -282,7 +282,8 @@ owning category, and a second sync is a no-op across all collections.
 Both the original ROADMAP phases are **done**: **Phase A** (contact/CardDAV sync,
 separate `contacts.icloud.com` host) and **Phase B** (the ESP32 firmware port —
 `dav_esp.c` over `esp_http_client`+mbedTLS, PDBs on SD, the sync working set moved
-from static BSS to heap for no-PSRAM). See [docs/ROADMAP.md](docs/ROADMAP.md).
+from static BSS to heap for no-PSRAM). The phase-by-phase history is in
+[docs/BUILD_PROGRESS.md](docs/BUILD_PROGRESS.md).
 
 ---
 

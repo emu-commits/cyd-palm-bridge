@@ -214,7 +214,7 @@ What was built, and the non-obvious things that cost time to learn. This is the
   **WASM** for the phone browser, live on GitHub Pages
   (https://emu-commits.github.io/cyd-palm-bridge/). A device-like general-heap
   ceiling (linker-wrapped malloc) + IDBFS `/sdcard` persistence + credential
-  scrubbing round it out. Plan: `SIMULATOR_PLAN.md`.
+  scrubbing round it out. (Plan doc `SIMULATOR_PLAN.md` retired once built.)
 
 ### 2026-07-15 — product-hygiene sprint + CI + whole-repo review
 - Legal: **GPLv3/MIT split + NOTICE** (PumpkinOS provenance, Palm trademark).
@@ -223,7 +223,7 @@ What was built, and the non-obvious things that cost time to learn. This is the
 - Newcomer-facing **README**; **M1** sync scratch buffers BSS → sync-lifetime heap
   (~20 KB returns to interactive mode); host `[sync]` telemetry behind `SYNC_DEBUG`;
   M4 discovery cap + O6 detail buffer micro-fixes. The review itself is
-  `REVIEW_2026-07-15.md` (source of the C#/I#/M# item IDs).
+  the retired `REVIEW_2026-07-15.md` (source of the C#/I#/M# item IDs; in git history).
 
 ### 2026-07-10 — sync robustness + on-device UX
 - **iCloud modern Reminders are walled off from CalDAV** (Apple, since iOS 13 /
@@ -274,12 +274,73 @@ What was built, and the non-obvious things that cost time to learn. This is the
   **U7** HotSync (bidirectional iCloud), per-record Delete + confirm, Calculator.
 - **U0** — sync working set static BSS → heap (`d7031ed`), the prerequisite that
   freed the RAM for everything above.
-- **Phase A/B** (`ROADMAP.md`, done): CardDAV contact sync, then the ESP32
+- **Phase A/B** (retired `ROADMAP.md`, done): CardDAV contact sync, then the ESP32
   firmware port of the exact codec + sync engine.
 
 ---
 
+## Hardware + RAM reference (salvaged from the retired `UI_ROADMAP.md`)
+
+The design analyses that proved this device could work (`UI_ROADMAP.md`,
+`ROADMAP.md`, `SIMULATOR_PLAN.md`, `REVIEW_2026-07-15.md`) were retired once every
+one of them was built — they are in git history if the reasoning is ever needed
+(`git log --diff-filter=D -- docs/`). These are the load-bearing FACTS from them,
+the things you cannot re-derive from the code.
+
+### The board
+- **ESP32-D0WD-V3**, 520 KB SRAM (~320 KB DRAM for data, rest is IRAM), 4 MB flash
+  (3 MB app partition), **no PSRAM**. Measured free heap: **129 KB at boot**, **78 KB
+  during a TLS sync** (headless).
+- **Display**: 2.8" 320x240 ILI9341 (some CYD units ST7789), SPI — SCLK 14, MOSI 13,
+  MISO 12, DC 2, CS 15, BL 21.
+- **Touch**: XPT2046 resistive, single-touch, on its OWN pins — CLK 25, MOSI 32,
+  MISO 39, CS 33, IRQ 36.
+- **SD**: a THIRD set — SCLK 18, MOSI 23, MISO 19, CS 5.
+  (TFT, touch and SD are three separate SPI arrangements and don't contend.)
+- **Battery**: JST header + divider on **GPIO34** for voltage sense.
+- **No battery-backed RTC** — time persists to NVS and re-anchors on each sync
+  (`clock.c`), so anything time-critical should say "as of last sync".
+
+### Why it fits: two mutually exclusive modes
+The rule the whole architecture rests on: **never hold LVGL's draw buffers and the
+TLS handshake at the same time.**
+
+| | Mode A — interactive (Wi-Fi OFF) | Mode B — sync (Wi-Fi + TLS) |
+|---|---|---|
+| IDF + FreeRTOS baseline + stacks | ~55 KB | ~55 KB |
+| LVGL partial draw buffers (2 x 320x32x2) | ~40 KB | (torn down) |
+| LVGL core + view tree | ~30 KB | — |
+| Wi-Fi driver + lwIP | (deinit'd) | ~50 KB |
+| mbedTLS handshake peak | — | ~40 KB |
+| Sync working set (heap, freed after) | — | ~55 KB |
+| Progress screen / record + Graffiti buffers | ~8 KB | ~4 KB |
+| **Free of ~275 KB usable** | **~140 KB** | **~70 KB** |
+
+Mode B's ~70 KB matches the 78 KB measured headless. `sim/sim_heap.h` takes its
+budget from Mode A's ~140 KB, which is why the simulator's heap ceiling is what it
+is. What would be blocked, and why we never do it: a full-framebuffer double-buffered
+GUI needs ~300 KB of buffers — we render in partial strips instead.
+
 ## Hard-won lessons (durable — re-read before touching these areas)
+
+### Simulator gotchas that cost real time
+- **`smoke32` leaves 32-bit objects behind.** It runs `make clean` and rebuilds
+  everything `-m32`, so the next plain `make -C sim host`/`smoke` fails to link
+  against the 32-bit `liblvgl.a`. Always `make -C sim clean` after a `smoke32` run.
+- **THE 24 KB POOL TRAP.** The 64-bit native sim gets a **48 KB** LVGL pool (LP64
+  objects are ~2x bigger); the wasm build and the device get the **true 24 KB**. A
+  screen with too many widgets can pass the native smoke and still **fail to boot on
+  wasm/device** (pool exhaustion -> NULL alloc -> crash/freeze), and CI only
+  *compiles* wasm. `make -C sim smoke32` is the guard and runs in CI (needs
+  `gcc-multilib libc6-dev-i386`). The lock screen keeps its footprint down by not
+  coexisting with other screens: it clears the content area and defers the launcher,
+  so the pool only ever holds the chrome + one screen.
+- **The smoke script navigates by pixel coordinates**, so launcher/folder grid
+  geometry matters — adding an app or a game reflows a row and moves every tap after
+  it. The Games folder now wraps to a second row (Zip sits there).
+- **A game board seeded from `time()` differs on every run**, so screenshots of
+  Mines/Sudoku/Zip are not byte-comparable across runs by design; assert on behaviour
+  (status text, persistence matching within a run), not on exact pixels.
 
 ### Timers that measure *play* time, not wall time
 - A game clock stored as one "started at" epoch keeps counting while the game is closed.
@@ -393,7 +454,11 @@ make roundtrip incremental synctoken category   # codec + sync
 
 # simulator
 make -C sim smoke     # native headless + screenshots (CI gate)
+make -C sim smoke32   # the SAME tour under the TRUE 24 KB device pool -- then `clean`!
+make -C sim games     # every game's logic gate: mines wordie sudoku zip clock
+make -C sim graf      # Graffiti recognizer accuracy gate
 make -C sim wasm      # browser build
+make -C sim clean     # REQUIRED after smoke32 (it leaves 32-bit objects behind)
 ```
 
 - **Graffiti stroke chart** (rendered from the templates):

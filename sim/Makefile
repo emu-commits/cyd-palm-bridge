@@ -1,4 +1,4 @@
-# sim/Makefile -- build the Palm UI simulator (docs/SIMULATOR_PLAN.md).
+# sim/Makefile -- build the Palm UI simulator (see docs/BUILD_PROGRESS.md).
 #
 #   make -C sim host    native headless sim (scripted input, PPM screenshots)
 #   make -C sim wasm    browser build via emcc -> build/web/ (index.html+js+wasm)
