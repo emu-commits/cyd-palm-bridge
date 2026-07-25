@@ -9,7 +9,8 @@
  *
  * The budget is ARMED after boot (sim_heap_arm): boot-time allocations are the
  * baseline, and the budget models "free heap once the device is up" -- the
- * UI_ROADMAP Mode A analysis measures that at ~140 KB with Wi-Fi off. Override
+ * The Mode A budget in docs/BUILD_PROGRESS.md measures that at ~140 KB with
+ * Wi-Fi off. Override
  * with -DSIM_HEAP_BUDGET=<bytes> for experiments.
  */
 #ifndef SIM_HEAP_H
