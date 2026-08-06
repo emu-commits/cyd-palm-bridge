@@ -219,6 +219,52 @@ starts with a **feasibility check on the base CYD** before committing to a build
   left open on the desk keeps counting — `ui.c` still considers the screen open. Pausing
   would need a hook from `idle_step()` (`lvgl_port.c`) into `games_pause_clocks()`.
   Deliberately not built blind: decide it on glass, where the real timeout is visible.
+- **`[device]` A real RTC part — decide and fit.** The clock problem in one line: this
+  board has no battery-backed RTC, so the wall clock is only as good as the last
+  checkpoint. `clock.c` persists the epoch to NVS every 120 s and restores it at boot,
+  so after a power cycle the clock resumes reading *the moment power was cut* — behind
+  by the whole outage. Nothing re-anchors it automatically either: `app_main.c:256-257`
+  does `wifi_connect()` → `clock_sync()`, but that code is **unreachable**, because
+  `lvgl_port_run()` above it is a bare `while(1)`. SNTP therefore only ever runs on a
+  user-initiated HotSync.
+  **Why a sleep button alone does not fix it:** ESP32 deep/light sleep does keep time,
+  but off RTC_SLOW_CLK, and the WROOM-32 has no 32.768 kHz crystal fitted — our own pin
+  map proves it (the 32K pins are GPIO32/33, both used by touch). That leaves the
+  internal ~150 kHz RC oscillator: calibrated at boot, but temperature- and
+  supply-dependent, drifting on the order of a percent — minutes/day, not seconds.
+  **Size the part to the sync interval, not to the spec sheet.** Assume Wi-Fi once a day
+  (user is home daily). At one anchor/day a plain crystal RTC at ±20 ppm drifts
+  **~1.7 s/day** — already invisible. The DS3231's ±2 ppm TCXO buys ~1 min/*year*, which
+  only earns its price if the device can go weeks without Wi-Fi. So a **PCF8563 /
+  DS1307-class part is sufficient and cheapest**; DS3231 is the upgrade if that daily
+  assumption weakens.
+  **Fit:** I2C, two free GPIOs — `22` and `27` are unused in our map and are the pair
+  usually broken out on the CYD's side headers (confirm against the board revision).
+  Check the module's footprint against the enclosure; the common ZS-042 board is large.
+  **Gotcha:** ZS-042-style DS3231 modules trickle-charge their cell — fit a LIR2032, or
+  remove the charging resistor before putting a non-rechargeable CR2032 in one.
+  **Do this part regardless of the RTC decision:** make the boot-time SNTP reachable
+  (a background task, not code parked after `lvgl_port_run()`), so a power cycle
+  self-corrects whenever Wi-Fi happens to be in range.
+- **`[device]` Make the hardware button sleep, not power off.** Today the firmware reads
+  **no** button at all and has no software power-off path — the only way off is cutting
+  the rail. Worth building for UX (instant wake, no boot wait, game and screen state
+  preserved), but it is **not** the clock fix — see the RTC item above.
+  **Which button decides whether this is firmware or soldering:** RESET/EN is wired to
+  the chip's reset pin and can *never* be intercepted; BOOT/GPIO0 is RTC-capable and
+  works both as the sleep trigger and as an `ext0` deep-sleep wake source; a slide
+  switch in the battery/USB line is a hard cut, and converting it means rewiring it to
+  a GPIO so the SoC keeps power.
+  **UX consequence:** from deep sleep, tap-to-wake is gone — touch is read via pressure
+  z1 over SPI (`IRQ36 unused`) and SPI is dead in sleep. Either wake on the button only,
+  or rewire touch IRQ as the wake source. Today's awake-but-dark model keeps tap-to-wake
+  for free.
+  **Measure before committing:** this board's real sleep current. The ESP32 die draws
+  microamps in deep sleep, but the CYD's LDO and USB-serial chip dominate — that number
+  decides whether an all-day sleep on a LiPo is viable at all.
+  Note `CONFIG_PM_ENABLE` / tickless idle are **commented out** in `sdkconfig.defaults`
+  (light sleep gated APB and made the display flash), so "sleep" today means a
+  full-speed SoC with the backlight off: accurate clock, thirsty.
 - **`[device]` Graffiti tuning.** The letter + punctuation stroke templates are
   coarse starters; tune thresholds from on-device `graf`/`graf pnc` telemetry on
   this exact resistive panel.
@@ -243,7 +289,8 @@ starts with a **feasibility check on the base CYD** before committing to a build
 top.) The Graffiti case model is settled: one stroke set (26 capital-style
 letters), lowercase output, upstroke = shift-next (two = caps lock).*
 
-- Preferences app icon in the launcher; power/reset-button remap; dark mode.
+- Preferences app icon in the launcher; dark mode. *(The button remap graduated to
+  "Needs hardware" above — it turns on which physical button it actually is.)*
 
 ---
 

@@ -300,6 +300,17 @@ the things you cannot re-derive from the code.
 - **Battery**: JST header + divider on **GPIO34** for voltage sense.
 - **No battery-backed RTC** — time persists to NVS and re-anchors on each sync
   (`clock.c`), so anything time-critical should say "as of last sync".
+- **And no 32.768 kHz crystal either**, which is the part people miss. The WROOM-32
+  leaves those pins as **GPIO32/33** — and our touch panel uses both (MOSI 32, CS 33),
+  so the module demonstrably has no 32K fitted. Consequence: RTC_SLOW_CLK is the
+  internal ~150 kHz RC oscillator, calibrated at boot but temperature-dependent, so
+  **timekeeping across sleep drifts on the order of a percent** (minutes/day). Sleeping
+  the SoC is therefore *not* a fix for the missing RTC — see the BACKLOG item. While
+  awake the clock runs off the 40 MHz XTAL and is fine (seconds/day).
+- **`CONFIG_PM_ENABLE` and tickless idle are commented out** (`sdkconfig.defaults`):
+  automatic light-sleep gated APB between LVGL frames and the display flashed. So
+  `power.c`'s `esp_pm_configure` block compiles out entirely — the power story is the
+  PWM backlight plus idle screen-off, and "asleep" means a full-speed SoC in the dark.
 
 ### Why it fits: two mutually exclusive modes
 The rule the whole architecture rests on: **never hold LVGL's draw buffers and the
