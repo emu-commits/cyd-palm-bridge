@@ -273,10 +273,23 @@ starts with a **feasibility check on the base CYD** before committing to a build
   a second sync path.
 - **`[device]` Measure Mode B headroom with the UI resident.** The number in
   `BUILD_PROGRESS.md` is arithmetic, not a measurement, and it is the estimate the whole
-  Mode A/B rule rests on. During the next flash, log free heap + largest free block at
-  the mbedTLS handshake peak of a real HotSync (`hotsync.c:210` already logs at Wi-Fi
-  up — add one at the handshake). If it really is ~20 KB, implement the draw-buffer
-  teardown `hotsync.c:8` has promised since the beginning: that is ~19 KB in reserve.
+  Mode A/B rule rests on. **The probe is already in the firmware** — `hs_heap()` in
+  `hotsync.c` logs `free / min_ever / largest8 / largestDMA` at six points:
+  `wifi-up`, `pre-tls`, `post-tls`, `sync-done`, `wifi-down`, plus `disc wifi-up` /
+  `disc post-tls` on the discovery path. Nothing to write on the next flash; just run a
+  HotSync and read the log.
+  **How to read it.** The handshake peak is the drop in `min_ever` from `pre-tls` to
+  `post-tls`. `min_ever` is since *boot*, so if it does not move, the handshake simply
+  never beat an earlier boot transient and the run is inconclusive — reboot and sync
+  immediately for a clean bracket. The `free` column at `post-tls` is sampled after the
+  handshake buffers are released, so it overstates headroom.
+  **What to do with the answer.** If the peak really is ~20 KB, implement the
+  draw-buffer teardown `hotsync.c:8` has promised since the beginning — that is ~19 KB
+  in reserve. Separately, compare `largestDMA` at `wifi-up` against `wifi-down`: if a
+  Wi-Fi cycle fragments the DMA region, that alone kills the boot-SNTP fallback above,
+  since LVGL needs ~19 KB *contiguous* DMA and its failure path just returns.
+  Write the measured figures back into the `BUILD_PROGRESS.md` table and drop the
+  "(est.)" markers.
 - **`[device]` Make the hardware button sleep, not power off.** Today the firmware reads
   **no** button at all and has no software power-off path — the only way off is cutting
   the rail. Worth building for UX (instant wake, no boot wait, game and screen state
