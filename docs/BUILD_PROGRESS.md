@@ -319,17 +319,43 @@ TLS handshake at the same time.**
 | | Mode A — interactive (Wi-Fi OFF) | Mode B — sync (Wi-Fi + TLS) |
 |---|---|---|
 | IDF + FreeRTOS baseline + stacks | ~55 KB | ~55 KB |
-| LVGL partial draw buffers (2 x 320x32x2) | ~40 KB | (torn down) |
-| LVGL core + view tree | ~30 KB | — |
+| LVGL partial draw buffer (1 x 240x40x2) | ~19 KB | ~19 KB — **NOT torn down** |
+| LVGL core + view tree | ~30 KB | ~30 KB — still resident |
 | Wi-Fi driver + lwIP | (deinit'd) | ~50 KB |
 | mbedTLS handshake peak | — | ~40 KB |
 | Sync working set (heap, freed after) | — | ~55 KB |
 | Progress screen / record + Graffiti buffers | ~8 KB | ~4 KB |
-| **Free of ~275 KB usable** | **~140 KB** | **~70 KB** |
+| **Free of ~275 KB usable** | **~160 KB** (est.) | **~20 KB** (est., UNMEASURED) |
 
-Mode B's ~70 KB matches the 78 KB measured headless. `sim/sim_heap.h` takes its
-budget from Mode A's ~140 KB, which is why the simulator's heap ceiling is what it
-is. What would be blocked, and why we never do it: a full-framebuffer double-buffered
+**Read the Mode B column carefully — an earlier version of this table was flattering
+it.** Two corrections landed 2026-08-06, both from reading the code rather than the
+doc:
+
+1. **The draw buffer is one ~19 KB allocation, not two totalling ~40 KB.**
+   `lvgl_port.c:88-91` does a single `heap_caps_malloc(LCD_W(240) x 40 x 2, DMA)` and
+   passes **`NULL`** as the second buffer. Good news for Mode A: ~160 KB free, not ~140.
+2. **Nothing ever tears LVGL down.** `hotsync.c:8` says "if it's tight, tear down the
+   LVGL draw buffer first" — that is a *contingency that was never implemented*. There
+   is no `heap_caps_free` of the buffer and no `lv_deinit` anywhere. So during a real
+   on-device HotSync, the draw buffer **and** the whole view tree stay resident, and the
+   old table's "(torn down)" / "—" cells were describing a plan, not the binary.
+
+Netting those: on-device Mode B has roughly **~20 KB** free, not ~70 KB. **The 78 KB
+figure that seemed to confirm ~70 KB was measured *headless*** — no LVGL at all — so it
+only ever validated the no-UI case (55+50+40+55 = ~200 KB used, ~75 KB free: that
+matches, but it is a different configuration from the shipping one). **The with-UI Mode
+B number has never actually been measured on glass.** Treat ~20 KB as an estimate and a
+warning, not a fact — and measure it during the games ship-gate flash.
+
+Practical consequence: **do not add anything to Mode B**, and be sceptical of any plan
+that brings Wi-Fi up while LVGL is resident. If Mode B does prove that tight on glass,
+implementing the never-built draw-buffer teardown is the ~19 KB in reserve.
+
+`sim/sim_heap.h` still budgets from the old ~140 KB. Leave it: the simulator being
+*stricter* than the device is the safe direction for a guard, and loosening it to
+~160 KB would only let a design through the sim that the device might refuse.
+
+What would be blocked, and why we never do it: a full-framebuffer double-buffered
 GUI needs ~300 KB of buffers — we render in partial strips instead.
 
 ## Hard-won lessons (durable — re-read before touching these areas)

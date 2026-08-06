@@ -243,9 +243,40 @@ starts with a **feasibility check on the base CYD** before committing to a build
   Check the module's footprint against the enclosure; the common ZS-042 board is large.
   **Gotcha:** ZS-042-style DS3231 modules trickle-charge their cell — fit a LIR2032, or
   remove the charging resistor before putting a non-rechargeable CR2032 in one.
-  **Do this part regardless of the RTC decision:** make the boot-time SNTP reachable
-  (a background task, not code parked after `lvgl_port_run()`), so a power cycle
-  self-corrects whenever Wi-Fi happens to be in range.
+  **Why this leads rather than the software fallback below.** The alternative is to
+  bring Wi-Fi up for SNTP, and Wi-Fi is the one resource this board cannot spare — see
+  the corrected Mode A/B table in `BUILD_PROGRESS.md`, where on-device Mode B is now
+  estimated at **~20 KB** free (the old ~70 KB assumed an LVGL teardown that was never
+  implemented, and the 78 KB that appeared to confirm it was measured headless). A ~$1
+  I2C part converts a RAM-and-timing question into a two-wire read at boot and takes
+  the clock off the network permanently. That is worth well more than the part price on
+  a board with no RAM to spare.
+- **`[device]` FALLBACK (only if the RTC is rejected): make boot-time SNTP reachable.**
+  Strictly second choice — the RTC above removes the need for this entirely. If it is
+  built anyway, the constraints are not negotiable:
+  **(a) Boot ordering, not a background task.** Do NOT bring Wi-Fi up during interactive
+  use: `lvgl_port.c:63-66` already documents the priority-4 sync task starving the LVGL
+  wake-poll, so a mid-session connect would stutter the UI even if the RAM fit. The
+  place for this is `app_main`, *above* `lvgl_port_init()`, where LVGL does not exist
+  yet — no draw buffer, no view tree, no 24 KB pool. The dead code at
+  `app_main.c:256-257` had the right idea and the wrong address: it sits below
+  `lvgl_port_run()`'s `while(1)` and can never execute.
+  **(b) Allocate the draw buffer FIRST.** `lvgl_port.c:88-90` takes a single *contiguous*
+  ~19 KB `MALLOC_CAP_DMA` block, and its failure path just `return`s — a fragmented
+  DMA heap gives you a black screen and one log line. Wi-Fi up/down before that malloc
+  can fragment exactly that region. Grab the buffer while the heap is pristine, then do
+  Wi-Fi, then hand the saved pointer to `lv_display_set_buffers`.
+  **(c) Hard timeout.** 3–5 s cap on connect+SNTP, then skip. Booting away from home
+  must not hang on a scan.
+  **(d) SNTP is not TLS.** It is one UDP datagram: it needs Wi-Fi+lwIP (~50 KB) but
+  neither mbedTLS (~40 KB) nor the sync working set (~55 KB). Do not let this grow into
+  a second sync path.
+- **`[device]` Measure Mode B headroom with the UI resident.** The number in
+  `BUILD_PROGRESS.md` is arithmetic, not a measurement, and it is the estimate the whole
+  Mode A/B rule rests on. During the next flash, log free heap + largest free block at
+  the mbedTLS handshake peak of a real HotSync (`hotsync.c:210` already logs at Wi-Fi
+  up — add one at the handshake). If it really is ~20 KB, implement the draw-buffer
+  teardown `hotsync.c:8` has promised since the beginning: that is ~19 KB in reserve.
 - **`[device]` Make the hardware button sleep, not power off.** Today the firmware reads
   **no** button at all and has no software power-off path — the only way off is cutting
   the rail. Worth building for UX (instant wake, no boot wait, game and screen state
