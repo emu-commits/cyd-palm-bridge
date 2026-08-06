@@ -34,6 +34,33 @@ static volatile int s_busy;
 static char s_status[80] = "Ready";
 static void setst(const char *s){ snprintf(s_status, sizeof s_status, "%s", s); }
 
+/* ---- Mode B headroom probe -----------------------------------------------
+ * BACKLOG: "Measure Mode B headroom with the UI resident". The number that matters
+ * -- free RAM at the mbedTLS handshake peak while LVGL is still fully resident --
+ * occurs INSIDE the handshake, where no log line can sit. So bracket it instead:
+ * min_ever (esp_get_minimum_free_heap_size) is a since-boot low-water mark and only
+ * ever falls, so if it drops between the "pre-tls" and "post-tls" samples, that
+ * lower value IS the peak.
+ * READING IT: min_ever is since BOOT, not since the sync. If it does NOT move
+ * pre->post, that does not mean the handshake was free -- it means the handshake
+ * never dipped below some earlier boot transient, and this run tells you nothing
+ * about the peak. Reboot and sync immediately to get a clean bracket. Note also
+ * that the `free` column at "post-tls" is sampled after the handshake buffers are
+ * released, so it OVERSTATES headroom; it is a lower bound on the peak, not the
+ * peak. largestDMA answers the separate question of whether a
+ * Wi-Fi up/down cycle fragments the DMA-capable region that LVGL's ~19 KB
+ * *contiguous* draw buffer depends on. Cheap and INFO-level: this runs a handful of
+ * times per sync, and the answer decides whether the never-built draw-buffer
+ * teardown is needed. */
+static void hs_heap(const char *where){
+    ESP_LOGI(TAG,"heap[%s]: free=%lu min_ever=%lu largest8=%lu largestDMA=%lu",
+             where,
+             (unsigned long)esp_get_free_heap_size(),
+             (unsigned long)esp_get_minimum_free_heap_size(),
+             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+}
+
 /* sync progress 0..100 for the UI status line. Each configured collection owns a
  * band [s_band_lo, s_band_lo+s_band_span]; the engine's per-record progress hook
  * (hs_prog_cb) fills that band, so the bar advances WITHIN a collection, not just
@@ -207,9 +234,7 @@ static void hotsync_task(void *arg){
 
     setst("Connecting Wi-Fi...");
     if(!wifi_up()){ setst("Wi-Fi failed"); wifi_down(); s_busy=0; vTaskDelete(NULL); return; }
-    ESP_LOGI(TAG,"wifi up: free heap=%lu largest block=%lu",
-             (unsigned long)esp_get_free_heap_size(),
-             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    hs_heap("wifi-up");    /* Mode B baseline: Wi-Fi+lwIP paid for, no TLS yet */
     setst("Setting clock...");
     if(!clock_ok()){ setst("Clock/SNTP failed"); wifi_down(); s_busy=0; vTaskDelete(NULL); return; }
 
@@ -223,6 +248,7 @@ static void hotsync_task(void *arg){
     (void)abspath;
     char msg[80];
 
+    hs_heap("pre-tls");    /* last sample before the first HTTPS request */
     setst("Resolving host...");
     char host[256]="";
     if(dav_effective_host(&d,"/",host,sizeof host)==0 && host[0]){
@@ -240,6 +266,10 @@ static void hotsync_task(void *arg){
         ESP_LOGE(TAG,"%s",msg); setst(msg); wifi_down(); s_busy=0; vTaskDelete(NULL); return;
     }
     ESP_LOGI(TAG,"principal: %s",principal);
+    /* THE number: a full handshake has completed, so min_ever now carries its peak.
+     * Compare min_ever here against the "pre-tls" sample -- the drop is the cost of
+     * mbedTLS with the whole UI still resident. */
+    hs_heap("post-tls");
 
     /* Address book (CardDAV) lives on a separate iCloud host; resolve it lazily
      * the first time a card target is reached. Same credentials as caldav. */
@@ -313,7 +343,12 @@ static void hotsync_task(void *arg){
                  (failed||protec)?" (some skipped)":"");
     ESP_LOGI(TAG,"%s",msg);
     setst(msg);
+    hs_heap("sync-done");  /* after sync_free_scratch(), before Wi-Fi goes away */
     wifi_down();           /* also closes the last collection's keep-alive connection */
+    /* Back in Mode A. If largestDMA here is much smaller than it was at "wifi-up",
+     * a Wi-Fi cycle fragments the DMA region -- which is what would break a plan to
+     * bring Wi-Fi up before LVGL allocates its contiguous draw buffer. */
+    hs_heap("wifi-down");
     s_busy = 0;
     vTaskDelete(NULL);
 }
@@ -367,6 +402,7 @@ static void discover_task(void *arg){
     s_disc_n = 0; s_disc_done = 0;
     setst("Connecting Wi-Fi...");
     if(!wifi_up()){ setst("Wi-Fi failed"); s_disc_done=1; wifi_down(); s_busy=0; vTaskDelete(NULL); return; }
+    hs_heap("disc wifi-up");   /* second Mode B data point: discovery also does TLS */
     const Config *cfg = appcfg();
 
     /* --- CalDAV: calendars + reminders lists --- */
@@ -406,6 +442,7 @@ static void discover_task(void *arg){
         } else ESP_LOGW(TAG,"addressbook-home-set failed (HTTP %d)",dav_last_status);
     } else ESP_LOGW(TAG,"carddav principal failed (HTTP %d)",dav_last_status);
 
+    hs_heap("disc post-tls");  /* both hosts handshaked by here */
     s_disc_done = 1;
     if(s_disc_n==0) setst("No collections found - check login");
     else { char m[80]; snprintf(m,sizeof m,"Found %d (%d cal, %d addr)",s_disc_n,ncal,s_disc_n-ncal); setst(m); }

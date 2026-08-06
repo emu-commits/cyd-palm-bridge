@@ -219,6 +219,96 @@ starts with a **feasibility check on the base CYD** before committing to a build
   left open on the desk keeps counting — `ui.c` still considers the screen open. Pausing
   would need a hook from `idle_step()` (`lvgl_port.c`) into `games_pause_clocks()`.
   Deliberately not built blind: decide it on glass, where the real timeout is visible.
+- **`[device]` A real RTC part — decide and fit.** The clock problem in one line: this
+  board has no battery-backed RTC, so the wall clock is only as good as the last
+  checkpoint. `clock.c` persists the epoch to NVS every 120 s and restores it at boot,
+  so after a power cycle the clock resumes reading *the moment power was cut* — behind
+  by the whole outage. Nothing re-anchors it automatically either: `app_main.c:256-257`
+  does `wifi_connect()` → `clock_sync()`, but that code is **unreachable**, because
+  `lvgl_port_run()` above it is a bare `while(1)`. SNTP therefore only ever runs on a
+  user-initiated HotSync.
+  **Why a sleep button alone does not fix it:** ESP32 deep/light sleep does keep time,
+  but off RTC_SLOW_CLK, and the WROOM-32 has no 32.768 kHz crystal fitted — our own pin
+  map proves it (the 32K pins are GPIO32/33, both used by touch). That leaves the
+  internal ~150 kHz RC oscillator: calibrated at boot, but temperature- and
+  supply-dependent, drifting on the order of a percent — minutes/day, not seconds.
+  **Size the part to the sync interval, not to the spec sheet.** Assume Wi-Fi once a day
+  (user is home daily). At one anchor/day a plain crystal RTC at ±20 ppm drifts
+  **~1.7 s/day** — already invisible. The DS3231's ±2 ppm TCXO buys ~1 min/*year*, which
+  only earns its price if the device can go weeks without Wi-Fi. So a **PCF8563 /
+  DS1307-class part is sufficient and cheapest**; DS3231 is the upgrade if that daily
+  assumption weakens.
+  **Fit:** I2C, two free GPIOs — `22` and `27` are unused in our map and are the pair
+  usually broken out on the CYD's side headers (confirm against the board revision).
+  Check the module's footprint against the enclosure; the common ZS-042 board is large.
+  **Gotcha:** ZS-042-style DS3231 modules trickle-charge their cell — fit a LIR2032, or
+  remove the charging resistor before putting a non-rechargeable CR2032 in one.
+  **Why this leads rather than the software fallback below.** The alternative is to
+  bring Wi-Fi up for SNTP, and Wi-Fi is the one resource this board cannot spare — see
+  the corrected Mode A/B table in `BUILD_PROGRESS.md`, where on-device Mode B is now
+  estimated at **~20 KB** free (the old ~70 KB assumed an LVGL teardown that was never
+  implemented, and the 78 KB that appeared to confirm it was measured headless). A ~$1
+  I2C part converts a RAM-and-timing question into a two-wire read at boot and takes
+  the clock off the network permanently. That is worth well more than the part price on
+  a board with no RAM to spare.
+- **`[device]` FALLBACK (only if the RTC is rejected): make boot-time SNTP reachable.**
+  Strictly second choice — the RTC above removes the need for this entirely. If it is
+  built anyway, the constraints are not negotiable:
+  **(a) Boot ordering, not a background task.** Do NOT bring Wi-Fi up during interactive
+  use: `lvgl_port.c:63-66` already documents the priority-4 sync task starving the LVGL
+  wake-poll, so a mid-session connect would stutter the UI even if the RAM fit. The
+  place for this is `app_main`, *above* `lvgl_port_init()`, where LVGL does not exist
+  yet — no draw buffer, no view tree, no 24 KB pool. The dead code at
+  `app_main.c:256-257` had the right idea and the wrong address: it sits below
+  `lvgl_port_run()`'s `while(1)` and can never execute.
+  **(b) Allocate the draw buffer FIRST.** `lvgl_port.c:88-90` takes a single *contiguous*
+  ~19 KB `MALLOC_CAP_DMA` block, and its failure path just `return`s — a fragmented
+  DMA heap gives you a black screen and one log line. Wi-Fi up/down before that malloc
+  can fragment exactly that region. Grab the buffer while the heap is pristine, then do
+  Wi-Fi, then hand the saved pointer to `lv_display_set_buffers`.
+  **(c) Hard timeout.** 3–5 s cap on connect+SNTP, then skip. Booting away from home
+  must not hang on a scan.
+  **(d) SNTP is not TLS.** It is one UDP datagram: it needs Wi-Fi+lwIP (~50 KB) but
+  neither mbedTLS (~40 KB) nor the sync working set (~55 KB). Do not let this grow into
+  a second sync path.
+- **`[device]` Measure Mode B headroom with the UI resident.** The number in
+  `BUILD_PROGRESS.md` is arithmetic, not a measurement, and it is the estimate the whole
+  Mode A/B rule rests on. **The probe is already in the firmware** — `hs_heap()` in
+  `hotsync.c` logs `free / min_ever / largest8 / largestDMA` at six points:
+  `wifi-up`, `pre-tls`, `post-tls`, `sync-done`, `wifi-down`, plus `disc wifi-up` /
+  `disc post-tls` on the discovery path. Nothing to write on the next flash; just run a
+  HotSync and read the log.
+  **How to read it.** The handshake peak is the drop in `min_ever` from `pre-tls` to
+  `post-tls`. `min_ever` is since *boot*, so if it does not move, the handshake simply
+  never beat an earlier boot transient and the run is inconclusive — reboot and sync
+  immediately for a clean bracket. The `free` column at `post-tls` is sampled after the
+  handshake buffers are released, so it overstates headroom.
+  **What to do with the answer.** If the peak really is ~20 KB, implement the
+  draw-buffer teardown `hotsync.c:8` has promised since the beginning — that is ~19 KB
+  in reserve. Separately, compare `largestDMA` at `wifi-up` against `wifi-down`: if a
+  Wi-Fi cycle fragments the DMA region, that alone kills the boot-SNTP fallback above,
+  since LVGL needs ~19 KB *contiguous* DMA and its failure path just returns.
+  Write the measured figures back into the `BUILD_PROGRESS.md` table and drop the
+  "(est.)" markers.
+- **`[device]` Make the hardware button sleep, not power off.** Today the firmware reads
+  **no** button at all and has no software power-off path — the only way off is cutting
+  the rail. Worth building for UX (instant wake, no boot wait, game and screen state
+  preserved), but it is **not** the clock fix — see the RTC item above.
+  **Which button decides whether this is firmware or soldering:** RESET/EN is wired to
+  the chip's reset pin and can *never* be intercepted; BOOT/GPIO0 is RTC-capable and
+  works both as the sleep trigger and as an `ext0` deep-sleep wake source; a slide
+  switch in the battery/USB line is a hard cut, and converting it means rewiring it to
+  a GPIO so the SoC keeps power.
+  **UX consequence:** from deep sleep, tap-to-wake is gone — touch is read via pressure
+  z1 over SPI (`IRQ36 unused`) and SPI is dead in sleep. Either wake on the button only,
+  or rewire touch IRQ as the wake source. Today's awake-but-dark model keeps tap-to-wake
+  for free.
+  **Measure before committing:** this board's real sleep current. The ESP32 die draws
+  microamps in deep sleep, but the CYD's LDO and USB-serial chip dominate — that number
+  decides whether an all-day sleep on a LiPo is viable at all.
+  Note `CONFIG_PM_ENABLE` / tickless idle are **commented out** in `sdkconfig.defaults`
+  (light sleep gated APB and made the display flash), so "sleep" today means a
+  full-speed SoC with the backlight off: accurate clock, thirsty.
 - **`[device]` Graffiti tuning.** The letter + punctuation stroke templates are
   coarse starters; tune thresholds from on-device `graf`/`graf pnc` telemetry on
   this exact resistive panel.
@@ -243,7 +333,8 @@ starts with a **feasibility check on the base CYD** before committing to a build
 top.) The Graffiti case model is settled: one stroke set (26 capital-style
 letters), lowercase output, upstroke = shift-next (two = caps lock).*
 
-- Preferences app icon in the launcher; power/reset-button remap; dark mode.
+- Preferences app icon in the launcher; dark mode. *(The button remap graduated to
+  "Needs hardware" above — it turns on which physical button it actually is.)*
 
 ---
 
