@@ -25,14 +25,25 @@ CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
 CONFIG_FATFS_LFN_HEAP=y
 
 # --- the sync runs in the main task; give it headroom ---
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288
+# 12288 overflowed on hardware: ui_init() alone peaks at ~10.3 KB building the
+# lock-screen dashboard, for ~12.8 KB total against a 12 KB stack -- a hard
+# boot loop ("stack overflow in task main", every boot, right after LVGL init).
+# Measured on device with uxTaskGetStackHighWaterMark; 16 KB leaves ~3.5 KB.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 
 # --- LVGL: monochrome theme for the PalmOS grayscale look ---
 CONFIG_LV_USE_THEME_MONO=y
-# Shrink LVGL's heap pool from the 64 KB default -- our UI (lists, buttons, a few
-# labels) fits comfortably in 24 KB, and the freed 40 KB is what the TLS handshake
-# + sync working set need. If the UI ever logs "lv_malloc failed", raise this.
-CONFIG_LV_MEM_SIZE_KILOBYTES=24
+# Shrink LVGL's heap pool from the 64 KB default -- the freed RAM is what the TLS
+# handshake + sync working set need.
+# 24 KB is NOT enough once the lock-screen dashboard is resident: measured on
+# device, the dashboard leaves 788 bytes free with a 648-byte largest block and
+# rising fragmentation. The pool does not report "lv_malloc failed" when it gets
+# that tight -- instead a label's glyph draw cannot allocate a draw task and
+# lv_draw_dispatch spins forever, which reads as a frozen dashboard with missing
+# elements and an unlock swipe that never registers (the same loop starves touch).
+# 32 KB leaves ~9.7 KB free at 7% fragmentation, steady across repeated repaints,
+# and costs ~8 KB of ESP heap (103 KB -> 95 KB free at boot).
+CONFIG_LV_MEM_SIZE_KILOBYTES=32
 
 # --- Wi-Fi: trim the (generous) default buffer pools to claw back heap for TLS.
 # Sync is low-bandwidth, so fewer RX/TX buffers is fine. ---
