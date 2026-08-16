@@ -3402,10 +3402,32 @@ static uint8_t    ink_buf[LV_CANVAS_BUF_SIZE(INK_W, INK_H, 1, 1) + 16]; /* +pale
 static int        ink_lx = -1, ink_ly = -1;   /* last canvas-local point (-1 = pen up) */
 static lv_timer_t *ink_fade;
 
+/* The ink canvas is written directly rather than through lv_canvas_set_px, which
+ * ends every single pixel with lv_obj_invalidate() -- and each of those walks the
+ * object tree and rescans the display's invalid-area list. lv_canvas_fill_bg is a
+ * per-pixel set_px loop for indexed formats, so clearing this 168x106 pad meant
+ * ~17.8k of them: measured on device at 80 ms during ui_init and 1.006 SECONDS
+ * once the full UI was live. That stall runs inside lv_timer_handler, which is
+ * also the loop that polls the touch panel, so a pen-down ate the whole stroke:
+ * every real stroke sampled exactly 1 point, below the recognizer's 4-point floor
+ * (graffiti.c), so nothing drew and nothing was recognized -- only taps got
+ * through. Same fix as the dashboard canvas (dpx/dash_clear): reproduce LVGL's
+ * own I1 addressing (bit 7-(x&7) of the byte at goto_xy, palette index 1 = ink)
+ * and issue exactly one invalidate per clear / per stroke segment. */
+static lv_draw_buf_t *ink_db;                 /* cached draw buf for the ink canvas */
+
+static void inkpx(int x, int y){
+    if(x < 0 || y < 0 || x >= INK_W || y >= INK_H) return;
+    if(!ink_db) return;
+    uint8_t *p = lv_draw_buf_goto_xy(ink_db, (uint32_t)x, (uint32_t)y);
+    if(p) *p |= (uint8_t)(1u << (7 - (x & 7)));
+}
 static void ink_clear(void){
-    if(!ink_canvas) return;
-    lv_color_t bg = { .blue = 0 };       /* indexed canvas: palette index in .blue */
-    lv_canvas_fill_bg(ink_canvas, bg, LV_OPA_COVER);
+    if(!ink_canvas || !ink_db) return;
+    uint8_t *p0 = lv_draw_buf_goto_xy(ink_db, 0, 0);   /* palette index 0 = COL_GRAF */
+    if(!p0) return;
+    lv_memset(p0, 0x00, (size_t)ink_db->header.stride * ink_db->header.h);
+    lv_obj_invalidate(ink_canvas);                     /* one, not 17.8k */
 }
 static void ink_fade_cb(lv_timer_t *t){ (void)t; ink_clear(); ink_fade = NULL; }
 static void ink_fade_start(void){
@@ -3419,20 +3441,30 @@ static void ink_point(int sx, int sy){
     if(x < 0 || y < 0 || x >= INK_W || y >= INK_H){ ink_lx = -1; return; }
     if(ink_lx < 0){ ink_lx = x; ink_ly = y; }
     int x0 = ink_lx, y0 = ink_ly;
+    /* bounding box of this segment, invalidated once after the run (+1 for the
+     * 2px pen). Only the touched strip is redrawn, so the SPI blit stays small. */
+    int bx1 = x0 < x ? x0 : x, bx2 = x0 > x ? x0 : x;
+    int by1 = y0 < y ? y0 : y, by2 = y0 > y ? y0 : y;
     int dx = x > x0 ? x - x0 : x0 - x, sx_ = x0 < x ? 1 : -1;
     int dy = y > y0 ? y0 - y : y - y0, sy_ = y0 < y ? 1 : -1;   /* dy <= 0 */
     int err = dx + dy;
-    lv_color_t ink = { .blue = 1 };
     for(;;){
-        lv_canvas_set_px(ink_canvas, x0, y0, ink, LV_OPA_COVER);
-        if(x0 + 1 < INK_W) lv_canvas_set_px(ink_canvas, x0 + 1, y0, ink, LV_OPA_COVER);
-        if(y0 + 1 < INK_H) lv_canvas_set_px(ink_canvas, x0, y0 + 1, ink, LV_OPA_COVER);
+        inkpx(x0, y0);
+        inkpx(x0 + 1, y0);
+        inkpx(x0, y0 + 1);
         if(x0 == x && y0 == y) break;
         int e2 = 2 * err;
         if(e2 >= dy){ err += dy; x0 += sx_; }
         if(e2 <= dx){ err += dx; y0 += sy_; }
     }
     ink_lx = x; ink_ly = y;
+
+    lv_area_t a;
+    lv_obj_get_coords(ink_canvas, &a);           /* absolute; invalidate_area clips */
+    int ax = a.x1, ay = a.y1;
+    a.x1 = ax + bx1;     a.y1 = ay + by1;
+    a.x2 = ax + bx2 + 1; a.y2 = ay + by2 + 1;
+    lv_obj_invalidate_area(ink_canvas, &a);
 }
 
 /* echo the recognized character in the strip for a moment (Palm-style feedback) */
@@ -5130,6 +5162,7 @@ void ui_init(void){
      * stay the clickable surfaces and feed both the recognizer and the ink. */
     ink_canvas = lv_canvas_create(graf);
     lv_canvas_set_buffer(ink_canvas, ink_buf, INK_W, INK_H, LV_COLOR_FORMAT_I1);
+    ink_db = lv_canvas_get_draw_buf(ink_canvas);   /* inkpx/ink_clear write this directly */
     lv_canvas_set_palette(ink_canvas, 0, lv_color_to_32(COL_GRAF, 0xFF));
     lv_canvas_set_palette(ink_canvas, 1, lv_color_to_32(COL_LINE, 0xFF));
     lv_obj_set_pos(ink_canvas, INK_X0, INK_Y0);
