@@ -85,6 +85,41 @@ static lv_obj_t *panel(lv_obj_t *parent, int x, int y, int w, int h, lv_color_t 
     return p;
 }
 
+/* ---- shared I1 canvas direct-write helpers --------------------------------
+ * Every canvas in this file is I1 (1 bpp indexed: palette 0 = background,
+ * 1 = ink). Painting them through lv_canvas_set_px is pathological on this
+ * board: set_px ends EVERY pixel with lv_obj_invalidate(), which walks the
+ * object tree and rescans the display's invalid-area list, and for indexed
+ * formats lv_canvas_fill_bg is itself just a set_px loop. Measured on device
+ * with the 168x106 Graffiti pad: 80 ms for one clear during ui_init and
+ * 1.006 SECONDS once the full UI was live. Because that runs inside
+ * lv_timer_handler -- the same loop that polls touch -- it also swallows the
+ * input that triggered the repaint.
+ *
+ * These reproduce LVGL's own I1 addressing (bit 7-(x&7) of the byte at
+ * goto_xy) and deliberately do NOT invalidate; each paint routine issues
+ * exactly one lv_obj_invalidate() when it is done. */
+static void i1_px(lv_draw_buf_t *db, int x, int y, int v){
+    if(!db || x < 0 || y < 0 ||
+       x >= (int)db->header.w || y >= (int)db->header.h) return;
+    uint8_t *p = lv_draw_buf_goto_xy(db, (uint32_t)x, (uint32_t)y);
+    if(!p) return;
+    uint8_t m = (uint8_t)(1u << (7 - (x & 7)));
+    if(v) *p |= m; else *p &= (uint8_t)~m;
+}
+static void i1_clear(lv_draw_buf_t *db){          /* fill with palette index 0 */
+    if(!db) return;
+    uint8_t *p0 = lv_draw_buf_goto_xy(db, 0, 0);
+    if(p0) lv_memset(p0, 0x00, (size_t)db->header.stride * db->header.h);
+}
+/* object-taking wrappers, for the paint code that only has the canvas widget */
+static void i1_obj_px(lv_obj_t *cv, int x, int y, int v){
+    if(cv) i1_px(lv_canvas_get_draw_buf(cv), x, y, v);
+}
+static void i1_obj_clear(lv_obj_t *cv){
+    if(cv) i1_clear(lv_canvas_get_draw_buf(cv));
+}
+
 static void home_cb(lv_event_t *e){ (void)e; show_launcher(); }
 static void app_cb(lv_event_t *e){ show_app((const char *)lv_event_get_user_data(e)); }
 
@@ -1117,9 +1152,7 @@ static int tr_pick(void){
 }
 
 static void tr_plot(int x, int y){
-    if(x<0||y<0||x>=TR_GW||y>=TR_GH) return;
-    lv_color_t on = { .blue = 1 };
-    lv_canvas_set_px(tr_guide, x, y, on, LV_OPA_COVER);
+    i1_obj_px(tr_guide, x, y, 1);
 }
 static void tr_line(int x0,int y0,int x1,int y1){    /* Bresenham, 2px weight */
     int dx=abs(x1-x0), sx=x0<x1?1:-1, dy=-abs(y1-y0), sy=y0<y1?1:-1, err=dx+dy;
@@ -1131,9 +1164,8 @@ static void tr_line(int x0,int y0,int x1,int y1){    /* Bresenham, 2px weight */
         if(e2<=dx){ err+=dx; y0+=sy; }
     }
 }
-static void tr_draw_guide(int gi){
-    lv_color_t bg = { .blue = 0 };
-    lv_canvas_fill_bg(tr_guide, bg, LV_OPA_COVER);
+static void tr_draw_guide_body(int gi){
+    i1_obj_clear(tr_guide);
     if(gi<0) return;
     int np=0; const float *p = graffiti_glyph_template(TR_G[gi], &np);
     if(!p || np<1){                               /* no drawn stroke (e.g. '.'): a dot */
@@ -1149,6 +1181,12 @@ static void tr_draw_guide(int gi){
     for(int a=-2;a<=2;a++) for(int b=-2;b<=2;b++) if(a*a+b*b<=4) tr_plot(sx+a,sy+b);
     #undef GX
     #undef GY
+}
+/* one invalidate for the whole guide, however the body returned */
+static void tr_draw_guide(int gi){
+    if(!tr_guide) return;
+    tr_draw_guide_body(gi);
+    lv_obj_invalidate(tr_guide);
 }
 
 /* how the current target is entered, so the prompt can nudge the user to the right
@@ -1413,9 +1451,7 @@ static void ka_set_target(int t){
 
 /* ---- WRITE mode: draw the numbered stroke model on the I1 canvas ---- */
 static void ka_mplot(int x,int y){
-    if(x<0||y<0||x>=KW_GW||y>=KW_GH) return;
-    lv_color_t on = { .blue = 1 };
-    lv_canvas_set_px(ka_model, x, y, on, LV_OPA_COVER);
+    i1_obj_px(ka_model, x, y, 1);
 }
 /* style: 0 = dotted guide (a stroke not yet drawn), 1 = solid "locked in" (a stroke
  * the user has correctly drawn -- stays visible until the kana is finished or a
@@ -1443,9 +1479,8 @@ static void ka_mdigit(int cx,int cy,int d){
     for(int r=0;r<5;r++) for(int c=0;c<3;c++)
         if(KW_DIG[d][r] & (4>>c)) ka_mplot(cx+c, cy+r);
 }
-static void ka_draw_model(void){
-    lv_color_t bg = { .blue = 0 };
-    lv_canvas_fill_bg(ka_model, bg, LV_OPA_COVER);
+static void ka_draw_model_body(void){
+    i1_obj_clear(ka_model);
     if(ka_target<0) return;
     const KanaStrokes *ks = &KANA_STROKES[ka_target];
     const int pad=10, span=KW_GW-2*pad;
@@ -1464,6 +1499,12 @@ static void ka_draw_model(void){
             for(int a=-1;a<=1;a++) for(int b=-1;b<=1;b++) ka_mplot(sx+a, sy+b);
     }
     #undef MX
+}
+/* one invalidate for the whole model, however the body returned */
+static void ka_draw_model(void){
+    if(!ka_model) return;
+    ka_draw_model_body();
+    lv_obj_invalidate(ka_model);
 }
 
 static void ka_render(void){
@@ -3402,31 +3443,19 @@ static uint8_t    ink_buf[LV_CANVAS_BUF_SIZE(INK_W, INK_H, 1, 1) + 16]; /* +pale
 static int        ink_lx = -1, ink_ly = -1;   /* last canvas-local point (-1 = pen up) */
 static lv_timer_t *ink_fade;
 
-/* The ink canvas is written directly rather than through lv_canvas_set_px, which
- * ends every single pixel with lv_obj_invalidate() -- and each of those walks the
- * object tree and rescans the display's invalid-area list. lv_canvas_fill_bg is a
- * per-pixel set_px loop for indexed formats, so clearing this 168x106 pad meant
- * ~17.8k of them: measured on device at 80 ms during ui_init and 1.006 SECONDS
- * once the full UI was live. That stall runs inside lv_timer_handler, which is
- * also the loop that polls the touch panel, so a pen-down ate the whole stroke:
- * every real stroke sampled exactly 1 point, below the recognizer's 4-point floor
- * (graffiti.c), so nothing drew and nothing was recognized -- only taps got
- * through. Same fix as the dashboard canvas (dpx/dash_clear): reproduce LVGL's
- * own I1 addressing (bit 7-(x&7) of the byte at goto_xy, palette index 1 = ink)
- * and issue exactly one invalidate per clear / per stroke segment. */
+/* Ink is written straight to the draw buffer via the shared I1 helpers -- see
+ * i1_px() for why lv_canvas_set_px is unusable here. This pad is where the cost
+ * was actually measured: clearing it cost 80 ms during ui_init and 1.006 SECONDS
+ * once the full UI was live, and because that stall sits inside lv_timer_handler
+ * (the same loop that polls touch) a pen-down ate the whole stroke. Every real
+ * stroke on hardware sampled exactly 1 point -- below the 4-point floor in
+ * graffiti_recognize() -- so nothing drew and nothing was recognized. */
 static lv_draw_buf_t *ink_db;                 /* cached draw buf for the ink canvas */
 
-static void inkpx(int x, int y){
-    if(x < 0 || y < 0 || x >= INK_W || y >= INK_H) return;
-    if(!ink_db) return;
-    uint8_t *p = lv_draw_buf_goto_xy(ink_db, (uint32_t)x, (uint32_t)y);
-    if(p) *p |= (uint8_t)(1u << (7 - (x & 7)));
-}
+static void inkpx(int x, int y){ i1_px(ink_db, x, y, 1); }
 static void ink_clear(void){
-    if(!ink_canvas || !ink_db) return;
-    uint8_t *p0 = lv_draw_buf_goto_xy(ink_db, 0, 0);   /* palette index 0 = COL_GRAF */
-    if(!p0) return;
-    lv_memset(p0, 0x00, (size_t)ink_db->header.stride * ink_db->header.h);
+    if(!ink_canvas) return;
+    i1_clear(ink_db);                                  /* palette index 0 = COL_GRAF */
     lv_obj_invalidate(ink_canvas);                     /* one, not 17.8k */
 }
 static void ink_fade_cb(lv_timer_t *t){ (void)t; ink_clear(); ink_fade = NULL; }
@@ -3644,31 +3673,17 @@ static const char *aqi_word(int aqi){
     return "Hazardous";
 }
 
-/* The dashboard canvas is written directly rather than through
- * lv_canvas_set_px, which ends every single pixel with lv_obj_invalidate() --
- * and each of those walks the whole object tree. At 240x320 a full repaint cost
- * ~77k tree walks: seconds of solid CPU inside one lv_timer_handler pass, which
- * starved IDLE0 into a task-watchdog trigger and, because touch is serviced from
- * that same loop, swallowed the unlock swipe and left the screen half drawn.
- * These helpers reproduce LVGL's own I1 addressing (lv_canvas_set_px, indexed
- * branch: bit 7-(x&7) of the byte at goto_xy, palette index 1 = COL_LINE) and
- * dash_paint issues exactly one invalidate at the end. */
+/* The dashboard is written straight to the draw buffer via the shared I1 helpers
+ * -- see i1_px() for why lv_canvas_set_px is unusable here. At 240x320 a full
+ * repaint through set_px cost ~77k tree walks: seconds of solid CPU inside one
+ * lv_timer_handler pass, which starved IDLE0 into a task-watchdog trigger and,
+ * because touch is serviced from that same loop, swallowed the unlock swipe and
+ * left the screen half drawn. dash_paint issues one invalidate at the end. */
 static lv_draw_buf_t *g_dash_db;      /* cached draw buf for the dash canvas */
 
-static void dpx(int x,int y){
-    if(x<0||y<0||x>=DASH_CW||y>=DASH_CH) return;
-    if(!g_dash_db) return;
-    uint8_t *p = lv_draw_buf_goto_xy(g_dash_db, (uint32_t)x, (uint32_t)y);
-    if(!p) return;
-    *p |= (uint8_t)(1u << (7 - (x & 7)));
-}
-/* clear to palette index 0 (COL_BODY) -- the direct-write equivalent of
- * lv_canvas_fill_bg, which for indexed formats is just a set_px loop. */
-static void dash_clear(void){
-    if(!g_dash_db) return;
-    uint8_t *p0 = lv_draw_buf_goto_xy(g_dash_db, 0, 0);
-    if(!p0) return;
-    lv_memset(p0, 0x00, (size_t)g_dash_db->header.stride * g_dash_db->header.h);
+static void dpx(int x,int y){ i1_px(g_dash_db, x, y, 1); }   /* index 1 = COL_LINE */
+static void dash_clear(void){        /* clear to palette index 0 (COL_BODY) */
+    i1_clear(g_dash_db);
 }
 static void dfill(int x,int y,int w,int h){
     for(int j=0;j<h;j++) for(int i=0;i<w;i++) dpx(x+i,y+j);
@@ -4065,9 +4080,7 @@ static void ms_fmt_mmss(uint32_t sec, char *out, int cap){
 }
 
 static void mpx(int x,int y){
-    if(!g_ms_cv || x<0 || y<0 || x>=MSCW || y>=MSCH) return;
-    lv_color_t on = { .blue = 1 };
-    lv_canvas_set_px(g_ms_cv, x, y, on, LV_OPA_COVER);
+    i1_obj_px(g_ms_cv, x, y, 1);
 }
 static void mfill(int x,int y,int w,int h){ for(int j=0;j<h;j++) for(int i=0;i<w;i++) mpx(x+i,y+j); }
 static void mdigit(int x,int y,int d){
@@ -4078,10 +4091,8 @@ static void mdigit(int x,int y,int d){
 static void mdisc(int cx,int cy,int r){
     for(int dy=-r;dy<=r;dy++) for(int dx=-r;dx<=r;dx++) if(dx*dx+dy*dy<=r*r) mpx(cx+dx,cy+dy);
 }
-static void ms_render(void){
-    if(!g_ms_cv) return;
-    lv_color_t bg = { .blue = 0 };
-    lv_canvas_fill_bg(g_ms_cv, bg, LV_OPA_COVER);
+static void ms_render_body(void){
+    i1_obj_clear(g_ms_cv);
     for(int r=0;r<=MSH;r++) for(int x=0;x<MSCW;x++) mpx(x, r*MSC);   /* grid */
     for(int c=0;c<=MSW;c++) for(int y=0;y<MSCH;y++) mpx(c*MSC, y);
     for(int r=0;r<MSH;r++) for(int c=0;c<MSW;c++){
@@ -4107,6 +4118,11 @@ static void ms_render(void){
                        lv_label_set_text_fmt(g_ms_timelbl, "Time %s   Best %s", tb, bb); }
         else           lv_label_set_text_fmt(g_ms_timelbl, "Time %s   Best --", tb);
     }
+}
+static void ms_render(void){
+    if(!g_ms_cv) return;
+    ms_render_body();
+    lv_obj_invalidate(g_ms_cv);          /* one, not MSCW*MSCH */
 }
 /* 1 Hz tick (created once in ui_init): keep the on-screen clock live while playing. */
 static void ms_tick(lv_timer_t *t){ (void)t;
@@ -4249,11 +4265,11 @@ static void canvas_glyph_at(lv_obj_t *cv, const lv_font_t *font, uint32_t uni, i
     const lv_font_fmt_txt_dsc_t *fdsc = (const lv_font_fmt_txt_dsc_t *)g.resolved_font->dsc;
     const lv_font_fmt_txt_glyph_dsc_t *gd = &fdsc->glyph_dsc[g.gid.index];
     const uint8_t *bits = &fdsc->glyph_bitmap[gd->bitmap_index];
-    lv_color_t col = { .blue = (uint8_t)(v ? 1 : 0) };
+    lv_draw_buf_t *db = cv ? lv_canvas_get_draw_buf(cv) : NULL;   /* fetched once */
     int bw = g.box_w, bh = g.box_h, i = 0;
     for(int gy=0; gy<bh; gy++) for(int gx=0; gx<bw; gx++, i++)
         if(bits[i>>3] & (0x80 >> (i&7)))
-            lv_canvas_set_px(cv, x+gx, y+gy, col, LV_OPA_COVER);
+            i1_px(db, x+gx, y+gy, v ? 1 : 0);
 }
 /* glyph centred on point (cx,cy) -- for a single char in a cell/key. */
 static void canvas_glyph_c(lv_obj_t *cv, const lv_font_t *font, uint32_t uni, int cx, int cy, int v){
@@ -4358,9 +4374,7 @@ static int wd_load(void){
 }
 
 static void wdpx(int x,int y,int v){
-    if(!g_wd_cv || x<0 || y<0 || x>=WDCW || y>=WDCH) return;
-    lv_color_t col = { .blue = (uint8_t)(v ? 1 : 0) };       /* I1: blue&1 = palette idx */
-    lv_canvas_set_px(g_wd_cv, x, y, col, LV_OPA_COVER);
+    i1_obj_px(g_wd_cv, x, y, v);
 }
 static void wd_glyph(int x,int y,char ch,int s,int v){       /* ch at (x,y), scale s; 5x6 */
     if(ch<'A' || ch>'Z') return;
@@ -4434,10 +4448,8 @@ static void wd_legend(void){
         for(const char *p=it[k].cap; *p; p++){ wd_glyph(tx, y+3, *p, 1, 1); tx += 6; }
     }
 }
-static void wd_render(void){
-    if(!g_wd_cv) return;
-    lv_color_t bg = { .blue = 0 };
-    lv_canvas_fill_bg(g_wd_cv, bg, LV_OPA_COVER);
+static void wd_render_body(void){
+    i1_obj_clear(g_wd_cv);
     for(int r=0;r<WD_ROWS;r++) for(int c=0;c<WD_LEN;c++){
         int x = WD_GX0 + c*WD_CW, y = WD_GY0 + r*WD_CH;
         char ch = 0; int state = -1;
@@ -4462,6 +4474,11 @@ static void wd_render(void){
         else if(g_wd.state == WD_LOST) lv_label_set_text_fmt(g_wd_status, "Answer: %s", g_wd.answer);
         else                           lv_label_set_text_fmt(g_wd_status, "Guess %d/%d%s", g_wd.nrows+1, WD_ROWS, st);
     }
+}
+static void wd_render(void){
+    if(!g_wd_cv) return;
+    wd_render_body();
+    lv_obj_invalidate(g_wd_cv);          /* one, not WDCW*WDCH */
 }
 /* submit the current row and fold the result into the win streak: a solve bumps
  * it, a loss resets it. Only wd_enter can end a game, so this is the one hook. */
@@ -4582,9 +4599,7 @@ static void sd_time_text(void){
 }
 
 static void sdpx(int x,int y,int v){
-    if(!g_sd_cv || x<0 || y<0 || x>=SDCW || y>=SDCH) return;
-    lv_color_t col = { .blue = (uint8_t)(v ? 1 : 0) };
-    lv_canvas_set_px(g_sd_cv, x, y, col, LV_OPA_COVER);
+    i1_obj_px(g_sd_cv, x, y, v);
 }
 static void sd_hline(int x0,int x1,int y){ for(int x=x0;x<=x1;x++) sdpx(x,y,1); }
 static void sd_vline(int x,int y0,int y1){ for(int y=y0;y<=y1;y++) sdpx(x,y,1); }
@@ -4603,10 +4618,8 @@ static void sd_ex(int x,int y,int w,int h){           /* an "X" (both diagonals)
         sdpx(x + (w-1) - i*(w-1)/(steps-1), y + i*(h-1)/(steps-1), 1);
     }
 }
-static void sd_render(void){
-    if(!g_sd_cv) return;
-    lv_color_t bg = { .blue = 0 };
-    lv_canvas_fill_bg(g_sd_cv, bg, LV_OPA_COVER);
+static void sd_render_body(void){
+    i1_obj_clear(g_sd_cv);
 
     /* grid: thin cell lines, doubled on the 3x3 box boundaries */
     for(int i=0;i<=9;i++){
@@ -4639,6 +4652,11 @@ static void sd_render(void){
         else lv_label_set_text_fmt(g_sd_status, "%d left", sd_remaining(&g_sd));
     }
     sd_time_text();
+}
+static void sd_render(void){
+    if(!g_sd_cv) return;
+    sd_render_body();
+    lv_obj_invalidate(g_sd_cv);          /* one, not SDCW*SDCH */
 }
 /* 1 Hz tick (created once in ui_init): keep the solve clock live while playing. */
 static void sd_tick(lv_timer_t *t){ (void)t;
@@ -4822,9 +4840,7 @@ static void zp_time_text(void){
 }
 
 static void zppx(int x,int y,int v){
-    if(!g_zp_cv || x<0 || y<0 || x>=ZPCW || y>=ZPCH) return;
-    lv_color_t col = { .blue = (uint8_t)(v ? 1 : 0) };
-    lv_canvas_set_px(g_zp_cv, x, y, col, LV_OPA_COVER);
+    i1_obj_px(g_zp_cv, x, y, v);
 }
 static void zp_fill(int x,int y,int w,int h,int v){
     for(int j=0;j<h;j++) for(int i=0;i<w;i++) zppx(x+i,y+j,v);
@@ -4864,10 +4880,8 @@ static void zp_button(int x,int y,int w,int h,const char *label){
     canvas_text(g_zp_cv, &lv_font_palm, label,
                 x + (w - canvas_text_w(&lv_font_palm, label))/2, y + (h-14)/2, 1);
 }
-static void zp_render(void){
-    if(!g_zp_cv) return;
-    lv_color_t bg = { .blue = 0 };
-    lv_canvas_fill_bg(g_zp_cv, bg, LV_OPA_COVER);
+static void zp_render_body(void){
+    i1_obj_clear(g_zp_cv);
 
     /* dotted interior grid + a solid outer frame: the cells recede so the path
      * band is what the eye follows (the same trick as Mines' stipple). */
@@ -4912,6 +4926,11 @@ static void zp_render(void){
         else lv_label_set_text_fmt(g_zp_status, "%d left", zp_remaining(&g_zp));
     }
     zp_time_text();
+}
+static void zp_render(void){
+    if(!g_zp_cv) return;
+    zp_render_body();
+    lv_obj_invalidate(g_zp_cv);          /* one, not ZPCW*ZPCH */
 }
 /* 1 Hz tick (created once in ui_init): keep the solve clock live while playing. */
 static void zp_tick(lv_timer_t *t){ (void)t;
