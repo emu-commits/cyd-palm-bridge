@@ -3612,10 +3612,31 @@ static const char *aqi_word(int aqi){
     return "Hazardous";
 }
 
+/* The dashboard canvas is written directly rather than through
+ * lv_canvas_set_px, which ends every single pixel with lv_obj_invalidate() --
+ * and each of those walks the whole object tree. At 240x320 a full repaint cost
+ * ~77k tree walks: seconds of solid CPU inside one lv_timer_handler pass, which
+ * starved IDLE0 into a task-watchdog trigger and, because touch is serviced from
+ * that same loop, swallowed the unlock swipe and left the screen half drawn.
+ * These helpers reproduce LVGL's own I1 addressing (lv_canvas_set_px, indexed
+ * branch: bit 7-(x&7) of the byte at goto_xy, palette index 1 = COL_LINE) and
+ * dash_paint issues exactly one invalidate at the end. */
+static lv_draw_buf_t *g_dash_db;      /* cached draw buf for the dash canvas */
+
 static void dpx(int x,int y){
     if(x<0||y<0||x>=DASH_CW||y>=DASH_CH) return;
-    lv_color_t on = { .blue = 1 };
-    lv_canvas_set_px(g_dash_cv, x, y, on, LV_OPA_COVER);
+    if(!g_dash_db) return;
+    uint8_t *p = lv_draw_buf_goto_xy(g_dash_db, (uint32_t)x, (uint32_t)y);
+    if(!p) return;
+    *p |= (uint8_t)(1u << (7 - (x & 7)));
+}
+/* clear to palette index 0 (COL_BODY) -- the direct-write equivalent of
+ * lv_canvas_fill_bg, which for indexed formats is just a set_px loop. */
+static void dash_clear(void){
+    if(!g_dash_db) return;
+    uint8_t *p0 = lv_draw_buf_goto_xy(g_dash_db, 0, 0);
+    if(!p0) return;
+    lv_memset(p0, 0x00, (size_t)g_dash_db->header.stride * g_dash_db->header.h);
 }
 static void dfill(int x,int y,int w,int h){
     for(int j=0;j<h;j++) for(int i=0;i<w;i++) dpx(x+i,y+j);
@@ -3795,7 +3816,7 @@ static void lock_pressing_cb(lv_event_t *e){ (void)e;
     lv_point_t p; lv_indev_get_point(lv_indev_active(),&p); if(p.y>0) g_lock_ly=p.y; }
 static void lock_release_cb(lv_event_t *e){ (void)e;
     if(g_lock_py - g_lock_ly > 40){                 /* dragged up -> unlock */
-        if(g_lock){ lv_obj_del(g_lock); g_lock=NULL; g_dash_cv=NULL; g_dash_time_ap=NULL; }
+        if(g_lock){ lv_obj_del(g_lock); g_lock=NULL; g_dash_cv=NULL; g_dash_db=NULL; g_dash_time_ap=NULL; }
         /* the launcher is built lazily on the FIRST unlock (at boot the content area
          * is empty behind the lock, so the launcher grid and the dashboard never share
          * the 24 KB pool). Later wakes re-lock over whatever app is showing, so only
@@ -3807,8 +3828,8 @@ static void lock_release_cb(lv_event_t *e){ (void)e;
 /* paint the canvas graphics + (re)set the time labels from the current clock. */
 static void dash_paint(void){
     if(!g_lock || !g_dash_cv) return;
-    lv_color_t bg = { .blue = 0 };
-    lv_canvas_fill_bg(g_dash_cv, bg, LV_OPA_COVER);
+
+    dash_clear();
 
     time_t now=0; time(&now); struct tm ti; localtime_r(&now,&ti);
     int h24 = appcfg()->clock24;
@@ -3843,6 +3864,9 @@ static void dash_paint(void){
     { int illum=0,wax=1;
       dash_moon(now,&illum,&wax,NULL);
       dash_moon_draw(224,282,13,illum,wax); }
+
+    /* one invalidate for the whole canvas, instead of one per pixel */
+    lv_obj_invalidate(g_dash_cv);
 }
 
 void ui_show_lock(void){
@@ -3879,6 +3903,7 @@ void ui_show_lock(void){
     lv_canvas_set_palette(g_dash_cv, 1, lv_color_to_32(COL_LINE, 0xFF));
     lv_obj_set_pos(g_dash_cv, 0, 0);
     lv_obj_clear_flag(g_dash_cv, LV_OBJ_FLAG_CLICKABLE);
+    g_dash_db = lv_canvas_get_draw_buf(g_dash_cv);   /* dpx/dash_clear write this directly */
 
     /* ---- status strip ---- */
     char sb[48];
