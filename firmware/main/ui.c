@@ -50,6 +50,10 @@
 #define COL_LINE    lv_color_hex(0x000000)   /* black rules      */
 
 static lv_obj_t *content;      /* the swappable view area */
+/* Tear down the content area. ALWAYS use this instead of lv_obj_clean(content):
+ * it nulls every global that points into it, in the same breath that frees them.
+ * Defined at the bottom of the file, where all of those globals are in scope. */
+static void content_clear(void);
 static lv_obj_t *title_lbl;
 static lv_obj_t *clock_lbl;    /* live clock in the title bar (Palm) */
 
@@ -441,7 +445,7 @@ static void list_view(const AppDef *ad){
     kill_kb();
     cur_app = ad;
     cur_uid = 0;
-    lv_obj_clean(content);
+    content_clear();
     g_listtbl = NULL;
     lv_label_set_text(title_lbl, ad->name);
 
@@ -546,7 +550,7 @@ static void show_detail(uint32_t uid){
     static char buf[1280];   /* fits a full-length memo (mtext is 1200) without truncation */
     if(!data_detail(cur_app->app, uid, buf, sizeof buf)) snprintf(buf,sizeof buf,"(not found)");
 
-    lv_obj_clean(content);
+    content_clear();
     int ch = PDA_H - TITLE_H;
     int istodo = (cur_app->app == APP_TODO);
     /* leave room for the action row (and a second row for ToDo's Mark Done) */
@@ -704,7 +708,7 @@ static void show_edit(uint32_t uid){
     edit_uid = uid; cur_uid = uid; g_nfields = 0;
     int rc = uid ? data_record_category(cur_app->app, uid) : data_get_category();
     edit_cat = rc < 0 ? 0 : rc;   /* new records default to Unfiled / the current filter */
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, uid ? "Edit" : "New");
 
     /* C4: Palm form contract -- the action row lives across the BOTTOM of the
@@ -814,7 +818,7 @@ static void hs_sync_cb(lv_event_t *e){ (void)e; hotsync_start(); }
 static void show_hotsync(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "HotSync");
     update_cat_trigger();
 
@@ -894,7 +898,7 @@ static void show_datebook_day(int y,int m,int d){
     kill_kb();
     g_cal_y=y; g_cal_m=m; g_cal_d=d;
     cur_app=&APPDEFS[0]; cur_uid=0;     /* Date Book context (menu New/Categories) */
-    lv_obj_clean(content);
+    content_clear();
     char t[36]; snprintf(t,sizeof t,"%s %d/%d",CAL_WD[cal_wday(y,m,d)],m,d);
     lv_label_set_text(title_lbl,t);
     update_cat_trigger();
@@ -951,7 +955,7 @@ static void show_datebook_week(int y,int m,int d){
     /* snap (y,m,d) back to the Sunday that starts its week */
     g_wk_y=y; g_wk_m=m; g_wk_d=d;
     cal_add_days(&g_wk_y,&g_wk_m,&g_wk_d, -cal_wday(y,m,d));
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl,"Week");
     update_cat_trigger();
 
@@ -1014,7 +1018,7 @@ static void show_datebook_month(int y,int m){
     kill_kb();
     g_cal_y=y; g_cal_m=m;
     cur_app=&APPDEFS[0]; cur_uid=0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl,"Date Book");
     update_cat_trigger();
 
@@ -1064,7 +1068,7 @@ static void show_app(const char *name){
     if(!strcmp(name, "News")){ show_news(); return; }
     if(!strcmp(name, "Games")){ show_games(); return; }
     cur_app = NULL;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, name);
     lv_obj_t *l = lv_label_create(content);
     lv_label_set_text_fmt(l, "%s\n\n(coming soon)", name);
@@ -1292,7 +1296,7 @@ static void graffiti_to_kana_cb(lv_event_t *e){ (void)e; show_kana(); }
 static void show_trainer(void){
     kill_kb();
     cur_app=NULL; cur_uid=0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Graffiti");
     update_cat_trigger();
     tr_load();
@@ -1634,9 +1638,8 @@ static void kana_to_graffiti_cb(lv_event_t *e){ (void)e; show_trainer(); }
 /* build the Kana screen for `mode` (0 Sound / 1 Write): clears content, lays out
  * the widgets that mode needs, wires the right Graffiti hook, and renders. */
 static void kana_build(int mode){
-    lv_obj_clean(content);
+    content_clear();
     ka_wmode = mode;
-    ka_kana=ka_prompt=ka_answer=ka_typed=ka_feedback=ka_score=ka_strokes_lbl=ka_model=ka_modelbl=NULL;
 
     /* mode toggle (top-right): label = the mode you'll switch TO */
     lv_obj_t *mb = lv_button_create(content);
@@ -1807,7 +1810,7 @@ static void show_news(void){
     cur_app = NULL; cur_uid = 0;
     news_seed_if_empty();
     g_news_i = 0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "News");
     update_cat_trigger();
 
@@ -1857,7 +1860,7 @@ static void show_launcher(void){
     kill_kb();
     cur_app = NULL;
     cur_uid = 0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Applications");
     update_cat_trigger();   /* hides it (no data app) */
 
@@ -2057,7 +2060,7 @@ static void prefkb_cb(lv_event_t *e){
 static void show_pref_edit(int i){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0; pf_edit_idx = i;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, PF_LABELS[i]);
     update_cat_trigger();
 
@@ -2115,7 +2118,7 @@ static void feeds_tbl_click_cb(lv_event_t *e){
 static void show_feeds(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "News Feeds");
     update_cat_trigger();
 
@@ -2173,7 +2176,7 @@ static void fe_delete_cb(lv_event_t *e){ (void)e;
 static void show_feed_edit(int idx){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0; fe_edit_idx = idx;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, idx<0 ? "Add Feed" : "Edit Feed");
     update_cat_trigger();
 
@@ -2264,7 +2267,7 @@ static void show_zone_picker(int target){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
     g_zone_target = target;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, target==ZTGT_TZ ? "Time Zone" : "World Clock");
     update_cat_trigger();
 
@@ -2312,7 +2315,7 @@ static void ds_fmt_cb(lv_event_t *e){ (void)e;
 static void show_dash_settings(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Lock Screen");
     update_cat_trigger();
 
@@ -2373,7 +2376,7 @@ static lv_obj_t *pf_add(lv_obj_t *list, const char *text, lv_event_cb_t cb, int 
 static void show_prefs(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Preferences");
     update_cat_trigger();   /* hides the category picker (no data app) */
 
@@ -2490,8 +2493,7 @@ static void disc_back_cb(lv_event_t *e){ (void)e; show_prefs(); }
 static void disc_show_results(void){
     disc_built = 1;
     if(disc_timer){ lv_timer_delete(disc_timer); disc_timer=NULL; }
-    lv_obj_clean(content);
-    disc_status = NULL;
+    content_clear();
     int n = hotsync_discover_count();
 
     lv_obj_t *back = lv_button_create(content);
@@ -2546,7 +2548,7 @@ static void disc_tick(lv_timer_t *t){ (void)t;
 static void show_discover(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0; disc_built = 0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Discover");
     update_cat_trigger();
 
@@ -2802,7 +2804,7 @@ static void findq_ta_cb(lv_event_t *e){
 static void show_find(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_findtbl = NULL; g_findq[0] = 0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Find");
     update_cat_trigger();
 
@@ -3034,7 +3036,7 @@ static void cat_name_save_cb(lv_event_t *e){ (void)e;
 static void show_cat_name_edit(int slot){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0; g_ce_slot = slot;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Category");
     update_cat_trigger();
 
@@ -3083,7 +3085,7 @@ static void ce_new_cb(lv_event_t *e){ (void)e;
 static void show_cat_edit(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Edit Categories");
     update_cat_trigger();
 
@@ -3922,7 +3924,7 @@ void ui_show_lock(void){
      * screen anyway, and this keeps the 24 KB LVGL pool holding only the chrome + the
      * dashboard at once (never chrome + an app + the dashboard). The content area is
      * left empty, so unlocking rebuilds the launcher (see lock_release_cb). */
-    lv_obj_clean(content);
+    content_clear();
     kill_kb();
     time_t now=0; time(&now);
     dash_weather_seed_sample(WX_PATH);
@@ -4047,8 +4049,9 @@ static void dash_tick(lv_timer_t *t){ (void)t; if(g_lock) dash_paint(); }
  * on a resistive panel). Pool-safe: one canvas + a few labels/buttons. */
 /* ---- ONE 1-bpp canvas buffer, shared by every game ----------------------------
  * The four games are mutually exclusive screens: each show_*() calls kill_kb() and
- * lv_obj_clean(content), which deletes the previous canvas before the next one is
- * created, so two game canvases can never be live at once. Private buffers cost
+ * content_clear(), which deletes the previous canvas -- and nulls the pointer to
+ * it -- before the next one is created, so two game canvases can never be live at
+ * once and no stale canvas pointer is left behind. Private buffers cost
  * ~18 KB of BSS on a board with 320 KB of DRAM and no PSRAM; one buffer sized to
  * the largest board costs 5 KB. LVGL reads the buffer only while drawing, and a
  * screen swap always happens between draws (from an event callback, never mid-
@@ -4205,8 +4208,7 @@ static void ms_newbtn_cb(lv_event_t *e){ (void)e;
 }
 static void show_minesweeper(void){
     kill_kb(); cur_app=NULL; cur_uid=0;
-    g_ms_cv=g_ms_status=g_ms_modelbl=g_ms_timelbl=NULL;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Mines");
     update_cat_trigger();
 
@@ -4530,8 +4532,7 @@ static void wd_newbtn_cb(lv_event_t *e){ (void)e;
 }
 static void show_wordie(void){
     kill_kb(); cur_app=NULL; cur_uid=0;
-    g_wd_cv = g_wd_status = NULL;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Wordie");
     update_cat_trigger();
 
@@ -4752,8 +4753,7 @@ static void sd_newbtn_cb(lv_event_t *e){ (void)e;
 }
 static void show_sudoku(void){
     kill_kb(); cur_app=NULL; cur_uid=0;
-    g_sd_cv = g_sd_status = g_sd_timelbl = NULL;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Sudoku");
     update_cat_trigger();
 
@@ -4825,6 +4825,49 @@ static void show_sudoku(void){
 
 static ZpGame    g_zp;
 static lv_obj_t *g_zp_cv, *g_zp_status, *g_zp_timelbl;
+
+/* ---- the one place the content area is torn down -------------------------
+ * lv_obj_clean(content) frees every widget in the view, but the file keeps
+ * module-global handles to a lot of them (canvases, status labels, form
+ * fields). Those were only reset on RE-ENTRY to the screen that owned them, so
+ * from the moment you navigated away until you came back, each one pointed at
+ * freed memory -- a use-after-free waiting for any timer tick or callback that
+ * still reached for it. The 1 Hz game ticks are guarded by their *_active
+ * flags, which is why this never fired in practice, but the guard is a
+ * coincidence of the current call graph rather than a property of the code.
+ *
+ * Freeing and nulling in one function is what makes it a property: a new
+ * screen cannot forget to reset the previous screen's pointers, because no
+ * screen resets them any more -- this does. Only pointers that actually live
+ * under `content` belong here. Overlays with their own lifetime (g_calc on
+ * lv_layer_top, g_lock/g_dash_cv, the Graffiti strip, the title bar) must NOT
+ * be nulled here: their objects survive this call. */
+static void content_clear(void){
+    if(!content) return;
+    lv_obj_clean(content);
+
+    /* edit / preferences forms */
+    g_form = NULL; active_ta = NULL; edit_cat_lbl = NULL; g_due_lbl = NULL;
+    for(int i = 0; i < 12; i++) g_fields[i] = NULL;
+    g_nfields = 0;
+    /* record + search tables */
+    g_listtbl = NULL; g_findtbl = NULL;
+    /* HotSync / discovery status lines */
+    hs_status = NULL; disc_status = NULL;
+    /* Graffiti + Kana trainers */
+    tr_guide = tr_prompt = tr_score = tr_feedback = tr_mode_lbl = NULL;
+    ka_kana = ka_prompt = ka_answer = ka_typed = ka_feedback = ka_score = NULL;
+    ka_strokes_lbl = ka_model = ka_modelbl = NULL;
+    /* News reader */
+    g_news_hdr = g_news_feed = g_news_title = g_news_body = g_news_hint = NULL;
+    /* Preferences brightness row */
+    g_pf_bright_btn = NULL;
+    /* games */
+    g_ms_cv = g_ms_status = g_ms_modelbl = g_ms_timelbl = NULL;
+    g_wd_cv = g_wd_status = NULL;
+    g_sd_cv = g_sd_status = g_sd_timelbl = NULL;
+    g_zp_cv = g_zp_status = g_zp_timelbl = NULL;
+}
 static uint32_t  g_zp_seq;                  /* varies the board each New */
 static PlayClock g_zp_clk;                  /* pausable solve timer (playclock.h) */
 static uint32_t  g_zp_best;                 /* fastest solve in seconds (0 = none yet) */
@@ -5012,8 +5055,7 @@ static void zp_newbtn_cb(lv_event_t *e){ (void)e;
 }
 static void show_zip(void){
     kill_kb(); cur_app=NULL; cur_uid=0;
-    g_zp_cv = g_zp_status = g_zp_timelbl = NULL;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Zip");
     update_cat_trigger();
 
@@ -5078,7 +5120,7 @@ static void games_pick_cb(lv_event_t *e){
 }
 static void show_games(void){
     kill_kb(); cur_app=NULL; cur_uid=0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Games");
     update_cat_trigger();
 
