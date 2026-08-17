@@ -50,6 +50,10 @@
 #define COL_LINE    lv_color_hex(0x000000)   /* black rules      */
 
 static lv_obj_t *content;      /* the swappable view area */
+/* Tear down the content area. ALWAYS use this instead of lv_obj_clean(content):
+ * it nulls every global that points into it, in the same breath that frees them.
+ * Defined at the bottom of the file, where all of those globals are in scope. */
+static void content_clear(void);
 static lv_obj_t *title_lbl;
 static lv_obj_t *clock_lbl;    /* live clock in the title bar (Palm) */
 
@@ -83,6 +87,41 @@ static lv_obj_t *panel(lv_obj_t *parent, int x, int y, int w, int h, lv_color_t 
     lv_obj_set_style_pad_all(p, 0, 0);
     lv_obj_clear_flag(p, LV_OBJ_FLAG_SCROLLABLE);
     return p;
+}
+
+/* ---- shared I1 canvas direct-write helpers --------------------------------
+ * Every canvas in this file is I1 (1 bpp indexed: palette 0 = background,
+ * 1 = ink). Painting them through lv_canvas_set_px is pathological on this
+ * board: set_px ends EVERY pixel with lv_obj_invalidate(), which walks the
+ * object tree and rescans the display's invalid-area list, and for indexed
+ * formats lv_canvas_fill_bg is itself just a set_px loop. Measured on device
+ * with the 168x106 Graffiti pad: 80 ms for one clear during ui_init and
+ * 1.006 SECONDS once the full UI was live. Because that runs inside
+ * lv_timer_handler -- the same loop that polls touch -- it also swallows the
+ * input that triggered the repaint.
+ *
+ * These reproduce LVGL's own I1 addressing (bit 7-(x&7) of the byte at
+ * goto_xy) and deliberately do NOT invalidate; each paint routine issues
+ * exactly one lv_obj_invalidate() when it is done. */
+static void i1_px(lv_draw_buf_t *db, int x, int y, int v){
+    if(!db || x < 0 || y < 0 ||
+       x >= (int)db->header.w || y >= (int)db->header.h) return;
+    uint8_t *p = lv_draw_buf_goto_xy(db, (uint32_t)x, (uint32_t)y);
+    if(!p) return;
+    uint8_t m = (uint8_t)(1u << (7 - (x & 7)));
+    if(v) *p |= m; else *p &= (uint8_t)~m;
+}
+static void i1_clear(lv_draw_buf_t *db){          /* fill with palette index 0 */
+    if(!db) return;
+    uint8_t *p0 = lv_draw_buf_goto_xy(db, 0, 0);
+    if(p0) lv_memset(p0, 0x00, (size_t)db->header.stride * db->header.h);
+}
+/* object-taking wrappers, for the paint code that only has the canvas widget */
+static void i1_obj_px(lv_obj_t *cv, int x, int y, int v){
+    if(cv) i1_px(lv_canvas_get_draw_buf(cv), x, y, v);
+}
+static void i1_obj_clear(lv_obj_t *cv){
+    if(cv) i1_clear(lv_canvas_get_draw_buf(cv));
 }
 
 static void home_cb(lv_event_t *e){ (void)e; show_launcher(); }
@@ -406,7 +445,7 @@ static void list_view(const AppDef *ad){
     kill_kb();
     cur_app = ad;
     cur_uid = 0;
-    lv_obj_clean(content);
+    content_clear();
     g_listtbl = NULL;
     lv_label_set_text(title_lbl, ad->name);
 
@@ -511,7 +550,7 @@ static void show_detail(uint32_t uid){
     static char buf[1280];   /* fits a full-length memo (mtext is 1200) without truncation */
     if(!data_detail(cur_app->app, uid, buf, sizeof buf)) snprintf(buf,sizeof buf,"(not found)");
 
-    lv_obj_clean(content);
+    content_clear();
     int ch = PDA_H - TITLE_H;
     int istodo = (cur_app->app == APP_TODO);
     /* leave room for the action row (and a second row for ToDo's Mark Done) */
@@ -669,7 +708,7 @@ static void show_edit(uint32_t uid){
     edit_uid = uid; cur_uid = uid; g_nfields = 0;
     int rc = uid ? data_record_category(cur_app->app, uid) : data_get_category();
     edit_cat = rc < 0 ? 0 : rc;   /* new records default to Unfiled / the current filter */
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, uid ? "Edit" : "New");
 
     /* C4: Palm form contract -- the action row lives across the BOTTOM of the
@@ -779,7 +818,7 @@ static void hs_sync_cb(lv_event_t *e){ (void)e; hotsync_start(); }
 static void show_hotsync(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "HotSync");
     update_cat_trigger();
 
@@ -859,7 +898,7 @@ static void show_datebook_day(int y,int m,int d){
     kill_kb();
     g_cal_y=y; g_cal_m=m; g_cal_d=d;
     cur_app=&APPDEFS[0]; cur_uid=0;     /* Date Book context (menu New/Categories) */
-    lv_obj_clean(content);
+    content_clear();
     char t[36]; snprintf(t,sizeof t,"%s %d/%d",CAL_WD[cal_wday(y,m,d)],m,d);
     lv_label_set_text(title_lbl,t);
     update_cat_trigger();
@@ -916,7 +955,7 @@ static void show_datebook_week(int y,int m,int d){
     /* snap (y,m,d) back to the Sunday that starts its week */
     g_wk_y=y; g_wk_m=m; g_wk_d=d;
     cal_add_days(&g_wk_y,&g_wk_m,&g_wk_d, -cal_wday(y,m,d));
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl,"Week");
     update_cat_trigger();
 
@@ -979,7 +1018,7 @@ static void show_datebook_month(int y,int m){
     kill_kb();
     g_cal_y=y; g_cal_m=m;
     cur_app=&APPDEFS[0]; cur_uid=0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl,"Date Book");
     update_cat_trigger();
 
@@ -1029,7 +1068,7 @@ static void show_app(const char *name){
     if(!strcmp(name, "News")){ show_news(); return; }
     if(!strcmp(name, "Games")){ show_games(); return; }
     cur_app = NULL;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, name);
     lv_obj_t *l = lv_label_create(content);
     lv_label_set_text_fmt(l, "%s\n\n(coming soon)", name);
@@ -1117,9 +1156,7 @@ static int tr_pick(void){
 }
 
 static void tr_plot(int x, int y){
-    if(x<0||y<0||x>=TR_GW||y>=TR_GH) return;
-    lv_color_t on = { .blue = 1 };
-    lv_canvas_set_px(tr_guide, x, y, on, LV_OPA_COVER);
+    i1_obj_px(tr_guide, x, y, 1);
 }
 static void tr_line(int x0,int y0,int x1,int y1){    /* Bresenham, 2px weight */
     int dx=abs(x1-x0), sx=x0<x1?1:-1, dy=-abs(y1-y0), sy=y0<y1?1:-1, err=dx+dy;
@@ -1131,9 +1168,8 @@ static void tr_line(int x0,int y0,int x1,int y1){    /* Bresenham, 2px weight */
         if(e2<=dx){ err+=dx; y0+=sy; }
     }
 }
-static void tr_draw_guide(int gi){
-    lv_color_t bg = { .blue = 0 };
-    lv_canvas_fill_bg(tr_guide, bg, LV_OPA_COVER);
+static void tr_draw_guide_body(int gi){
+    i1_obj_clear(tr_guide);
     if(gi<0) return;
     int np=0; const float *p = graffiti_glyph_template(TR_G[gi], &np);
     if(!p || np<1){                               /* no drawn stroke (e.g. '.'): a dot */
@@ -1149,6 +1185,12 @@ static void tr_draw_guide(int gi){
     for(int a=-2;a<=2;a++) for(int b=-2;b<=2;b++) if(a*a+b*b<=4) tr_plot(sx+a,sy+b);
     #undef GX
     #undef GY
+}
+/* one invalidate for the whole guide, however the body returned */
+static void tr_draw_guide(int gi){
+    if(!tr_guide) return;
+    tr_draw_guide_body(gi);
+    lv_obj_invalidate(tr_guide);
 }
 
 /* how the current target is entered, so the prompt can nudge the user to the right
@@ -1254,7 +1296,7 @@ static void graffiti_to_kana_cb(lv_event_t *e){ (void)e; show_kana(); }
 static void show_trainer(void){
     kill_kb();
     cur_app=NULL; cur_uid=0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Graffiti");
     update_cat_trigger();
     tr_load();
@@ -1413,9 +1455,7 @@ static void ka_set_target(int t){
 
 /* ---- WRITE mode: draw the numbered stroke model on the I1 canvas ---- */
 static void ka_mplot(int x,int y){
-    if(x<0||y<0||x>=KW_GW||y>=KW_GH) return;
-    lv_color_t on = { .blue = 1 };
-    lv_canvas_set_px(ka_model, x, y, on, LV_OPA_COVER);
+    i1_obj_px(ka_model, x, y, 1);
 }
 /* style: 0 = dotted guide (a stroke not yet drawn), 1 = solid "locked in" (a stroke
  * the user has correctly drawn -- stays visible until the kana is finished or a
@@ -1443,9 +1483,8 @@ static void ka_mdigit(int cx,int cy,int d){
     for(int r=0;r<5;r++) for(int c=0;c<3;c++)
         if(KW_DIG[d][r] & (4>>c)) ka_mplot(cx+c, cy+r);
 }
-static void ka_draw_model(void){
-    lv_color_t bg = { .blue = 0 };
-    lv_canvas_fill_bg(ka_model, bg, LV_OPA_COVER);
+static void ka_draw_model_body(void){
+    i1_obj_clear(ka_model);
     if(ka_target<0) return;
     const KanaStrokes *ks = &KANA_STROKES[ka_target];
     const int pad=10, span=KW_GW-2*pad;
@@ -1464,6 +1503,12 @@ static void ka_draw_model(void){
             for(int a=-1;a<=1;a++) for(int b=-1;b<=1;b++) ka_mplot(sx+a, sy+b);
     }
     #undef MX
+}
+/* one invalidate for the whole model, however the body returned */
+static void ka_draw_model(void){
+    if(!ka_model) return;
+    ka_draw_model_body();
+    lv_obj_invalidate(ka_model);
 }
 
 static void ka_render(void){
@@ -1593,9 +1638,8 @@ static void kana_to_graffiti_cb(lv_event_t *e){ (void)e; show_trainer(); }
 /* build the Kana screen for `mode` (0 Sound / 1 Write): clears content, lays out
  * the widgets that mode needs, wires the right Graffiti hook, and renders. */
 static void kana_build(int mode){
-    lv_obj_clean(content);
+    content_clear();
     ka_wmode = mode;
-    ka_kana=ka_prompt=ka_answer=ka_typed=ka_feedback=ka_score=ka_strokes_lbl=ka_model=ka_modelbl=NULL;
 
     /* mode toggle (top-right): label = the mode you'll switch TO */
     lv_obj_t *mb = lv_button_create(content);
@@ -1766,7 +1810,7 @@ static void show_news(void){
     cur_app = NULL; cur_uid = 0;
     news_seed_if_empty();
     g_news_i = 0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "News");
     update_cat_trigger();
 
@@ -1816,7 +1860,7 @@ static void show_launcher(void){
     kill_kb();
     cur_app = NULL;
     cur_uid = 0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Applications");
     update_cat_trigger();   /* hides it (no data app) */
 
@@ -2016,7 +2060,7 @@ static void prefkb_cb(lv_event_t *e){
 static void show_pref_edit(int i){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0; pf_edit_idx = i;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, PF_LABELS[i]);
     update_cat_trigger();
 
@@ -2074,7 +2118,7 @@ static void feeds_tbl_click_cb(lv_event_t *e){
 static void show_feeds(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "News Feeds");
     update_cat_trigger();
 
@@ -2132,7 +2176,7 @@ static void fe_delete_cb(lv_event_t *e){ (void)e;
 static void show_feed_edit(int idx){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0; fe_edit_idx = idx;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, idx<0 ? "Add Feed" : "Edit Feed");
     update_cat_trigger();
 
@@ -2223,7 +2267,7 @@ static void show_zone_picker(int target){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
     g_zone_target = target;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, target==ZTGT_TZ ? "Time Zone" : "World Clock");
     update_cat_trigger();
 
@@ -2271,7 +2315,7 @@ static void ds_fmt_cb(lv_event_t *e){ (void)e;
 static void show_dash_settings(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Lock Screen");
     update_cat_trigger();
 
@@ -2332,7 +2376,7 @@ static lv_obj_t *pf_add(lv_obj_t *list, const char *text, lv_event_cb_t cb, int 
 static void show_prefs(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Preferences");
     update_cat_trigger();   /* hides the category picker (no data app) */
 
@@ -2449,8 +2493,7 @@ static void disc_back_cb(lv_event_t *e){ (void)e; show_prefs(); }
 static void disc_show_results(void){
     disc_built = 1;
     if(disc_timer){ lv_timer_delete(disc_timer); disc_timer=NULL; }
-    lv_obj_clean(content);
-    disc_status = NULL;
+    content_clear();
     int n = hotsync_discover_count();
 
     lv_obj_t *back = lv_button_create(content);
@@ -2505,7 +2548,7 @@ static void disc_tick(lv_timer_t *t){ (void)t;
 static void show_discover(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0; disc_built = 0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Discover");
     update_cat_trigger();
 
@@ -2761,7 +2804,7 @@ static void findq_ta_cb(lv_event_t *e){
 static void show_find(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_findtbl = NULL; g_findq[0] = 0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Find");
     update_cat_trigger();
 
@@ -2993,7 +3036,7 @@ static void cat_name_save_cb(lv_event_t *e){ (void)e;
 static void show_cat_name_edit(int slot){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0; g_ce_slot = slot;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Category");
     update_cat_trigger();
 
@@ -3042,7 +3085,7 @@ static void ce_new_cb(lv_event_t *e){ (void)e;
 static void show_cat_edit(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Edit Categories");
     update_cat_trigger();
 
@@ -3402,10 +3445,20 @@ static uint8_t    ink_buf[LV_CANVAS_BUF_SIZE(INK_W, INK_H, 1, 1) + 16]; /* +pale
 static int        ink_lx = -1, ink_ly = -1;   /* last canvas-local point (-1 = pen up) */
 static lv_timer_t *ink_fade;
 
+/* Ink is written straight to the draw buffer via the shared I1 helpers -- see
+ * i1_px() for why lv_canvas_set_px is unusable here. This pad is where the cost
+ * was actually measured: clearing it cost 80 ms during ui_init and 1.006 SECONDS
+ * once the full UI was live, and because that stall sits inside lv_timer_handler
+ * (the same loop that polls touch) a pen-down ate the whole stroke. Every real
+ * stroke on hardware sampled exactly 1 point -- below the 4-point floor in
+ * graffiti_recognize() -- so nothing drew and nothing was recognized. */
+static lv_draw_buf_t *ink_db;                 /* cached draw buf for the ink canvas */
+
+static void inkpx(int x, int y){ i1_px(ink_db, x, y, 1); }
 static void ink_clear(void){
     if(!ink_canvas) return;
-    lv_color_t bg = { .blue = 0 };       /* indexed canvas: palette index in .blue */
-    lv_canvas_fill_bg(ink_canvas, bg, LV_OPA_COVER);
+    i1_clear(ink_db);                                  /* palette index 0 = COL_GRAF */
+    lv_obj_invalidate(ink_canvas);                     /* one, not 17.8k */
 }
 static void ink_fade_cb(lv_timer_t *t){ (void)t; ink_clear(); ink_fade = NULL; }
 static void ink_fade_start(void){
@@ -3419,20 +3472,30 @@ static void ink_point(int sx, int sy){
     if(x < 0 || y < 0 || x >= INK_W || y >= INK_H){ ink_lx = -1; return; }
     if(ink_lx < 0){ ink_lx = x; ink_ly = y; }
     int x0 = ink_lx, y0 = ink_ly;
+    /* bounding box of this segment, invalidated once after the run (+1 for the
+     * 2px pen). Only the touched strip is redrawn, so the SPI blit stays small. */
+    int bx1 = x0 < x ? x0 : x, bx2 = x0 > x ? x0 : x;
+    int by1 = y0 < y ? y0 : y, by2 = y0 > y ? y0 : y;
     int dx = x > x0 ? x - x0 : x0 - x, sx_ = x0 < x ? 1 : -1;
     int dy = y > y0 ? y0 - y : y - y0, sy_ = y0 < y ? 1 : -1;   /* dy <= 0 */
     int err = dx + dy;
-    lv_color_t ink = { .blue = 1 };
     for(;;){
-        lv_canvas_set_px(ink_canvas, x0, y0, ink, LV_OPA_COVER);
-        if(x0 + 1 < INK_W) lv_canvas_set_px(ink_canvas, x0 + 1, y0, ink, LV_OPA_COVER);
-        if(y0 + 1 < INK_H) lv_canvas_set_px(ink_canvas, x0, y0 + 1, ink, LV_OPA_COVER);
+        inkpx(x0, y0);
+        inkpx(x0 + 1, y0);
+        inkpx(x0, y0 + 1);
         if(x0 == x && y0 == y) break;
         int e2 = 2 * err;
         if(e2 >= dy){ err += dy; x0 += sx_; }
         if(e2 <= dx){ err += dx; y0 += sy_; }
     }
     ink_lx = x; ink_ly = y;
+
+    lv_area_t a;
+    lv_obj_get_coords(ink_canvas, &a);           /* absolute; invalidate_area clips */
+    int ax = a.x1, ay = a.y1;
+    a.x1 = ax + bx1;     a.y1 = ay + by1;
+    a.x2 = ax + bx2 + 1; a.y2 = ay + by2 + 1;
+    lv_obj_invalidate_area(ink_canvas, &a);
 }
 
 /* echo the recognized character in the strip for a moment (Palm-style feedback) */
@@ -3612,31 +3675,17 @@ static const char *aqi_word(int aqi){
     return "Hazardous";
 }
 
-/* The dashboard canvas is written directly rather than through
- * lv_canvas_set_px, which ends every single pixel with lv_obj_invalidate() --
- * and each of those walks the whole object tree. At 240x320 a full repaint cost
- * ~77k tree walks: seconds of solid CPU inside one lv_timer_handler pass, which
- * starved IDLE0 into a task-watchdog trigger and, because touch is serviced from
- * that same loop, swallowed the unlock swipe and left the screen half drawn.
- * These helpers reproduce LVGL's own I1 addressing (lv_canvas_set_px, indexed
- * branch: bit 7-(x&7) of the byte at goto_xy, palette index 1 = COL_LINE) and
- * dash_paint issues exactly one invalidate at the end. */
+/* The dashboard is written straight to the draw buffer via the shared I1 helpers
+ * -- see i1_px() for why lv_canvas_set_px is unusable here. At 240x320 a full
+ * repaint through set_px cost ~77k tree walks: seconds of solid CPU inside one
+ * lv_timer_handler pass, which starved IDLE0 into a task-watchdog trigger and,
+ * because touch is serviced from that same loop, swallowed the unlock swipe and
+ * left the screen half drawn. dash_paint issues one invalidate at the end. */
 static lv_draw_buf_t *g_dash_db;      /* cached draw buf for the dash canvas */
 
-static void dpx(int x,int y){
-    if(x<0||y<0||x>=DASH_CW||y>=DASH_CH) return;
-    if(!g_dash_db) return;
-    uint8_t *p = lv_draw_buf_goto_xy(g_dash_db, (uint32_t)x, (uint32_t)y);
-    if(!p) return;
-    *p |= (uint8_t)(1u << (7 - (x & 7)));
-}
-/* clear to palette index 0 (COL_BODY) -- the direct-write equivalent of
- * lv_canvas_fill_bg, which for indexed formats is just a set_px loop. */
-static void dash_clear(void){
-    if(!g_dash_db) return;
-    uint8_t *p0 = lv_draw_buf_goto_xy(g_dash_db, 0, 0);
-    if(!p0) return;
-    lv_memset(p0, 0x00, (size_t)g_dash_db->header.stride * g_dash_db->header.h);
+static void dpx(int x,int y){ i1_px(g_dash_db, x, y, 1); }   /* index 1 = COL_LINE */
+static void dash_clear(void){        /* clear to palette index 0 (COL_BODY) */
+    i1_clear(g_dash_db);
 }
 static void dfill(int x,int y,int w,int h){
     for(int j=0;j<h;j++) for(int i=0;i<w;i++) dpx(x+i,y+j);
@@ -3875,7 +3924,7 @@ void ui_show_lock(void){
      * screen anyway, and this keeps the 24 KB LVGL pool holding only the chrome + the
      * dashboard at once (never chrome + an app + the dashboard). The content area is
      * left empty, so unlocking rebuilds the launcher (see lock_release_cb). */
-    lv_obj_clean(content);
+    content_clear();
     kill_kb();
     time_t now=0; time(&now);
     dash_weather_seed_sample(WX_PATH);
@@ -4000,8 +4049,9 @@ static void dash_tick(lv_timer_t *t){ (void)t; if(g_lock) dash_paint(); }
  * on a resistive panel). Pool-safe: one canvas + a few labels/buttons. */
 /* ---- ONE 1-bpp canvas buffer, shared by every game ----------------------------
  * The four games are mutually exclusive screens: each show_*() calls kill_kb() and
- * lv_obj_clean(content), which deletes the previous canvas before the next one is
- * created, so two game canvases can never be live at once. Private buffers cost
+ * content_clear(), which deletes the previous canvas -- and nulls the pointer to
+ * it -- before the next one is created, so two game canvases can never be live at
+ * once and no stale canvas pointer is left behind. Private buffers cost
  * ~18 KB of BSS on a board with 320 KB of DRAM and no PSRAM; one buffer sized to
  * the largest board costs 5 KB. LVGL reads the buffer only while drawing, and a
  * screen swap always happens between draws (from an event callback, never mid-
@@ -4033,9 +4083,7 @@ static void ms_fmt_mmss(uint32_t sec, char *out, int cap){
 }
 
 static void mpx(int x,int y){
-    if(!g_ms_cv || x<0 || y<0 || x>=MSCW || y>=MSCH) return;
-    lv_color_t on = { .blue = 1 };
-    lv_canvas_set_px(g_ms_cv, x, y, on, LV_OPA_COVER);
+    i1_obj_px(g_ms_cv, x, y, 1);
 }
 static void mfill(int x,int y,int w,int h){ for(int j=0;j<h;j++) for(int i=0;i<w;i++) mpx(x+i,y+j); }
 static void mdigit(int x,int y,int d){
@@ -4046,10 +4094,8 @@ static void mdigit(int x,int y,int d){
 static void mdisc(int cx,int cy,int r){
     for(int dy=-r;dy<=r;dy++) for(int dx=-r;dx<=r;dx++) if(dx*dx+dy*dy<=r*r) mpx(cx+dx,cy+dy);
 }
-static void ms_render(void){
-    if(!g_ms_cv) return;
-    lv_color_t bg = { .blue = 0 };
-    lv_canvas_fill_bg(g_ms_cv, bg, LV_OPA_COVER);
+static void ms_render_body(void){
+    i1_obj_clear(g_ms_cv);
     for(int r=0;r<=MSH;r++) for(int x=0;x<MSCW;x++) mpx(x, r*MSC);   /* grid */
     for(int c=0;c<=MSW;c++) for(int y=0;y<MSCH;y++) mpx(c*MSC, y);
     for(int r=0;r<MSH;r++) for(int c=0;c<MSW;c++){
@@ -4075,6 +4121,11 @@ static void ms_render(void){
                        lv_label_set_text_fmt(g_ms_timelbl, "Time %s   Best %s", tb, bb); }
         else           lv_label_set_text_fmt(g_ms_timelbl, "Time %s   Best --", tb);
     }
+}
+static void ms_render(void){
+    if(!g_ms_cv) return;
+    ms_render_body();
+    lv_obj_invalidate(g_ms_cv);          /* one, not MSCW*MSCH */
 }
 /* 1 Hz tick (created once in ui_init): keep the on-screen clock live while playing. */
 static void ms_tick(lv_timer_t *t){ (void)t;
@@ -4157,8 +4208,7 @@ static void ms_newbtn_cb(lv_event_t *e){ (void)e;
 }
 static void show_minesweeper(void){
     kill_kb(); cur_app=NULL; cur_uid=0;
-    g_ms_cv=g_ms_status=g_ms_modelbl=g_ms_timelbl=NULL;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Mines");
     update_cat_trigger();
 
@@ -4217,11 +4267,11 @@ static void canvas_glyph_at(lv_obj_t *cv, const lv_font_t *font, uint32_t uni, i
     const lv_font_fmt_txt_dsc_t *fdsc = (const lv_font_fmt_txt_dsc_t *)g.resolved_font->dsc;
     const lv_font_fmt_txt_glyph_dsc_t *gd = &fdsc->glyph_dsc[g.gid.index];
     const uint8_t *bits = &fdsc->glyph_bitmap[gd->bitmap_index];
-    lv_color_t col = { .blue = (uint8_t)(v ? 1 : 0) };
+    lv_draw_buf_t *db = cv ? lv_canvas_get_draw_buf(cv) : NULL;   /* fetched once */
     int bw = g.box_w, bh = g.box_h, i = 0;
     for(int gy=0; gy<bh; gy++) for(int gx=0; gx<bw; gx++, i++)
         if(bits[i>>3] & (0x80 >> (i&7)))
-            lv_canvas_set_px(cv, x+gx, y+gy, col, LV_OPA_COVER);
+            i1_px(db, x+gx, y+gy, v ? 1 : 0);
 }
 /* glyph centred on point (cx,cy) -- for a single char in a cell/key. */
 static void canvas_glyph_c(lv_obj_t *cv, const lv_font_t *font, uint32_t uni, int cx, int cy, int v){
@@ -4326,9 +4376,7 @@ static int wd_load(void){
 }
 
 static void wdpx(int x,int y,int v){
-    if(!g_wd_cv || x<0 || y<0 || x>=WDCW || y>=WDCH) return;
-    lv_color_t col = { .blue = (uint8_t)(v ? 1 : 0) };       /* I1: blue&1 = palette idx */
-    lv_canvas_set_px(g_wd_cv, x, y, col, LV_OPA_COVER);
+    i1_obj_px(g_wd_cv, x, y, v);
 }
 static void wd_glyph(int x,int y,char ch,int s,int v){       /* ch at (x,y), scale s; 5x6 */
     if(ch<'A' || ch>'Z') return;
@@ -4402,10 +4450,8 @@ static void wd_legend(void){
         for(const char *p=it[k].cap; *p; p++){ wd_glyph(tx, y+3, *p, 1, 1); tx += 6; }
     }
 }
-static void wd_render(void){
-    if(!g_wd_cv) return;
-    lv_color_t bg = { .blue = 0 };
-    lv_canvas_fill_bg(g_wd_cv, bg, LV_OPA_COVER);
+static void wd_render_body(void){
+    i1_obj_clear(g_wd_cv);
     for(int r=0;r<WD_ROWS;r++) for(int c=0;c<WD_LEN;c++){
         int x = WD_GX0 + c*WD_CW, y = WD_GY0 + r*WD_CH;
         char ch = 0; int state = -1;
@@ -4430,6 +4476,11 @@ static void wd_render(void){
         else if(g_wd.state == WD_LOST) lv_label_set_text_fmt(g_wd_status, "Answer: %s", g_wd.answer);
         else                           lv_label_set_text_fmt(g_wd_status, "Guess %d/%d%s", g_wd.nrows+1, WD_ROWS, st);
     }
+}
+static void wd_render(void){
+    if(!g_wd_cv) return;
+    wd_render_body();
+    lv_obj_invalidate(g_wd_cv);          /* one, not WDCW*WDCH */
 }
 /* submit the current row and fold the result into the win streak: a solve bumps
  * it, a loss resets it. Only wd_enter can end a game, so this is the one hook. */
@@ -4481,8 +4532,7 @@ static void wd_newbtn_cb(lv_event_t *e){ (void)e;
 }
 static void show_wordie(void){
     kill_kb(); cur_app=NULL; cur_uid=0;
-    g_wd_cv = g_wd_status = NULL;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Wordie");
     update_cat_trigger();
 
@@ -4550,9 +4600,7 @@ static void sd_time_text(void){
 }
 
 static void sdpx(int x,int y,int v){
-    if(!g_sd_cv || x<0 || y<0 || x>=SDCW || y>=SDCH) return;
-    lv_color_t col = { .blue = (uint8_t)(v ? 1 : 0) };
-    lv_canvas_set_px(g_sd_cv, x, y, col, LV_OPA_COVER);
+    i1_obj_px(g_sd_cv, x, y, v);
 }
 static void sd_hline(int x0,int x1,int y){ for(int x=x0;x<=x1;x++) sdpx(x,y,1); }
 static void sd_vline(int x,int y0,int y1){ for(int y=y0;y<=y1;y++) sdpx(x,y,1); }
@@ -4571,10 +4619,8 @@ static void sd_ex(int x,int y,int w,int h){           /* an "X" (both diagonals)
         sdpx(x + (w-1) - i*(w-1)/(steps-1), y + i*(h-1)/(steps-1), 1);
     }
 }
-static void sd_render(void){
-    if(!g_sd_cv) return;
-    lv_color_t bg = { .blue = 0 };
-    lv_canvas_fill_bg(g_sd_cv, bg, LV_OPA_COVER);
+static void sd_render_body(void){
+    i1_obj_clear(g_sd_cv);
 
     /* grid: thin cell lines, doubled on the 3x3 box boundaries */
     for(int i=0;i<=9;i++){
@@ -4607,6 +4653,11 @@ static void sd_render(void){
         else lv_label_set_text_fmt(g_sd_status, "%d left", sd_remaining(&g_sd));
     }
     sd_time_text();
+}
+static void sd_render(void){
+    if(!g_sd_cv) return;
+    sd_render_body();
+    lv_obj_invalidate(g_sd_cv);          /* one, not SDCW*SDCH */
 }
 /* 1 Hz tick (created once in ui_init): keep the solve clock live while playing. */
 static void sd_tick(lv_timer_t *t){ (void)t;
@@ -4702,8 +4753,7 @@ static void sd_newbtn_cb(lv_event_t *e){ (void)e;
 }
 static void show_sudoku(void){
     kill_kb(); cur_app=NULL; cur_uid=0;
-    g_sd_cv = g_sd_status = g_sd_timelbl = NULL;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Sudoku");
     update_cat_trigger();
 
@@ -4775,6 +4825,49 @@ static void show_sudoku(void){
 
 static ZpGame    g_zp;
 static lv_obj_t *g_zp_cv, *g_zp_status, *g_zp_timelbl;
+
+/* ---- the one place the content area is torn down -------------------------
+ * lv_obj_clean(content) frees every widget in the view, but the file keeps
+ * module-global handles to a lot of them (canvases, status labels, form
+ * fields). Those were only reset on RE-ENTRY to the screen that owned them, so
+ * from the moment you navigated away until you came back, each one pointed at
+ * freed memory -- a use-after-free waiting for any timer tick or callback that
+ * still reached for it. The 1 Hz game ticks are guarded by their *_active
+ * flags, which is why this never fired in practice, but the guard is a
+ * coincidence of the current call graph rather than a property of the code.
+ *
+ * Freeing and nulling in one function is what makes it a property: a new
+ * screen cannot forget to reset the previous screen's pointers, because no
+ * screen resets them any more -- this does. Only pointers that actually live
+ * under `content` belong here. Overlays with their own lifetime (g_calc on
+ * lv_layer_top, g_lock/g_dash_cv, the Graffiti strip, the title bar) must NOT
+ * be nulled here: their objects survive this call. */
+static void content_clear(void){
+    if(!content) return;
+    lv_obj_clean(content);
+
+    /* edit / preferences forms */
+    g_form = NULL; active_ta = NULL; edit_cat_lbl = NULL; g_due_lbl = NULL;
+    for(int i = 0; i < 12; i++) g_fields[i] = NULL;
+    g_nfields = 0;
+    /* record + search tables */
+    g_listtbl = NULL; g_findtbl = NULL;
+    /* HotSync / discovery status lines */
+    hs_status = NULL; disc_status = NULL;
+    /* Graffiti + Kana trainers */
+    tr_guide = tr_prompt = tr_score = tr_feedback = tr_mode_lbl = NULL;
+    ka_kana = ka_prompt = ka_answer = ka_typed = ka_feedback = ka_score = NULL;
+    ka_strokes_lbl = ka_model = ka_modelbl = NULL;
+    /* News reader */
+    g_news_hdr = g_news_feed = g_news_title = g_news_body = g_news_hint = NULL;
+    /* Preferences brightness row */
+    g_pf_bright_btn = NULL;
+    /* games */
+    g_ms_cv = g_ms_status = g_ms_modelbl = g_ms_timelbl = NULL;
+    g_wd_cv = g_wd_status = NULL;
+    g_sd_cv = g_sd_status = g_sd_timelbl = NULL;
+    g_zp_cv = g_zp_status = g_zp_timelbl = NULL;
+}
 static uint32_t  g_zp_seq;                  /* varies the board each New */
 static PlayClock g_zp_clk;                  /* pausable solve timer (playclock.h) */
 static uint32_t  g_zp_best;                 /* fastest solve in seconds (0 = none yet) */
@@ -4790,9 +4883,7 @@ static void zp_time_text(void){
 }
 
 static void zppx(int x,int y,int v){
-    if(!g_zp_cv || x<0 || y<0 || x>=ZPCW || y>=ZPCH) return;
-    lv_color_t col = { .blue = (uint8_t)(v ? 1 : 0) };
-    lv_canvas_set_px(g_zp_cv, x, y, col, LV_OPA_COVER);
+    i1_obj_px(g_zp_cv, x, y, v);
 }
 static void zp_fill(int x,int y,int w,int h,int v){
     for(int j=0;j<h;j++) for(int i=0;i<w;i++) zppx(x+i,y+j,v);
@@ -4832,10 +4923,8 @@ static void zp_button(int x,int y,int w,int h,const char *label){
     canvas_text(g_zp_cv, &lv_font_palm, label,
                 x + (w - canvas_text_w(&lv_font_palm, label))/2, y + (h-14)/2, 1);
 }
-static void zp_render(void){
-    if(!g_zp_cv) return;
-    lv_color_t bg = { .blue = 0 };
-    lv_canvas_fill_bg(g_zp_cv, bg, LV_OPA_COVER);
+static void zp_render_body(void){
+    i1_obj_clear(g_zp_cv);
 
     /* dotted interior grid + a solid outer frame: the cells recede so the path
      * band is what the eye follows (the same trick as Mines' stipple). */
@@ -4880,6 +4969,11 @@ static void zp_render(void){
         else lv_label_set_text_fmt(g_zp_status, "%d left", zp_remaining(&g_zp));
     }
     zp_time_text();
+}
+static void zp_render(void){
+    if(!g_zp_cv) return;
+    zp_render_body();
+    lv_obj_invalidate(g_zp_cv);          /* one, not ZPCW*ZPCH */
 }
 /* 1 Hz tick (created once in ui_init): keep the solve clock live while playing. */
 static void zp_tick(lv_timer_t *t){ (void)t;
@@ -4961,8 +5055,7 @@ static void zp_newbtn_cb(lv_event_t *e){ (void)e;
 }
 static void show_zip(void){
     kill_kb(); cur_app=NULL; cur_uid=0;
-    g_zp_cv = g_zp_status = g_zp_timelbl = NULL;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Zip");
     update_cat_trigger();
 
@@ -5027,7 +5120,7 @@ static void games_pick_cb(lv_event_t *e){
 }
 static void show_games(void){
     kill_kb(); cur_app=NULL; cur_uid=0;
-    lv_obj_clean(content);
+    content_clear();
     lv_label_set_text(title_lbl, "Games");
     update_cat_trigger();
 
@@ -5130,6 +5223,7 @@ void ui_init(void){
      * stay the clickable surfaces and feed both the recognizer and the ink. */
     ink_canvas = lv_canvas_create(graf);
     lv_canvas_set_buffer(ink_canvas, ink_buf, INK_W, INK_H, LV_COLOR_FORMAT_I1);
+    ink_db = lv_canvas_get_draw_buf(ink_canvas);   /* inkpx/ink_clear write this directly */
     lv_canvas_set_palette(ink_canvas, 0, lv_color_to_32(COL_GRAF, 0xFF));
     lv_canvas_set_palette(ink_canvas, 1, lv_color_to_32(COL_LINE, 0xFF));
     lv_obj_set_pos(ink_canvas, INK_X0, INK_Y0);
