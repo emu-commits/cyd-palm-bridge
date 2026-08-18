@@ -33,6 +33,7 @@
 #include "sudoku.h"       /* Games: Sudoku board logic */
 #include "zip.h"          /* Games: Zip path-puzzle logic */
 #include "playclock.h"    /* Games: pausable play timer (shared by Mines/Sudoku/Zip) */
+#include "coach.h"        /* Coach: ritual focus timer (pure logic + rule engine) */
 #include "lvgl.h"
 #include <string.h>
 #include <strings.h>      /* strncasecmp for the Address Look Up filter */
@@ -59,11 +60,12 @@ static lv_obj_t *clock_lbl;    /* live clock in the title bar (Palm) */
 
 /* Kana is NOT a top-level app -- it lives inside Graffiti (a handwriting sibling of
  * the Latin drill), reached by the "あ" button there. Keeps the launcher focused. */
-static const char *APPS[] = { "Date Book", "Address", "To Do List", "Memo Pad", "HotSync", "Graffiti", "News", "Games" };
+static const char *APPS[] = { "Date Book", "Address", "To Do List", "Memo Pad", "HotSync", "Graffiti", "News", "Games", "Coach" };
 /* authentic Palm app launcher icons (from PumpkinOS) */
 static const lv_image_dsc_t *APP_ICONS[] = { &icon_datebook, &icon_address,
                                              &icon_todo, &icon_memo, &icon_hotsync,
-                                             &icon_graffiti, &icon_news, &icon_games };
+                                             &icon_graffiti, &icon_news, &icon_games,
+                                             &icon_coach };
 #define NAPPS ((int)(sizeof(APPS)/sizeof(APPS[0])))
 
 static void show_launcher(void);
@@ -71,6 +73,11 @@ static void show_trainer(void);
 static void show_kana(void);
 static void show_news(void);
 static void show_games(void);
+static void show_coach(void);
+static void co_save(void);        /* persist Coach state (defined with the app) */
+static void show_coach_marks(void);
+static void show_coach_report(void);
+static void co_show_sigil(void);
 static void show_minesweeper(void);
 static void show_wordie(void);
 static void show_sudoku(void);
@@ -233,6 +240,23 @@ static int  g_kana_open;         /* the Kana trainer is the live screen (menu Re
 static int  g_ms_active;         /* the Mines screen is live (1 Hz timer tick guard) */
 static int  g_sd_active;         /* the Sudoku screen is live (1 Hz timer tick guard) */
 static int  g_zp_active;         /* the Zip screen is live (1 Hz timer tick guard)    */
+/* ---- Coach (see the implementation block above ui_init) -------------------
+ * These live up here, with the other cross-screen state, because content_clear()
+ * is defined further down and has to be able to null every one of them. */
+static CoachState g_co;              /* durable state; mirrors /sdcard/coach.sav */
+static CoachSigil g_co_sig;          /* the live session's mark                  */
+static int  g_co_loaded;             /* coach.sav has been read this boot        */
+static int  g_co_open;               /* a Coach screen is the live view (menu)   */
+static int  g_co_step;               /* ritual step 0..2                         */
+static int  g_co_pick_en, g_co_pick_dom, g_co_pick_int;
+static int  g_co_res, g_co_blk;      /* the reflect answers                      */
+static int  g_co_last_fill;          /* last painted fill %, so we repaint 1/min */
+static int  g_co_pulse;              /* remaining end-of-session backlight flashes */
+static uint32_t g_co_last_start;     /* the just-finished session, for the exports */
+static uint16_t g_co_last_min;
+static uint32_t g_co_hold_start;     /* give-up press-and-hold start (lv ticks)  */
+static lv_obj_t *g_co_cv, *g_co_time, *g_co_sub, *g_co_status, *g_co_hold_lbl;
+static lv_obj_t *g_co_seal;          /* the sealed takeover root, or NULL        */
 /* Bank + persist the open game's play clock. Every screen teardown goes through
  * kill_kb(), which makes it the one place that reliably means "you left the game"
  * -- so the timers stop there and restart in the matching show_*(). */
@@ -242,6 +266,7 @@ static void kill_kb(void){
     g_form=NULL; active_ta=NULL; edit_cat_lbl=NULL; g_listtbl=NULL; g_findtbl=NULL;
     graf_char_hook=NULL; graf_capture_hook=NULL;
     g_trainer_open=0; g_kana_open=0; g_ms_active=0; g_sd_active=0; g_zp_active=0;
+    g_co_open=0;
     free_rowuids();
     free_finds();
     kill_hs();
@@ -1067,6 +1092,7 @@ static void show_app(const char *name){
     if(!strcmp(name, "Graffiti")){ show_trainer(); return; }
     if(!strcmp(name, "News")){ show_news(); return; }
     if(!strcmp(name, "Games")){ show_games(); return; }
+    if(!strcmp(name, "Coach")){ show_coach(); return; }
     cur_app = NULL;
     content_clear();
     lv_label_set_text(title_lbl, name);
@@ -2576,6 +2602,34 @@ static void act_delete(lv_event_t *e){ (void)e;
 static void act_categories(lv_event_t *e){ (void)e; menu_close(); cat_trigger_cb(NULL); }
 static void act_prefs(lv_event_t *e){ (void)e; menu_close(); show_prefs(); }
 static void act_tr_reset(lv_event_t *e){ (void)e; menu_close(); tr_reset_progress(); show_trainer(); }
+/* Coach: the session length cycles through the four lengths people actually use,
+ * so setting it costs one tap and needs no picker screen. */
+static void act_co_len(lv_event_t *e){ (void)e; menu_close();
+    static const uint16_t LENS[] = { 15, 25, 45, 50 };
+    int i = 0;
+    for(int k = 0; k < 4; k++) if(g_co.pref_min == LENS[k]) i = k + 1;
+    g_co.pref_min = LENS[i % 4];
+    co_save();
+    toast_show("Session length set");
+    show_coach();
+}
+static void act_co_goal(lv_event_t *e){ (void)e; menu_close();
+    g_co.day_goal = (uint16_t)(g_co.day_goal >= 10 ? 2 : g_co.day_goal + 2);
+    co_save();
+    show_coach();
+}
+static void act_co_marks(lv_event_t *e){ (void)e; menu_close(); show_coach_marks(); }
+static void act_co_week(lv_event_t *e){ (void)e; menu_close(); show_coach_report(); }
+static void act_co_reset(lv_event_t *e){ (void)e; menu_close();
+    /* the counters go, the marks stay -- coach.log/coach.sig are the record of
+     * what actually happened and are never rewritten from the UI. */
+    uint16_t keep_len = g_co.pref_min, keep_goal = g_co.day_goal;
+    coach_state_init(&g_co);
+    g_co.pref_min = keep_len; g_co.day_goal = keep_goal;
+    co_save();
+    toast_show("Counters reset");
+    show_coach();
+}
 static void act_ka_reset(lv_event_t *e){ (void)e; menu_close(); ka_reset_progress(); show_kana(); }
 static void act_toggle_done(lv_event_t *e){ (void)e; menu_close();
     g_todo_show_done = !g_todo_show_done; if(cur_app) app_reopen(cur_app); }
@@ -2723,6 +2777,17 @@ static void menu_open(void){
         menu_item(panel, "Reset progress", act_tr_reset);   /* Graffiti trainer only */
     if(g_kana_open)
         menu_item(panel, "Reset progress", act_ka_reset);   /* Kana trainer only */
+    if(g_co_open){                                          /* Coach only */
+        menu_header(panel, "Coach");
+        static char lenbuf[24], goalbuf[24];
+        snprintf(lenbuf,  sizeof lenbuf,  "Length: %d min", (int)g_co.pref_min);
+        snprintf(goalbuf, sizeof goalbuf, "Day goal: %d",   (int)g_co.day_goal);
+        menu_item(panel, lenbuf,  act_co_len);
+        menu_item(panel, goalbuf, act_co_goal);
+        menu_item(panel, "Marks",       act_co_marks);
+        menu_item(panel, "This week",   act_co_week);
+        menu_item(panel, "Reset counters", act_co_reset);
+    }
     if(data_demo_present())
         menu_item(panel, "Remove demo data", act_remove_demo);
 #ifdef UI_DEVTOOLS
@@ -3919,6 +3984,10 @@ static void dash_paint(void){
 }
 
 void ui_show_lock(void){
+    /* SEALED MODE: while a Coach session runs, Coach owns the screen -- the port
+     * layer re-raises the lock on every wake, and a user who taps the device
+     * mid-session must see their mark and the countdown, not the dashboard. */
+    if(g_co_seal) return;
     if(g_lock){ dash_paint(); return; }             /* already showing -> just refresh */
     /* Free whatever app view is in the content area first. The lock covers the whole
      * screen anyway, and this keeps the 24 KB LVGL pool holding only the chrome + the
@@ -4867,6 +4936,10 @@ static void content_clear(void){
     g_wd_cv = g_wd_status = NULL;
     g_sd_cv = g_sd_status = g_sd_timelbl = NULL;
     g_zp_cv = g_zp_status = g_zp_timelbl = NULL;
+    /* Coach. g_co_seal is NOT cleared here: it lives on lv_layer_top(), not in
+     * the content area, and must survive a content teardown -- that is exactly
+     * what keeps a session sealed while the shell changes underneath it. */
+    g_co_cv = g_co_time = g_co_sub = g_co_status = g_co_hold_lbl = NULL;
 }
 static uint32_t  g_zp_seq;                  /* varies the board each New */
 static PlayClock g_zp_clk;                  /* pausable solve timer (playclock.h) */
@@ -5157,6 +5230,935 @@ static void show_games(void){
     }
 }
 
+/* ========================= Coach (ritual focus timer) =======================
+ * The centrepiece app: a ritual-based Pomodoro. Three taps pick energy / domain /
+ * intention, one Graffiti stroke becomes the session's SIGIL, and that mark inks in
+ * from the bottom as the session elapses. Afterwards two taps record how it went.
+ * Six taps and one stroke, no typing.
+ *
+ * Three things make it worth building on this device rather than as a phone app:
+ *
+ *   SEALED MODE. While a session runs, Coach owns the whole 240x320 on
+ *   lv_layer_top() -- which covers the silkscreen row too, so Home/Menu/Find/Calc
+ *   are physically unreachable (they are underneath, not disabled: nothing to
+ *   forget to re-enable). ui_show_lock() no-ops while sealed, so waking the screen
+ *   mid-session shows the mark rather than the dashboard. Giving up costs a
+ *   five-second press-and-hold and breaks the streak.
+ *
+ *   THE SIGIL. graffiti_raw_stroke() already exists for the Kana trainer; coach.c
+ *   normalises the captured polyline to a 0..100 box (80 bytes). Drawn as a thick
+ *   band: solid below the fill line, 50% stippled above it. The stipple is the
+ *   whole trick -- "half inked" needs no second buffer and no alpha, just a parity
+ *   test in the plot function, which is exactly the Palm mono idiom.
+ *
+ *   NO NEW BUFFERS. Because sealed mode makes it impossible to open a game while a
+ *   session runs, the sigil canvas reuses game_cv_buf outright. Coach's entire
+ *   static cost is CoachState + one live CoachSigil.
+ *
+ * The 1 Hz co_tick() is registered once in ui_init() and runs regardless of which
+ * screen is up, so a session ends correctly from anywhere. See
+ * docs/COACH_DESIGN.md for the product design and coach.h for the pure logic. */
+
+#define CO_SAV        "/sdcard/coach.sav"
+#define CO_LOG        "/sdcard/coach.log"
+#define CO_SIGF       "/sdcard/coach.sig"
+#define CO_SAV_MAGIC  0x434F4131u        /* "COA1" */
+#define CO_LOG_MAGIC  0x434F4C31u        /* "COL1" */
+
+#define CO_CVW  GAME_CVW                 /* the sigil canvas shares game_cv_buf */
+#define CO_CVH  GAME_CVH
+#define CO_BOX  150                      /* the sigil's drawing box, centred     */
+#define CO_BOXX ((CO_CVW - CO_BOX) / 2)
+#define CO_BOXY ((CO_CVH - CO_BOX) / 2)
+#define CO_BAND 4                        /* half-thickness of the mark's stroke  */
+#define CO_HOLD_MS 5000                  /* press-and-hold to abandon a session  */
+#define CO_DIM_PCT 15                    /* brightness while a session runs      */
+
+/* ---- the local timezone offset, in minutes east of UTC ---------------------
+ * coach.c takes this as an argument rather than reading TZ itself (that is what
+ * makes the whole engine host-testable). Derived from the difference between
+ * localtime and gmtime rather than tm_gmtoff, which is not portable. */
+static int co_tz(void){
+    time_t t = time(NULL);
+    struct tm lt, gt;
+    localtime_r(&t, &lt);
+    gmtime_r(&t, &gt);
+    int mins = (lt.tm_hour - gt.tm_hour) * 60 + (lt.tm_min - gt.tm_min);
+    int dday = lt.tm_yday - gt.tm_yday;
+    if(dday == 1 || dday < -1)       mins += 1440;   /* local is a day ahead */
+    else if(dday == -1 || dday > 1)  mins -= 1440;   /* local is a day behind */
+    return mins;
+}
+
+/* ------------------------------------------------------------- persistence */
+static void co_save(void){
+    FILE *f = fopen(CO_SAV, "wb"); if(!f) return;
+    g_co.magic = CO_SAV_MAGIC;
+    fwrite(&g_co, sizeof g_co, 1, f);
+    fwrite(&g_co_sig, sizeof g_co_sig, 1, f);
+    fclose(f);
+}
+
+static void co_finish(int result, int blocker);
+
+/* A session that was running when the app closed (or the device died) has to be
+ * resolved before anything else can happen. Two cases, and the second is the one
+ * the missing RTC forces: the epoch is restored from an NVS checkpoint at boot, so
+ * a power cycle can move the clock by the whole off-duration. Anything wildly past
+ * the planned length is not a long session, it is a bad clock. */
+static void co_recover(void){
+    if(g_co.phase != CO_PH_RUNNING && g_co.phase != CO_PH_PAUSED) return;
+    uint32_t now     = (uint32_t)time(NULL);
+    uint32_t el      = pc_secs(&g_co.clk, now);
+    uint32_t planned = (uint32_t)g_co.planned_min * 60;
+    if(el >= planned + 3600u){
+        co_finish(CO_RES_ABANDONED, CO_BLK_NONE);    /* untrustworthy: drop it */
+    } else if(el >= planned){
+        g_co.phase = CO_PH_REFLECT;                  /* it ended while we were off */
+        co_save();
+    }
+}
+
+static void co_load(void){
+    if(g_co_loaded) return;
+    coach_state_init(&g_co);
+    memset(&g_co_sig, 0, sizeof g_co_sig);
+    FILE *f = fopen(CO_SAV, "rb");
+    if(f){
+        CoachState t;
+        if(fread(&t, sizeof t, 1, f) == 1 && t.magic == CO_SAV_MAGIC){
+            g_co = t;
+            /* clamp anything a truncated or foreign file could have left absurd */
+            if(g_co.pref_min < 5 || g_co.pref_min > 120) g_co.pref_min = 25;
+            if(g_co.day_goal < 1 || g_co.day_goal > 99)  g_co.day_goal = 6;
+            if(g_co.phase > CO_PH_REFLECT)               g_co.phase = CO_PH_IDLE;
+            if(g_co.domain >= CO_NDOM)     g_co.domain = CO_DOM_CAREER;
+            if(g_co.energy >= CO_NENERGY)  g_co.energy = CO_ENERGY_MED;
+            if(g_co.intent >= CO_NINT)     g_co.intent = CO_INT_FINISH;
+            if(fread(&g_co_sig, sizeof g_co_sig, 1, f) != 1)
+                memset(&g_co_sig, 0, sizeof g_co_sig);
+            if(g_co_sig.n > CO_SIG_MAXPT) memset(&g_co_sig, 0, sizeof g_co_sig);
+        }
+        fclose(f);
+    }
+    g_co_loaded = 1;
+    co_recover();
+}
+
+/* Append one finished session. The record and its mark go to two files that stay
+ * index-aligned, so the wall can pair them by position without storing a key. */
+static void co_log_append(const CoachRec *r){
+    int fresh = 1;
+    FILE *t = fopen(CO_LOG, "rb");
+    if(t){ fresh = 0; fclose(t); }
+    FILE *f = fopen(CO_LOG, "ab");
+    if(f){
+        if(fresh){ uint32_t m = CO_LOG_MAGIC; fwrite(&m, 4, 1, f); }
+        fwrite(r, sizeof *r, 1, f);
+        fclose(f);
+    }
+    f = fopen(CO_SIGF, "ab");
+    if(f){ fwrite(&g_co_sig, sizeof g_co_sig, 1, f); fclose(f); }
+}
+
+/* Stream the log into an aggregate. Records are read one at a time -- the whole
+ * history is never resident, only the ~120-byte fold. `since` is an epoch cutoff
+ * (0 = everything). Returns the number of records folded. */
+static int co_fold(CoachAgg *a, uint32_t since){
+    coach_agg_reset(a);
+    FILE *f = fopen(CO_LOG, "rb");
+    if(!f) return 0;
+    uint32_t m = 0;
+    if(fread(&m, 4, 1, f) != 1 || m != CO_LOG_MAGIC){ fclose(f); return 0; }
+    int tz = co_tz(), n = 0;
+    CoachRec r;
+    while(fread(&r, sizeof r, 1, f) == 1){
+        if(r.start < since) continue;
+        coach_agg_add(a, &r, tz);
+        n++;
+    }
+    fclose(f);
+    return n;
+}
+
+/* ------------------------------------------------------------ sigil drawing */
+/* Canvas y at and below which the mark is solid; above it the band is stippled.
+ * One shared variable rather than a parameter so the Bresenham inner loop stays
+ * a plain plot call. */
+static int co_fill_y;
+
+static void co_plot(lv_draw_buf_t *db, int x, int y){
+    if(y >= co_fill_y || ((x ^ y) & 1) == 0) i1_px(db, x, y, 1);
+}
+/* a filled disc, so the band has round joins and caps instead of notches */
+static void co_dot(lv_draw_buf_t *db, int x, int y){
+    for(int a = -CO_BAND; a <= CO_BAND; a++)
+        for(int b = -CO_BAND; b <= CO_BAND; b++)
+            if(a*a + b*b <= CO_BAND*CO_BAND) co_plot(db, x + a, y + b);
+}
+static void co_line(lv_draw_buf_t *db, int x0, int y0, int x1, int y1){
+    int dx = abs(x1-x0), sx = x0<x1?1:-1, dy = -abs(y1-y0), sy = y0<y1?1:-1, err = dx+dy;
+    for(;;){
+        co_dot(db, x0, y0);
+        if(x0==x1 && y0==y1) break;
+        int e2 = 2*err;
+        if(e2 >= dy){ err += dy; x0 += sx; }
+        if(e2 <= dx){ err += dx; y0 += sy; }
+    }
+}
+
+/* Paint the live sigil with `pct` (0..100) of it inked. A session with no usable
+ * mark (a tap, or a stroke with no extent) falls back to a plain square so the
+ * screen never goes blank on someone mid-session. */
+static void co_paint_sigil(int pct){
+    if(!g_co_cv) return;
+    lv_draw_buf_t *db = lv_canvas_get_draw_buf(g_co_cv);
+    i1_clear(db);
+    if(pct < 0) pct = 0;
+    if(pct > 100) pct = 100;
+    co_fill_y = CO_BOXY + CO_BOX - (CO_BOX * pct / 100);
+
+    if(coach_sigil_ok(&g_co_sig)){
+        int n = g_co_sig.n;
+        for(int i = 0; i < n - 1; i++){
+            int ax = CO_BOXX + g_co_sig.xy[2*i]     * CO_BOX / 100;
+            int ay = CO_BOXY + g_co_sig.xy[2*i + 1] * CO_BOX / 100;
+            int bx = CO_BOXX + g_co_sig.xy[2*i + 2] * CO_BOX / 100;
+            int by = CO_BOXY + g_co_sig.xy[2*i + 3] * CO_BOX / 100;
+            co_line(db, ax, ay, bx, by);
+        }
+    } else {
+        int m = 28;                                   /* the fallback square */
+        for(int y = CO_BOXY + m; y < CO_BOXY + CO_BOX - m; y++)
+            for(int x = CO_BOXX + m; x < CO_BOXX + CO_BOX - m; x++)
+                co_plot(db, x, y);
+    }
+    lv_obj_invalidate(g_co_cv);                       /* one, not CO_BOX^2 */
+}
+
+/* ------------------------------------------------------------- the sealed screen */
+static void co_show_reflect(void);
+
+static uint32_t co_elapsed(void){
+    return pc_secs(&g_co.clk, (uint32_t)time(NULL));
+}
+static int co_pct(void){
+    uint32_t planned = (uint32_t)g_co.planned_min * 60;
+    if(!planned) return 100;
+    uint32_t el = co_elapsed();
+    return el >= planned ? 100 : (int)(el * 100 / planned);
+}
+
+static void co_unseal(void){
+    if(g_co_seal){ lv_obj_del(g_co_seal); g_co_seal = NULL; }
+    g_co_cv = g_co_time = g_co_sub = g_co_hold_lbl = NULL;
+    power_set_brightness(appcfg()->brightness);       /* the desk comes back up */
+}
+
+/* the countdown + the fill, refreshed from co_tick */
+static void co_seal_refresh(void){
+    if(!g_co_seal) return;
+    uint32_t planned = (uint32_t)g_co.planned_min * 60;
+    uint32_t el = co_elapsed();
+    uint32_t left = el >= planned ? 0 : planned - el;
+    if(g_co_time)
+        lv_label_set_text_fmt(g_co_time, "%u:%02u",
+                              (unsigned)(left / 60), (unsigned)(left % 60));
+    /* the mark only moves 1% at a time: repaint when it actually changes, not
+     * once a second (25 repaints across a 25-minute session, not 1500). */
+    int pct = co_pct();
+    if(pct != g_co_last_fill){ g_co_last_fill = pct; co_paint_sigil(pct); }
+}
+
+static void co_hold_cb(lv_event_t *e){
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_PRESSED){
+        g_co_hold_start = lv_tick_get();
+    } else if(code == LV_EVENT_PRESSING){
+        if(!g_co_hold_start) return;
+        uint32_t held = lv_tick_elaps(g_co_hold_start);
+        if(held >= CO_HOLD_MS){
+            g_co_hold_start = 0;
+            co_unseal();
+            co_finish(CO_RES_ABANDONED, CO_BLK_NONE);
+            show_coach();
+            return;
+        }
+        if(g_co_hold_lbl)
+            lv_label_set_text_fmt(g_co_hold_lbl, "hold %u",
+                                  (unsigned)((CO_HOLD_MS - held + 999) / 1000));
+    } else {                                    /* RELEASED / PRESS_LOST */
+        g_co_hold_start = 0;
+        if(g_co_hold_lbl) lv_label_set_text(g_co_hold_lbl, "hold to give up");
+    }
+}
+
+#ifdef UI_DEVTOOLS
+static void co_devfinish_cb(lv_event_t *e){ (void)e;
+    /* jump the clock to the planned end; co_tick() does the rest exactly as it
+     * would have at T-0, so the tested path is the real one. */
+    uint32_t now = (uint32_t)time(NULL);
+    g_co.clk.accum = (uint32_t)g_co.planned_min * 60;
+    g_co.clk.run   = now;
+}
+#endif
+
+/* Raise the takeover. On lv_layer_top() at full screen size, so it covers the
+ * Graffiti strip and the silkscreen buttons as well as the app area -- that IS
+ * sealed mode; there is no separate "disable the buttons" path to get wrong. */
+static void co_seal(void){
+    if(g_co_seal) return;
+    kill_kb();
+    content_clear();
+
+    g_co_seal = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_co_seal, LCD_W, LCD_H);
+    lv_obj_set_pos(g_co_seal, 0, 0);
+    lv_obj_set_style_bg_color(g_co_seal, COL_BODY, 0);
+    lv_obj_set_style_radius(g_co_seal, 0, 0);
+    lv_obj_set_style_border_width(g_co_seal, 0, 0);
+    lv_obj_set_style_pad_all(g_co_seal, 0, 0);
+    lv_obj_set_style_text_font(g_co_seal, &lv_font_palm, 0);
+    lv_obj_clear_flag(g_co_seal, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(g_co_seal, LV_OBJ_FLAG_CLICKABLE);   /* swallow stray taps */
+
+    g_co_time = lv_label_create(g_co_seal);
+    lv_obj_set_style_text_font(g_co_time, &lv_font_palm_bold, 0);
+    lv_obj_align(g_co_time, LV_ALIGN_TOP_MID, 0, 18);
+
+    g_co_cv = lv_canvas_create(g_co_seal);
+    lv_canvas_set_buffer(g_co_cv, game_cv_buf, CO_CVW, CO_CVH, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_palette(g_co_cv, 0, lv_color_to_32(COL_BODY, 0xFF));
+    lv_canvas_set_palette(g_co_cv, 1, lv_color_to_32(COL_LINE, 0xFF));
+    lv_obj_align(g_co_cv, LV_ALIGN_TOP_MID, 0, 46);
+    lv_obj_clear_flag(g_co_cv, LV_OBJ_FLAG_SCROLLABLE);
+
+    g_co_sub = lv_label_create(g_co_seal);
+    lv_obj_align(g_co_sub, LV_ALIGN_TOP_MID, 0, 218);
+    lv_label_set_text_fmt(g_co_sub, "%s  %s  %s",
+                          coach_domain_name(g_co.domain),
+                          coach_intent_name(g_co.intent),
+                          coach_energy_name(g_co.energy));
+
+    /* the give-up target: small, low, and deliberately unhurried */
+    lv_obj_t *hold = lv_obj_create(g_co_seal);
+    lv_obj_set_size(hold, 120, 40);
+    lv_obj_align(hold, LV_ALIGN_BOTTOM_MID, 0, -12);
+    lv_obj_set_style_bg_opa(hold, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(hold, 0, 0);
+    lv_obj_set_style_pad_all(hold, 0, 0);
+    lv_obj_add_flag(hold, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(hold, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(hold, co_hold_cb, LV_EVENT_PRESSED,    NULL);
+    lv_obj_add_event_cb(hold, co_hold_cb, LV_EVENT_PRESSING,   NULL);
+    lv_obj_add_event_cb(hold, co_hold_cb, LV_EVENT_RELEASED,   NULL);
+    lv_obj_add_event_cb(hold, co_hold_cb, LV_EVENT_PRESS_LOST, NULL);
+    g_co_hold_lbl = lv_label_create(hold);
+    lv_label_set_text(g_co_hold_lbl, "hold to give up");
+    lv_obj_center(g_co_hold_lbl);
+
+#ifdef UI_DEVTOOLS
+    /* Dev scaffolding: sealed mode is, by design, unreachable from the menu -- which
+     * also means CI can never reach the reflect/note screens without waiting out a
+     * real 25-minute session. This invisible top-left corner target ends the session
+     * immediately. Compiled out of a release build along with "Add test events". */
+    {
+        lv_obj_t *sk = lv_obj_create(g_co_seal);
+        lv_obj_set_size(sk, 26, 26);
+        lv_obj_align(sk, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_set_style_bg_opa(sk, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(sk, 0, 0);
+        lv_obj_add_flag(sk, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(sk, co_devfinish_cb, LV_EVENT_CLICKED, NULL);
+    }
+#endif
+    g_co_last_fill = -1;                       /* force the first paint */
+    co_seal_refresh();
+    power_set_brightness(CO_DIM_PCT);          /* the desk goes quiet */
+}
+
+/* ------------------------------------------------------------ finishing up */
+static void co_finish(int result, int blocker){
+    uint32_t now     = (uint32_t)time(NULL);
+    uint32_t el      = co_elapsed();
+    uint32_t planned = (uint32_t)g_co.planned_min * 60;
+    if(el > planned) el = planned;             /* never bank more than was asked */
+
+    CoachRec r;
+    r.start       = g_co.start ? g_co.start : now;
+    r.planned_min = g_co.planned_min;
+    r.actual_min  = (uint16_t)((el + 30) / 60);
+    r.domain      = g_co.domain;
+    r.energy      = g_co.energy;
+    r.intent      = g_co.intent;
+    r.outcome     = co_pack(result, blocker);
+    co_log_append(&r);
+    /* the note screen runs AFTER the live session is cleared, so hold on to what
+     * the Memo/Date Book records need */
+    g_co_last_start = r.start;
+    g_co_last_min   = r.actual_min ? r.actual_min : r.planned_min;
+
+    if(result == CO_RES_ABANDONED){
+        /* giving up breaks the streak, and does NOT establish the day -- an
+         * abandoned session should not be able to hold a streak together. */
+        g_co.streak = 0;
+        if(g_co.total_n < 0xFFFF) g_co.total_n++;
+    } else {
+        coach_note_completion(&g_co, r.start, co_tz());
+    }
+    g_co.phase = CO_PH_IDLE;
+    g_co.start = 0;
+    pc_reset(&g_co.clk);
+    co_save();
+}
+
+/* ------------------------------------------------------------- the 1 Hz tick */
+/* Registered once in ui_init() and never torn down, so a session ends correctly
+ * from any screen -- including the lock screen, a game, or the Calculator. */
+static void co_tick(lv_timer_t *t){ (void)t;
+    if(g_co_pulse){                                   /* end-of-session flash */
+        g_co_pulse--;
+        power_backlight(g_co_pulse & 1);
+        if(!g_co_pulse) power_backlight(1);
+        return;
+    }
+    if(g_co.phase != CO_PH_RUNNING) return;
+    if(co_elapsed() >= (uint32_t)g_co.planned_min * 60){
+        g_co.phase = CO_PH_REFLECT;
+        pc_stop(&g_co.clk, (uint32_t)time(NULL));
+        co_save();
+        power_set_brightness(appcfg()->brightness);
+        power_backlight(1);
+        g_co_pulse = 6;                               /* three on/off pairs */
+        co_unseal();
+        co_show_reflect();
+        return;
+    }
+    co_seal_refresh();
+}
+
+/* ---------------------------------------------------------------- the ritual */
+static const char *CO_EN_MAP[]  = { "Low", "Medium", "High", "" };
+static const char *CO_DOM_MAP[] = { "Career", "Health", "\n", "Learning", "Creative", "" };
+static const char *CO_INT_MAP[] = { "Finish", "Explore", "Maintain", "" };
+static const char *CO_RES_MAP[] = { "Great", "Okay", "Struggled", "" };
+static const char *CO_BLK_MAP[] = { "Tired", "Kids", "\n", "Work", "Distracted", "" };
+
+/* one big tap target grid, styled flat like everything else in the shell */
+static lv_obj_t *co_matrix(lv_obj_t *par, const char **map, int y, int h,
+                           lv_event_cb_t cb){
+    lv_obj_t *bm = lv_buttonmatrix_create(par);
+    lv_buttonmatrix_set_map(bm, map);
+    lv_obj_set_size(bm, 224, h);
+    lv_obj_align(bm, LV_ALIGN_TOP_MID, 0, y);
+    lv_obj_set_style_radius(bm, 0, 0);
+    lv_obj_set_style_pad_all(bm, 2, 0);
+    lv_obj_set_style_bg_opa(bm, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(bm, 0, 0);
+    lv_obj_set_style_radius(bm, 0, LV_PART_ITEMS);
+    lv_obj_set_style_border_width(bm, 1, LV_PART_ITEMS);
+    lv_obj_set_style_border_color(bm, COL_LINE, LV_PART_ITEMS);
+    lv_obj_add_event_cb(bm, cb, LV_EVENT_VALUE_CHANGED, NULL);
+    return bm;
+}
+
+static void co_show_ritual(int step);
+
+static void co_ritual_cb(lv_event_t *e){
+    lv_obj_t *bm = lv_event_get_target(e);
+    uint32_t id = lv_buttonmatrix_get_selected_button(bm);
+    if(id == LV_BUTTONMATRIX_BUTTON_NONE) return;
+    switch(g_co_step){
+        case 0: g_co_pick_en  = (int)id; break;
+        case 1: g_co_pick_dom = (int)id; break;
+        case 2: g_co_pick_int = (int)id; break;
+    }
+    if(g_co_step < 2) co_show_ritual(g_co_step + 1);
+    else              co_show_sigil();
+}
+
+static void co_back_cb(lv_event_t *e){ (void)e;
+    if(g_co_step > 0) co_show_ritual(g_co_step - 1);
+    else              show_coach();
+}
+
+/* a plain "< back" affordance, bottom-left, on every ritual step */
+static void co_back_link(lv_obj_t *par){
+    lv_obj_t *b = lv_button_create(par);
+    lv_obj_set_style_radius(b, 0, 0);
+    lv_obj_set_style_pad_all(b, 3, 0);
+    lv_obj_align(b, LV_ALIGN_BOTTOM_LEFT, 4, -4);
+    lv_obj_add_event_cb(b, co_back_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *l = lv_label_create(b);
+    lv_label_set_text(l, "back");
+}
+
+static void co_show_ritual(int step){
+    kill_kb(); cur_app = NULL; cur_uid = 0;
+    content_clear();
+    g_co_open = 1; g_co_step = step;
+    lv_label_set_text(title_lbl, "Coach");
+    update_cat_trigger();
+
+    lv_obj_t *n = lv_label_create(content);
+    lv_obj_align(n, LV_ALIGN_TOP_LEFT, 8, 6);
+    lv_label_set_text_fmt(n, "%d of 3", step + 1);
+
+    lv_obj_t *q = lv_label_create(content);
+    lv_obj_set_style_text_font(q, &lv_font_palm_bold, 0);
+    lv_obj_align(q, LV_ALIGN_TOP_LEFT, 8, 28);
+    lv_label_set_text(q, step == 0 ? "Energy?" : step == 1 ? "Focus on?" : "Intention?");
+
+    if(step == 0)      co_matrix(content, CO_EN_MAP,  60, 46, co_ritual_cb);
+    else if(step == 1) co_matrix(content, CO_DOM_MAP, 58, 84, co_ritual_cb);
+    else               co_matrix(content, CO_INT_MAP, 60, 46, co_ritual_cb);
+
+    co_back_link(content);
+}
+
+/* ------------------------------------------------------------------- the sigil */
+/* Runs on pen-up BEFORE recognition and consumes the stroke, so the mark is
+ * whatever the user drew -- it is never fed to the recognizer and never has to
+ * resemble a letter. */
+static int co_sigil_capture(void){
+    int16_t raw[2 * 64];
+    int n = graffiti_raw_stroke(raw, 64);
+    if(coach_sigil_from_raw(&g_co_sig, raw, n) > 0){
+        if(g_co_cv) co_paint_sigil(100);              /* preview it solid */
+        if(g_co_status) lv_label_set_text(g_co_status, "Tap Begin, or draw again.");
+    } else if(g_co_status){
+        lv_label_set_text(g_co_status, "Too small -- draw a bigger mark.");
+    }
+    return 1;                                          /* always consume it */
+}
+
+static void co_begin_cb(lv_event_t *e){ (void)e;
+    uint32_t now = (uint32_t)time(NULL);
+    g_co.energy      = (uint8_t)g_co_pick_en;
+    g_co.domain      = (uint8_t)g_co_pick_dom;
+    g_co.intent      = (uint8_t)g_co_pick_int;
+    g_co.planned_min = g_co.pref_min;
+    g_co.start       = now;
+    g_co.phase       = CO_PH_RUNNING;
+    pc_reset(&g_co.clk);
+    pc_start(&g_co.clk, now);
+    co_save();
+    co_seal();
+}
+
+static void co_show_sigil(void){
+    kill_kb(); cur_app = NULL; cur_uid = 0;
+    content_clear();
+    g_co_open = 1;
+    lv_label_set_text(title_lbl, "Coach");
+    update_cat_trigger();
+    memset(&g_co_sig, 0, sizeof g_co_sig);
+
+    lv_obj_t *q = lv_label_create(content);
+    lv_obj_set_style_text_font(q, &lv_font_palm_bold, 0);
+    lv_obj_align(q, LV_ALIGN_TOP_LEFT, 8, 6);
+    lv_label_set_text(q, "Draw your mark.");
+
+    g_co_status = lv_label_create(content);
+    lv_label_set_long_mode(g_co_status, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(g_co_status, 224);
+    lv_obj_align(g_co_status, LV_ALIGN_TOP_LEFT, 8, 26);
+    lv_label_set_text(g_co_status, "One stroke in the Graffiti area. It fills in as you work.");
+
+    g_co_cv = lv_canvas_create(content);
+    lv_canvas_set_buffer(g_co_cv, game_cv_buf, CO_CVW, CO_CVH, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_palette(g_co_cv, 0, lv_color_to_32(COL_BODY, 0xFF));
+    lv_canvas_set_palette(g_co_cv, 1, lv_color_to_32(COL_LINE, 0xFF));
+    lv_obj_align(g_co_cv, LV_ALIGN_TOP_MID, 0, 52);
+    lv_obj_clear_flag(g_co_cv, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_height(g_co_cv, 108);                  /* clipped: the box is enough */
+    co_paint_sigil(100);
+
+    lv_obj_t *go = lv_button_create(content);
+    lv_obj_set_style_radius(go, 0, 0);
+    lv_obj_set_size(go, 96, 30);
+    lv_obj_align(go, LV_ALIGN_BOTTOM_RIGHT, -6, -4);
+    lv_obj_add_event_cb(go, co_begin_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *gl = lv_label_create(go);
+    lv_label_set_text_fmt(gl, "Begin %d", (int)g_co.pref_min);
+    lv_obj_center(gl);
+
+    co_back_link(content);
+    graf_capture_hook = co_sigil_capture;   /* AFTER kill_kb cleared it */
+}
+
+/* ----------------------------------------------------------------- reflect */
+static void co_show_note(void);
+
+static void co_blocker_cb(lv_event_t *e){
+    lv_obj_t *bm = lv_event_get_target(e);
+    uint32_t id = lv_buttonmatrix_get_selected_button(bm);
+    if(id == LV_BUTTONMATRIX_BUTTON_NONE) return;
+    g_co_blk = (int)id + 1;                  /* map 0..3 -> CO_BLK_TIRED.. */
+    co_finish(CO_RES_STRUGGLED, g_co_blk);
+    co_show_note();
+}
+
+static void co_show_blocker(void){
+    kill_kb(); content_clear();
+    g_co_open = 1;
+    lv_label_set_text(title_lbl, "Coach");
+
+    lv_obj_t *q = lv_label_create(content);
+    lv_obj_set_style_text_font(q, &lv_font_palm_bold, 0);
+    lv_obj_align(q, LV_ALIGN_TOP_LEFT, 8, 10);
+    lv_label_set_text(q, "What got in the way?");
+
+    co_matrix(content, CO_BLK_MAP, 46, 84, co_blocker_cb);
+}
+
+static void co_result_cb(lv_event_t *e){
+    lv_obj_t *bm = lv_event_get_target(e);
+    uint32_t id = lv_buttonmatrix_get_selected_button(bm);
+    if(id == LV_BUTTONMATRIX_BUTTON_NONE) return;
+    g_co_res = (int)id;                       /* 0 Great, 1 Okay, 2 Struggled */
+    if(g_co_res == CO_RES_STRUGGLED){ co_show_blocker(); return; }
+    co_finish(g_co_res, CO_BLK_NONE);
+    co_show_note();
+}
+
+static void co_show_reflect(void){
+    kill_kb(); cur_app = NULL; cur_uid = 0;
+    content_clear();
+    g_co_open = 1;
+    lv_label_set_text(title_lbl, "Coach");
+    update_cat_trigger();
+
+    lv_obj_t *d = lv_label_create(content);
+    lv_obj_align(d, LV_ALIGN_TOP_LEFT, 8, 6);
+    lv_label_set_text_fmt(d, "%d:00 done", (int)g_co.planned_min);
+
+    lv_obj_t *q = lv_label_create(content);
+    lv_obj_set_style_text_font(q, &lv_font_palm_bold, 0);
+    lv_obj_align(q, LV_ALIGN_TOP_LEFT, 8, 30);
+    lv_label_set_text(q, "How did it go?");
+
+    co_matrix(content, CO_RES_MAP, 66, 46, co_result_cb);
+}
+
+/* ------------------------------------------------------------------ the note */
+/* The note is not a scratchpad: it becomes a real Memo Pad record, and the
+ * session becomes a Date Book block, so both ride the next HotSync to iCloud. */
+static void co_write_exports(const char *note){
+    char buf[160];
+    time_t st = (time_t)(g_co_last_start ? g_co_last_start : (uint32_t)time(NULL));
+    struct tm lt; localtime_r(&st, &lt);
+
+    if(note && note[0]){
+        snprintf(buf, sizeof buf, "Coach %04d-%02d-%02d  %s  %s\n%s",
+                 lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday,
+                 coach_domain_name(g_co.domain), coach_result_name(g_co_res), note);
+        data_save_memo(0, 0, buf);
+    }
+    /* Appt is ~900 bytes; this runs from a button callback, never from ui_init,
+     * so it is nowhere near the main task's stack ceiling. */
+    Appt a;
+    memset(&a, 0, sizeof a);
+    a.hasTime = 1;
+    a.year = lt.tm_year + 1900; a.month = lt.tm_mon + 1; a.day = lt.tm_mday;
+    a.sH = lt.tm_hour; a.sM = lt.tm_min;
+    int endm = lt.tm_hour * 60 + lt.tm_min + (int)g_co_last_min;
+    a.eH = (endm / 60) % 24; a.eM = endm % 60;
+    snprintf(a.description, sizeof a.description, "Focus  %s  %s",
+             coach_domain_name(g_co.domain), coach_intent_name(g_co.intent));
+    data_save_cal(0, 0, &a);
+}
+
+static void co_note_save_cb(lv_event_t *e){ (void)e;
+    const char *t = active_ta ? lv_textarea_get_text(active_ta) : NULL;
+    co_write_exports(t);
+    toast_show("Logged");
+    show_coach();
+}
+static void co_note_skip_cb(lv_event_t *e){ (void)e;
+    co_write_exports(NULL);
+    show_coach();
+}
+
+static void co_show_note(void){
+    kill_kb(); content_clear();
+    g_co_open = 1;
+    lv_label_set_text(title_lbl, "Coach");
+
+    lv_obj_t *q = lv_label_create(content);
+    lv_obj_set_style_text_font(q, &lv_font_palm_bold, 0);
+    lv_obj_align(q, LV_ALIGN_TOP_LEFT, 8, 8);
+    lv_label_set_text(q, "Note?");
+
+    lv_obj_t *ta = lv_textarea_create(content);
+    lv_obj_set_size(ta, 224, 60);
+    lv_obj_align(ta, LV_ALIGN_TOP_MID, 0, 32);
+    lv_textarea_set_one_line(ta, false);
+    lv_textarea_set_max_length(ta, 64);
+    lv_textarea_set_placeholder_text(ta, "optional");
+    lv_obj_set_style_radius(ta, 0, 0);
+    active_ta = ta;
+
+    lv_obj_t *sv = lv_button_create(content);
+    lv_obj_set_style_radius(sv, 0, 0);
+    lv_obj_set_size(sv, 80, 28);
+    lv_obj_align(sv, LV_ALIGN_BOTTOM_LEFT, 8, -6);
+    lv_obj_add_event_cb(sv, co_note_save_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *sl = lv_label_create(sv); lv_label_set_text(sl, "Save"); lv_obj_center(sl);
+
+    lv_obj_t *sk = lv_button_create(content);
+    lv_obj_set_style_radius(sk, 0, 0);
+    lv_obj_set_size(sk, 80, 28);
+    lv_obj_align(sk, LV_ALIGN_BOTTOM_RIGHT, -8, -6);
+    lv_obj_add_event_cb(sk, co_note_skip_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *kl = lv_label_create(sk); lv_label_set_text(kl, "Skip"); lv_obj_center(kl);
+}
+
+/* -------------------------------------------------------------- the marks wall */
+/* Streams coach.sig from the tail, one 80-byte mark at a time, and draws each into
+ * a small cell. Abandoned sessions come back hollow (stippled), which is why the
+ * log is read alongside it. */
+#define CO_WALL_N    24
+#define CO_WALL_CELL 38
+
+static void co_wall_mark(lv_draw_buf_t *db, const CoachSigil *sg, int cx, int cy,
+                         int size, int solid){
+    co_fill_y = solid ? 0 : 0x7FFF;            /* solid, or stippled throughout */
+    if(!coach_sigil_ok(sg)){
+        for(int y = cy + size/3; y < cy + size - size/3; y++)
+            for(int x = cx + size/3; x < cx + size - size/3; x++)
+                co_plot(db, x, y);
+        return;
+    }
+    for(int i = 0; i < sg->n - 1; i++){
+        int ax = cx + sg->xy[2*i]     * size / 100;
+        int ay = cy + sg->xy[2*i + 1] * size / 100;
+        int bx = cx + sg->xy[2*i + 2] * size / 100;
+        int by = cy + sg->xy[2*i + 3] * size / 100;
+        int dx = abs(bx-ax), sx = ax<bx?1:-1, dy = -abs(by-ay), sy = ay<by?1:-1;
+        int err = dx+dy;
+        for(;;){                                /* 2 px, so it survives at 30 px */
+            co_plot(db, ax, ay); co_plot(db, ax+1, ay); co_plot(db, ax, ay+1);
+            if(ax==bx && ay==by) break;
+            int e2 = 2*err;
+            if(e2 >= dy){ err += dy; ax += sx; }
+            if(e2 <= dx){ err += dx; ay += sy; }
+        }
+    }
+}
+
+static void show_coach_marks(void){
+    kill_kb(); cur_app = NULL; cur_uid = 0;
+    content_clear();
+    g_co_open = 1;
+    lv_label_set_text(title_lbl, "Marks");
+    update_cat_trigger();
+
+    lv_obj_t *cv = lv_canvas_create(content);
+    lv_canvas_set_buffer(cv, game_cv_buf, CO_CVW, CO_CVH, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_palette(cv, 0, lv_color_to_32(COL_BODY, 0xFF));
+    lv_canvas_set_palette(cv, 1, lv_color_to_32(COL_LINE, 0xFF));
+    lv_obj_align(cv, LV_ALIGN_TOP_MID, 0, 18);
+    lv_obj_clear_flag(cv, LV_OBJ_FLAG_SCROLLABLE);
+    lv_draw_buf_t *db = lv_canvas_get_draw_buf(cv);
+    i1_clear(db);
+
+    /* how many marks are on the card, and where the tail starts */
+    long nsig = 0;
+    FILE *f = fopen(CO_SIGF, "rb");
+    if(f){ fseek(f, 0, SEEK_END); nsig = ftell(f) / (long)sizeof(CoachSigil); }
+    long first = nsig > CO_WALL_N ? nsig - CO_WALL_N : 0;
+
+    /* the matching outcomes, so a hollow mark means "gave up" */
+    uint8_t bad[CO_WALL_N];
+    memset(bad, 0, sizeof bad);
+    FILE *lf = fopen(CO_LOG, "rb");
+    if(lf){
+        uint32_t m = 0;
+        if(fread(&m, 4, 1, lf) == 1 && m == CO_LOG_MAGIC &&
+           fseek(lf, 4 + first * (long)sizeof(CoachRec), SEEK_SET) == 0){
+            CoachRec r;
+            for(int i = 0; i < CO_WALL_N && fread(&r, sizeof r, 1, lf) == 1; i++)
+                bad[i] = (uint8_t)(co_result(&r) == CO_RES_ABANDONED);
+        }
+        fclose(lf);
+    }
+
+    int shown = 0;
+    if(f && fseek(f, first * (long)sizeof(CoachSigil), SEEK_SET) == 0){
+        CoachSigil sg;
+        for(int i = 0; i < CO_WALL_N && fread(&sg, sizeof sg, 1, f) == 1; i++){
+            int col = i % 6, row = i / 6;
+            co_wall_mark(db, &sg, 6 + col * CO_WALL_CELL, 4 + row * CO_WALL_CELL,
+                         CO_WALL_CELL - 8, !bad[i]);
+            shown++;
+        }
+    }
+    if(f) fclose(f);
+    lv_obj_invalidate(cv);
+
+    lv_obj_t *hdr = lv_label_create(content);
+    lv_obj_align(hdr, LV_ALIGN_TOP_LEFT, 8, 2);
+    if(shown == 1)   lv_label_set_text(hdr, "1 mark");
+    else if(shown)   lv_label_set_text_fmt(hdr, "Last %d marks", shown);
+    else      lv_label_set_text(hdr, "No marks yet -- finish a session.");
+
+    lv_obj_t *ft = lv_label_create(content);
+    lv_obj_align(ft, LV_ALIGN_BOTTOM_LEFT, 8, -4);
+    lv_label_set_text(ft, "hollow = gave up");
+}
+
+/* ---------------------------------------------------------- the weekly report */
+static const char *co_advice_text(int code){
+    switch(code){
+        case CA_EARLIER:  return "Your later sessions struggle far more than your early "
+                                 "ones. Shift sessions earlier.";
+        case CA_SHORTER:  return "You are cutting sessions short more often than not. "
+                                 "Try shorter sessions.";
+        case CA_REDUCE:   return "Most of your low-energy sessions are going badly. "
+                                 "Reduce intensity.";
+        case CA_INCREASE: return "You are finishing almost everything you start. "
+                                 "Increase intensity.";
+        case CA_STEADY:   return "This is working. Same again this week.";
+    }
+    return "Keep logging -- five sessions unlocks advice.";
+}
+
+static void show_coach_report(void){
+    kill_kb(); cur_app = NULL; cur_uid = 0;
+    content_clear();
+    g_co_open = 1;
+    lv_label_set_text(title_lbl, "This week");
+    update_cat_trigger();
+
+    uint32_t now = (uint32_t)time(NULL);
+    uint32_t since = now > 7u * 86400u ? now - 7u * 86400u : 0;
+    CoachAgg a;
+    co_fold(&a, since);
+
+    lv_obj_t *box = lv_obj_create(content);
+    lv_obj_set_size(box, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_radius(box, 0, 0);
+    lv_obj_set_style_border_width(box, 0, 0);
+    lv_obj_set_style_bg_color(box, COL_BODY, 0);
+    lv_obj_set_style_pad_all(box, 8, 0);
+    lv_obj_set_style_pad_row(box, 3, 0);
+    lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
+
+    #define CO_ROW(...) do{ lv_obj_t *l_ = lv_label_create(box); \
+                            lv_label_set_long_mode(l_, LV_LABEL_LONG_WRAP); \
+                            lv_obj_set_width(l_, 216); \
+                            lv_label_set_text_fmt(l_, __VA_ARGS__); }while(0)
+
+    CO_ROW("Pomodoros   %d", (int)a.n);
+    CO_ROW("Focus time  %uh %02um",
+           (unsigned)(a.focus_min / 60), (unsigned)(a.focus_min % 60));
+
+    for(int d = 0; d < CO_NDOM; d++){
+        char bar[13];
+        int nb = a.dom[d] > 12 ? 12 : a.dom[d];
+        for(int i = 0; i < nb; i++) bar[i] = '#';
+        bar[nb] = 0;
+        CO_ROW("%-9s %-12s %d", coach_domain_name(d), bar, (int)a.dom[d]);
+    }
+
+    int bs = coach_best_slot(&a);
+    if(bs >= 0) CO_ROW("Best time   %s, %d%%", coach_slot_name(bs),
+                       coach_slot_ok_pct(&a, bs));
+    int tb = coach_top_blocker(&a);
+    if(tb != CO_BLK_NONE) CO_ROW("Top blocker %s (%d)", coach_blocker_name(tb),
+                                 (int)a.blk[tb]);
+    int hi = coach_energy_great_pct(&a, CO_ENERGY_HIGH);
+    int lo = coach_energy_great_pct(&a, CO_ENERGY_LOW);
+    if(hi >= 0 && lo >= 0) CO_ROW("Energy      High %d%% / Low %d%%", hi, lo);
+
+    CO_ROW("%s", "-- Coach says --");
+    CO_ROW("%s", co_advice_text(coach_advise(&a)));
+    #undef CO_ROW
+}
+
+/* ------------------------------------------------------------------ the home */
+static void co_start_cb(lv_event_t *e){ (void)e; co_show_ritual(0); }
+static void co_marks_cb(lv_event_t *e){ (void)e; show_coach_marks(); }
+static void co_week_cb(lv_event_t *e){ (void)e; show_coach_report(); }
+
+static void show_coach(void){
+    kill_kb(); cur_app = NULL; cur_uid = 0;
+    content_clear();
+    co_load();
+    g_co_open = 1;
+    lv_label_set_text(title_lbl, "Coach");
+    update_cat_trigger();
+
+    /* a session survived the trip here: pick it back up rather than starting over */
+    if(g_co.phase == CO_PH_RUNNING){ co_seal(); return; }
+    if(g_co.phase == CO_PH_REFLECT){ co_show_reflect(); return; }
+
+    uint32_t now = (uint32_t)time(NULL);
+    int tz = co_tz();
+    int today  = coach_today_now(&g_co, now, tz);
+    int streak = coach_streak_now(&g_co, now, tz);
+
+    lv_obj_t *cnt = lv_label_create(content);
+    lv_obj_set_style_text_font(cnt, &lv_font_palm_bold, 0);
+    lv_obj_align(cnt, LV_ALIGN_TOP_LEFT, 10, 10);
+    lv_label_set_text_fmt(cnt, "%d today", today);
+
+    /* the day-goal bar: ten cells of '#' and '-'. A label, never an lv_bar -- a
+     * bar allocates a draw layer and live-locks LVGL on this pool. */
+    char bar[13];
+    int goal = g_co.day_goal ? g_co.day_goal : 6;
+    int filled = today >= goal ? 10 : today * 10 / goal;
+    bar[0] = '[';
+    for(int i = 0; i < 10; i++) bar[1 + i] = i < filled ? '#' : '-';
+    bar[11] = ']'; bar[12] = 0;
+    lv_obj_t *bl = lv_label_create(content);
+    lv_obj_align(bl, LV_ALIGN_TOP_LEFT, 10, 32);
+    lv_label_set_text_fmt(bl, "%s of %d", bar, goal);
+
+    lv_obj_t *go = lv_button_create(content);
+    lv_obj_set_size(go, 200, 42);
+    lv_obj_set_style_radius(go, 0, 0);
+    lv_obj_align(go, LV_ALIGN_TOP_MID, 0, 58);
+    lv_obj_add_event_cb(go, co_start_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *gl = lv_label_create(go);
+    lv_obj_set_style_text_font(gl, &lv_font_palm_bold, 0);
+    lv_label_set_text(gl, "Start");
+    lv_obj_center(gl);
+
+    lv_obj_t *sk = lv_label_create(content);
+    lv_obj_align(sk, LV_ALIGN_TOP_LEFT, 10, 112);
+    lv_label_set_text_fmt(sk, "streak    %d day%s", streak, streak == 1 ? "" : "s");
+
+    /* one line of earned insight -- only once there is enough to earn it */
+    CoachAgg a;
+    int n = co_fold(&a, 0);
+    lv_obj_t *st = lv_label_create(content);
+    lv_obj_align(st, LV_ALIGN_TOP_LEFT, 10, 130);
+    int bs = n >= 5 ? coach_best_slot(&a) : -1;
+    int td = n >= 5 ? coach_top_domain(&a) : -1;
+    if(bs >= 0 && td >= 0)
+        lv_label_set_text_fmt(st, "strong    %s, %s", coach_domain_name(td),
+                              coach_slot_name(bs));
+    else
+        lv_label_set_text_fmt(st, "total     %d session%s", (int)g_co.total_n,
+                              g_co.total_n == 1 ? "" : "s");
+
+    lv_obj_t *mk = lv_button_create(content);
+    lv_obj_set_style_radius(mk, 0, 0);
+    lv_obj_set_size(mk, 88, 28);
+    lv_obj_align(mk, LV_ALIGN_BOTTOM_LEFT, 10, -6);
+    lv_obj_add_event_cb(mk, co_marks_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *ml = lv_label_create(mk); lv_label_set_text(ml, "Marks"); lv_obj_center(ml);
+
+    lv_obj_t *wk = lv_button_create(content);
+    lv_obj_set_style_radius(wk, 0, 0);
+    lv_obj_set_size(wk, 88, 28);
+    lv_obj_align(wk, LV_ALIGN_BOTTOM_RIGHT, -10, -6);
+    lv_obj_add_event_cb(wk, co_week_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *wl = lv_label_create(wk); lv_label_set_text(wl, "Week"); lv_obj_center(wl);
+}
+
 void ui_init(void){
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, COL_BODY, 0);
@@ -5268,5 +6270,9 @@ void ui_init(void){
     lv_timer_create(ms_tick, 1000, NULL);        /* live Mines clock (no-op unless it's showing) */
     lv_timer_create(sd_tick, 1000, NULL);        /* live Sudoku clock (no-op unless it's showing) */
     lv_timer_create(zp_tick, 1000, NULL);        /* live Zip clock (no-op unless it's showing) */
+    /* Coach runs from ANY screen: the session must end correctly whether the
+     * user is on the lock screen, in a game, or in the Calculator. */
+    lv_timer_create(co_tick, 1000, NULL);
+    co_load();                                   /* resolve a session left running */
     ui_show_lock();
 }

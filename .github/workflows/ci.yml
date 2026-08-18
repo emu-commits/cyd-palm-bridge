@@ -76,6 +76,8 @@ jobs:
         run: make -C sim zip
       - name: Game play-clock (pause/resume) gate
         run: make -C sim clock
+      - name: Coach logic gate (advice rules, streaks, sigil)
+        run: make -C sim coach
       - name: Build + run the scripted UI tour (real ui.c, screenshots)
         run: make -C sim smoke
       - name: Convert screenshots to PNG

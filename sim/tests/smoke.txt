@@ -369,12 +369,17 @@ c 31 40
 t 300
 c 18 225
 t 300
-# Games (product roadmap): launcher app row 3 col 2 (the die icon) opens the Games
+# Games (product roadmap): launcher row 3 col 2 (the die icon) opens the Games
+# NOTE: adding Coach as the 9th app moved this column -- row 3 now holds three
+# icons (News 46 / Games 120 / Coach 194) instead of two, so the old x=169 landed
+# on Coach. The smoke gates on exit code, not pixels, so it passed while touring
+# the wrong app; the screenshots were the only evidence. Keep these in sync with
+# APPS[] in ui.c.
 # FOLDER -- an icon grid mirroring the launcher, one icon per game (Mines, Wordie).
 # Tap the Minesweeper mine icon (left) to open it. Minesweeper draws its 9x9 board on a
 # 1-bpp canvas; the first tap is always safe and floods open; then switch to Flag mode and
 # flag a cell. The board takes taps via PRESSED (resistive-panel robust). Pool-safe.
-c 169 160
+c 120 160
 t 300
 s games_menu
 c 40 55
@@ -397,7 +402,7 @@ t 300
 # Persistence: leave to the launcher, reopen Games -> Mines, and the dug board is
 # restored exactly (saved to /sdcard after every move). mines_persist must match
 # mines_dug, not a fresh board.
-c 169 160
+c 120 160
 t 300
 c 40 55
 t 400
@@ -411,7 +416,7 @@ t 300
 # The row scores with mono state tiles: filled=correct, double-border=present, slashed=absent;
 # used keys pick up the same states. Grid + keyboard are ONE pool-cheap I1 canvas; taps
 # hit-test via PRESSED. (The physical Graffiti strip also types letters on the device.)
-c 169 160
+c 120 160
 t 300
 c 120 55
 t 400
@@ -435,7 +440,7 @@ t 300
 # Persistence: leave to the launcher, reopen Games -> Wordie, and the scored guess
 # grid + keyboard states are restored (saved to /sdcard after every keystroke).
 # wordie_persist must match wordie_scored, not a fresh daily.
-c 169 160
+c 120 160
 t 300
 c 120 55
 t 400
@@ -447,7 +452,7 @@ t 300
 # tab, the first blank is pre-selected (thick border). Tap a number-pad digit to fill
 # it (the physical Graffiti strip also enters digits on the device), then reopen from
 # the folder to confirm the in-progress board persists (saved to /sdcard).
-c 169 160
+c 120 160
 t 300
 c 198 55
 t 400
@@ -457,7 +462,7 @@ t 300
 s sudoku_entered
 c 18 225
 t 300
-c 169 160
+c 120 160
 t 300
 c 198 55
 t 400
@@ -474,7 +479,7 @@ t 300
 # is correctly refused, and from the moment the pen crosses it the path draws along
 # the sweep until a number would come out of turn. That exercises the whole drag
 # path on ANY board. Cell centres are (60+24c, 56+24r).
-c 169 160
+c 120 160
 t 300
 c 120 108
 t 400
@@ -529,7 +534,7 @@ s zip_clock_running
 c 18 225
 t 300
 w 3000
-c 169 160
+c 120 160
 t 300
 c 120 108
 t 400
@@ -545,11 +550,128 @@ s zip_cleared
 c 18 225
 t 300
 # Persistence: reopen from the folder -- the cleared board comes back, not a new one.
-c 169 160
+c 120 160
 t 300
 c 120 108
 t 400
 s zip_persist
+c 18 225
+t 300
+# Coach (the centrepiece: ritual focus timer). Launcher row 3 col 3 -- the
+# hourglass. The flow is Today -> three ritual taps -> draw a sigil -> a SEALED
+# full-screen session -> reflect -> note, and it writes a Memo + a Date Book block
+# on the way out. Every screen here is labels, buttons and one button-matrix; the
+# only canvas is the sigil, which reuses game_cv_buf.
+c 194 160
+t 400
+s coach_today
+# Start -> Energy? -> High
+c 120 103
+t 400
+s coach_ritual_energy
+c 195 107
+t 400
+# Focus on? -> Career (row 1 col 1)
+s coach_ritual_domain
+c 64 103
+t 400
+# Intention? -> Finish
+s coach_ritual_intent
+c 45 107
+t 400
+s coach_sigil_empty
+# THE SIGIL: one stroke in the Graffiti area becomes the session's mark. It is
+# captured through graf_capture_hook (raw points, never recognized as a letter) and
+# normalised by coach_sigil_from_raw. A regression here draws nothing.
+d 70 230
+t 25
+m 100 300
+t 25
+m 140 230
+t 25
+m 170 300
+t 25
+u
+t 500
+s coach_sigil_drawn
+# Begin -> SEALED MODE: a full-screen takeover on lv_layer_top() that covers the
+# Graffiti strip and the silkscreen row, so Home/Menu/Find/Calc are unreachable.
+c 186 189
+t 600
+s coach_sealed
+# Proof of the seal: tapping silkscreen Home must NOT escape the session.
+# coach_sealed_home must be IDENTICAL to coach_sealed.
+c 18 225
+t 400
+s coach_sealed_home
+# UI_DEVTOOLS-only corner target ends the session immediately (a real one runs 25
+# minutes, and the menu is sealed away, so CI has no other route to these screens).
+# It jumps the clock, so co_tick() takes the true T-0 path.
+c 13 13
+t 1200
+s coach_reflect
+# Struggled -> the blocker question only appears for this answer
+c 195 113
+t 400
+s coach_blocker
+c 176 133
+t 400
+s coach_note
+# Skip the note -> Today. The session still exports a Date Book block.
+c 192 188
+t 500
+s coach_today_after
+# The marks wall: the stroke drawn above, kept.
+c 54 188
+t 500
+s coach_marks
+c 18 225
+t 300
+# A SECOND session, abandoned via the five-second press-and-hold, so the wall shows
+# a hollow mark beside the solid one and the streak breaks. `w` burns real time --
+# the hold is measured in lv ticks, so `t` alone would never trip it.
+c 194 160
+t 400
+c 120 103
+t 400
+c 45 107
+t 400
+c 176 103
+t 400
+c 120 107
+t 400
+d 60 240
+t 25
+m 180 280
+t 25
+u
+t 400
+c 186 189
+t 600
+d 120 288
+w 6000
+u
+t 600
+s coach_gaveup
+c 54 188
+t 600
+s coach_marks_hollow
+c 18 225
+t 300
+# The weekly report: counts, the domain histogram, the best/worst read-outs, and
+# the deterministic advice line (coach_advise, gated by `make -C sim coach`).
+c 194 160
+t 400
+c 186 188
+t 600
+s coach_week
+c 18 225
+t 300
+# The session exported a real Date Book record, so it rides the next HotSync to
+# iCloud. It must be on today's day view.
+c 40 55
+t 500
+s coach_export_cal
 c 18 225
 t 300
 # I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.

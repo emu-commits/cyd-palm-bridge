@@ -30,7 +30,7 @@ CFLAGS := -O2 -g -Wall -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS $(INC)
 APP_SRCS := \
     $(FW)/ui.c $(FW)/data.c $(FW)/graffiti.c $(FW)/appcfg.c $(FW)/clock.c \
     $(FW)/lv_font_palm.c $(FW)/lv_font_palm_bold.c $(FW)/lv_font_kana.c $(FW)/palm_icons.c \
-    $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(FW)/dash.c $(FW)/minesweeper.c $(FW)/wordie.c $(FW)/sudoku.c $(FW)/zip.c \
+    $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(FW)/dash.c $(FW)/minesweeper.c $(FW)/wordie.c $(FW)/sudoku.c $(FW)/zip.c $(FW)/coach.c \
     $(BR)/pdb.c $(BR)/datebook.c $(BR)/address.c $(BR)/todo.c $(BR)/appinfo.c \
     $(BR)/ical.c $(BR)/vcard.c $(BR)/tz.c $(BR)/charset.c \
     $(BR)/find.c $(BR)/calc.c $(BR)/config.c $(BR)/rss.c $(BR)/news.c $(BR)/feeds.c \
@@ -43,7 +43,7 @@ WRAP_LD := -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free
 LVGL_SRCS := $(shell find lvgl/src -name '*.c' 2>/dev/null)
 LVGL_OBJS := $(patsubst lvgl/src/%.c,build/lvgl/%.o,$(LVGL_SRCS))
 
-.PHONY: host wasm smoke smoke32 graf mines wordie sudoku zip clock games clean lvgl-src
+.PHONY: host wasm smoke smoke32 graf mines wordie sudoku zip clock coach games clean lvgl-src
 
 # LVGL_SRCS is evaluated when make parses this file, so on a clean checkout the
 # source must be fetched BEFORE the build graph is used: the entry points fetch,
@@ -143,8 +143,17 @@ build/clock_test: tests/clock_test.c $(FW)/playclock.h
 	@mkdir -p build
 	$(CC) -O2 -Wall -I$(FW) tests/clock_test.c -o $@
 
+# ---- coach: host gate for the pure Coach logic (advice rules, streaks, sigil
+# normalisation). Clock- and zone-injected, so it needs no LVGL and no sleeping. ----
+coach: build/coach_test
+	./build/coach_test
+
+build/coach_test: tests/coach_test.c $(FW)/coach.c $(FW)/coach.h
+	@mkdir -p build
+	$(CC) -O2 -Wall -I$(FW) tests/coach_test.c $(FW)/coach.c -o $@
+
 # ---- games: every game's logic gate in one go (what CI runs). ----
-games: mines wordie sudoku zip clock
+games: mines wordie sudoku zip clock coach
 
 # ---- wasm: everything compiled by emcc in one shot (CI build; no local emcc needed).
 # 32-bit wasm => the TRUE 24 KB device pool applies (see lv_conf.h). main() boots
