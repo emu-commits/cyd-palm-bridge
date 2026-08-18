@@ -20,7 +20,8 @@
 
 /* ---- the ritual's fixed vocabularies (indices are persisted: never reorder) ---- */
 enum { CO_ENERGY_LOW, CO_ENERGY_MED, CO_ENERGY_HIGH, CO_NENERGY };
-enum { CO_DOM_CAREER, CO_DOM_HEALTH, CO_DOM_LEARN, CO_DOM_CREATE, CO_NDOM };
+enum { CO_DOM_CAREER, CO_DOM_HEALTH, CO_DOM_LEARN, CO_DOM_CREATE,
+       CO_DOM_FAMILY, CO_DOM_PEOPLE, CO_NDOM };
 enum { CO_INT_FINISH, CO_INT_EXPLORE, CO_INT_MAINTAIN, CO_NINT };
 enum { CO_RES_GREAT, CO_RES_OKAY, CO_RES_STRUGGLED, CO_RES_ABANDONED, CO_NRES };
 enum { CO_BLK_NONE, CO_BLK_TIRED, CO_BLK_KIDS, CO_BLK_WORK, CO_BLK_DISTRACT, CO_NBLK };
@@ -41,7 +42,7 @@ typedef struct {
     uint32_t start;        /* epoch the session began                        */
     uint16_t planned_min;
     uint16_t actual_min;   /* wall minutes actually run, pauses excluded     */
-    uint8_t  domain;       /* CO_DOM_*                                       */
+    uint8_t  domain;       /* CO_DOM_* -- a whole byte, so the list can grow  */
     uint8_t  energy;       /* CO_ENERGY_*                                    */
     uint8_t  intent;       /* CO_INT_*                                       */
     uint8_t  outcome;      /* result | blocker << 3 -- see co_pack()         */

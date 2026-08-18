@@ -105,6 +105,24 @@ int main(void){
         CK(coach_energy_great_pct(&a, CO_ENERGY_HIGH) == 50, "high energy is 50% Great");
         CK(coach_energy_great_pct(&a, CO_ENERGY_MED) == -1,  "no data reads -1, not 0");
         CK(a.planned_lo == 25 && a.planned_hi == 25,         "length range is flat");
+        /* The domain list grew (Family, Relationships) after the first release.
+         * `domain` is a whole byte on disk, so the new values must fold like any
+         * other and every value must still name itself -- an unnamed domain would
+         * print as an empty column in the weekly report rather than fail loudly. */
+        CoachRec grown[] = {
+            mk(9,  CO_DOM_FAMILY, CO_ENERGY_MED, CO_RES_GREAT, CO_BLK_NONE, 25, 25),
+            mk(10, CO_DOM_PEOPLE, CO_ENERGY_MED, CO_RES_GREAT, CO_BLK_NONE, 25, 25),
+            mk(11, CO_DOM_PEOPLE, CO_ENERGY_MED, CO_RES_OKAY,  CO_BLK_NONE, 25, 25),
+        };
+        CoachAgg g; feed(&g, grown, 3, 0);
+        CK(g.n == 3,                          "the added domains are not rejected");
+        CK(g.dom[CO_DOM_FAMILY] == 1,         "folds Family");
+        CK(g.dom[CO_DOM_PEOPLE] == 2,         "folds Relationships");
+        CK(coach_top_domain(&g) == CO_DOM_PEOPLE, "top domain can be a new one");
+        for(int d = 0; d < CO_NDOM; d++)
+            CK(coach_domain_name(d)[0] != 0,  "every domain index has a name");
+        CK(coach_domain_name(CO_NDOM)[0] == 0, "one past the end names nothing");
+
         /* a corrupt record (out-of-range enum from a truncated file) is dropped,
          * not folded in as garbage */
         CoachRec junk = mk(9, 99, 99, 99, 99, 25, 25);

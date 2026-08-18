@@ -565,19 +565,23 @@ t 300
 c 194 160
 t 400
 s coach_today
-# Start -> Energy? -> High
-c 120 103
+# Start -> Energy? -> High. Every ritual step now carries a line of explanatory
+# copy under its question, which pushed the button-matrix down to content y=48
+# (screen y=72). Screen y = content y + TITLE_H.
+c 120 129
 t 400
 s coach_ritual_energy
-c 195 107
+c 195 100
 t 400
-# Focus on? -> Career (row 1 col 1)
+# Focus on? -> Career. SIX domains now (Family and Relationships were added), so
+# this is a 2-wide x 3-tall grid spanning screen y 72..176: column centres x=64/176,
+# row centres y=89/124/159. Career is row 1 col 1.
 s coach_ritual_domain
-c 64 103
+c 64 90
 t 400
 # Intention? -> Finish
 s coach_ritual_intent
-c 45 107
+c 45 100
 t 400
 s coach_sigil_empty
 # THE SIGIL: one stroke in the Graffiti area becomes the session's mark. It is
@@ -625,6 +629,11 @@ s coach_today_after
 c 54 188
 t 500
 s coach_marks
+# ...and it is no longer a dead end: "back" (bottom-left) returns to Coach's own
+# home screen instead of forcing a trip out through the silkscreen.
+c 19 194
+t 400
+s coach_marks_back
 c 18 225
 t 300
 # A SECOND session, abandoned via the five-second press-and-hold, so the wall shows
@@ -632,13 +641,13 @@ t 300
 # the hold is measured in lv ticks, so `t` alone would never trip it.
 c 194 160
 t 400
-c 120 103
+c 120 129
 t 400
-c 45 107
+c 45 100
 t 400
-c 176 103
+c 176 90
 t 400
-c 120 107
+c 120 100
 t 400
 d 60 240
 t 25
@@ -665,6 +674,25 @@ t 400
 c 186 188
 t 600
 s coach_week
+c 19 194
+t 400
+s coach_week_back
+# Menu > Length / Day goal cycle their value WITHOUT dismissing the sheet. They are
+# the only menu rows that change a setting rather than navigate, and closing on tap
+# hid the result of the tap. coach_menu_len must still show the pull-down, now
+# reading "Length: 45 min", with the home screen's Start button restated behind it.
+c 18 300
+t 400
+s coach_menu
+c 79 110
+t 400
+s coach_menu_len
+c 79 136
+t 400
+s coach_menu_goal
+c 200 60
+t 400
+s coach_menu_closed
 c 18 225
 t 300
 # The session exported a real Date Book record, so it rides the next HotSync to

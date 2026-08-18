@@ -207,16 +207,21 @@ starts with a **feasibility check on the base CYD** before committing to a build
 
 ## Needs hardware — on-device verifies (written, awaiting flash)
 
-- **`[device]` Coach on glass — NOTES PASS PENDING (2026-08-18).** Flashed and
-  boot-verified; general behaviour confirmed working by the owner. A round of usage
-  notes is coming. Two things the simulator structurally cannot judge, worth checking
-  first:
+- **`[device]` Coach on glass — NOTES ROUND 1 DONE (2026-08-18), ROUND 2 OPEN.**
+  Six notes came back from the first real use and are all shipped (icon, back links
+  out of Marks/This-week, non-dismissing Length/Day-goal rows, on-screen explanation
+  of what the app is, Family + Relationships domains, sigil scaled to fit its
+  control). See the `2026-08-18` entry in `BUILD_PROGRESS.md`. Still open, and still
+  the things the simulator structurally cannot judge:
   - **Does the 15% session dim read as intentional, or as a fault?** On the sim it is
     just a number; on the real panel a dim backlight can look like a failure. Tune
-    `CO_DIM_PCT` if it reads wrong.
-  - **Sigil legibility at ~30 px on the Marks wall.** A mark that reads well at 200 px
-    may be mush in a 38 px cell. Already flagged as an open risk in `COACH_DESIGN.md`;
-    the fix, if needed, is a minimum stroke-extent check at capture time.
+    `CO_DIM_PCT` if it reads wrong. **Not raised in round 1 — may be fine.**
+  - **Hollow (gave-up) marks on the wall are faint.** Now that the wall renders whole
+    marks at 30 px, the solid ones read well; the stippled ones are close to invisible
+    at that size — the 50% parity stipple leaves ~1 px of ink on a 2 px stroke. A
+    thicker stroke for hollow marks, or a different "gave up" treatment (a slash
+    through the cell?), would fix it. Not raised in round 1, but visible in
+    `coach_marks_hollow`.
   - Also worth a look: the five-second give-up hold (too long? too short?), whether
     the exported Date Book block is welcome or noise (it is opt-in, default on), and
     whether the ritual's three questions are the right three.
@@ -401,7 +406,7 @@ save/delete *and* config-field save), and the brightness-stepper freeze fix.
 **Coach (2026-08-17)** — the ritual focus timer, and the first app built from a
 written design spec (`COACH_DESIGN.md`) rather than straight into `ui.c`. Sigil
 capture, sealed mode, the six-rule advice engine (68 host assertions), the marks
-wall, the weekly report, and Memo + Date Book export. 194 B of static DRAM, zero new
+wall, the weekly report, and Memo + Date Book export. 226 B of static DRAM, zero new
 canvas buffers. Merged in #39 and flashed; **the on-glass notes pass is still open**
 (below).
 

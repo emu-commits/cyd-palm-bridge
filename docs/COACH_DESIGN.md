@@ -4,10 +4,23 @@ _Written 2026-08-17. A ritual-based focus timer for a device that physically can
 notify you. You draw a mark, the screen seals itself, and the mark fills with ink
 while you work._
 
-**Status: BUILT + merged (PR #39, `f487801`), flashed and boot-verified on the bench.**
-Costs in §8 are measured off the built ELF, not estimated. The on-glass notes pass is
-open — see `BACKLOG.md`. §9 (RTC / piezo / ESP-NOW) is specified but **not approved**;
-nothing in §1–§8 depends on it.
+**Status: BUILT + merged (PR #39, `f487801`), flashed and boot-verified on the bench.
+Revised 2026-08-18 after the first round of on-glass notes.** Costs in §8 are measured
+off the built ELF, not estimated. §9 (RTC / piezo / ESP-NOW) is specified but **not
+approved**; nothing in §1–§8 depends on it.
+
+**Changed by notes round 1 (2026-08-18)** — the changelog entry in `BUILD_PROGRESS.md`
+has the reasoning; the spec below is updated to match:
+- Six domains, not four: **Family** and **Relationships** were added. `domain` is a
+  whole byte on disk, so existing `coach.log` files stay readable.
+- The launcher icon is a **stopwatch**, not an hourglass.
+- Marks and This-week carry a **back** link; the Marks wall shows 18 marks (3x6),
+  not 24, to make room for it without shrinking a mark below 30 px.
+- Menu **Length** and **Day goal** cycle their value without dismissing the sheet.
+- The home screen and each ritual step carry **explanatory copy**; the Start button
+  names the session length.
+- The sigil preview is drawn to fit its canvas (see the `lv_canvas` centre-crop lesson
+  in `BUILD_PROGRESS.md`).
 
 Published design: https://claude.ai/code/artifact/e272936c-dd92-451c-922e-9a7152f0689d
 
@@ -26,7 +39,7 @@ tomorrow.
 fifteen seconds of interaction around twenty-five minutes of work. Everything below is
 subordinate to that.
 
-**Cost (measured on the built firmware):** 194 bytes of static DRAM out of the
+**Cost (measured on the built firmware):** 226 bytes of static DRAM out of the
 37,328 free, +12 KB of flash, and **zero new canvas buffers**. Coach is the cheapest
 app in the firmware.
 
@@ -272,21 +285,22 @@ hours that's a defensible record. Both are opt-in from Menu ▸ Coach, default o
 
 | Budget | Coach | Notes |
 |---|---|---|
-| Static `.bss` | **194 B** | `g_co_sig` 80 + `g_co` 44 + 70 in widget pointers and flags |
-| Total DRAM delta | **336 B** | window went 37,328 -> 36,992 free |
+| Static `.bss` | **226 B** | `g_co_sig` 80 + `g_co` 44 + 102 in widget pointers, box geometry and flags |
+| Total DRAM delta | **336 B** | window went 37,328 -> 36,992 free (measured at the 194 B build; +32 B of statics since, not re-measured on glass) |
 | Canvas buffers | 0 B | sigil reuses `game_cv_buf`; sealed mode guarantees exclusivity |
 | LVGL pool, 24 KB gate | **passes** | `make -C sim smoke32` runs the whole Coach tour at device pool size |
 | Sim heap peak, full tour | 2,236 B | of a 147,456 B budget, with every app exercised |
 | Flash | **+12,141 B** | image 1,460,739 -> 1,472,880; 53% of the app partition still free |
 
-I estimated ~148 bytes when writing this spec; the build says 194. The gap is the
-widget pointers, which I had waved at rather than counted. Recorded here as measured
-rather than quietly left as the estimate.
+I estimated ~148 bytes when writing this spec; the first build said 194, and the
+2026-08-18 notes round took it to 226. The original gap was the widget pointers, which
+I had waved at rather than counted. Recorded here as measured rather than quietly left
+as the estimate.
 
 Coach is the cheapest app in the firmware -- cheaper than Wordie, cheaper than the
 dashboard, even with the sigil. That isn't luck: it's mostly text, counters, and one
 1-bpp canvas that already exists. Compare the BLE mesh analysis: that failed the link
-by 24,064 bytes before any application code existed. This asks for 194.
+by 24,064 bytes before any application code existed. This asks for 226.
 
 One thing to watch: the weekly report has the highest label count in the app. If it
 grows past what's drawn here, it converts to an `lv_table` — the same move that fixed
