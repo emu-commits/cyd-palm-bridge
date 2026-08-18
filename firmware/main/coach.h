@@ -16,6 +16,7 @@
 #ifndef COACH_H
 #define COACH_H
 #include <stdint.h>
+#include "playclock.h"   /* the pausable session timer -- already host-tested */
 
 /* ---- the ritual's fixed vocabularies (indices are persisted: never reorder) ---- */
 enum { CO_ENERGY_LOW, CO_ENERGY_MED, CO_ENERGY_HIGH, CO_NENERGY };
@@ -65,6 +66,7 @@ typedef struct {
     uint32_t  magic;
     /* --- the live session (phase == CO_PH_IDLE means none) --- */
     uint32_t  start;       /* epoch the live session began                   */
+    PlayClock clk;         /* elapsed, pausable; keeps running off-screen     */
     uint16_t  planned_min;
     uint8_t   domain, energy, intent;
     uint8_t   phase;       /* CO_PH_*                                        */

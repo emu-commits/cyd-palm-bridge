@@ -21,8 +21,9 @@ tomorrow.
 fifteen seconds of interaction around twenty-five minutes of work. Everything below is
 subordinate to that.
 
-**Cost:** ~148 bytes of static DRAM out of the 37,328 free, and **zero new canvas
-buffers**. Coach is the cheapest app in the firmware.
+**Cost (measured on the built firmware):** 194 bytes of static DRAM out of the
+37,328 free, +12 KB of flash, and **zero new canvas buffers**. Coach is the cheapest
+app in the firmware.
 
 ---
 
@@ -261,23 +262,26 @@ hours that's a defensible record. Both are opt-in from Menu ▸ Coach, default o
 
 ## 8. What it costs
 
-Measured against the shipping firmware: 37,328 bytes free in the static DRAM window,
-32 KB LVGL pool, ~155 KB free heap at boot.
+**These are measured on the built firmware, not estimated.** Baseline before Coach:
+37,328 bytes free in the static DRAM window, 32 KB LVGL pool, ~155 KB free heap.
 
 | Budget | Coach | Notes |
 |---|---|---|
-| Static `.bss` | ~148 B | `CoachState` (48) + live `CoachSigil` (80) + pointers |
+| Static `.bss` | **194 B** | `g_co_sig` 80 + `g_co` 44 + 70 in widget pointers and flags |
+| Total DRAM delta | **336 B** | window went 37,328 -> 36,992 free |
 | Canvas buffers | 0 B | sigil reuses `game_cv_buf`; sealed mode guarantees exclusivity |
-| LVGL pool, peak | ~2.5 KB | Weekly report, ~14 labels — lighter than the launcher grid |
-| LVGL pool, running | ~0.6 KB | takeover is 1 canvas + 3 labels; no button-matrix on screen |
-| Heap, transient | ~1 KB | read buffers + `CoachAgg` on the stack |
-| Flash | ~18 KB | `coach.c`, the screens, sigil rendering, one A8 icon |
-| **Static DRAM used** | **148 / 37,328** | **0.4% of what's left** |
+| LVGL pool, 24 KB gate | **passes** | `make -C sim smoke32` runs the whole Coach tour at device pool size |
+| Sim heap peak, full tour | 2,236 B | of a 147,456 B budget, with every app exercised |
+| Flash | **+12,141 B** | image 1,460,739 -> 1,472,880; 53% of the app partition still free |
 
-Coach is the cheapest app in the firmware — cheaper than Wordie, cheaper than the
+I estimated ~148 bytes when writing this spec; the build says 194. The gap is the
+widget pointers, which I had waved at rather than counted. Recorded here as measured
+rather than quietly left as the estimate.
+
+Coach is the cheapest app in the firmware -- cheaper than Wordie, cheaper than the
 dashboard, even with the sigil. That isn't luck: it's mostly text, counters, and one
-1-bpp canvas that already exists. Compare the BLE mesh analysis: that failed the link by
-24,064 bytes before any application code existed. This asks for 148.
+1-bpp canvas that already exists. Compare the BLE mesh analysis: that failed the link
+by 24,064 bytes before any application code existed. This asks for 194.
 
 One thing to watch: the weekly report has the highest label count in the app. If it
 grows past what's drawn here, it converts to an `lv_table` — the same move that fixed

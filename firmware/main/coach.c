@@ -289,8 +289,10 @@ int coach_sigil_from_raw(CoachSigil *sg, const int16_t *xy, int n){
     int minx = xy[0], maxx = xy[0], miny = xy[1], maxy = xy[1];
     for(int i = 1; i < n; i++){
         int x = xy[2*i], y = xy[2*i + 1];
-        if(x < minx) minx = x;  if(x > maxx) maxx = x;
-        if(y < miny) miny = y;  if(y > maxy) maxy = y;
+        if(x < minx) minx = x;
+        if(x > maxx) maxx = x;
+        if(y < miny) miny = y;
+        if(y > maxy) maxy = y;
     }
     int w = maxx - minx, h = maxy - miny;
     int span = w > h ? w : h;
@@ -309,8 +311,10 @@ int coach_sigil_from_raw(CoachSigil *sg, const int16_t *xy, int n){
         int src = keep > 1 ? (int)((long)i * (n - 1) / (keep - 1)) : 0;
         int x = ((xy[2*src]     - minx) + offx) * 100 / span;
         int y = ((xy[2*src + 1] - miny) + offy) * 100 / span;
-        if(x < 0) x = 0;  if(x > 100) x = 100;
-        if(y < 0) y = 0;  if(y > 100) y = 100;
+        if(x < 0) x = 0;
+        if(x > 100) x = 100;
+        if(y < 0) y = 0;
+        if(y > 100) y = 100;
         sg->xy[2*i]     = (int8_t)x;
         sg->xy[2*i + 1] = (int8_t)y;
     }

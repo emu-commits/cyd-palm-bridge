@@ -11,6 +11,7 @@ extern const lv_image_dsc_t icon_mines;     /* Minesweeper (Games sub-launcher) 
 extern const lv_image_dsc_t icon_wordie;    /* Wordie (Games sub-launcher) */
 extern const lv_image_dsc_t icon_sudoku;    /* Sudoku (Games sub-launcher) */
 extern const lv_image_dsc_t icon_zip;       /* Zip path puzzle (Games sub-launcher) */
+extern const lv_image_dsc_t icon_coach;     /* Coach focus timer (ritual Pomodoro) */
 /* silkscreen buttons (flank the Graffiti area) */
 extern const lv_image_dsc_t silk_home, silk_menu, silk_find, silk_calc;
 #endif
