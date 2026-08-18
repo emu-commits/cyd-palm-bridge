@@ -272,7 +272,7 @@ auto-advancing selectors (energy / domain / intention), one Graffiti mark, a sea
    (and the optional note as a Memo), so the next HotSync puts your real focus hours in
    iCloud. For anyone who bills time, that alone justifies the purchase.
 
-**It cost almost nothing:** 194 bytes of static DRAM out of 37,328 free, and **zero new
+**It cost almost nothing:** 226 bytes of static DRAM out of 37,328 free, and **zero new
 canvas buffers** — sealed mode makes it impossible to open a game mid-session, so the
 sigil canvas reuses `game_cv_buf`. For scale, the BLE mesh analysis failed the link by
 24,064 bytes before any application code existed.

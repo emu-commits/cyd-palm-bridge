@@ -11,6 +11,52 @@ What was built, and the non-obvious things that cost time to learn. This is the
 
 ## Milestone changelog (newest first)
 
+### 2026-08-18 — Coach: first on-glass notes pass
+Six changes from the first real round of use on the device, plus one bug those notes
+led to. Nothing here changed the session model or the on-disk formats.
+- **The launcher icon is a stopwatch, not an hourglass.** The hourglass read as
+  "waiting"; Coach is about working. Tried and rejected a runner silhouette in front of
+  the dial — at 24x22 with 2 px limbs it collapses into a blob, both as line art and as
+  a knockout on a solid dial. The stopwatch (crown, two side nubs, hands) is the only
+  version that survives the size, and it matches the line weight of the Palm icons
+  beside it. Generated from `scratchpad/mkicon.py`-style code, not hand-poked.
+- **Marks and This-week were dead ends.** Both are reachable from the home screen and
+  from the menu, but neither had a way back to Coach — you had to leave the app through
+  the silkscreen. Both now carry the same bottom-left `back` affordance the ritual steps
+  use; `co_link()` is the shared builder, `co_back_link()` walks back one ritual step and
+  `co_home_link()` returns to the app home.
+- **Length and Day goal no longer dismiss the menu.** They are the only menu rows that
+  *change a value* rather than navigate, so closing the sheet on tap hid the very thing
+  the tap did — you had to reopen the menu to see what you had set. They now restate
+  themselves in place (`co_menu_restate()`) and repaint the home screen underneath.
+  Safe because the sheet lives on `lv_layer_top()`: rebuilding `content` leaves it up.
+  `g_co_view` tracks which Coach screen is behind the sheet so only the home screen is
+  rebuilt, and `menu_close()` nulls the two label pointers that lived on it.
+- **The app explains itself.** The home screen was a bare Start button — you were asked
+  to commit to something unnamed, and because a session seals the display that is a
+  bigger commitment than it looks. It now carries a line about what Coach *is*, the
+  Start button names the length ("Start 25 min"), and each ritual step has a plain
+  sentence under its question. The home copy deliberately does **not** narrate the next
+  screens ("pick a domain, draw a mark") — that is meaningless before you have seen them
+  and redundant after.
+- **Six domains, not four.** Family and Relationships joined Career / Health / Learning /
+  Creative. The domain is what the weekly report hands back to you, so leaving them out
+  meant time spent on the people in your life scored as nothing at all. `domain` is a
+  whole byte on disk, so **appending leaves every existing `coach.log` readable** — the
+  gate pins that, along with every index naming itself. The ritual grid became 2x3 and
+  the weekly report now prints only the domains actually used (six rows of mostly zeros
+  pushed the advice line, the point of the screen, off the bottom).
+- **The sigil is drawn to fit its control** — see the lesson below; this was the real
+  bug behind "the mark is scaled beyond the space of the display control".
+- Marks wall went from 24 marks to 18 (3 rows of 6). The back link took a strip off the
+  foot, and the choice was 24 at 26 px or 18 at 30 px; at this size a mark is already
+  near the edge of legible, so the count gave way.
+- Coach's static RAM: **194 B -> 226 B** (measured off the ELF). The 32 B is the box
+  geometry, the two live menu labels and `g_co_view`.
+- Gates: `make -C sim coach` (now also covers the grown domain list), `make -C sim smoke`
+  and `smoke32` — the tour was re-coordinated for the new layouts and extended with
+  `coach_marks_back`, `coach_week_back` and the three `coach_menu*` shots.
+
 ### 2026-08-17 — Coach: the ritual focus timer (sigil + sealed mode)
 The centrepiece app from `docs/COACH_DESIGN.md`. Six taps and one stroke per session,
 no typing: three auto-advancing ritual selectors (energy / domain / intention — there
@@ -74,8 +120,9 @@ Graffiti stroke, then a sealed 25-minute session, then two taps to record how it
   **There is no SPIFFS partition on this device** — `partitions.csv` is `nvs` +
   `phy_init` + a 3 MB `factory` app, and that is all of the 4 MB. SD via FatFs, like
   every other app.
-- **RAM — measured off the ELF, not estimated.** `194 B` of static `.bss`
-  (`g_co_sig` 80 + `g_co` 44 + 70 of pointers/flags), **336 B** total DRAM delta
+- **RAM — measured off the ELF, not estimated.** `194 B` of static `.bss` at this
+  build, `226 B` after the 2026-08-18 notes round
+  (`g_co_sig` 80 + `g_co` 44 + the rest in pointers/flags), **336 B** total DRAM delta
   (37,328 → 36,992 free), **+12,141 B** flash. Confirmed on hardware: free heap at boot
   went 155,412 → **155,076**, exactly the 336 B. The spec had estimated ~148 B; the gap
   was the widget pointers, waved at rather than counted.
@@ -436,6 +483,11 @@ GUI needs ~300 KB of buffers — we render in partial strips instead.
 - **`smoke32` leaves 32-bit objects behind.** It runs `make clean` and rebuilds
   everything `-m32`, so the next plain `make -C sim host`/`smoke` fails to link
   against the 32-bit `liblvgl.a`. Always `make -C sim clean` after a `smoke32` run.
+- **The sim's `/sdcard` persists between runs.** The smoke appends to real files
+  (`coach.log`, `coach.sig`, the PDBs), so a second run starts with the first run's data
+  and screenshots stop matching what the script just did — a Marks wall reading "Last 2
+  marks" after one session sent me hunting a rendering bug that was not there. CI is
+  always fresh; locally, wipe the SD root before trusting a screenshot.
 - **THE 24 KB POOL TRAP.** The 64-bit native sim gets a **48 KB** LVGL pool (LP64
   objects are ~2x bigger); the wasm build and the device get the **true 24 KB**. A
   screen with too many widgets can pass the native smoke and still **fail to boot on
@@ -444,6 +496,14 @@ GUI needs ~300 KB of buffers — we render in partial strips instead.
   `gcc-multilib libc6-dev-i386`). The lock screen keeps its footprint down by not
   coexisting with other screens: it clears the content area and defers the launcher,
   so the pool only ever holds the chrome + one screen.
+- **`lv_canvas` is an `lv_image`, so shrinking the OBJECT centre-crops the buffer.**
+  Not "clips from the top" — it takes a band off **both** ends. Coach drew its sigil into
+  a 240x164 buffer and then called `lv_obj_set_height()` to fit the control, which
+  quietly ate ~23 px off the top and bottom of every mark; on the Marks wall it left only
+  the bottom tips of the strokes showing. The fix is to hand the height you want to
+  **`lv_canvas_set_buffer()`** and never resize the object — `game_cv_buf` is allocated
+  for the full 240x164, so a shorter canvas simply uses fewer rows of it. Anything that
+  draws into a shared canvas buffer at less than full height needs this.
 - **The smoke script navigates by pixel coordinates**, so launcher/folder grid
   geometry matters — adding an app or a game reflows a row and moves every tap after
   it. The Games folder now wraps to a second row (Zip sits there).

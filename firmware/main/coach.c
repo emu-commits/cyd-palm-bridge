@@ -58,6 +58,8 @@ const char *coach_domain_name(int dom){
         case CO_DOM_HEALTH: return "Health";
         case CO_DOM_LEARN:  return "Learning";
         case CO_DOM_CREATE: return "Creative";
+        case CO_DOM_FAMILY: return "Family";
+        case CO_DOM_PEOPLE: return "Relationships";
     }
     return "";
 }
