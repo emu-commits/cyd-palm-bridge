@@ -11,6 +11,78 @@ What was built, and the non-obvious things that cost time to learn. This is the
 
 ## Milestone changelog (newest first)
 
+### 2026-08-17 — Coach: the ritual focus timer (sigil + sealed mode)
+The centrepiece app from `docs/COACH_DESIGN.md`. Six taps and one stroke per session,
+no typing: three auto-advancing ritual selectors (energy / domain / intention — there
+is no Next button anywhere, which is what makes it a ritual rather than a form), one
+Graffiti stroke, then a sealed 25-minute session, then two taps to record how it went.
+- **The sigil — the stroke you draw IS the progress bar.** Captured through
+  `graf_capture_hook` on pen-up, which runs *before* recognition and consumes the
+  stroke, so the mark is never fed to the recognizer and never has to resemble a
+  letter. `graffiti_raw_stroke()` (already built for the Kana trainer) hands back the
+  polyline; `coach_sigil_from_raw()` normalises it to a 0..100 box with aspect
+  preserved, decimating strokes past 39 points while keeping both endpoints. **80
+  bytes per session.**
+  - **The fill is a parity test, not a second buffer.** The mark draws as a thick band
+    that is solid below the fill line and **50% stippled above it** — `if(y >= fill_y
+    || ((x ^ y) & 1) == 0)` in the plot function. "Half inked" therefore needs no alpha,
+    no second canvas, and no compositing, which is exactly the Palm mono idiom. The
+    fill advances **once a minute** (25 repaints across a 25-minute session); only the
+    `MM:SS` label ticks at 1 Hz.
+  - Finished marks are kept in `coach.sig` and tiled on a Marks wall. Abandoned
+    sessions keep their mark but render **hollow** (stippled throughout), so the wall
+    stays honest.
+- **Sealed mode — the session cannot be escaped by the obvious control.** The running
+  screen is a full-screen takeover on `lv_layer_top()`, which covers the Graffiti strip
+  and the silkscreen row, so Home/Menu/Find/Calc are unreachable **because they are
+  underneath, not because they were disabled** — there is no re-enable path to forget.
+  `ui_show_lock()` early-returns while sealed, so the port layer's wake-and-raise shows
+  your mark instead of the dashboard. Giving up costs a **five-second press-and-hold**
+  and breaks the streak.
+  - **The seal pays for its own buffer.** Because you cannot open a game mid-session,
+    the sigil canvas reuses `game_cv_buf` outright — Coach adds **no canvas storage at
+    all**. This is the same mutual-exclusion argument that collapsed the four game
+    buffers into one, applied one step further.
+  - Verified **byte-for-byte** in the smoke: the tour taps silkscreen Home mid-session
+    and screenshots again; `coach_sealed.ppm` and `coach_sealed_home.ppm` are identical
+    files.
+- **`coach.c` / `coach.h` — pure, no stdio, no LVGL.** Same split as `minesweeper.c`:
+  `ui.c` owns the pixels, the file I/O, and every user-facing string; `coach.c` owns the
+  arithmetic. **Every wall-clock input is injected** (`coach_day_index(epoch,
+  tz_off_min)`, never a `time()` or TZ read inside), which is what makes the advice
+  testable on any host in any locale — `make -C sim coach`, **68 assertions**.
+  - `coach_advise()` runs six rules in fixed priority, first match wins, all integer
+    math. **R0 stays silent under five sessions**, which is what protects the
+    credibility of the other five. Each rule in the gate is paired with a **near-miss
+    that must NOT fire**: bad *mornings* must not say "shift earlier", full-length
+    struggles must not say "try shorter", a session length already in motion must not
+    say "increase".
+  - **Local-day arithmetic floors, it does not truncate.** `a / b` toward zero puts a
+    22:00 EDT session on the wrong local day (the negative-offset case); the streak
+    counts in local days, so this is load-bearing.
+  - `coach_streak_now()` decays a stored streak on its own — a stale save cannot show a
+    nine-day streak from last month. A **backwards clock** (no RTC; SNTP corrects the
+    epoch mid-week) resets the streak rather than inflating it.
+- **Exports: the data leaves the device.** A finished session writes a Date Book block
+  via `data_save_cal()` and, if you wrote one, the note as a Memo via
+  `data_save_memo()` — both ride the next HotSync to iCloud. Verified in the sim: the
+  block lands on today's day view.
+- **Storage.** `coach.sav` (state, written on phase change — six writes per session,
+  not per second), `coach.log` (12 B/session, append-only), `coach.sig` (80 B/session,
+  index-aligned to the log so the wall pairs them by position with no key). ~552 B/day
+  at six sessions; both logs are **streamed on read**, never fully buffered.
+  **There is no SPIFFS partition on this device** — `partitions.csv` is `nvs` +
+  `phy_init` + a 3 MB `factory` app, and that is all of the 4 MB. SD via FatFs, like
+  every other app.
+- **RAM — measured off the ELF, not estimated.** `194 B` of static `.bss`
+  (`g_co_sig` 80 + `g_co` 44 + 70 of pointers/flags), **336 B** total DRAM delta
+  (37,328 → 36,992 free), **+12,141 B** flash. Confirmed on hardware: free heap at boot
+  went 155,412 → **155,076**, exactly the 336 B. The spec had estimated ~148 B; the gap
+  was the widget pointers, waved at rather than counted.
+- Gates: `make -C sim coach`, `smoke` (16 new Coach screenshots), **`smoke32`** (the
+  whole tour at the device-sized pool, peak 2,236 B of a 147,456 B budget), and a clean
+  ESP-IDF v5.5 build. Flashed and boot-verified on the bench at 115200.
+
 ### 2026-07-24 — Zip (the fourth and final game) + pausable play clocks
 - **The game timers pause when the game is off screen.** Mines and Sudoku each stored
   one "started at" epoch and rendered `now - start`, so the clock kept running while the
@@ -375,6 +447,19 @@ GUI needs ~300 KB of buffers — we render in partial strips instead.
 - **The smoke script navigates by pixel coordinates**, so launcher/folder grid
   geometry matters — adding an app or a game reflows a row and moves every tap after
   it. The Games folder now wraps to a second row (Zip sits there).
+- **...and the smoke will NOT tell you when that happens.** This bit us for real when
+  Coach became the 9th launcher app: row 3 went from two icons to three, `SPACE_EVENLY`
+  re-centred it, and the **nine** `c 169 160` taps meant for Games started opening
+  Coach. The gate asserts **exit code + "screenshots exist"**, never pixels — so the
+  run stayed green while touring the wrong app through nine sections. The screenshots
+  were the only evidence, and only if someone looked. **After changing `APPS[]` or
+  `GAMES[]`, re-derive the affected coordinates and eyeball the shots.** Grid centres
+  are computable: content 240 wide, `pad_all 6`, 68 px cells, `SPACE_EVENLY` → three
+  columns at **x = 46 / 120 / 194**, rows at **y = 56 / 108 / 160**.
+- **A gate that CI does not name does not run.** `sim/Makefile` has a `games`
+  aggregate, but `.github/workflows/ci.yml` lists each logic gate as its own step —
+  so adding `coach` to `games` was not enough and its 68 assertions never executed in
+  CI. Caught only by reading the job's step list. **Add the step to `ci.yml` too.**
 - **A game board seeded from `time()` differs on every run**, so screenshots of
   Mines/Sudoku/Zip are not byte-comparable across runs by design; assert on behaviour
   (status text, persistence matching within a run), not on exact pixels.
@@ -492,7 +577,8 @@ make roundtrip incremental synctoken category   # codec + sync
 # simulator
 make -C sim smoke     # native headless + screenshots (CI gate)
 make -C sim smoke32   # the SAME tour under the TRUE 24 KB device pool -- then `clean`!
-make -C sim games     # every game's logic gate: mines wordie sudoku zip clock
+make -C sim games     # every logic gate: mines wordie sudoku zip clock coach
+make -C sim coach     # Coach: advice rules, streaks, sigil normalisation
 make -C sim graf      # Graffiti recognizer accuracy gate
 make -C sim wasm      # browser build
 make -C sim clean     # REQUIRED after smoke32 (it leaves 32-bit objects behind)

@@ -4,6 +4,11 @@ _Written 2026-08-17. A ritual-based focus timer for a device that physically can
 notify you. You draw a mark, the screen seals itself, and the mark fills with ink
 while you work._
 
+**Status: BUILT + merged (PR #39, `f487801`), flashed and boot-verified on the bench.**
+Costs in §8 are measured off the built ELF, not estimated. The on-glass notes pass is
+open — see `BACKLOG.md`. §9 (RTC / piezo / ESP-NOW) is specified but **not approved**;
+nothing in §1–§8 depends on it.
+
 Published design: https://claude.ai/code/artifact/e272936c-dd92-451c-922e-9a7152f0689d
 
 ## TL;DR

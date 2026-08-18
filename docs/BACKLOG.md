@@ -12,10 +12,13 @@ mostly away from the bench via the browser simulator).
   flash-verified on return.
 - **`[blocked]`** — has an unmet prerequisite spelled out in the item.
 
-> **The docs folder is deliberately three files.** This one is what's LEFT;
+> **The docs folder is four files.** This one is what's LEFT;
 > `BUILD_PROGRESS.md` is history + the hard-won lessons + the hardware/RAM reference;
 > `PRODUCT_PLAN.md` is the path to shipping (the consumer-readiness checklist and the
-> locked product decisions). The original design analyses — `UI_ROADMAP.md` (memory/
+> locked product decisions); `COACH_DESIGN.md` is the one surviving per-app design
+> spec, kept because Coach is the flagship and its rule engine, storage format and
+> optional-hardware backlog are all specified there rather than in code comments.
+> It was deliberately three files before 2026-08-17 — the bar for a fifth is high. The original design analyses — `UI_ROADMAP.md` (memory/
 > hardware), `ROADMAP.md` (sync/port), `SIMULATOR_PLAN.md` (the emulator),
 > `REVIEW_2026-07-15.md` (the review the `O#`/`M#`/`C#`/`I#` IDs come from) and
 > `KANA_TRAINER.md` — were retired once each had been built or decided against. Their
@@ -168,6 +171,29 @@ starts with a **feasibility check on the base CYD** before committing to a build
   exposed); credentialed iCloud sync in-browser is the harder **S5** item above.
 - **BLE + a companion iOS app: dropped, not parked** — see `PRODUCT_PLAN.md` §2 for
   the reasoning, kept so it isn't relitigated.
+- **Coach's optional-hardware backlog** (`COACH_DESIGN.md` §9). Specified but **not
+  approved**, and nothing in Coach depends on any of it:
+  - **The 8:00 knock** — an RTC alarm interrupt wakes the ESP32 from deep sleep and
+    the device asks "Career. 25 minutes. Ready?" Flips it from a passive object into a
+    habit trigger, which is the single biggest lever on *essential*. **An RTC is
+    committed to the production BOM** (owner, 2026-08-17), so the ask here is just
+    routing its alarm pin to an RTC-capable GPIO — a trace, not a part, and far cheaper
+    to decide before a respin. Unknown: deep sleep is untouched here; `esp_pm` light
+    sleep is disabled because it gates APB and glitches this display, and deep sleep
+    *should* be fine since the panel re-inits on wake, but that is an assumption.
+  - **Piezo tick** — one GPIO and a second LEDC channel (the driver is already in
+    `REQUIRES`). Buys a real end-of-session alarm (closing the disclosed no-speaker
+    gap) and, better, a **once-per-minute tick while a session runs**: a ticking object
+    on a desk has presence, and in a shared room it signals "I'm in a session" without
+    saying so. Ties into the already-open "is the buzzer pad populated?" decision in
+    `PRODUCT_PLAN.md`.
+  - **Co-working over ESP-NOW** — two or more devices share one session, each screen
+    showing the countdown plus a row of sigils; give up and yours hollows out for
+    everyone. `esp_now.h` ships inside the already-linked `esp_wifi`, so it sidesteps
+    the whole BLE-controller problem (none of the 56 KB reserved DRAM that put bitchat
+    24,064 B over the link). **Unmeasured**: needs Wi-Fi resident during a session
+    (heap + battery), and coexistence with a HotSync is unexamined. Measure before
+    committing — same discipline as the bitchat answer.
 
 ## Needs hardware — features
 
@@ -181,6 +207,27 @@ starts with a **feasibility check on the base CYD** before committing to a build
 
 ## Needs hardware — on-device verifies (written, awaiting flash)
 
+- **`[device]` Coach on glass — NOTES PASS PENDING (2026-08-18).** Flashed and
+  boot-verified; general behaviour confirmed working by the owner. A round of usage
+  notes is coming. Two things the simulator structurally cannot judge, worth checking
+  first:
+  - **Does the 15% session dim read as intentional, or as a fault?** On the sim it is
+    just a number; on the real panel a dim backlight can look like a failure. Tune
+    `CO_DIM_PCT` if it reads wrong.
+  - **Sigil legibility at ~30 px on the Marks wall.** A mark that reads well at 200 px
+    may be mush in a 38 px cell. Already flagged as an open risk in `COACH_DESIGN.md`;
+    the fix, if needed, is a minimum stroke-extent check at capture time.
+  - Also worth a look: the five-second give-up hold (too long? too short?), whether
+    the exported Date Book block is welcome or noise (it is opt-in, default on), and
+    whether the ritual's three questions are the right three.
+- **`[device]` Coach: retire the `UI_DEVTOOLS` seal escape.** Sealed mode is
+  deliberately unreachable from the menu, so CI has no route to the reflect/note
+  screens without waiting out a real 25-minute session; the current answer is an
+  invisible `UI_DEVTOOLS`-only corner target on the seal that jumps the clock. It
+  compiles out of release builds, but it is an escape hatch inside the one feature
+  whose premise is that there isn't one. Better options if it bothers us: a
+  build-time short session length for CI, or driving `coach.sav` directly from the
+  harness.
 - **`[device]` Sync self-heal.** Confirm the device's always-full-reconcile heals
   To Do (out 2 → 3, pulling the orphaned test todo) and that a 2nd sync is
   idempotent (`push=0 pull=0`). Capture the `[sync]` line.
@@ -350,6 +397,13 @@ intuitiveness batch: C1 ink trail, C2 HotSync dialog, the full C4 form contract
 About honesty, C7 inverted title bar, I1.1 onboarding hint, I1.2 keyboard,
 I2 remove-demo-data safety, I3 Week view, I4 feedback toasts (record
 save/delete *and* config-field save), and the brightness-stepper freeze fix.
+
+**Coach (2026-08-17)** — the ritual focus timer, and the first app built from a
+written design spec (`COACH_DESIGN.md`) rather than straight into `ui.c`. Sigil
+capture, sealed mode, the six-rule advice engine (68 host assertions), the marks
+wall, the weekly report, and Memo + Date Book export. 194 B of static DRAM, zero new
+canvas buffers. Merged in #39 and flashed; **the on-glass notes pass is still open**
+(below).
 
 This cycle also landed two of the "new apps / input experience" items: the
 **Graffiti accuracy harness + template fixes** (letters 97.5%→99.6%, now a CI

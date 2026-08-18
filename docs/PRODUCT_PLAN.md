@@ -14,6 +14,19 @@ your desk.
 
 So the order is: **Dashboard → Alarms/Power polish → Games → Setup/flashing polish.**
 
+### Amendment (2026-08-17) — one app *does* sell it
+
+The thesis above says "not more apps". **Coach is the exception, and it is worth
+naming as one** rather than quietly editing the claim. The reasoning still holds for
+*generic* apps — another notepad or unit converter sells nothing. What Coach has that
+those don't is that it can only exist on this hardware: the progress bar is a
+**Graffiti stroke you drew**, and the session is **sealed** behind a screen that
+physically cannot be navigated away from. Both are properties of a stylus PDA with no
+notifications, not features of a to-do list.
+
+So the shape is now: **the dashboard sells it at rest, Coach sells it in use, games
+make it a toy you keep.** See §5 and `COACH_DESIGN.md`.
+
 ### Decisions locked (2026-07-19)
 - **BLE + companion iOS app: dropped.** Wi-Fi only. (Rationale kept in §2 for the
   record; the effort goes into dashboard / games / polish instead.)
@@ -232,6 +245,44 @@ pays for and doesn't return." Ranked by impact on sellability:
 
 ---
 
+---
+
+## 5) Coach — the app that sells it in use
+
+> **Status: BUILT + merged (#39), flashed, boot-verified.** Design and measured costs
+> in `COACH_DESIGN.md`. On-glass notes pass still open — see `BACKLOG.md`.
+
+A ritual-based focus timer. **Six taps and one stroke** per session, no typing: three
+auto-advancing selectors (energy / domain / intention), one Graffiti mark, a sealed
+25-minute session, two taps to record how it went.
+
+**Why it sells, in the order a buyer notices:**
+
+1. **The sigil.** You draw one stroke, and *that mark* is the progress bar — it inks
+   in from the bottom as you work. Finished marks are kept, so a month of focus is a
+   wall of your own handwriting. No phone app can copy this; it needs a digitizer and
+   a unistroke recognizer, both of which were already sitting in the firmware. It is
+   also the most photographable thing the device does, which matters for how a
+   hand-made gadget actually spreads.
+2. **Sealed mode.** During a session the silkscreen row is unreachable — not disabled,
+   *covered*. Giving up costs a five-second hold and breaks the streak. This is the
+   "phone in a lockbox" mechanic in software, and it is the honest argument for owning
+   a dedicated device instead of using the thing that interrupts you.
+3. **It produces something that outlives it.** Each session writes a Date Book block
+   (and the optional note as a Memo), so the next HotSync puts your real focus hours in
+   iCloud. For anyone who bills time, that alone justifies the purchase.
+
+**It cost almost nothing:** 194 bytes of static DRAM out of 37,328 free, and **zero new
+canvas buffers** — sealed mode makes it impossible to open a game mid-session, so the
+sigil canvas reuses `game_cv_buf`. For scale, the BLE mesh analysis failed the link by
+24,064 bytes before any application code existed.
+
+**Deliberately not built** (and worth holding the line on): badges, XP, levels,
+leaderboards, accounts, generated encouragement copy, and streak freezes. The audience
+for a hand-made Palm-style device is exactly the audience that finds gamification
+insulting — and we are selling a device that *can't reach you*, so we should not build
+the thing we are selling against.
+
 ## Sequencing (BLE dropped, mono, dashboard-first)
 
 1. Lock-screen **dashboard** — mock approved, **built + emulator-verified.** ✅
@@ -240,6 +291,10 @@ pays for and doesn't return." Ranked by impact on sellability:
 3. **Games**: Minesweeper + Word first, then Sudoku, then Zip (all **renamed**,
    strictly mono).
 4. **Web flasher + OTA** + first-run setup wizard + brand/photo/name.
+5. **Coach** — built out of order (2026-08-17), ahead of 2 and 4, because it turned out
+   to be the strongest single reason to pick the device up daily. Its optional-hardware
+   backlog (RTC alarm knock, piezo tick, ESP-NOW co-working) is parked in `BACKLOG.md`
+   and approved by nobody yet.
 
 Each item ships as its own PR through the existing branch/CI flow (firmware ESP-IDF +
 wasm gates green before merge), sim-verified where the sim can prove it (everything but
@@ -252,7 +307,16 @@ real battery ADC, live weather, and buzzer — those are device-bench verifies).
 - **Weather location:** single lat/lon in config, or an on-device city picker?
   (Leaning: config lat/lon for v1, picker later.)
 - **Buzzer:** confirm whether this board's speaker/buzzer pad is populated (gates the
-  audible-alarm + game-sound polish).
+  audible-alarm + game-sound polish). **Second reason as of 2026-08-17:** Coach's
+  session end is visual-only (backlight pulse) because there is no speaker/buzzer/DAC
+  on this board — fine on a desk in your eyeline, wrong in a bag, and currently a
+  disclosed limitation. A piezo also unlocks the once-a-minute session *tick*, which
+  is the cheapest presence the device could have. See `COACH_DESIGN.md` §9.
 
 Resolved 2026-07-19: **BLE dropped**, **strictly mono Palm**, **dashboard mock-up
 first**.
+
+Resolved 2026-08-17: **an RTC goes into the production BOM** (removes the no-RTC
+clock-drift caveat that the dashboard, the play clocks, and now Coach all work
+around — none of them may *depend* on it, since units already in the field have no
+RTC). **Coach may take over the lock screen** during a focus session.
