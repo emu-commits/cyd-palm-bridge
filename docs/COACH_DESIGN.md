@@ -214,9 +214,10 @@ engine means the tone can be tuned without touching logic or invalidating a sing
 | R4 | `CA_INCREASE` — increase intensity | Great rate above 70%, completion at essentially 100%, and the session length hasn't moved in two weeks. It's too easy. |
 | R5 | `CA_STEADY` — same again | The fallthrough. A coach that always finds a correction is a coach you stop believing. |
 
-The energy-to-performance correlation is R3 plus the report's `Energy High 86% / Low
-31%` line — a 3x3 energy x result table folded down to the one comparison a person can
-act on.
+The energy-to-performance correlation is R3 plus the report's `Energy Hi 86% Lo 31%`
+line — a 3x3 energy x result table folded down to the one comparison a person can act
+on. (It read `High 86% / Low 31%` until the portrait took the right-hand margin; at 183
+px that wording no longer fitted the narrowed stat column and would have wrapped.)
 
 The timezone offset is **injected, not read** — same discipline as `playclock.h` and
 `dash_sun_times()`. It's what keeps the morning/afternoon/evening bucketing testable on
@@ -305,6 +306,15 @@ by 24,064 bytes before any application code existed. This asks for 226.
 One thing to watch: the weekly report has the highest label count in the app. If it
 grows past what's drawn here, it converts to an `lv_table` — the same move that fixed
 the record list — rather than adding labels.
+
+The report gained the coach himself on 2026-08-19: a 60x65 portrait in the right-hand
+margin with the advice in a speech bubble hanging off his chin. It costs the pool
+nothing. The portrait is A8 rodata in flash (3,900 bytes) exactly like the launcher
+icons, and the bubble is a bordered rectangle plus a 24x26 I1 tail canvas over a 94-byte
+static buffer — no `lv_bar`/`lv_arc`/`lv_meter`, so no draw layer, and one
+`lv_obj_invalidate()` for the whole tail rather than a `set_px` storm. The balloon is a
+fixed height sized to the *worst* advice string: all six wrap to at most three lines of
+`lv_font_palm`, so nothing the coach can say ever resizes it.
 
 ---
 
