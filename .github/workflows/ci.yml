@@ -78,6 +78,8 @@ jobs:
         run: make -C sim clock
       - name: Coach logic gate (advice rules, streaks, sigil)
         run: make -C sim coach
+      - name: Lock-screen dashboard gate (weather age + freshness cut)
+        run: make -C sim dash
       - name: Build + run the scripted UI tour (real ui.c, screenshots)
         run: make -C sim smoke
       - name: Convert screenshots to PNG

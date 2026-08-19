@@ -11,6 +11,56 @@ What was built, and the non-obvious things that cost time to learn. This is the
 
 ## Milestone changelog (newest first)
 
+### 2026-08-19 — Wake straight into the lock screen, and four notes' worth of polish
+Round-two notes off the glass. The theme is that three of the four were the device
+telling the truth about its own state a beat too late.
+- **The lock screen is now raised when the screen SLEEPS, not when it wakes.** It was
+  built on the wake tap, so the backlight came up on whatever app had been left open
+  and the dashboard slid in over it a frame or two later. Blanking first and building
+  the dashboard behind a dark panel costs nothing (nobody is looking) and makes the
+  wake instant. The wake tap now refreshes it while still dark and defers the
+  backlight by one render pass — `g_wake_pending` in `lvgl_port.c` — so the first
+  thing lit is a current dashboard, not a dashboard showing the time it was when the
+  device went to sleep.
+- **Which meant the lock was suddenly up and ticking behind a dark screen.**
+  `dash_tick` repaints the whole 240x320 canvas and flushes it every 15 s; doing that
+  forever into a screen nobody is looking at is the kind of thing that empties a
+  battery quietly. It now skips while `power_screen_off()`.
+- **Coach is exempt, and the exemption had to grow.** `ui_show_lock()` already no-oped
+  during a sealed session. But a session that ENDS while the device is face-down
+  unseals itself and puts "how did it go" up — and the old code would then answer the
+  next tap with the dashboard, whose `content_clear()` would have deleted that screen
+  on the way past. The guard is now `co_owns_screen()`: sealed, or `CO_PH_REFLECT`, or
+  the reflect -> blocker -> note flow (`g_co_reflect`, cleared by `kill_kb()`, which is
+  the one call every other screen build already goes through).
+- **The end-of-session flash was two blinks and a shrug.** It rode the 1 Hz `co_tick`
+  for six ticks at desk brightness, which is easy to miss from the other side of the
+  room — the one place you need it from. It has its own timer now: 1.4 s phases, ten
+  of them, and the lit phases run at 100% rather than the configured brightness so the
+  swing is the panel's whole range. Any touch since the previous phase ends it early —
+  a strobe at someone trying to read "how did it go" is just a strobe.
+- **The flash and the idle timer read the same clock, in opposite directions.** The
+  port layer stands down while `ui_owns_backlight()` (otherwise a tap during a dark
+  phase reads as a wake and the two fight over the same LEDC duty) — but unlike the
+  HotSync guard beside it, it must NOT call `lv_display_trigger_activity()`, because
+  that is exactly the timer the flash reads to decide whether it has been noticed.
+  Resetting it there stopped every flash after one phase. The flash restarts the
+  countdown itself when it ends, which also hands someone who walked back to a
+  finished session a full `backlight_sec` to answer instead of an instant blank.
+- **A day-old temperature is not a late number, it is the wrong one.** The dashboard
+  is read in a second, on the way past, and believed. Everything that comes off the
+  synced snapshot — current conditions, AQI, the six-hour strip, the rain bars, the
+  sun times — is now gated on `dash_weather_fresh(&wx, WX_STALE_MIN)`, 24 hours. What
+  stays is what is still true offline: the clocks, the date, the agenda (those are the
+  user's own records, not a reading of the outside world), and the moon, which is
+  arithmetic. The status strip still reports the real age, so the screen never goes
+  quiet about why. `sim/tests/dash_test.c` pins the cut, the boundary, and the
+  clock-ran-backwards case; `make -C sim dash` is a CI gate.
+- **Say which kind of empty it is.** A blank band where the weather was reads as a
+  fault. "Weather is 3d old / hidden until the next HotSync", centred in the band the
+  readings vacated rather than pinned to the top of it, reads as a decision and points
+  at the fix.
+
 ### 2026-08-19 — Coach: the coach appears on the weekly report
 "Coach says" was a text row like any other; the app had no coach in it. The weekly
 report now stands the supplied portrait in the right-hand margin and hangs the advice

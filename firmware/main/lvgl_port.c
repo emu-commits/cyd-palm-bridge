@@ -6,7 +6,7 @@
 #include "power.h"
 #include "appcfg.h"
 #include "hotsync.h"
-#include "ui.h"           /* ui_show_lock() -- re-raise the dashboard on wake */
+#include "ui.h"           /* ui_show_lock() / ui_owns_backlight() */
 #include "lv_font_palm.h"
 #include "lvgl.h"
 #include "esp_heap_caps.h"
@@ -20,6 +20,13 @@ static const char *TAG = "lvgl";
 /* set for one touch-stroke right after a wake, so the tap that lights the screen
  * back up is swallowed (not delivered to a button) -- PalmOS wake-tap behavior. */
 static volatile int g_swallow_tap = 0;
+
+/* Set by the wake-poll, cleared by the run loop one render pass later. The wake
+ * tap refreshes the dashboard while the panel is still dark and the backlight
+ * comes up only after that repaint has been flushed, so the first thing the eye
+ * lands on is the current dashboard -- never the previous screen, and never a
+ * dashboard showing the time it was when the device went to sleep. */
+static int g_wake_pending = 0;
 
 /* partial draw buffer: 40 rows. ~19KB, DMA-capable. */
 #define BUF_ROWS 40
@@ -60,6 +67,13 @@ static void indev_cb(lv_indev_t *indev, lv_indev_data_t *data){
  * the caller can idle more slowly (deeper light-sleep, slower wake polling). */
 static int idle_step(void){
     int secs = appcfg()->backlight_sec;
+    /* Coach's end-of-session flash owns the backlight: don't blank under it, and
+     * don't read its dark phases as a screen someone needs woken. Note what this
+     * does NOT do -- unlike the sync guard below it leaves the idle timer alone,
+     * because the flash reads that timer to tell whether it has been noticed yet.
+     * Resetting it here would make every flash stop after one phase. The flash
+     * restarts the countdown itself when it ends. */
+    if(ui_owns_backlight()) return 0;
     /* never blank during a sync: the user is watching the progress line, and the
      * priority-4 sync task can starve this wake-poll -- a screen that blanked
      * mid-sync wouldn't relight on a tap until the sync finished. Keep it lit and
@@ -70,12 +84,25 @@ static int idle_step(void){
         return 0;
     }
     if(power_screen_off()){
-        if(tp_pressed()){ power_backlight(1); g_swallow_tap = 1; ui_show_lock(); }
+        if(tp_pressed()){
+            g_swallow_tap = 1;
+            lv_display_trigger_activity(NULL);   /* the swallowed tap still counts as use */
+            ui_show_lock();                      /* already up: repaints it, in the dark */
+            g_wake_pending = 1;                  /* light it once that repaint has landed */
+        }
         return power_screen_off();
     }
     if(secs > 0){
         uint32_t idle = lv_display_get_inactive_time(NULL);   /* ms since activity */
-        if(idle > (uint32_t)secs * 1000){ power_backlight(0); return 1; }
+        if(idle > (uint32_t)secs * 1000){
+            /* Blank FIRST, then raise the lock: building it behind a dark panel is
+             * what makes the wake instant. Doing it the other way round -- raising
+             * the lock on wake, as this did -- shows the previous screen for the
+             * frame or two the dashboard takes to build and paint. */
+            power_backlight(0);
+            ui_show_lock();
+            return 1;
+        }
     }
     return 0;
 }
@@ -104,11 +131,14 @@ void lvgl_port_init(void){
 void lvgl_port_run(void){
     while(1){
         uint32_t next = lv_timer_handler();      /* ms until next work */
+        /* the wake tap's repaint has now been flushed to the panel -- light it */
+        if(g_wake_pending){ g_wake_pending = 0; power_backlight(1); }
         int off = idle_step();                   /* backlight off/on + wake */
-        if(off){
+        if(off && !g_wake_pending){
             /* screen blanked: nothing to draw. Idle in ~120 ms slices so the SoC
              * light-sleeps deeply between wake-polls (120 ms touch latency is
-             * imperceptible for waking a PDA). */
+             * imperceptible for waking a PDA). A pending wake skips this and takes
+             * the fast path below, so the one extra pass costs a frame, not 120 ms. */
             vTaskDelay(pdMS_TO_TICKS(120));
         } else {
             if(next > 30) next = 30;
