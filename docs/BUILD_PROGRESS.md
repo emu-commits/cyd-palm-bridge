@@ -21,6 +21,13 @@ off his chin in a speech bubble.
   cropped to the ink bbox and box-filtered down with a 50% ink-coverage threshold. The
   reduced art is checked into the generator as text, so it reviews as a diff and the
   normal path is stdlib-only; `--from-image` reruns the recipe for a new source or size.
+  **Retouching needs a different door than importing.** `--from-image` crops to the ink
+  bbox and box-filters, so one pixel added at an edge reframes and resamples the whole
+  face — fine for new artwork, useless for a touch-up. `--preview f.png 1` now writes the
+  art at 1:1 (or any integer zoom) and `--from-exact` reads it back pixel for pixel, no
+  crop, no rescale, decoding grey/RGB/RGBA/palette PNGs with the standard library. The
+  first pass through it was verified byte-identical before any edit was made, which is
+  the only reason a 27-pixel diff could be trusted as a 27-pixel diff.
 - **The bubble is a rectangle and the tail is 94 bytes.** A bordered, radiused `lv_obj`
   for the balloon — border and corners are drawn straight into the frame buffer, unlike
   the indicator widgets that take a draw layer and live-lock this pool. The one shape
