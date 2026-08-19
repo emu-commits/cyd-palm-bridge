@@ -296,6 +296,17 @@ starts with a **feasibility check on the base CYD** before committing to a build
   left open on the desk keeps counting — `ui.c` still considers the screen open. Pausing
   would need a hook from `idle_step()` (`lvgl_port.c`) into `games_pause_clocks()`.
   Deliberately not built blind: decide it on glass, where the real timeout is visible.
+- **`[device]` The device-side weather fetch is NOT BUILT.** The lock screen reads
+  `/sdcard/weather.dat`, but nothing on the device has ever written it — the only
+  writer is `dash_weather_seed_sample()`, which fabricates a plausible snapshot so the
+  dashboard renders before a real fetch exists. So every temperature the device has
+  ever shown is synthetic, and the 24-hour staleness gate added on 2026-08-19 can only
+  ever fire on the seeded sample's age. `PRODUCT_PLAN.md` §"device-later" specifies the
+  fetch (Open-Meteo, hourly temp + precipitation probability + weathercode + daily sun
+  times, written compact to `WX_PATH` during HotSync); it belongs in the internet-only
+  stage of `hotsync_task()` beside `fetch_news()`, which now runs regardless of the
+  account. **Open first:** where the location comes from — a single lat/lon in
+  `config.ini`, or an on-device picker (`PRODUCT_PLAN.md` lists this as undecided).
 - **`[device]` A real RTC part — decide and fit.** The clock problem in one line: this
   board has no battery-backed RTC, so the wall clock is only as good as the last
   checkpoint. `clock.c` persists the epoch to NVS every 120 s and restores it at boot,

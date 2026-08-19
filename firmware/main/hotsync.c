@@ -244,7 +244,12 @@ static void hotsync_task(void *arg){
     if(!wifi_up()){ setst("Wi-Fi failed"); wifi_down(); s_busy=0; vTaskDelete(NULL); return; }
     hs_heap("wifi-up");    /* Mode B baseline: Wi-Fi+lwIP paid for, no TLS yet */
     setst("Setting clock...");
-    if(!clock_ok()){ setst("Clock/SNTP failed"); wifi_down(); s_busy=0; vTaskDelete(NULL); return; }
+    /* This one IS fatal, but not because of the account: TLS certificate validity
+     * is checked against the wall clock, so an unset clock breaks every fetch
+     * below, news included. clock_ok() only fails when the clock is still
+     * implausible AFTER the attempt -- a transient SNTP timeout on a device whose
+     * clock is already good passes straight through. */
+    if(!clock_ok()){ setst("Clock unset - nothing can sync"); wifi_down(); s_busy=0; vTaskDelete(NULL); return; }
 
     const Config *cfg = appcfg();
     ESP_LOGI(TAG,"config source: %s", appcfg_from_sd() ? "/sdcard/config.ini" : "secrets.h (no config.ini)");
@@ -256,28 +261,55 @@ static void hotsync_task(void *arg){
     (void)abspath;
     char msg[80];
 
-    hs_heap("pre-tls");    /* last sample before the first HTTPS request */
-    setst("Resolving host...");
-    char host[256]="";
-    if(dav_effective_host(&d,"/",host,sizeof host)==0 && host[0]){
-        snprintf(d.base,sizeof d.base,"%s",host);
-        ESP_LOGI(TAG,"effective host: %s",host);
-    } else {
-        ESP_LOGW(TAG,"host resolve failed (HTTP %d); using %s",dav_last_status,d.base);
-    }
+    /* ---- what is account work, and what is merely internet ----------------
+     * The clock above and the news below need nothing but a network. The account
+     * stages -- host resolve, login, collections -- need iCloud credentials, and
+     * a device with none, or with wrong ones, must still come away with a
+     * corrected clock and fresh feeds. So a failure here SKIPS the rest of the
+     * account work; it no longer ends the sync. `dav_why` carries the reason
+     * into the final status line, because a silent skip reads as a silent
+     * success and would hide a bad password indefinitely. */
+    /* ntgt also sizes the progress bar: each configured collection owns a band
+     * [k/M], the per-app step being the coarse indicator (a finer intra-collection
+     * bar would need a callback through sync_collection). Zero of them is a
+     * skip reason in its own right -- there is nothing to log in to for. */
+    int ntgt=0; for(int i=0;i<N_APPS;i++){ const char*c=app_coll(cfg,i); if(c&&c[0]) ntgt++; }
+    int dav_ok = 0;
+    char dav_why[48] = "";
 
-    /* probe login first so we can tell an auth failure from a bad collection */
-    setst("Checking login...");
-    char principal[256]="";
-    if(dav_prop_href(&d,"/","<d:current-user-principal/>","",principal,sizeof principal)!=0 || !principal[0]){
-        snprintf(msg,sizeof msg,"Login failed (HTTP %d) - check user/pass",dav_last_status);
-        ESP_LOGE(TAG,"%s",msg); setst(msg); wifi_down(); s_busy=0; vTaskDelete(NULL); return;
+    if(!cfg->dav_base[0] || !cfg->dav_user[0] || !cfg->dav_pass[0]){
+        snprintf(dav_why,sizeof dav_why,"no account set up");
+        ESP_LOGW(TAG,"no iCloud credentials; internet-only sync");
+    } else if(!ntgt){
+        snprintf(dav_why,sizeof dav_why,"no collections chosen");
+        ESP_LOGW(TAG,"no collections configured; internet-only sync");
+    } else {
+        hs_heap("pre-tls");    /* last sample before the first HTTPS request */
+        setst("Resolving host...");
+        char host[256]="";
+        if(dav_effective_host(&d,"/",host,sizeof host)==0 && host[0]){
+            snprintf(d.base,sizeof d.base,"%s",host);
+            ESP_LOGI(TAG,"effective host: %s",host);
+        } else {
+            ESP_LOGW(TAG,"host resolve failed (HTTP %d); using %s",dav_last_status,d.base);
+        }
+
+        /* probe login first so we can tell an auth failure from a bad collection */
+        setst("Checking login...");
+        char principal[256]="";
+        if(dav_prop_href(&d,"/","<d:current-user-principal/>","",principal,sizeof principal)!=0 || !principal[0]){
+            snprintf(dav_why,sizeof dav_why,"login failed (HTTP %d)",dav_last_status);
+            ESP_LOGE(TAG,"%s - check user/pass",dav_why);
+            dav_disconnect();          /* drop the dead TLS handle before the news fetch */
+        } else {
+            ESP_LOGI(TAG,"principal: %s",principal);
+            dav_ok = 1;
+        }
+        /* THE number: a full handshake has completed, so min_ever now carries its peak.
+         * Compare min_ever here against the "pre-tls" sample -- the drop is the cost of
+         * mbedTLS with the whole UI still resident. */
+        hs_heap("post-tls");
     }
-    ESP_LOGI(TAG,"principal: %s",principal);
-    /* THE number: a full handshake has completed, so min_ever now carries its peak.
-     * Compare min_ever here against the "pre-tls" sample -- the drop is the cost of
-     * mbedTLS with the whole UI still resident. */
-    hs_heap("post-tls");
 
     /* Address book (CardDAV) lives on a separate iCloud host; resolve it lazily
      * the first time a card target is reached. Same credentials as caldav. */
@@ -286,14 +318,10 @@ static void hotsync_task(void *arg){
     SyncStats tot={0};
     int did=0, failed=0, protec=0;
     ConflictPolicy pol = (ConflictPolicy)cfg->policy;
-    /* count configured apps so the status line can show progress [k/M]; with
-     * three collections the per-app step is the coarse progress indicator (a
-     * finer intra-collection bar would need a callback through sync_collection). */
-    int ntgt=0; for(int i=0;i<N_APPS;i++){ const char*c=app_coll(cfg,i); if(c&&c[0]) ntgt++; }
     int step=0;
     setprog(0);
     sync_set_progress(hs_prog_cb, NULL);           /* engine drives the intra-collection bar */
-    for(int i=0;i<N_APPS;i++){
+    for(int i=0; dav_ok && i<N_APPS; i++){
         const SyncApp *t=&s_apps[i];
         const char *coll=app_coll(cfg,i);
         if(!coll || !coll[0]) continue;            /* app not configured -> skip */
@@ -342,7 +370,12 @@ static void hotsync_task(void *arg){
     sync_free_scratch();   /* hand the ~20 KB sync scratch back to the interactive UI */
     fetch_news();          /* RSS reader: fetch configured feeds while Wi-Fi is up */
     setprog(100);
-    if(did==0 && failed>0)
+    if(!dav_ok)
+        /* Name what DID happen before naming what didn't -- the clock was set and
+         * the feeds were fetched, and a line that only says "login failed" would
+         * read as though the whole press was wasted. */
+        snprintf(msg,sizeof msg,"Clock + news done; no records - %s",dav_why);
+    else if(did==0 && failed>0)
         snprintf(msg,sizeof msg,"Sync failed - low memory (heap %lu)",
                  (unsigned long)esp_get_free_heap_size());
     else
