@@ -27,6 +27,14 @@ int dash_weather_age_min(const WxCache *w){
     return d > 0 ? (int)(d / 60) : 0;
 }
 
+/* The dashboard's one rule about stale data: draw it or don't, never draw it and
+ * hope the "synced 3d ago" line is read. A snapshot that never loaded has magic 0
+ * and fails here too, so callers need only this test. */
+int dash_weather_fresh(const WxCache *w, int max_min){
+    if(!w || w->magic != WX_MAGIC) return 0;
+    return dash_weather_age_min(w) < max_min;
+}
+
 /* WMO weather-interpretation codes (Open-Meteo's `weathercode`), collapsed to the
  * few buckets a one-line label needs. */
 const char *dash_wcode_desc(int code){

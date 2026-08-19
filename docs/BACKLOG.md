@@ -207,6 +207,25 @@ starts with a **feasibility check on the base CYD** before committing to a build
 
 ## Needs hardware — on-device verifies (written, awaiting flash)
 
+- **`[device]` Wake + lock-screen notes — ROUND 2 SHIPPED (2026-08-19), NEEDS A LOOK.**
+  Lock raised at sleep instead of at wake, Coach exempt through the reflect flow, a
+  slower/stronger/longer end-of-session flash, and stale weather hidden after 24 h.
+  See the `2026-08-19` entry in `BUILD_PROGRESS.md`. What the sim cannot judge:
+  - **Is 1.4 s x 10 phases at 100% the right flash?** Tune `CO_FLASH_MS` / `CO_FLASH_N`
+    in `ui.c`. It ends early on the first touch, so the ceiling only costs something
+    if nobody is in the room.
+  - **Does the wake now land clean?** The dashboard is built behind a dark panel and
+    the backlight is deferred one render pass. If any of the previous screen still
+    flickers through, the deferral needs a second pass, not a longer one.
+  - **The reflect screen now holds the display indefinitely.** By request: a session
+    that ends while the device is face-down must be answered, so no lock covers it.
+    That means an unanswered "how did it go" keeps the device out of glance mode until
+    someone taps. If that turns out to be annoying rather than insistent, the fix is a
+    timeout that banks the session as unrated, not a lock screen over the top of it.
+  - **24 h is a guess.** Long enough that an overnight gap doesn't blank the screen,
+    short enough that yesterday's forecast never shows. `WX_STALE_MIN` in `dash.h`.
+    The agenda is deliberately NOT gated — those are the user's own records and stay
+    true offline; only the readings of the outside world are hidden.
 - **`[device]` Coach on glass — NOTES ROUND 1 DONE (2026-08-18), ROUND 2 OPEN.**
   Six notes came back from the first real use and are all shipped (icon, back links
   out of Marks/This-week, non-dismissing Length/Day-goal rows, on-screen explanation

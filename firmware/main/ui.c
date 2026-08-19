@@ -251,7 +251,6 @@ static int  g_co_step;               /* ritual step 0..2                        
 static int  g_co_pick_en, g_co_pick_dom, g_co_pick_int;
 static int  g_co_res, g_co_blk;      /* the reflect answers                      */
 static int  g_co_last_fill;          /* last painted fill %, so we repaint 1/min */
-static int  g_co_pulse;              /* remaining end-of-session backlight flashes */
 static uint32_t g_co_last_start;     /* the just-finished session, for the exports */
 static uint16_t g_co_last_min;
 static uint32_t g_co_hold_start;     /* give-up press-and-hold start (lv ticks)  */
@@ -260,6 +259,15 @@ static lv_obj_t *g_co_len_lbl, *g_co_goal_lbl;   /* the two live rows on the men
 enum { CO_VIEW_HOME, CO_VIEW_MARKS, CO_VIEW_WEEK, CO_VIEW_OTHER };
 static int  g_co_view;               /* which Coach screen `content` is showing  */
 static lv_obj_t *g_co_seal;          /* the sealed takeover root, or NULL        */
+static int  g_co_reflect;            /* the reflect -> blocker -> note flow is up */
+
+/* 1 while Coach owns the screen and nothing may cover it: a sealed session, or the
+ * reflect flow that follows one. The lock screen is suppressed for both -- someone
+ * who put the device down mid-session and picked it up again has to land on "how
+ * did it go", not on a dashboard that has already thrown that screen away. */
+static int co_owns_screen(void){
+    return g_co_seal != NULL || g_co.phase == CO_PH_REFLECT || g_co_reflect;
+}
 /* Bank + persist the open game's play clock. Every screen teardown goes through
  * kill_kb(), which makes it the one place that reliably means "you left the game"
  * -- so the timers stop there and restart in the matching show_*(). */
@@ -269,7 +277,7 @@ static void kill_kb(void){
     g_form=NULL; active_ta=NULL; edit_cat_lbl=NULL; g_listtbl=NULL; g_findtbl=NULL;
     graf_char_hook=NULL; graf_capture_hook=NULL;
     g_trainer_open=0; g_kana_open=0; g_ms_active=0; g_sd_active=0; g_zp_active=0;
-    g_co_open=0; g_co_view=CO_VIEW_OTHER;
+    g_co_open=0; g_co_view=CO_VIEW_OTHER; g_co_reflect=0;
     free_rowuids();
     free_finds();
     kill_hs();
@@ -3747,13 +3755,14 @@ static int localtime_mon(time_t t){ struct tm x; localtime_r(&t,&x); return x.tm
 static int localtime_mday(time_t t){ struct tm x; localtime_r(&t,&x); return x.tm_mday; }
 static const char *month_long(int m){ return (m>=1&&m<=12)?DASH_MON_L[m]:""; }
 
-/* "Nm" / "Nh" / "Nd" since the weather snapshot was made (for the status strip). */
-static const char *dash_age_str(const WxCache *w){
+/* "45m" / "3h" / "2d" since the weather snapshot was made. Bare span, no "ago",
+ * so it reads correctly both after "synced" and inside the stale-weather line. */
+static const char *dash_age_span(const WxCache *w){
     static char b[24];
     int mins = dash_weather_age_min(w);
-    if(mins < 60)      snprintf(b,sizeof b,"%dm ago",mins);
-    else if(mins < 1440) snprintf(b,sizeof b,"%dh ago",mins/60);
-    else               snprintf(b,sizeof b,"%dd ago",mins/1440);
+    if(mins < 60)        snprintf(b,sizeof b,"%dm",mins);
+    else if(mins < 1440) snprintf(b,sizeof b,"%dh",mins/60);
+    else                 snprintf(b,sizeof b,"%dd",mins/1440);
     return b;
 }
 /* US-AQI band word. */
@@ -4010,10 +4019,13 @@ static void dash_paint(void){
 }
 
 void ui_show_lock(void){
-    /* SEALED MODE: while a Coach session runs, Coach owns the screen -- the port
-     * layer re-raises the lock on every wake, and a user who taps the device
-     * mid-session must see their mark and the countdown, not the dashboard. */
-    if(g_co_seal) return;
+    /* COACH OWNS THE SCREEN: while a session runs the mark and the countdown are
+     * what a tap must reveal, and once it ends the reflect screen is. The port
+     * layer raises the lock when the screen sleeps and refreshes it on every wake,
+     * so without this a session that ended while the device was face-down would be
+     * answered by the dashboard -- and content_clear() below would have deleted
+     * "how did it go" on the way past. */
+    if(co_owns_screen()) return;
     if(g_lock){ dash_paint(); return; }             /* already showing -> just refresh */
     /* Free whatever app view is in the content area first. The lock covers the whole
      * screen anyway, and this keeps the 24 KB LVGL pool holding only the chrome + the
@@ -4023,7 +4035,12 @@ void ui_show_lock(void){
     kill_kb();
     time_t now=0; time(&now);
     dash_weather_seed_sample(WX_PATH);
-    WxCache wx; int havewx = dash_weather_load(&wx);
+    /* Two different questions. `loaded` is "is there a snapshot at all", which is
+     * what the age line reports; `havewx` is "may it be drawn", which every actual
+     * reading is gated on. A day-old temperature is not a late temperature, it is
+     * the wrong one, and this screen is read at a glance with no second look. */
+    WxCache wx; int loaded = dash_weather_load(&wx);
+    int havewx = loaded && dash_weather_fresh(&wx, WX_STALE_MIN);
     g_wx = wx; g_havewx = havewx;                    /* dash_paint() draws the bars from this */
 
     g_lock = lv_obj_create(lv_screen_active());     /* on the active screen (like News),
@@ -4055,7 +4072,7 @@ void ui_show_lock(void){
              DASH_DOW_S[ti_wday(now)], CAL_MON[localtime_mon(now)], localtime_mday(now));
     dash_lbl(6,4,sb,0);
     int bp = power_battery_pct();
-    if(havewx) snprintf(sb,sizeof sb,"synced %s \xC2\xB7 ", dash_age_str(&wx));
+    if(loaded) snprintf(sb,sizeof sb,"synced %s ago \xC2\xB7 ", dash_age_span(&wx));
     else       snprintf(sb,sizeof sb," ");
     if(bp>=0) snprintf(sb+strlen(sb),sizeof sb-strlen(sb),"%d%%",bp);
     else      snprintf(sb+strlen(sb),sizeof sb-strlen(sb),"USB");
@@ -4101,6 +4118,17 @@ void ui_show_lock(void){
             snprintf(c,sizeof c,"%d%s",hh,wx.hr[i].hour24<12?"a":"p"); dash_lbl(cx-8,196,c,0);
             snprintf(c,sizeof c,"%d%%",wx.hr[i].rain);     dash_lbl(cx-8,208,c,0);
         }
+    } else if(loaded){
+        /* Say which it is. A blank space where the weather was reads as a fault; a
+         * line naming the age reads as a decision, and points at the fix. Centred
+         * in the band the readings vacated, not pinned to the top of it, so the
+         * space around it looks emptied on purpose rather than half-drawn. */
+        char wl[48];
+        snprintf(wl,sizeof wl,"Weather is %s old", dash_age_span(&wx));
+        lv_obj_t *o = dash_lbl(0,0,wl,1);
+        lv_obj_align(o,LV_ALIGN_TOP_MID,0,150);
+        o = dash_lbl(0,0,"hidden until the next HotSync",0);
+        lv_obj_align(o,LV_ALIGN_TOP_MID,0,170);
     } else {
         dash_lbl(10,118,"Weather syncs on HotSync",0);
     }
@@ -4134,7 +4162,13 @@ void ui_show_lock(void){
 }
 
 /* keep the locked clock fresh (minute tick); no-op while unlocked. */
-static void dash_tick(lv_timer_t *t){ (void)t; if(g_lock) dash_paint(); }
+/* The lock is now raised the moment the screen sleeps, so it is up and ticking
+ * while the panel is dark -- and a full 240x320 canvas repaint plus a flush every
+ * 15 s, forever, into a screen nobody is looking at, is exactly the kind of thing
+ * that eats a battery quietly. Skip it while blanked; the wake repaints anyway. */
+static void dash_tick(lv_timer_t *t){ (void)t;
+    if(g_lock && !power_screen_off()) dash_paint();
+}
 
 /* ========================= Games (product roadmap) ==========================
  * A "Games" launcher app opening a small menu of low-RAM games. First up:
@@ -5302,6 +5336,13 @@ static void show_games(void){
 #define CO_PREV_BOX 88                   /* and two buttons -- so it draws small  */
 #define CO_HOLD_MS 5000                  /* press-and-hold to abandon a session  */
 #define CO_DIM_PCT 15                    /* brightness while a session runs      */
+/* End-of-session flash. The first version rode the 1 Hz tick for six ticks, which
+ * came out as two dark blinks at desk brightness -- easy to miss from the other
+ * side of the room, which is the one place you need it from. Its own timer, so the
+ * phase length is a number rather than an artefact of the tick, and the lit phases
+ * are driven to full brightness so the swing is the whole range the panel has. */
+#define CO_FLASH_MS 1400                 /* one dark or lit phase                */
+#define CO_FLASH_N  10                   /* 5 dark + 5 lit = 14 s of asking      */
 
 /* ---- the local timezone offset, in minutes east of UTC ---------------------
  * coach.c takes this as an argument rather than reading TZ itself (that is what
@@ -5649,26 +5690,57 @@ static void co_finish(int result, int blocker){
     co_save();
 }
 
+/* ------------------------------------------------------- end-of-session flash */
+static lv_timer_t *g_co_flash;           /* NULL when no flash is running        */
+static int         g_co_flash_left;      /* phases still to run                  */
+
+/* 1 while the flash is driving the backlight, so the port layer's idle blank and
+ * wake-poll leave it alone -- otherwise a tap during a dark phase reads as a wake
+ * and the two fight over the same LEDC duty. */
+int ui_owns_backlight(void){ return g_co_flash != NULL; }
+
+static void co_flash_stop(void){
+    if(g_co_flash){ lv_timer_delete(g_co_flash); g_co_flash = NULL; }
+    g_co_flash_left = 0;
+    power_set_brightness(appcfg()->brightness);   /* undo the full-brightness lit phase */
+    power_backlight(1);
+    /* The idle countdown was frozen for the duration (the port layer stands down
+     * while the flash owns the backlight, deliberately without touching the timer
+     * -- see idle_step). Restart it here, so someone who walked back to a finished
+     * session gets a full backlight_sec to answer rather than an instant blank. */
+    lv_display_trigger_activity(NULL);
+}
+
+static void co_flash_step(lv_timer_t *t){ (void)t;
+    /* The flash is asking for attention; once it has it, it is just strobing at
+     * someone who is trying to read "how did it go". Any touch since the last
+     * phase ends it. (The session itself ran untouched, so the timer never trips
+     * on its own first step.) */
+    if(lv_display_get_inactive_time(NULL) < CO_FLASH_MS){ co_flash_stop(); return; }
+    if(--g_co_flash_left <= 0){ co_flash_stop(); return; }
+    power_backlight(g_co_flash_left & 1);
+}
+
+static void co_flash_start(void){
+    if(g_co_flash) lv_timer_delete(g_co_flash);
+    power_set_brightness(100);           /* the lit phases go to full, not to desk level */
+    power_backlight(0);                  /* start dark: the CHANGE is what catches an eye */
+    g_co_flash_left = CO_FLASH_N;
+    g_co_flash = lv_timer_create(co_flash_step, CO_FLASH_MS, NULL);
+}
+
 /* ------------------------------------------------------------- the 1 Hz tick */
 /* Registered once in ui_init() and never torn down, so a session ends correctly
  * from any screen -- including the lock screen, a game, or the Calculator. */
 static void co_tick(lv_timer_t *t){ (void)t;
-    if(g_co_pulse){                                   /* end-of-session flash */
-        g_co_pulse--;
-        power_backlight(g_co_pulse & 1);
-        if(!g_co_pulse) power_backlight(1);
-        return;
-    }
     if(g_co.phase != CO_PH_RUNNING) return;
     if(co_elapsed() >= (uint32_t)g_co.planned_min * 60){
         g_co.phase = CO_PH_REFLECT;
         pc_stop(&g_co.clk, (uint32_t)time(NULL));
         co_save();
-        power_set_brightness(appcfg()->brightness);
-        power_backlight(1);
-        g_co_pulse = 6;                               /* three on/off pairs */
-        co_unseal();
+        co_unseal();                                  /* restores desk brightness */
         co_show_reflect();
+        co_flash_start();                             /* ...so the flash goes last */
         return;
     }
     co_seal_refresh();
@@ -5881,7 +5953,7 @@ static void co_blocker_cb(lv_event_t *e){
 
 static void co_show_blocker(void){
     kill_kb(); content_clear();
-    g_co_open = 1;
+    g_co_open = 1; g_co_reflect = 1;      /* still Coach's screen: no lock over it */
     lv_label_set_text(title_lbl, "Coach");
 
     lv_obj_t *q = lv_label_create(content);
@@ -5905,7 +5977,7 @@ static void co_result_cb(lv_event_t *e){
 static void co_show_reflect(void){
     kill_kb(); cur_app = NULL; cur_uid = 0;
     content_clear();
-    g_co_open = 1;
+    g_co_open = 1; g_co_reflect = 1;      /* still Coach's screen: no lock over it */
     lv_label_set_text(title_lbl, "Coach");
     update_cat_trigger();
 
@@ -5962,7 +6034,7 @@ static void co_note_skip_cb(lv_event_t *e){ (void)e;
 
 static void co_show_note(void){
     kill_kb(); content_clear();
-    g_co_open = 1;
+    g_co_open = 1; g_co_reflect = 1;      /* still Coach's screen: no lock over it */
     lv_label_set_text(title_lbl, "Coach");
 
     lv_obj_t *q = lv_label_create(content);

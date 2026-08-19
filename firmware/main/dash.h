@@ -42,6 +42,15 @@ void dash_weather_seed_sample(const char *path);
 /* whole minutes since the snapshot was generated (using time(NULL)); 0 if in future. */
 int  dash_weather_age_min(const WxCache *w);
 
+/* How old a snapshot may get before the dashboard stops drawing it. Past a day
+ * "now", the six-hour strip and today's sun times are not merely late, they are
+ * wrong, and a wrong number on a glance screen is worse than a missing one. */
+#define WX_STALE_MIN (24 * 60)
+
+/* 1 if *w is recent enough to show: a valid snapshot less than max_min old.
+ * NULL, or anything that did not load, is never fresh. */
+int  dash_weather_fresh(const WxCache *w, int max_min);
+
 /* short label for a WMO weather code, e.g. 2 -> "Partly cloudy". Never NULL. */
 const char *dash_wcode_desc(int code);
 

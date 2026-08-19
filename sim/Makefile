@@ -43,7 +43,7 @@ WRAP_LD := -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free
 LVGL_SRCS := $(shell find lvgl/src -name '*.c' 2>/dev/null)
 LVGL_OBJS := $(patsubst lvgl/src/%.c,build/lvgl/%.o,$(LVGL_SRCS))
 
-.PHONY: host wasm smoke smoke32 graf mines wordie sudoku zip clock coach games clean lvgl-src
+.PHONY: host wasm smoke smoke32 graf mines wordie sudoku zip clock coach dash games clean lvgl-src
 
 # LVGL_SRCS is evaluated when make parses this file, so on a clean checkout the
 # source must be fetched BEFORE the build graph is used: the entry points fetch,
@@ -152,8 +152,16 @@ build/coach_test: tests/coach_test.c $(FW)/coach.c $(FW)/coach.h
 	@mkdir -p build
 	$(CC) -O2 -Wall -I$(FW) tests/coach_test.c $(FW)/coach.c -o $@
 
+# ---- dash: the lock screen's freshness + age rules (needs libm for the moon). ----
+dash: build/dash_test
+	./build/dash_test
+
+build/dash_test: tests/dash_test.c $(FW)/dash.c $(FW)/dash.h
+	mkdir -p build
+	$(CC) -O2 -Wall -I$(FW) tests/dash_test.c $(FW)/dash.c -o $@ -lm
+
 # ---- games: every game's logic gate in one go (what CI runs). ----
-games: mines wordie sudoku zip clock coach
+games: mines wordie sudoku zip clock coach dash
 
 # ---- wasm: everything compiled by emcc in one shot (CI build; no local emcc needed).
 # 32-bit wasm => the TRUE 24 KB device pool applies (see lv_conf.h). main() boots
