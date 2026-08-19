@@ -5731,7 +5731,7 @@ static void co_home_cb(lv_event_t *e){ (void)e; show_coach(); }
  * steps walk back one question at a time; Marks and This-week have nowhere to
  * walk back TO, so they return to the app's home screen -- without this they
  * were dead ends, reachable only by leaving Coach through the silkscreen. */
-static void co_link(lv_obj_t *par, lv_event_cb_t cb){
+static lv_obj_t *co_link(lv_obj_t *par, lv_event_cb_t cb){
     lv_obj_t *b = lv_button_create(par);
     lv_obj_set_style_radius(b, 0, 0);
     lv_obj_set_style_pad_all(b, 3, 0);
@@ -5739,9 +5739,15 @@ static void co_link(lv_obj_t *par, lv_event_cb_t cb){
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *l = lv_label_create(b);
     lv_label_set_text(l, "back");
+    return b;
 }
 static void co_back_link(lv_obj_t *par){ co_link(par, co_back_cb); }
 static void co_home_link(lv_obj_t *par){ co_link(par, co_home_cb); }
+/* ...and the same link on a scrolling page, where "the bottom" is wherever the
+ * content ends rather than the bottom of the visible frame. */
+static void co_home_link_at(lv_obj_t *par, int y){
+    lv_obj_align(co_link(par, co_home_cb), LV_ALIGN_TOP_LEFT, 4, y);
+}
 
 /* Each step carries a line of plain English under the question. A bare "Energy?"
  * over three buttons tells a first-time user nothing about what is being asked or
@@ -6104,6 +6110,72 @@ static const char *co_advice_text(int code){
     return "Keep logging -- five sessions unlocks advice.";
 }
 
+/* ---- the coach's speech-bubble tail -------------------------------------
+ * A wedge from the top of the bubble up to the portrait's chin. It is the one
+ * shape here that is neither a rectangle nor a glyph, so it is painted -- but
+ * NOT with an lv_bar/lv_arc/lv_triangle-style widget, which would allocate a
+ * draw layer out of the 24 KB pool and live-lock LVGL (docs/BUILD_PROGRESS.md,
+ * "Never use a widget that allocates a draw LAYER"). It is a 24x26 I1 canvas
+ * over a 94-byte static buffer, written through the shared i1_px helpers with
+ * exactly ONE lv_obj_invalidate() at the end -- the set_px invalidate storm that
+ * cost every game a second of tap latency is the other trap on this screen.
+ *
+ * The canvas is opaque, so its bottom row IS the bubble's top border: the row is
+ * drawn black outside the wedge and left white between its edges, which is what
+ * makes the tail read as an opening into the balloon rather than a sticker on
+ * top of it. */
+#define CO_TAIL_W   24
+#define CO_TAIL_H   26
+#define CO_TAIL_APX 20                         /* apex x: points up at the chin  */
+#define CO_TAIL_B0  2                          /* base runs from x=B0..          */
+#define CO_TAIL_B1  13                         /* ...to x=B1 on the bottom row   */
+static uint8_t co_tail_buf[LV_CANVAS_BUF_SIZE(CO_TAIL_W, CO_TAIL_H, 1, 1) + 16];
+
+static void co_tail_line(lv_draw_buf_t *db, int x0, int y0, int x1, int y1){
+    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+    int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1, err = dx + dy;
+    for(;;){
+        i1_px(db, x0, y0, 1);
+        if(x0 == x1 && y0 == y1) break;
+        int e2 = 2 * err;
+        if(e2 >= dy){ err += dy; x0 += sx; }
+        if(e2 <= dx){ err += dx; y0 += sy; }
+    }
+}
+
+static void co_tail_paint(lv_obj_t *cv){
+    lv_draw_buf_t *db = lv_canvas_get_draw_buf(cv);
+    if(!db) return;
+    i1_clear(db);
+    /* the bubble's top border, continued across this canvas except where the
+     * wedge opens into it */
+    for(int x = 0; x < CO_TAIL_W; x++)
+        if(x < CO_TAIL_B0 || x > CO_TAIL_B1) i1_px(db, x, CO_TAIL_H - 1, 1);
+    co_tail_line(db, CO_TAIL_B0, CO_TAIL_H - 1, CO_TAIL_APX, 0);   /* trailing edge */
+    co_tail_line(db, CO_TAIL_B1, CO_TAIL_H - 1, CO_TAIL_APX, 0);   /* leading edge  */
+    lv_obj_invalidate(cv);                      /* exactly one, for the whole tail */
+}
+
+/* Geometry of the report, in `content` coordinates (240 x 184 visible).
+ * The screen is ONE scrolling page, not a scrolling sub-panel with fixed
+ * furniture around it: the stats, the coach and his bubble move together, and
+ * the only scrollbar that can ever appear is the page's own, at the far right
+ * and clear of the portrait. A quiet week fits with no scrollbar at all.
+ *
+ * The bubble is sized to the WORST CASE of co_advice_text(): all six strings
+ * wrap to at most three lines at this width (measured against lv_font_palm,
+ * 14 px a line), so the balloon is a fixed height whatever the coach says, and
+ * short advice is centred in it rather than left rattling at the top. */
+#define CO_BUB_X    2
+#define CO_BUB_W    230                          /* clear of the page scrollbar   */
+#define CO_BUB_H    58                           /* 3 * 14 text + pad + border    */
+#define CO_FACE_R   232                          /* portrait's right edge, inside
+                                                    the page scrollbar            */
+#define CO_FACE_TOP 4                            /* its y on a quiet week          */
+#define CO_CHIN_GAP 4                            /* chin to the tip of the tail    */
+#define CO_STAT_W   168                          /* stats column, clear of the face */
+#define CO_STAT_ROW 164                          /* every row fits without wrapping */
+
 static void show_coach_report(void){
     kill_kb(); cur_app = NULL; cur_uid = 0;
     content_clear();
@@ -6116,19 +6188,35 @@ static void show_coach_report(void){
     CoachAgg a;
     co_fold(&a, since);
 
-    lv_obj_t *box = lv_obj_create(content);
-    lv_obj_set_size(box, lv_pct(100), (PDA_H - TITLE_H) - 28);
-    lv_obj_align(box, LV_ALIGN_TOP_MID, 0, 0);
+    /* the page: everything below lives on this, so a heavy week scrolls as one
+     * piece. `content` itself is left alone -- it is shared with every other
+     * screen in the app and content_clear() does not reset its flags. */
+    lv_obj_t *page = lv_obj_create(content);
+    lv_obj_set_size(page, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_radius(page, 0, 0);
+    lv_obj_set_style_border_width(page, 0, 0);
+    lv_obj_set_style_bg_color(page, COL_BODY, 0);
+    lv_obj_set_style_pad_all(page, 0, 0);
+    lv_obj_set_scroll_dir(page, LV_DIR_VER);
+
+    /* ---- the statistics, in a column narrow enough to leave the coach a margin.
+     * Height is its content and it does not scroll itself; it just makes the page
+     * taller, which is what puts the one scrollbar in the one right place. */
+    lv_obj_t *box = lv_obj_create(page);
+    lv_obj_set_size(box, CO_STAT_W, LV_SIZE_CONTENT);
+    lv_obj_set_pos(box, 0, 0);
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_radius(box, 0, 0);
     lv_obj_set_style_border_width(box, 0, 0);
     lv_obj_set_style_bg_color(box, COL_BODY, 0);
-    lv_obj_set_style_pad_all(box, 8, 0);
-    lv_obj_set_style_pad_row(box, 3, 0);
+    lv_obj_set_style_pad_all(box, 3, 0);
+    lv_obj_set_style_pad_left(box, 4, 0);
+    lv_obj_set_style_pad_row(box, 1, 0);
     lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
 
     #define CO_ROW(...) do{ lv_obj_t *l_ = lv_label_create(box); \
                             lv_label_set_long_mode(l_, LV_LABEL_LONG_WRAP); \
-                            lv_obj_set_width(l_, 216); \
+                            lv_obj_set_width(l_, CO_STAT_ROW); \
                             lv_label_set_text_fmt(l_, __VA_ARGS__); }while(0)
 
     CO_ROW("Pomodoros   %d", (int)a.n);
@@ -6136,14 +6224,16 @@ static void show_coach_report(void){
            (unsigned)(a.focus_min / 60), (unsigned)(a.focus_min % 60));
 
     /* only the domains that were actually used. With six of them, printing the
-     * empty ones pushed the advice -- the point of the screen -- off the bottom. */
+     * empty ones pushed the advice -- the point of the screen -- off the bottom.
+     * The bar caps at 6 rather than 12: "Relationships" plus twelve '#' is 205 px
+     * and no longer fits the narrowed column, and six cells still rank the week. */
     for(int d = 0; d < CO_NDOM; d++){
         if(!a.dom[d]) continue;
-        char bar[13];
-        int nb = a.dom[d] > 12 ? 12 : a.dom[d];
+        char bar[7];
+        int nb = a.dom[d] > 6 ? 6 : a.dom[d];
         for(int i = 0; i < nb; i++) bar[i] = '#';
         bar[nb] = 0;
-        CO_ROW("%-13s %-12s %d", coach_domain_name(d), bar, (int)a.dom[d]);
+        CO_ROW("%-13s %-6s %d", coach_domain_name(d), bar, (int)a.dom[d]);
     }
 
     int bs = coach_best_slot(&a);
@@ -6154,13 +6244,66 @@ static void show_coach_report(void){
                                  (int)a.blk[tb]);
     int hi = coach_energy_great_pct(&a, CO_ENERGY_HIGH);
     int lo = coach_energy_great_pct(&a, CO_ENERGY_LOW);
-    if(hi >= 0 && lo >= 0) CO_ROW("Energy      High %d%% / Low %d%%", hi, lo);
-
-    CO_ROW("%s", "-- Coach says --");
-    CO_ROW("%s", co_advice_text(coach_advise(&a)));
+    /* "High .. / Low .." is 183 px and would wrap in the narrowed column */
+    if(hi >= 0 && lo >= 0) CO_ROW("Energy      Hi %d%% Lo %d%%", hi, lo);
     #undef CO_ROW
 
-    co_home_link(content);
+    /* Read the portrait's size off the descriptor rather than restating it: it is
+     * generated art (tools/gen_coach_face.py) and everything below is placed from
+     * it, so a regenerated face at a different size still lands correctly. */
+    const int face_w = (int)coach_face.header.w;
+    const int face_h = (int)coach_face.header.h;
+    const int face_x = CO_FACE_R - face_w;
+    /* Where the bubble lands: below the stats, but never so high that it eats into
+     * the portrait's spot at the top of the page. The coach then hangs off the
+     * bubble rather than off the top of the screen -- a long week pushes the pair
+     * down together, so the tail stays the short hop from his chin to the balloon
+     * instead of stretching into a wire. He is beside the stat column either way;
+     * on a heavy week it is the lower half of it. */
+    const int bub_min = CO_FACE_TOP + face_h + CO_CHIN_GAP + (CO_TAIL_H - 1);
+    lv_obj_update_layout(box);
+    int bub_y = lv_obj_get_height(box) + 6;
+    if(bub_y < bub_min) bub_y = bub_min;
+    int face_y = bub_y - (CO_TAIL_H - 1) - CO_CHIN_GAP - face_h;
+
+    /* ---- the coach himself: flash-resident A8, recolored to the ink colour the
+     * same way the launcher icons are. No pool cost and nothing to repaint. */
+    lv_obj_t *face = lv_image_create(page);
+    lv_image_set_src(face, &coach_face);
+    lv_obj_set_pos(face, face_x, face_y);
+    lv_obj_set_style_image_recolor(face, COL_LINE, 0);
+    lv_obj_set_style_image_recolor_opa(face, LV_OPA_COVER, 0);
+
+    /* ---- the bubble: a plain bordered rectangle. Rounded corners and a border
+     * are drawn straight into the frame buffer; only the indicator widgets take
+     * a layer, and this is not one of them. */
+    lv_obj_t *bub = lv_obj_create(page);
+    lv_obj_set_size(bub, CO_BUB_W, CO_BUB_H);
+    lv_obj_set_pos(bub, CO_BUB_X, bub_y);
+    lv_obj_set_style_radius(bub, 6, 0);
+    lv_obj_set_style_border_width(bub, 1, 0);
+    lv_obj_set_style_border_color(bub, COL_LINE, 0);
+    lv_obj_set_style_bg_color(bub, COL_BODY, 0);
+    lv_obj_set_style_pad_all(bub, 6, 0);
+    lv_obj_clear_flag(bub, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *say = lv_label_create(bub);
+    lv_label_set_long_mode(say, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(say, CO_BUB_W - 2 - 12);
+    lv_obj_set_style_text_align(say, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(say, co_advice_text(coach_advise(&a)));
+    lv_obj_center(say);
+
+    /* ---- and the tail, joining the two. Created after the bubble so it paints
+     * over the top border, which is the border it replaces. */
+    lv_obj_t *tail = lv_canvas_create(page);
+    lv_canvas_set_buffer(tail, co_tail_buf, CO_TAIL_W, CO_TAIL_H, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_palette(tail, 0, lv_color_to_32(COL_BODY, 0xFF));
+    lv_canvas_set_palette(tail, 1, lv_color_to_32(COL_LINE, 0xFF));
+    lv_obj_set_pos(tail, face_x + face_w / 2 - CO_TAIL_APX, bub_y - (CO_TAIL_H - 1));
+    co_tail_paint(tail);
+
+    co_home_link_at(page, bub_y + CO_BUB_H + 4);
 }
 
 /* ------------------------------------------------------------------ the home */

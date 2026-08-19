@@ -668,13 +668,34 @@ s coach_marks_hollow
 c 18 225
 t 300
 # The weekly report: counts, the domain histogram, the best/worst read-outs, and
-# the deterministic advice line (coach_advise, gated by `make -C sim coach`).
+# the deterministic advice line (coach_advise, gated by `make -C sim coach`) --
+# which now reads as the coach SAYING it: his portrait sits right of the stat
+# column and a speech bubble hangs off his chin. coach_week must show the face,
+# the tail joining it to the balloon, and no scrollbar beside the portrait.
 c 194 160
 t 400
 c 186 188
 t 600
 s coach_week
-c 19 194
+# The report is ONE scrolling page, not a scrolling stat panel inside fixed
+# furniture: stats, coach, bubble and "back" all move together. Two domains puts
+# "back" just below the fold, so it has to be scrolled to before it can be
+# tapped -- dragging further than the 14 px of travel simply clamps at the end.
+# WITHOUT this drag the tap below lands on the bubble instead, and because the
+# smoke gates on exit code rather than pixels it would pass while sitting on the
+# wrong screen. coach_week_scrolled is the evidence that it did not.
+d 60 190
+t 40
+m 60 170
+t 40
+m 60 140
+t 40
+m 60 130
+t 40
+u
+t 500
+s coach_week_scrolled
+c 19 197
 t 400
 s coach_week_back
 # Menu > Length / Day goal cycle their value WITHOUT dismissing the sheet. They are

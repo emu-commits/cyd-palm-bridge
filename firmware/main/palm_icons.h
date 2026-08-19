@@ -12,6 +12,10 @@ extern const lv_image_dsc_t icon_wordie;    /* Wordie (Games sub-launcher) */
 extern const lv_image_dsc_t icon_sudoku;    /* Sudoku (Games sub-launcher) */
 extern const lv_image_dsc_t icon_zip;       /* Zip path puzzle (Games sub-launcher) */
 extern const lv_image_dsc_t icon_coach;     /* Coach focus timer (ritual Pomodoro) */
+/* Coach's portrait, 60x65 -- the weekly report's speaker, beside the stats and
+ * attached to the advice bubble. Regenerate with tools/gen_coach_face.py. Flash
+ * rodata like every icon here, so the 24 KB LVGL object pool never holds it. */
+extern const lv_image_dsc_t coach_face;
 /* silkscreen buttons (flank the Graffiti area) */
 extern const lv_image_dsc_t silk_home, silk_menu, silk_find, silk_calc;
 #endif
