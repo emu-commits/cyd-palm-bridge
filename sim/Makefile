@@ -139,9 +139,10 @@ build/zip_test: tests/zip_test.c $(FW)/zip.c $(FW)/zip.h
 clock: build/clock_test
 	./build/clock_test
 
-build/clock_test: tests/clock_test.c $(FW)/playclock.h
+build/clock_test: tests/clock_test.c $(FW)/playclock.h $(FW)/clock.c $(FW)/clock.h
 	@mkdir -p build
-	$(CC) -O2 -Wall -I$(FW) tests/clock_test.c -o $@
+	$(CC) -O2 -Wall -Iinclude -I$(FW) -DCLOCK_TEST_HOOKS \
+	    tests/clock_test.c $(FW)/clock.c -o $@
 
 # ---- coach: host gate for the pure Coach logic (advice rules, streaks, sigil
 # normalisation). Clock- and zone-injected, so it needs no LVGL and no sleeping. ----

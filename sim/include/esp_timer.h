@@ -19,4 +19,12 @@ static inline esp_err_t esp_timer_start_periodic(esp_timer_handle_t t, uint64_t 
     (void)t; (void)period_us; return ESP_FAIL;
 }
 
+/* Monotonic microseconds since start. The drift meter needs a clock that
+ * settimeofday() cannot move, so this one is real even in the sim. */
+#include <sys/time.h>
+static inline int64_t esp_timer_get_time(void){
+    struct timeval tv; gettimeofday(&tv, NULL);
+    return (int64_t)tv.tv_sec * 1000000 + tv.tv_usec;
+}
+
 #endif

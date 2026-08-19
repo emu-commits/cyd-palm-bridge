@@ -309,6 +309,17 @@ starts with a **feasibility check on the base CYD** before committing to a build
   map proves it (the 32K pins are GPIO32/33, both used by touch). That leaves the
   internal ~150 kHz RC oscillator: calibrated at boot, but temperature- and
   supply-dependent, drifting on the order of a percent — minutes/day, not seconds.
+  **MEASURE BEFORE BUYING — instrumented 2026-08-19.** Every HotSync is a free
+  reading of how far the clock wandered since the last one, and `clock_sync_begin/end`
+  now takes it: the correction SNTP applies, the interval it accumulated over, and the
+  implied ppm, logged and appended to `/sdcard/drift.log` (the experiment runs on
+  battery with no USB attached, so a serial-only reading would never be read). Samples
+  whose interval contains a power loss are reported but not counted — that correction
+  is the outage, not drift. **The estimates below span seconds/day to minutes/day
+  depending on how much time goes to light sleep on the uncalibrated RC; if the real
+  number lands at the low end, a battery alone closes this item and no RTC part is
+  needed.** Two syncs are required before the first real sample (the first sets the
+  anchor). Gate: `make -C sim clock`.
   **Size the part to the sync interval, not to the spec sheet.** Assume Wi-Fi once a day
   (user is home daily). At one anchor/day a plain crystal RTC at ±20 ppm drifts
   **~1.7 s/day** — already invisible. The DS3231's ±2 ppm TCXO buys ~1 min/*year*, which

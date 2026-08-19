@@ -166,7 +166,15 @@ static void wifi_down(void){
 static int clock_ok(void){
     esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
     if(esp_netif_sntp_init(&cfg)!=ESP_OK) return 0;
-    for(int i=0;i<15;i++) if(esp_netif_sntp_sync_wait(pdMS_TO_TICKS(2000))==ESP_OK) break;
+    /* Every sync is a free measurement of how far the clock wandered since the
+     * last one -- the number that decides whether this device needs an RTC part.
+     * The bracket has to be OUTSIDE the wait, because the correction is only
+     * meaningful against the clock as it stood before SNTP touched it. */
+    clock_sync_begin();
+    int synced = 0;
+    for(int i=0;i<15;i++)
+        if(esp_netif_sntp_sync_wait(pdMS_TO_TICKS(2000))==ESP_OK){ synced = 1; break; }
+    clock_sync_end(synced);
     esp_netif_sntp_deinit();
     time_t now=0; time(&now); struct tm ti; gmtime_r(&now,&ti);
     if((ti.tm_year+1900) < 2024) return 0;
