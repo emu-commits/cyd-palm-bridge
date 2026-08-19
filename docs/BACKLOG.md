@@ -305,8 +305,34 @@ starts with a **feasibility check on the base CYD** before committing to a build
   fetch (Open-Meteo, hourly temp + precipitation probability + weathercode + daily sun
   times, written compact to `WX_PATH` during HotSync); it belongs in the internet-only
   stage of `hotsync_task()` beside `fetch_news()`, which now runs regardless of the
-  account. **Open first:** where the location comes from — a single lat/lon in
-  `config.ini`, or an on-device picker (`PRODUCT_PLAN.md` lists this as undecided).
+  account.
+  **Location — decided 2026-08-19: `lat`/`lon` in `config.ini` for v1.** `Config` has no
+  location field at all today, so this is greenfield. The reasoning, because it will
+  look under-ambitious later otherwise:
+  - **A forecast's resolution is kilometres.** Open-Meteo serves off a grid, so
+    locating the device to tens of metres is precision that gets discarded on arrival.
+    That kills the whole WiFi-positioning branch on value, before cost.
+  - **And the free WiFi-positioning landscape has moved.** Mozilla Location Service —
+    the free one everyone remembers — was **retired in 2024**. Google's Geolocation API
+    still does BSSID → lat/lng, but it is billable and the key would have to ship
+    *inside the device*, where it leaks. BeaconDB (beacondb.net) is the community
+    MLS successor: free, no key, MLS-compatible — but crowd-sourced coverage is patchy,
+    so it can simply return nothing for a given street. Verify its status before relying
+    on it; this note may age badly.
+  - **This is a desk PDA that syncs at home over a known SSID.** Its location *is*
+    "home". A fixed lat/lon is the truth, not a shortcut, and geolocation only earns
+    its complexity once the device both travels and syncs while travelling.
+  **Later, and worth doing before shipping to strangers: IP geolocation at first sync.**
+  One GET, cache into config, never ask the user anything, manual lat/lon as override —
+  because "look up your coordinates and type them into a file" is a bad first five
+  minutes for a buyer. Two traps when picking a provider: a VPN puts the device in the
+  wrong country, and **several free tiers are non-commercial-only** (`ip-api.com`
+  among them), so read the licence rather than the pricing page. Incidental upside on
+  this board: some of those endpoints are plain HTTP, which skips mbedTLS entirely, and
+  heap is what this device can least afford.
+  **The no-new-dependency alternative** if a picker is ever wanted: Open-Meteo also
+  publishes a **free, keyless geocoding API** (city name → lat/lon), so a city search
+  costs no second vendor and no key.
 - **`[device]` A real RTC part — decide and fit.** The clock problem in one line: this
   board has no battery-backed RTC, so the wall clock is only as good as the last
   checkpoint. `clock.c` persists the epoch to NVS every 120 s and restores it at boot,
