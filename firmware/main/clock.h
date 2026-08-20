@@ -48,6 +48,13 @@ void clock_sync_end(int synced);
  * POSIX TZ string directly, or maps a few common IANA names; unknown -> UTC. */
 void clock_set_tz(const char *tz);
 
+/* 1 if the last clock_set_tz() actually recognised its argument; 0 means the
+ * device is silently running on the UTC fallback, which looks identical to a
+ * correct clock except that every hour is wrong. clock_tz_posix() is the POSIX
+ * TZ string in force. */
+int         clock_tz_known(void);
+const char *clock_tz_posix(void);
+
 /* enumerate the built-in DST-aware timezone list (for the picker UI). */
 int clock_zone_count(void);
 const char *clock_zone_name(int i);   /* IANA name, e.g. "America/New_York" */

@@ -38,6 +38,19 @@ const char *config_policy_to_str(int policy){
     return "server";
 }
 
+/* Cut an INLINE comment off a value: everything from a '#' that FOLLOWS
+ * whitespace to the end of the line. Deliberately NOT any bare '#' -- a password
+ * or an SSID may legitimately contain one ("P#ssw0rd" survives; "pass # note"
+ * does not, which is the documented cost of the syntax). This exists because
+ * config.ini.example ships `timezone = America/New_York   # empty = floating`
+ * and the parser used to keep the comment as part of the value: the zone then
+ * matched nothing and silently fell back to UTC, and the same line shape on
+ * `dav_pass` silently appended a comment to the password. */
+static void cut_comment(char *s){
+    for(char *p = s; *p; p++)
+        if(*p=='#' && p>s && (p[-1]==' '||p[-1]=='\t')){ *p = 0; return; }
+}
+
 /* trim leading/trailing ASCII whitespace in place; returns the start pointer. */
 static char *trim(char *s){
     while(*s==' '||*s=='\t'||*s=='\r'||*s=='\n') s++;
@@ -79,7 +92,9 @@ int config_load(const char *path, Config *c){
         char *eq=strchr(s,'=');
         if(!eq) continue;                       /* malformed: no '=' */
         *eq=0;
-        char *key=trim(s), *val=trim(eq+1);
+        char *key=trim(s), *val=eq+1;
+        cut_comment(val);                       /* `value   # note` -> `value` */
+        val=trim(val);
         if(*key==0) continue;                   /* empty key */
         apply(c,key,val);
     }

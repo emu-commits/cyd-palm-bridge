@@ -24,6 +24,12 @@ CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
 # --- FatFs on SD: long filenames for state/*.map ---
 CONFIG_FATFS_LFN_HEAP=y
 
+# --- SNTP: room for three servers, not one. A single hard-coded pool name that
+# will not resolve (or whose UDP 123 the router eats) is indistinguishable from
+# "the clock was already fine", because the restored NVS checkpoint always looks
+# plausible. Fallbacks make a real failure rare enough to be worth reporting. ---
+CONFIG_LWIP_SNTP_MAX_SERVERS=3
+
 # --- the sync runs in the main task; give it headroom ---
 # 12288 overflowed on hardware: ui_init() alone peaks at ~10.3 KB building the
 # lock-screen dashboard, for ~12.8 KB total against a 12 KB stack -- a hard

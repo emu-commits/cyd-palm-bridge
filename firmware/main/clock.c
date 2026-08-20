@@ -229,13 +229,82 @@ static const struct { const char *iana, *posix; } TZ_TBL[] = {
 };
 #define TZ_TBL_N ((int)(sizeof TZ_TBL / sizeof TZ_TBL[0]))
 
-/* unknown zone (or empty) falls back to UTC so the date is at least stable. */
+/* --- zone resolution -------------------------------------------------------
+ * An unrecognised zone falls back to UTC so the date is at least stable, but
+ * SILENTLY falling back is how a device ends up confidently showing the wrong
+ * hour: the clock is right, the label says the zone, and only the number is
+ * wrong. So resolution now reports whether it actually recognised the zone, the
+ * caller says so out loud, and the matching itself is forgiving of the ways a
+ * person actually types a zone into config.ini. */
+
+static char s_tz_in[48];      /* what was asked for */
+static char s_tz_posix[48];   /* what is in force   */
+static int  s_tz_known;       /* 0 => the fallback is running, not the request */
+
+static int ci_eq(const char *a, const char *b){
+    for(; *a && *b; a++, b++){
+        char x=*a, y=*b;
+        if(x>='A'&&x<='Z') x += 32;
+        if(y>='A'&&y<='Z') y += 32;
+        if(x=='_') x=' ';                    /* "New_York" == "New York" */
+        if(y=='_') y=' ';
+        if(x!=y) return 0;
+    }
+    return *a==0 && *b==0;
+}
+
+/* The leading alphabetic run of a POSIX TZ string is its standard-time
+ * abbreviation ("EST" of "EST5EDT,..."); the run after the offset is the DST one
+ * ("EDT"). Both are things people type. */
+static int abbrev_eq(const char *posix, const char *z, int want_dst){
+    char ab[8]; int n=0, i=0;
+    while(posix[i] && !((posix[i]>='0'&&posix[i]<='9') || posix[i]=='-' || posix[i]=='+')){
+        if(n < (int)sizeof ab - 1) ab[n++] = posix[i];
+        i++;
+    }
+    if(!want_dst){ ab[n]=0; return n>0 && ci_eq(ab, z); }
+    while(posix[i] && ((posix[i]>='0'&&posix[i]<='9')||posix[i]=='-'||posix[i]=='+'||posix[i]==':')) i++;
+    n=0;
+    while(posix[i] && posix[i] != ','){ if(n < (int)sizeof ab - 1) ab[n++]=posix[i]; i++; }
+    ab[n]=0;
+    return n>0 && ci_eq(ab, z);
+}
+
+/* "America/New_York" -> "New_York"; a zone with no '/' is its own tail. */
+static const char *tail(const char *z){
+    const char *p = strrchr(z, '/');
+    return p ? p+1 : z;
+}
+
+/* A real POSIX TZ carries an OFFSET after the abbreviation ("EST5", "CET-1") or
+ * DST rules after a comma. A bare "EST" does NOT -- newlib reads it as UTC, which
+ * is exactly the silent five-hour error this check exists to prevent. */
+static int looks_posix(const char *z){
+    if(strchr(z, ',')) return 1;
+    int i=0;
+    while(z[i] && ((z[i]>='A'&&z[i]<='Z')||(z[i]>='a'&&z[i]<='z'))) i++;
+    if(i < 3) return 0;
+    return z[i]=='-' || z[i]=='+' || (z[i]>='0' && z[i]<='9');
+}
+
+/* Resolve `z` to a POSIX TZ string. Returns 1 if it was recognised, 0 if the
+ * result is the UTC fallback. An empty zone is a deliberate choice (floating
+ * local time), so it counts as recognised. */
+DRIFT_HOOK int tz_resolve(const char *z, const char **out){
+    *out = "UTC0";
+    if(!z || !z[0]) return 1;
+    if(looks_posix(z)){ *out = z; return 1; }
+    for(int i=0;i<TZ_TBL_N;i++) if(!strcmp(z, TZ_TBL[i].iana)){ *out = TZ_TBL[i].posix; return 1; }
+    /* case/underscore-insensitive, then by the city alone, then by abbreviation */
+    for(int i=0;i<TZ_TBL_N;i++) if(ci_eq(z, TZ_TBL[i].iana)){ *out = TZ_TBL[i].posix; return 1; }
+    for(int i=0;i<TZ_TBL_N;i++) if(ci_eq(z, tail(TZ_TBL[i].iana))){ *out = TZ_TBL[i].posix; return 1; }
+    for(int i=0;i<TZ_TBL_N;i++) if(abbrev_eq(TZ_TBL[i].posix, z, 0)){ *out = TZ_TBL[i].posix; return 1; }
+    for(int i=0;i<TZ_TBL_N;i++) if(abbrev_eq(TZ_TBL[i].posix, z, 1)){ *out = TZ_TBL[i].posix; return 1; }
+    return 0;
+}
+
 static const char *iana_to_posix(const char *z){
-    if(!z || !z[0]) return "UTC0";
-    /* already a POSIX TZ string (e.g. "EST5EDT,M3.2.0,M11.1.0")? pass through. */
-    if(strchr(z, ',') || (strlen(z) <= 6 && !strchr(z, '/'))) return z;
-    for(int i=0;i<TZ_TBL_N;i++) if(!strcmp(z, TZ_TBL[i].iana)) return TZ_TBL[i].posix;
-    return "UTC0";
+    const char *p; tz_resolve(z, &p); return p;
 }
 
 int clock_zone_count(void){ return TZ_TBL_N; }
@@ -252,11 +321,22 @@ void clock_now_desc(char *out, int cap){
 }
 
 void clock_set_tz(const char *tz){
-    const char *posix = iana_to_posix(tz);
+    const char *posix = NULL;
+    s_tz_known = tz_resolve(tz, &posix);
+    snprintf(s_tz_in,    sizeof s_tz_in,    "%s", (tz && tz[0]) ? tz : "");
+    snprintf(s_tz_posix, sizeof s_tz_posix, "%s", posix);
     setenv("TZ", posix, 1);
     tzset();
-    ESP_LOGI(TAG,"timezone: %s -> %s", (tz&&tz[0])?tz:"(unset)", posix);
+    if(s_tz_known)
+        ESP_LOGI(TAG,"timezone: %s -> %s", s_tz_in[0] ? s_tz_in : "(unset)", posix);
+    else
+        ESP_LOGW(TAG,"timezone \"%s\" not recognised -- running on UTC. Use an IANA "
+                     "name from the built-in list (e.g. America/New_York) or a POSIX "
+                     "TZ string (e.g. EST5EDT,M3.2.0,M11.1.0).", s_tz_in);
 }
+
+int clock_tz_known(void){ return s_tz_known; }
+const char *clock_tz_posix(void){ return s_tz_posix; }
 
 void clock_zone_hhmm(const char *iana, time_t t, char *out, int cap){
     if(!out || cap <= 0) return;

@@ -3,8 +3,12 @@
  * Today Wi-Fi + iCloud + per-app collections are compile-time (secrets.h), so
  * changing them means a reflash. This parses/serialises a plain `key = value`
  * file on the SD card so Preferences can edit them at runtime. Format: one
- * `key = value` per line, `#` comments, surrounding whitespace ignored, unknown
- * keys skipped, malformed lines skipped (robust against a hand-edited file).
+ * `key = value` per line, surrounding whitespace ignored, unknown keys skipped,
+ * malformed lines skipped (robust against a hand-edited file).
+ *
+ * COMMENTS: a '#' at the start of a line comments the whole line. A '#' that
+ * FOLLOWS whitespace ends the value ("timezone = UTC   # note"). A '#' with no
+ * space before it is an ordinary character, so a password may contain one.
  *
  * NOTE: this file holds the Wi-Fi and app-specific passwords, exactly like
  * secrets.h did -- treat it as sensitive; never log the password fields.

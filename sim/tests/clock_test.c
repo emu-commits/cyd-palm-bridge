@@ -14,6 +14,11 @@
  * slow and send us shopping for the wrong fix. */
 void drift_line(char *out, int cap, int64_t corr_us, long long span_s, unsigned lost);
 
+/* clock.c's timezone resolver, same hook. This one failed SILENTLY: an
+ * unrecognised zone became UTC, so the device showed a confident, wrong hour --
+ * which is exactly what a trailing "# comment" left on the config.ini line did. */
+int tz_resolve(const char *z, const char **out);
+
 static int fails = 0;
 #define CK(c,m) do{ if(!(c)){ fails++; printf("  FAIL: %s\n",(m)); } else printf("  ok: %s\n",(m)); }while(0)
 
@@ -152,6 +157,44 @@ int main(void){
         drift_line(m, sizeof m, 30LL*DAY*1000000, 365*DAY, 0);
         CK(strlen(m) < sizeof m - 1, "a year-long interval still fits the line");
         CK(HAS(m, "ppm"),           "and still produces a rate");
+    }
+
+    printf("== timezone resolution ==\n");
+    {
+        const char *p = NULL;
+
+        /* the exact IANA names from the built-in table */
+        CK(tz_resolve("America/New_York", &p) && HAS(p, "EST5EDT"), "exact IANA name resolves");
+        CK(HAS(p, "M3.2.0"),                       "and carries the US DST rules");
+        CK(tz_resolve("Asia/Kolkata", &p) && HAS(p, "IST-5:30"), "a half-hour zone resolves");
+
+        /* the ways a person actually types it */
+        CK(tz_resolve("America/New York", &p) && HAS(p,"EST5EDT"), "a space for the underscore");
+        CK(tz_resolve("america/new_york", &p) && HAS(p,"EST5EDT"), "lower case");
+        CK(tz_resolve("New York", &p)         && HAS(p,"EST5EDT"), "the city on its own");
+        CK(tz_resolve("EST", &p)              && HAS(p,"EST5EDT"), "the standard-time abbreviation");
+        CK(tz_resolve("EDT", &p)              && HAS(p,"EST5EDT"), "the daylight abbreviation");
+        CK(tz_resolve("PST", &p)              && HAS(p,"PST8PDT"), "and on the other coast");
+
+        /* a bare abbreviation must NOT be passed through as a POSIX TZ: newlib
+         * reads "EST" with no offset as UTC, which is the five-hour silent error */
+        CK(!HAS(p, "UTC"),                    "an abbreviation never falls through to UTC");
+
+        /* a real POSIX TZ string passes through untouched */
+        CK(tz_resolve("EST5EDT,M3.2.0,M11.1.0", &p) && !strcmp(p,"EST5EDT,M3.2.0,M11.1.0"),
+                                              "a full POSIX TZ passes through");
+        CK(tz_resolve("MST7", &p) && !strcmp(p,"MST7"), "so does an offset with no DST rules");
+
+        /* empty is a deliberate choice (floating local time), not a failure */
+        CK(tz_resolve("", &p) == 1 && !strcmp(p,"UTC0"),   "empty zone is UTC, and is not an error");
+        CK(tz_resolve(NULL, &p) == 1,                      "NULL zone is not an error either");
+
+        /* and the case that started all this: anything unrecognised reports 0 so
+         * the caller can say so out loud instead of quietly running on UTC */
+        CK(tz_resolve("America/New_York   # empty = floating", &p) == 0,
+                                              "a zone with a trailing comment is REJECTED, not UTC'd");
+        CK(!strcmp(p,"UTC0"),                 "and still yields a stable fallback");
+        CK(tz_resolve("Mars/Olympus_Mons", &p) == 0, "an unknown zone reports unknown");
     }
 
     printf(fails ? "== clock: %d FAILURE(S) ==\n" : "== clock: all passed ==\n", fails);
