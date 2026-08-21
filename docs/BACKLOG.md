@@ -203,6 +203,12 @@ starts with a **feasibility check on the base CYD** before committing to a build
   unlocks Date Book alarms actually *alarming* (VALARM already syncs).
 - **`[device]` U8 — Power.** Battery gauge (GPIO34 ADC → battery % by the clock);
   confirm light-sleep + PWM backlight behave on a real cell.
+  **Confirmed against the vendor docs (2026-08-19):** this board *does* carry a charge
+  path — a **TP4054** charge-management IC on the 2-pin `JP2` battery seat, with a
+  P-channel FET for discharge switching (user manual Fig. 3.13). `BAT_ADC` is wired to
+  `IO34`. So the battery charges over USB with no extra part, and `power_battery_pct()`
+  is implementable rather than blocked — it returns `-1` today purely because the
+  divider was never calibrated, which is a bench measurement, not a code problem.
 - **`[device]` U9 — Case.** Printed enclosure.
 
 ## Needs hardware — on-device verifies (written, awaiting flash)
@@ -309,9 +315,49 @@ starts with a **feasibility check on the base CYD** before committing to a build
   only earns its price if the device can go weeks without Wi-Fi. So a **PCF8563 /
   DS1307-class part is sufficient and cheapest**; DS3231 is the upgrade if that daily
   assumption weakens.
-  **Fit:** I2C, two free GPIOs — `22` and `27` are unused in our map and are the pair
-  usually broken out on the CYD's side headers (confirm against the board revision).
-  Check the module's footprint against the enclosure; the common ZS-042 board is large.
+  **Fit — settled against the vendor docs (2026-08-19), and the earlier guess was wrong.**
+  The board is the **E32R28T** (LCDWIKI, ESP32-WROOM-32E + ILI9341 + XPT2046); its IO
+  table in `5_Schematic/` matches our pin map exactly, so it is authoritative. The old
+  note here claimed `22` and `27` were the free pair broken out on the side headers.
+  **`IO22` is the red RGB LED and is not brought out at all.** The three 4-pin 1.25 mm
+  seats are, per Figures 3.12 and 3.13 of the user manual:
+
+  | seat | pin 1 | pin 2 | pin 3 | pin 4 |
+  |---|---|---|---|---|
+  | **P2** Serial | +5V | GND | TXD0 (IO1) | RXD0 (IO3) |
+  | **P3** SPI Peripheral | MOSI (IO23) | MISO (IO19) | CLK (IO18) | **CS (IO27)** |
+  | **P4** Expand Pin | VCC3V3 | **IO35** | *(n/c)* | GND |
+
+  **The pin census forces the answer.** Reachable without soldering: `IO27` (the only
+  free *bidirectional* GPIO), `IO35` (**input only**), `IO1`/`IO3` (UART0), and the SD
+  bus. I2C needs two bidirectional lines and there is exactly one, so an I2C part must
+  take a UART0 pin — and that is worse than inconvenient: **`RXD0` is driven by the
+  CH340 whenever USB is connected**, and `TXD0` carries the ROM bootloader's output
+  before our code runs. Either choice costs the console and both are needed back to
+  flash. So **I2C is off the table on this board without soldering.**
+
+  **Therefore: an SPI RTC on P3, with `IO27` as its chip select.** That is what the
+  seat is for — the manual's words: *"Lead out an unused chip selection pin and SPI
+  interface pin used by the MicroSD card, which can be used for external SPI devices."*
+  Candidate part: **DS3234** (the SPI sibling of the DS3231). Two consequences:
+  - **P3 carries no power.** 3.3V and GND come from **P4**, so the cable is a
+    two-connector splice — crimp only, nothing soldered to the board.
+  - **OPEN RISK, de-risk before buying: the RTC shares SPI2 with the SD card.**
+    Multiple devices per host is supported by the SPI master driver (add the RTC with
+    `spi_bus_add_device` on `SD_SPI_HOST` after `esp_vfs_fat_sdspi_mount` has brought
+    the bus up; per-device clocks handle the DS3234's ~4 MHz ceiling against the SD's
+    20 MHz). The failure mode is the module, not the driver: **a breakout whose MISO
+    does not go high-Z when CS is high will corrupt every SD read.** Buy a 3.3V-native
+    board with no buffer or level shifter on MISO, and prove SD + RTC coexist on the
+    bench before the enclosure design assumes it.
+
+  **The alarm pin has a home, so the 8:00 knock survives.** `IO35` is useless for a bus
+  but it is `RTC_GPIO5` and a valid `ext0` deep-sleep wake source — exactly what an
+  alarm input is — and it sits on P4 beside the 3.3V and GND the module needs.
+  **Gotcha:** `IO34`–`IO39` have no internal pull-ups and INT/SQW is open-drain, so that
+  line needs an external pull-up in the cable. This is also the reason to pay for a
+  DS3231-class part over the PCF8563 the drift maths alone would pick: the alarm is
+  worth more here than the ±2 ppm is.
   **Gotcha:** ZS-042-style DS3231 modules trickle-charge their cell — fit a LIR2032, or
   remove the charging resistor before putting a non-rechargeable CR2032 in one.
   **Why this leads rather than the software fallback below.** The alternative is to
