@@ -49,6 +49,35 @@ int main(void){
     CHECK(news_begin() && news_add("Only","one","just one",5)==1 && news_commit(), "rewrite");
     CHECK(news_count()==1, "count == 1 after rewrite");
 
+    /* --- suspend / resume across a fetch ------------------------------------
+     * The device closes both store files during each feed's network I/O to hand
+     * their 4 KB FatFs caches to the TLS handshake. If resume() reopened at the
+     * wrong offset it would corrupt earlier records rather than fail loudly, so
+     * this walks the exact sequence the fetch uses. */
+    CHECK(news_begin(), "suspend: begin");
+    CHECK(news_add("F1","t1","body one",11)==1, "suspend: first add");
+    CHECK(news_suspend()==1, "suspend closes the store");
+    CHECK(news_suspend()==0, "suspending twice is a no-op");
+    CHECK(news_add("F1","lost","must not be written",0)==0, "add while suspended is refused");
+    CHECK(news_resume()==1, "resume reopens the store");
+    CHECK(news_add("F2","t2","body two is longer",22)==1, "add after resume");
+    CHECK(news_suspend()==1 && news_resume()==1, "a second suspend/resume cycle");
+    CHECK(news_add("F3","t3","three",33)==1, "add after the second cycle");
+    CHECK(news_commit(), "suspend: commit");
+    CHECK(news_count()==3, "all three records survived the cycles");
+    {
+        NewsMeta m; char b[64];
+        CHECK(news_meta(0,&m) && !strcmp(m.title,"t1") && m.when==11, "record 0 intact");
+        news_read_text(0,b,sizeof b);
+        CHECK(!strcmp(b,"body one"), "body 0 intact -- resume did not overwrite it");
+        CHECK(news_meta(1,&m) && !strcmp(m.title,"t2") && m.when==22, "record 1 intact");
+        news_read_text(1,b,sizeof b);
+        CHECK(!strcmp(b,"body two is longer"), "body 1 lands at the right offset");
+        CHECK(news_meta(2,&m) && !strcmp(m.title,"t3"), "record 2 intact");
+        news_read_text(2,b,sizeof b);
+        CHECK(!strcmp(b,"three"), "body 2 lands at the right offset");
+    }
+
     remove("pdb/_news.idx"); remove("pdb/_news.dat");
     printf(failures ? "\nNews gate: %d FAIL\n" : "\nNews gate: OK\n", failures);
     return failures ? 1 : 0;

@@ -73,6 +73,8 @@ static void apply(Config *c, const char *key, const char *val){
     else if(!strcasecmp(key,"todo_coll")) setstr(c->todo_coll,     sizeof c->todo_coll, val);
     else if(!strcasecmp(key,"card_coll")) setstr(c->card_coll,     sizeof c->card_coll, val);
     else if(!strcasecmp(key,"timezone"))  setstr(c->timezone,      sizeof c->timezone, val);
+    else if(!strcasecmp(key,"latitude"))  setstr(c->latitude,      sizeof c->latitude, val);
+    else if(!strcasecmp(key,"longitude")) setstr(c->longitude,     sizeof c->longitude, val);
     else if(!strcasecmp(key,"world1"))    setstr(c->world1,        sizeof c->world1, val);
     else if(!strcasecmp(key,"world2"))    setstr(c->world2,        sizeof c->world2, val);
     else if(!strcasecmp(key,"brightness"))    c->brightness    = clampi(atoi(val),0,100);
@@ -117,6 +119,8 @@ int config_save(const char *path, const Config *c){
     fprintf(f,"todo_coll = %s\n",     c->todo_coll);
     fprintf(f,"card_coll = %s\n",     c->card_coll);
     fprintf(f,"timezone = %s\n",      c->timezone);
+    fprintf(f,"latitude = %s\n",      c->latitude);
+    fprintf(f,"longitude = %s\n",     c->longitude);
     fprintf(f,"world1 = %s\n",        c->world1);
     fprintf(f,"world2 = %s\n",        c->world2);
     fprintf(f,"brightness = %d\n",    c->brightness);

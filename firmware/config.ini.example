@@ -24,6 +24,12 @@ todo_coll =
 card_coll =
 
 timezone      = America/New_York          # empty = floating local time
+
+# Weather location, decimal degrees (east/north positive). Empty = no weather.
+# Forecast resolution is kilometres, so a rough figure for your town is plenty.
+latitude      = 40.7143
+longitude     = -74.0060
+
 brightness    = 80                        # backlight 0..100
 backlight_sec = 30                        # dim after N idle seconds (0 = never)
 policy        = server                    # conflict policy: server | local | both

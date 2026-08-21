@@ -30,6 +30,12 @@ typedef struct {
     char todo_coll[192];       /* To Do (Reminders list) collection      */
     char card_coll[192];       /* Address book collection                */
     char timezone[48];         /* e.g. America/New_York ("" = floating)  */
+    /* Weather location. Stored as text exactly as typed so a hand-edited
+     * config.ini round-trips unchanged, and because the device has no use for
+     * the number beyond pasting it into a URL. Empty = weather is not fetched
+     * (see PRODUCT_PLAN: lat/lon in config for v1, IP geolocation later). */
+    char latitude[24];
+    char longitude[24];
     char world1[48];           /* lock-screen world clock 1 (IANA zone, "" = off) */
     char world2[48];           /* lock-screen world clock 2 (IANA zone, "" = off) */
     int  brightness;           /* backlight, 0..100                      */

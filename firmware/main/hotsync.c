@@ -13,6 +13,8 @@
 #include "rss.h"          /* RSS reader: feed parser */
 #include "news.h"         /* RSS reader: on-SD article store */
 #include "feeds.h"        /* RSS reader: the enabled feed sources */
+#include "dash.h"         /* lock-screen dashboard: the WxCache it renders from */
+#include "wxfetch.h"      /* Open-Meteo CSV -> WxCache */
 #include "secrets.h"
 #include "appcfg.h"
 #include "clock.h"
@@ -41,7 +43,7 @@ static const char *TAG = "hotsync";
  * so this number stays honest. Raise it only against that log. */
 #define HOTSYNC_STACK 20480
 static volatile int s_busy;
-static char s_status[160] = "Ready";
+static char s_status[208] = "Ready";
 static void setst(const char *s){ snprintf(s_status, sizeof s_status, "%s", s); }
 
 /* ---- Mode B headroom probe -----------------------------------------------
@@ -337,11 +339,14 @@ static void fetch_news(void){
         if(!f || !f->enabled || !f->url[0]) continue;
         s_news_feeds_tried++;
         int before = s_news_added;
+        /* the store's two file caches (8 KB) are dead weight during the fetch --
+         * hand them back for the length of the handshake, take them again to parse */
+        news_suspend();
         int st = dav_fetch_url(f->url, NEWS_TMP);
         long spooled = 0;
         FILE *sp = fopen(NEWS_TMP,"rb");
         if(sp){ fseek(sp,0,SEEK_END); spooled = ftell(sp); fclose(sp); }
-        if(st>=200 && st<300){
+        if(st>=200 && st<300 && news_resume()){
             char feed[NEWS_FEED_CAP];
             /* explicit precision: the name (FEED_NAME_CAP) can exceed feed's cap,
              * so bound the copy so the compiler can prove no truncation UB. */
@@ -367,11 +372,82 @@ static void fetch_news(void){
         }
         remove(NEWS_TMP);
     }
+    news_resume();                                     /* so commit can patch the count */
     news_commit();
     dav_disconnect();                                  /* free the feed TLS handle */
     ESP_LOGI(TAG,"news: %d items from %d/%d feeds (%d dropped as older than today)%s%s",
              s_news_added, s_news_feeds_ok, s_news_feeds_tried, s_news_stale,
              s_news_why[0] ? " -- " : "", s_news_why);
+}
+
+/* ---- weather (Open-Meteo) --------------------------------------------------
+ * The last internet stage, and the cheapest: two GETs of ~1.5 KB each, spooled
+ * to SD and parsed by bridge/wxfetch.c the same way a feed is. No JSON parser
+ * and no new dependency -- Open-Meteo will return CSV if asked, which is the
+ * whole reason this fits. No API key, no account. Location comes from
+ * config.ini (PRODUCT_PLAN: lat/lon for v1); with none set, this does nothing
+ * and says so, because a dashboard quietly showing sample weather forever is
+ * how we got here. */
+#define WX_TMP "/sdcard/.wxtmp"
+static char s_wx_why[48];
+static int  s_wx_ok;
+
+static void fetch_weather(const Config *cfg){
+    s_wx_ok = 0; s_wx_why[0] = 0;
+    char url[512];
+    if(!wx_build_url(url, sizeof url, cfg->latitude, cfg->longitude)){
+        snprintf(s_wx_why,sizeof s_wx_why,"%s",
+                 cfg->latitude[0] || cfg->longitude[0] ? "location not a number" : "no location set");
+        ESP_LOGW(TAG,"weather: %s (latitude/longitude in config.ini)", s_wx_why);
+        return;
+    }
+    setst("Fetching weather...");
+
+    int st = dav_fetch_url(url, WX_TMP);
+    if(st < 200 || st >= 300){
+        snprintf(s_wx_why,sizeof s_wx_why, st < 0 ? "unreachable" : "HTTP %d", st);
+        ESP_LOGW(TAG,"weather: forecast GET st=%d", st);
+        remove(WX_TMP);
+        return;
+    }
+
+    WxCache w;
+    time_t now = 0; time(&now);
+    int ok = wx_parse_file(WX_TMP, (int64_t)now, &w);
+    remove(WX_TMP);
+    if(!ok){
+        snprintf(s_wx_why,sizeof s_wx_why,"reply not understood");
+        ESP_LOGW(TAG,"weather: the forecast CSV did not parse");
+        return;
+    }
+
+    /* AQI is a separate endpoint and a nice-to-have: its failure must not cost
+     * us the forecast we already have in hand. */
+    if(wx_build_aqi_url(url, sizeof url, cfg->latitude, cfg->longitude)){
+        int ast = dav_fetch_url(url, WX_TMP);
+        if(ast >= 200 && ast < 300) w.aqi = (int16_t)wx_parse_aqi_file(WX_TMP);
+        else ESP_LOGW(TAG,"weather: AQI GET st=%d (forecast kept)", ast);
+        remove(WX_TMP);
+    }
+
+    FILE *f = fopen(WX_PATH, "wb");
+    if(!f){
+        snprintf(s_wx_why,sizeof s_wx_why,"could not write %s", WX_PATH);
+        ESP_LOGE(TAG,"weather: cannot open %s", WX_PATH);
+        return;
+    }
+    size_t n = fwrite(&w, 1, sizeof w, f);
+    fclose(f);
+    if(n != sizeof w){
+        snprintf(s_wx_why,sizeof s_wx_why,"short write");
+        ESP_LOGE(TAG,"weather: short write to %s (%u of %u)", WX_PATH,
+                 (unsigned)n, (unsigned)sizeof w);
+        return;
+    }
+    s_wx_ok = 1;
+    ESP_LOGI(TAG,"weather: %dF code=%d aqi=%d, %d hourly, sun %02d:%02d-%02d:%02d",
+             w.cur_tempF, w.cur_code, w.aqi, w.nhours,
+             w.sunrise_min/60, w.sunrise_min%60, w.sunset_min/60, w.sunset_min%60);
 }
 
 static void hotsync_task(void *arg){
@@ -403,7 +479,7 @@ static void hotsync_task(void *arg){
     snprintf(d.user,sizeof d.user,"%s",cfg->dav_user);
     snprintf(d.pass,sizeof d.pass,"%s",cfg->dav_pass);
     (void)abspath;
-    char msg[160];
+    char msg[208];
 
     /* ---- what is account work, and what is merely internet ----------------
      * The clock above and the news below need nothing but a network. The account
@@ -494,7 +570,8 @@ static void hotsync_task(void *arg){
                 if(dav_effective_host(&dcard,"/",chost,sizeof chost)==0 && chost[0]){
                     snprintf(dcard.base,sizeof dcard.base,"%s",chost);
                     ESP_LOGI(TAG,"contacts host: %s",chost);
-                } else ESP_LOGW(TAG,"contacts host resolve failed (HTTP %d)",dav_last_status);
+                } else ESP_LOGW(TAG,"contacts host: no principal href in the reply "
+                                    "(HTTP %d); using %s",dav_last_status,dcard.base);
                 card_ready=1;
             }
             ctx=&dcard;
@@ -520,12 +597,23 @@ static void hotsync_task(void *arg){
 
     sync_set_progress(NULL, NULL);                 /* detach the hook */
     sync_free_scratch();   /* hand the ~20 KB sync scratch back to the interactive UI */
+    /* The account phase leaves a keep-alive TLS session open and the heap
+     * fragmented; the news phase is ten short-lived handshakes that each need a
+     * contiguous block. Measured: largest8 fell 27 KB -> 17 KB -> 10 KB across the
+     * account work and feeds began failing at FETCH_HEADER. Drop the session
+     * explicitly so the feeds start from whatever the heap can actually give back. */
+    dav_disconnect();
+    hs_heap("pre-news");
     fetch_news();          /* RSS reader: fetch configured feeds while Wi-Fi is up */
+    fetch_weather(cfg);    /* lock-screen dashboard: the last thing the network is for */
+    dav_disconnect();
     setprog(100);
     /* Every internet stage reports its own outcome. The old line asserted "Clock +
      * news done" whether or not either had happened, so a run that set nothing and
      * fetched nothing still read as a success with a credentials footnote. */
-    char clk[24], nws[64];
+    char clk[24], nws[64], wxs[40];
+    snprintf(wxs,sizeof wxs, s_wx_ok ? "; weather" : "; no weather (%.24s)",
+             s_wx_why[0] ? s_wx_why : "failed");
     snprintf(clk,sizeof clk,"%s", s_clock_synced ? "Clock set" : "CLOCK NOT SYNCED");
     if(s_news_added > 0)
         snprintf(nws,sizeof nws,"%d articles", s_news_added);
@@ -533,7 +621,7 @@ static void hotsync_task(void *arg){
         snprintf(nws,sizeof nws,"no news (%.47s)", s_news_why[0] ? s_news_why : "all feeds failed");
 
     if(!dav_ok)
-        snprintf(msg,sizeof msg,"%.23s; %.63s; no records - %.39s",clk,nws,dav_why);
+        snprintf(msg,sizeof msg,"%.23s; %.63s%.39s; no records - %.39s",clk,nws,wxs,dav_why);
     else if(did==0 && failed>0)
         snprintf(msg,sizeof msg,"Sync failed - low memory (heap %lu)",
                  (unsigned long)esp_get_free_heap_size());

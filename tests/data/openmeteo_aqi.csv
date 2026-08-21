@@ -1,0 +1,5 @@
+latitude,longitude,elevation,utc_offset_seconds,timezone,timezone_abbreviation
+40.699997,-74.0,51.0,-14400,America/New_York,GMT-4
+
+time,us_aqi (USAQI)
+2026-08-20T20:00,101

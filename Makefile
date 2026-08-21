@@ -5,7 +5,7 @@ CORE    = bridge/pdb.c bridge/datebook.c bridge/address.c bridge/ical.c bridge/v
           bridge/find.c
 
 all: roundtrip bridge_cli incremental synctoken category bigsync multiapp \
-     uidmatch idempotent streamparse find_test calc_test config_test rss_test news_test \
+     uidmatch idempotent streamparse find_test calc_test config_test rss_test news_test wx_test \
      feeds_test
 
 dirs:
@@ -61,6 +61,9 @@ find_test: tests/find_test.c $(CORE) | dirs
 calc_test: tests/calc_test.c bridge/calc.c | dirs
 	$(CC) $(CFLAGS) -o $@ $^ -lm
 
+wx_test: tests/wx_test.c bridge/wxfetch.c | dirs
+	$(CC) $(CFLAGS) -Ibridge -Ifirmware/main -o $@ tests/wx_test.c bridge/wxfetch.c
+
 config_test: tests/config_test.c bridge/config.c | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
@@ -81,7 +84,7 @@ fuzz_test: tests/fuzz_test.c $(CORE) | dirs
 rss_asan: tests/rss_test.c bridge/rss.c | dirs
 	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -o $@ $^
 
-test: roundtrip find_test calc_test config_test streamparse rss_test news_test feeds_test
+test: roundtrip find_test calc_test config_test streamparse rss_test news_test wx_test feeds_test
 	./roundtrip
 	./find_test
 	./calc_test
@@ -89,6 +92,7 @@ test: roundtrip find_test calc_test config_test streamparse rss_test news_test f
 	./streamparse
 	./rss_test
 	./news_test
+	cd tests && ../wx_test
 	./feeds_test
 
 # parser hardening sweep (sanitizer build; a bit slower)

@@ -33,4 +33,12 @@ int  news_begin(void);                                              /* 1 on succ
 int  news_add(const char *feed, const char *title, const char *text, uint32_t when);
 int  news_commit(void);                                            /* finalise count */
 
+/* Close the two store files without ending the session, and reopen to append.
+ * The device does this across each network fetch: an open file costs a 4 KB
+ * FatFs sector cache, and that memory is wanted by the TLS handshake. Between
+ * suspend() and resume() news_add() is a no-op, so resume before adding.
+ * suspend: 1 if it closed anything. resume: 1 if the store is writable again. */
+int  news_suspend(void);
+int  news_resume(void);
+
 #endif

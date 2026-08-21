@@ -21,6 +21,8 @@ jobs:
         run: make test
       - name: Fuzz gate (ASan + UBSan)
         run: make ftest
+      - name: Weather gate (Open-Meteo CSV -> WxCache, live fixtures)
+        run: make wx_test && cd tests && ../wx_test
 
   sync-gates:
     name: Sync gates (Radicale)

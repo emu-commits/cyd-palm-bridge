@@ -22,10 +22,16 @@ idf_component_register(
         "${BRIDGE_DIR}/config.c"
         "${BRIDGE_DIR}/rss.c"
         "${BRIDGE_DIR}/news.c"
+        "${BRIDGE_DIR}/wxfetch.c"
         "${BRIDGE_DIR}/feeds.c"
     INCLUDE_DIRS
         "."
         "${BRIDGE_DIR}"
+        # wxfetch.c fills a WxCache, whose layout is dash.h. dash.c/dash.h are
+        # already pure C shared with the sim and the host gates, so they belong
+        # beside rss.c and news.c in bridge/ -- moving them is a tidy-up on its
+        # own, tracked in BACKLOG.md. Until then, the path.
+        "${CMAKE_CURRENT_LIST_DIR}/../../main"
     REQUIRES
         esp_http_client
         mbedtls
