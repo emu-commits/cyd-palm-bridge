@@ -370,6 +370,26 @@ static int scratch_alloc(void){
             (int)sizeof(S),     g_state  ? "ok" : "FAILED");
     return 0;
 }
+/* ---- the bulk half of the scratch ------------------------------------------
+ * g_body (emit) and g_objbuf (object fetch) are 8 KB each, and NEITHER is in
+ * use during the server enumeration: that phase streams the reply to SD and
+ * parses it in its own window. Holding them across it is nevertheless what made
+ * the enumeration fail on the largest collection -- mbedTLS wants a receive
+ * buffer of SSL_IN_CONTENT_LEN (measured on device: "alloc(16749 bytes)
+ * failed", REPORT truncated at 15631 of 41496 bytes), and these two are exactly
+ * that much heap lying idle at that moment.
+ *
+ * So they are handed back for the enumeration and taken again at the first
+ * phase that actually needs each one: g_objbuf for resolveServer's GETs,
+ * g_body for buildLcRaw's hashing. Same trick the news fetch uses for its file
+ * handles, and the same reason: the memory is wanted by the handshake. */
+static void bulk_free(void){
+    free(g_body);   g_body=NULL;
+    free(g_objbuf); g_objbuf=NULL;
+}
+static int need_objbuf(void){ if(!g_objbuf) g_objbuf = malloc(OBJ_FETCH_CAP); return g_objbuf!=NULL; }
+static int need_body(void){   if(!g_body)   g_body   = malloc(BODY_CAP);      return g_body!=NULL; }
+
 void sync_free_scratch(void){
     free(g_body);   g_body=NULL;
     free(g_lrec);   g_lrec=NULL;
@@ -767,9 +787,11 @@ static int pushLocal(const DavCtx*d,const char*coll,int kind,Sink*k,
  * objhash's rows are ever resident, so peak RAM during a DAV op is O(1) in the
  * record count. `rt`/`Ccoll` (or NULL) restrict local records to one routed
  * collection for category sync. */
-static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
-                     ConflictPolicy pol,PdbW*w,int pullCat,SyncStats*st,
-                     const CatRoute*rt,const char*Ccoll){
+/* 0 on success, -1 if the collection had to be abandoned before it changed
+ * anything (the working buffers could not be retaken after the enumeration). */
+static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
+                    ConflictPolicy pol,PdbW*w,int pullCat,SyncStats*st,
+                    const CatRoute*rt,const char*Ccoll){
     uint32_t maxuid=0; int incremental=0;
     buildMapIdx(mapfile,s->token,sizeof s->token,&maxuid);   /* MP_IDX/MP_HREF/MP_PALM + token */
 #ifdef ESP_PLATFORM
@@ -782,6 +804,7 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
      * PROPFIND/REPORT branch; the fresh token is not persisted (see below). */
     s->token[0]=0;
 #endif
+    bulk_free();          /* 16 KB back: the enumeration needs it more than we do */
     int enumOk = enumServer(d,coll,s->token,s->newToken,sizeof s->newToken,&incremental); /* SV_RAW */
     if(enumOk!=0){
         /* The server could not be enumerated (all reports/PROPFIND failed or were
@@ -794,12 +817,23 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         fprintf(stderr,"[sync] %s: server enumeration failed -- keeping all local records (no deletes)\n",coll);
         incremental=1; s->newToken[0]=0;
     }
+    if(!need_objbuf()){
+        fprintf(stderr,"[sync] %s: could not retake the %d-byte fetch buffer after the "
+                       "enumeration -- abandoning this collection instead of running "
+                       "without it\n", coll, (int)OBJ_FETCH_CAP);
+        return -1;
+    }
     int unresolved = resolveServer(d,coll,incremental);      /* SV_IDX (GETs new objects) */
     if(unresolved){
         /* Some server object's UID could not be read this round; resolveServer
          * already suppressed deletes. Don't advance the sync-token either, so the
          * deferred object is re-reported by the next incremental delta. */
         s->newToken[0]=0;
+    }
+    if(!need_body()){
+        fprintf(stderr,"[sync] %s: could not retake the %d-byte emit buffer -- abandoning "
+                       "this collection instead of running without it\n", coll, (int)BODY_CAP);
+        return -1;
     }
     buildLcRaw(s->pdbpath,s->kind,rt,Ccoll,&maxuid);         /* LC_RAW */
     joinLcIdx();                                             /* LC_IDX */
@@ -979,6 +1013,7 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         if(rename(mtmp,mapfile)!=0)
             fprintf(stderr,"[sync] map publish FAILED for %s (rename errno=%d)\n",mapfile,errno);
     }
+    return 0;
 }
 
 /* count records in a PDB (for the empty-overwrite safety check). */
@@ -1000,7 +1035,9 @@ int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
     PdbW *w = pdbw_begin(OUT_TMP);
     if(!w){ fprintf(stderr,"sync_collection: cannot open output temp\n"); return -3; }
     progReset(nin);
-    sync_one(d,s,coll,mapfile,pol,w,0,st,NULL,NULL);
+    /* -1: abandoned before the merge began, so nothing local was touched. Discard
+     * the output and keep the PDB exactly as it was. */
+    if(sync_one(d,s,coll,mapfile,pol,w,0,st,NULL,NULL) != 0){ pdbw_abort(w); return -1; }
     /* The transport gave up partway through, so the merged output is missing an
      * unknown number of server records. Publishing it would look like deletions.
      * Discard it and keep local untouched -- the next run reconciles from the
@@ -1058,7 +1095,9 @@ int sync_categorized(const DavCtx*d,const char*localpdb,const char*outpdb,
         s->token[0]=0; s->newToken[0]=0;      /* rebuilt per collection by sync_one */
         char san[300], mapfile[400]; sanitizeColl(C,san,sizeof san);
         snprintf(mapfile,sizeof mapfile,"%s/%s.map",mapdir,san);
-        sync_one(d,s,C,mapfile,pol,w,catOf[ci],st,rt,C);   /* rt/C filter local records to this coll */
+        if(sync_one(d,s,C,mapfile,pol,w,catOf[ci],st,rt,C) != 0){   /* rt/C filter local records to this coll */
+            pdbw_abort(w); return -1;
+        }
     }
     if(dav_transport_down()){
         fprintf(stderr,"[sync] transport down -- discarding partial merge, keeping local\n");

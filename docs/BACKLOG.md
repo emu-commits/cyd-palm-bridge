@@ -601,7 +601,25 @@ opt-in CORS proxy (public = fragile/third-party; self-hosted = infra). Public fe
 are low-risk (only the URL is exposed); credentialed iCloud sync in-browser stays
 the harder S5 item. On device the fetch is direct, no proxy.
 
-## Date Book enumeration still runs out of memory (open)
+## Date Book enumeration ran out of memory (FIXED)
+
+Fixed by releasing the two 8 KB scratch buffers across the enumeration rather
+than by rewriting any parser. `g_body` and `g_objbuf` are not touched by
+`enumServer` -- it streams to SD and parses in its own window -- so they were
+16384 bytes lying idle at exactly the moment mbedTLS asked for 16749. They are
+now retaken at the first phase that needs each: `g_objbuf` before
+`resolveServer`, `g_body` before `buildLcRaw`.
+
+Device, after: `REPORT ... rn=41496 rc=0` (was `rn=15631 rc=-1`), and
+`Date Book: rc=73 up +1~0-0 down +55~0-0` -- the collection reconciled and 55
+records were pulled back down.
+
+The streaming rewrite below is therefore NOT needed to make the sync work. It
+would still lower the peak (23556 -> ~7 KB) and is what would let the budget's
+reserve honestly cover a mid-collection handshake, so it stays on the list as
+an improvement rather than a fix.
+
+## Original analysis (kept: the byte counts are still the right ones)
 
 Two-way sync works for To Do and Address. Date Book fails at `rc=-4`
 (transport down) inside the server enumeration:
