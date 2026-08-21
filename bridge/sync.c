@@ -297,7 +297,17 @@ static S *g_state;
                           (size_t)PALM_REC_MAX  + sizeof(S))
 static size_t s_budget;          /* 0 = unlimited (host build, gates) */
 void   sync_set_budget(size_t bytes){ s_budget = bytes; }
+static int  s_too_big;
+static long s_too_big_bytes;
+/* Ceiling on a single in-RAM sort. 0 = whatever the allocator will give. Set it
+ * to refuse a collection deliberately rather than discovering the limit by
+ * failing a malloc, and to let the gates exercise the refusal without having to
+ * stage a real out-of-memory. */
+static long s_max_sort;
+void   sync_set_max_sort(long bytes){ s_max_sort = bytes; }
+
 size_t sync_working_set(void){ return SYNC_WORKING_SET; }
+long   sync_too_big_bytes(void){ return s_too_big_bytes; }
 /* ---- pull-only (contract in sync.h) ---------------------------------------
  * While the memory rework is in flight the engine must not be able to write to
  * the account. A bug in a half-converted reconcile path would corrupt real data
@@ -425,7 +435,22 @@ static int cmpLine(const void*a,const void*b){
  * O(N) step, and it runs with no handshake live so it gets the full free block.
  * (For collections beyond what free heap can sort, an external merge sort is the
  * next increment; Palm-scale data is well within an in-RAM sort.) */
-static void sortFile(const char*path){
+/* ---- "this collection is bigger than this device" ---------------------------
+ * Set when a step fails for SIZE rather than for a transient shortage: an
+ * in-RAM sort that will not fit, or an output index that will not grow. It is
+ * kept apart from an ordinary OOM because the user needs different advice --
+ * retrying will not help, and the honest answer is that this collection cannot
+ * be synced here.
+ *
+ * It exists because both of those failures used to be SILENT AND WORSE THAN A
+ * CRASH. sortFile returned with the file unsorted and the merge-join then
+ * walked it as if sorted, mis-pairing records into spurious deletes and
+ * duplicates; pdbw_rec's return was never checked, so records were dropped from
+ * the merged PDB and the NEXT sync read them as locally deleted and pushed
+ * those deletions to the server. On a real account with years of history both
+ * are reachable -- SV_RAW is ~60-80 bytes per record, so a few hundred events
+ * already needs more contiguous RAM than this board has. */
+static int sortFile(const char*path){
     /* This used to dav_disconnect() first, on the reasoning that a sort must not
      * fight the ~40 KB TLS working set. Measured on device, that trade is the
      * wrong way round: the sort needs 2.5-3.4 KB, while the reconnect it forces
@@ -435,22 +460,38 @@ static void sortFile(const char*path){
      * connection now stays up across a sort. If the server drops it anyway the
      * reconnect is best-effort, and the circuit breaker (dav.h) ends the
      * collection in seconds with local data untouched. */
-    FILE*f=fopen(path,"rb"); if(!f) return;
+    FILE*f=fopen(path,"rb"); if(!f) return 1;          /* absent == nothing to sort */
     fseek(f,0,SEEK_END); long sz=ftell(f); fseek(f,0,SEEK_SET);
-    if(sz<=0){ fclose(f); return; }
-    char*buf=malloc((size_t)sz+1);
-    if(!buf){ fclose(f); fprintf(stderr,"[sync] sortFile OOM (%ld bytes) for %s\n",sz,path); return; }
+    if(sz<=0){ fclose(f); return 1; }
+    char*buf = (s_max_sort > 0 && sz+1 > s_max_sort) ? NULL : malloc((size_t)sz+1);
+    if(!buf){
+        fclose(f);
+        fprintf(stderr,"[sync] SORT FAILED for %s: %ld bytes of contiguous RAM needed.\n"
+                       "       Refusing -- merging against UNSORTED input mis-pairs records.\n",
+                path, sz+1);
+        s_too_big = 1; if(sz+1 > s_too_big_bytes) s_too_big_bytes = sz+1;
+        return 0;
+    }
     size_t got=fread(buf,1,(size_t)sz,f); buf[got]=0; fclose(f);
     int cap=64,n=0; char**lines=malloc((size_t)cap*sizeof*lines);
-    if(!lines){ free(buf); return; }
+    if(!lines){ free(buf); s_too_big=1; return 0; }
     for(char*p=buf;*p;){
-        if(n>=cap){ cap*=2; char**t=realloc(lines,(size_t)cap*sizeof*lines); if(!t){ free(lines); free(buf); return; } lines=t; }
+        if(n>=cap){ cap*=2; char**t=realloc(lines,(size_t)cap*sizeof*lines);
+            if(!t){ free(lines); free(buf); s_too_big=1;
+                    fprintf(stderr,"[sync] SORT FAILED for %s: line index (%d rows).\n",path,cap);
+                    return 0; }
+            lines=t; }
         lines[n++]=p; char*nl=strchr(p,'\n'); if(!nl) break; *nl=0; p=nl+1;
     }
     qsort(lines,n,sizeof*lines,cmpLine);
     FILE*o=fopen(path,"wb");
-    if(o){ for(int i=0;i<n;i++) fprintf(o,"%s\n",lines[i]); fclose(o); }
+    int ok = 1;
+    if(o){ for(int i=0;i<n;i++) if(fprintf(o,"%s\n",lines[i]) < 0){ ok=0; break; }
+           if(fclose(o)!=0) ok=0; }
+    else ok = 0;
+    if(!ok){ fprintf(stderr,"[sync] SORT FAILED for %s: could not rewrite it\n",path); s_too_big=1; }
     free(lines); free(buf);
+    return ok;
 }
 
 /* Stream the on-disk map into three sorted views: by objhash (MP_IDX, a reconcile
@@ -701,7 +742,15 @@ typedef struct { PdbW*w; FILE*mapf; int pullCat; } Sink;
 
 static void keepBytes(Sink*k,uint32_t uid,uint8_t attr,const uint8_t*data,int len,
                       const char*href,const char*etag,uint64_t hash,const char*objuid){
-    pdbw_rec(k->w,uid,(uint8_t)(attr&~REC_ATTR_DIRTY&~REC_ATTR_DELETE),data,len);
+    /* A dropped record here is not a lost row in a report -- it is a record
+     * missing from the merged PDB, which the next sync reads as a local
+     * deletion and pushes to the server. Never let that pass quietly. */
+    if(pdbw_rec(k->w,uid,(uint8_t)(attr&~REC_ATTR_DIRTY&~REC_ATTR_DELETE),data,len)!=0){
+        fprintf(stderr,"[sync] OUTPUT FULL at uid=%u -- the merged database cannot hold "
+                       "this collection on this device\n",(unsigned)uid);
+        s_too_big = 1;
+        return;                       /* do not write a map row for a record we dropped */
+    }
     if(k->mapf) fprintf(k->mapf,"%u\t%s\t%s\t%llu\t%s\n",
                         (unsigned)uid,href,etag,(unsigned long long)hash,objuid?objuid:"");
 }
@@ -772,7 +821,11 @@ static int pushLocal(const DavCtx*d,const char*coll,int kind,Sink*k,
      * OLD map row so it stays dirty and is retried next sync (never poison the
      * map with a bad etag). */
     fprintf(stderr,"[sync] push FAILED uid=%u (HTTP %d) -- kept local, will retry\n",(unsigned)uid,st);
-    pdbw_rec(k->w,uid,(uint8_t)(L->attr&~REC_ATTR_DIRTY&~REC_ATTR_DELETE),g_lrec,L->len); /* keep local */
+    if(pdbw_rec(k->w,uid,(uint8_t)(L->attr&~REC_ATTR_DIRTY&~REC_ATTR_DELETE),g_lrec,L->len)!=0){
+        fprintf(stderr,"[sync] OUTPUT FULL at uid=%u -- cannot keep the local record\n",(unsigned)uid);
+        s_too_big = 1;
+        return -1;
+    }
     if(k->mapf && oldHref && oldHref[0])                                  /* preserve old mapping */
         fprintf(k->mapf,"%u\t%s\t%s\t%llu\t%s\n",(unsigned)uid,oldHref,oldEtag?oldEtag:"",
                 (unsigned long long)oldHash,objuid?objuid:"");
@@ -793,7 +846,9 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
                     ConflictPolicy pol,PdbW*w,int pullCat,SyncStats*st,
                     const CatRoute*rt,const char*Ccoll){
     uint32_t maxuid=0; int incremental=0;
+    s_too_big = 0; s_too_big_bytes = 0;                      /* per collection */
     buildMapIdx(mapfile,s->token,sizeof s->token,&maxuid);   /* MP_IDX/MP_HREF/MP_PALM + token */
+    if(s_too_big) return -1;
 #ifdef ESP_PLATFORM
     /* Device: always FULL-enumerate. iCloud CalDAV PIM data is tiny, so the etag
      * list is cheap (streamed), and a persisted RFC 6578 sync-token can silently
@@ -824,6 +879,7 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         return -1;
     }
     int unresolved = resolveServer(d,coll,incremental);      /* SV_IDX (GETs new objects) */
+    if(s_too_big) return -1;
     if(unresolved){
         /* Some server object's UID could not be read this round; resolveServer
          * already suppressed deletes. Don't advance the sync-token either, so the
@@ -837,6 +893,11 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
     }
     buildLcRaw(s->pdbpath,s->kind,rt,Ccoll,&maxuid);         /* LC_RAW */
     joinLcIdx();                                             /* LC_IDX */
+    /* LAST GATE BEFORE THE MERGE. The three-way join below is a merge-join: it
+     * assumes LC_IDX, MP_IDX and SV_IDX are sorted and walks them once. Handing
+     * it an unsorted stream does not fail loudly -- it mis-pairs records, which
+     * comes out as deletions and duplicates against the real account. */
+    if(s_too_big) return -1;
     uint32_t seed=maxuid+1;
 
     char mtmp[512]; snprintf(mtmp,sizeof mtmp,"%s.tmp",mapfile);
@@ -881,6 +942,7 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
     int chkIter = 0;
     while(lc.v||mp.v||sv.v){
         chk_n("merge", chkIter++);
+        if(s_too_big) break;              /* output is full: stop, do not publish */
         uint64_t mn=~0ULL;
         if(lc.v&&lc.oh<mn)mn=lc.oh;
         if(mp.v&&mp.oh<mn)mn=mp.oh;
@@ -1005,6 +1067,13 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
                 guardedDel, coll);
     if(flc){fclose(flc);} if(fmp){fclose(fmp);} if(fsv){fclose(fsv);}
 
+    if(s_too_big){
+        /* The map describes a merge that will not be published, so publishing it
+         * would leave the next run reconciling against a state that never existed. */
+        if(mapf) fclose(mapf);
+        remove(mtmp);
+        return -1;
+    }
     if(mapf){
         fclose(mapf);
         /* Publish the new map. FATFS rename() FAILS if the target exists (FR_EXIST),
@@ -1037,7 +1106,10 @@ int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
     progReset(nin);
     /* -1: abandoned before the merge began, so nothing local was touched. Discard
      * the output and keep the PDB exactly as it was. */
-    if(sync_one(d,s,coll,mapfile,pol,w,0,st,NULL,NULL) != 0){ pdbw_abort(w); return -1; }
+    if(sync_one(d,s,coll,mapfile,pol,w,0,st,NULL,NULL) != 0){
+        pdbw_abort(w);
+        return s_too_big ? -6 : -1;
+    }
     /* The transport gave up partway through, so the merged output is missing an
      * unknown number of server records. Publishing it would look like deletions.
      * Discard it and keep local untouched -- the next run reconciles from the
@@ -1096,7 +1168,7 @@ int sync_categorized(const DavCtx*d,const char*localpdb,const char*outpdb,
         char san[300], mapfile[400]; sanitizeColl(C,san,sizeof san);
         snprintf(mapfile,sizeof mapfile,"%s/%s.map",mapdir,san);
         if(sync_one(d,s,C,mapfile,pol,w,catOf[ci],st,rt,C) != 0){   /* rt/C filter local records to this coll */
-            pdbw_abort(w); return -1;
+            pdbw_abort(w); return s_too_big ? -6 : -1;
         }
     }
     if(dav_transport_down()){
