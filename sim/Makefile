@@ -24,7 +24,7 @@ BR := ../bridge
 INC    := -I. -Iinclude -Ilvgl -I$(FW) -I$(BR)
 # UI_DEVTOOLS: keep the "Add test events" dev menu item in sim builds (used to
 # mass-generate records against the heap/pool ceilings). Release firmware drops it.
-CFLAGS := -O2 -g -Wall -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS $(INC)
+CFLAGS := -O2 -g -Wall -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS -DUI_SEED_TESTEVENTS $(INC)
 
 # the REAL firmware UI + data layer + portable modules, unchanged
 APP_SRCS := \
@@ -85,7 +85,7 @@ smoke: host
 # (CI only *compiles* wasm; this actually RUNS the UI under the device-sized pool.) ----
 smoke32: lvgl-src
 	$(MAKE) clean
-	$(MAKE) build/sim_host CFLAGS="-O2 -g -Wall -m32 -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS $(INC)"
+	$(MAKE) build/sim_host CFLAGS="-O2 -g -Wall -m32 -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS -DUI_SEED_TESTEVENTS $(INC)"
 	rm -rf build/shots && mkdir -p build/shots
 	./build/sim_host build/shots < tests/smoke.txt
 	@ls build/shots/*.ppm >/dev/null
