@@ -13,11 +13,14 @@
 #define NEWS_FEED_CAP  32
 #define NEWS_TITLE_CAP 128
 
+#define NEWS_F_READ 1u      /* the reader has shown this article */
+
 typedef struct {
     char     feed[NEWS_FEED_CAP];
     char     title[NEWS_TITLE_CAP];
     uint32_t when;      /* fetch/publish epoch (0 if unknown) */
     uint32_t len;       /* body length in bytes */
+    uint32_t flags;     /* NEWS_F_* */
 } NewsMeta;
 
 /* override the default /sdcard paths (for the host gate). */
@@ -27,6 +30,17 @@ void news_set_paths(const char *idx_path, const char *dat_path);
 int  news_count(void);                          /* articles in the store, 0 if none */
 int  news_meta(int i, NewsMeta *m);             /* 1 on success */
 int  news_read_text(int i, char *buf, int cap); /* body bytes read (NUL-terminated) */
+
+/* ---- read state ----
+ * Marking is a four-byte write into the record's flags word, so the reader can
+ * mark an article the moment it puts it on screen. It survives a HotSync: the
+ * store is rebuilt every sync, and news_begin() carries read state over by
+ * feed+title, otherwise finishing an article and syncing would hand it back as
+ * new. first_unread returns -1 when everything has been read. */
+int  news_is_read(int i);
+int  news_mark_read(int i);
+int  news_unread(void);
+int  news_first_unread(void);
 
 /* ---- writer (HotSync fetch rebuilds the store) ---- */
 int  news_begin(void);                                              /* 1 on success */

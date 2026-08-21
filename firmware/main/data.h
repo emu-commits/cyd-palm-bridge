@@ -14,6 +14,19 @@ void data_seed_if_empty(void);
 int  data_demo_present(void);
 int  data_remove_demo(void);
 
+/* Delete the appointments seeded by the devtools "Add test events" item, matched
+ * on the exact marker they carry in their note. Returns the number removed, 0 if
+ * there were none, or -1 if the rewrite was refused because the working set could
+ * not hold every surviving record (refusing beats writing back a truncated PDB).
+ * Safe to call at every boot: with nothing to remove it does not touch the file. */
+int  data_remove_test_events(void);
+/* how many Date Book records the last data_remove_test_events() actually examined,
+ * so "found none" can be reported with the size of the search behind it. */
+int  data_testev_scanned(void);
+/* Header record count for one app's PDB, with what pdb_read can actually walk and
+ * the file size. A mismatch means a truncated database. */
+int  data_db_stat(int app, int *walked, long *bytes);
+
 enum { APP_CAL, APP_ADDR, APP_TODO, APP_MEMO };
 
 /* per-record display callback: record uid + primary line + optional secondary. */

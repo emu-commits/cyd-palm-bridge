@@ -140,6 +140,7 @@ static int seed_memo(void){
 #define RW_ARENA (12*1024)
 #define RW_MAX   64
 static uint8_t g_arena[RW_ARENA];
+static int g_testev_scanned;      /* records examined by the last test-event scan */
 static PdbRec  g_recs[RW_MAX];
 typedef struct { int used; int nr; } Collect;
 static int collectCb(const PdbRec *r, int i, void *ctx){ (void)i; Collect *c=ctx;
@@ -237,6 +238,81 @@ static int remove_demo_from(int app, uint32_t nr){
     }
     pdb_write_ai(path, nm, type, creator, al?ai:NULL, al, g_recs, w.nr);
     return w.removed;
+}
+
+/* ---- dev "Add test events" cleanup ----------------------------------------
+ * The devtools menu seeds 30 appointments carrying an exact marker in their
+ * note. They were only ever local -- no sync ever completed while they existed
+ * -- but with two-way sync live they would be pushed to the real account on the
+ * next HotSync. Matching is the FULL marker string, so a genuine note is never
+ * mistaken for one.
+ *
+ * The rewrite is refused unless every surviving record was captured. g_arena is
+ * 12 KB and g_recs holds RW_MAX entries; if either filled we would be writing
+ * back a PDB missing the records we never got to, which is exactly the kind of
+ * silent data loss the sync's own empty-overwrite guard exists to prevent. */
+#define TESTEV_NOTE "generated for streaming-sync test"
+
+/* Pass 1: COUNT, and never stop early.
+ *
+ * Doing this in one pass -- copying survivors into the rewrite buffer while
+ * looking for matches -- means the scan aborts the moment that buffer fills, and
+ * any test event living past that point is never even examined. It would then
+ * report "none found" for a Date Book that has thirty of them, which is a worse
+ * failure than not trying: you would believe the seed was gone and turn on
+ * two-way sync. Counting needs no buffer, so pass 1 always sees every record. */
+typedef struct { int matched, scanned; } TestScan;
+static int testScanCb(const PdbRec *r, int i, void *ctx){ (void)i; TestScan *t=ctx;
+    Appt a; t->scanned++;
+    if(ApptUnpack(r->data, r->len, &a)==0 && !strcmp(a.note, TESTEV_NOTE)) t->matched++;
+    return 0;
+}
+/* Pass 2: collect the survivors. Bails if they do not fit, and the caller then
+ * refuses the rewrite rather than writing back a PDB missing real records. */
+typedef struct { uint8_t *arena; int used; PdbRec *recs; int nr, full; } TestRW;
+static int testRwCb(const PdbRec *r, int i, void *ctx){ (void)i; TestRW *w=ctx;
+    Appt a;
+    if(ApptUnpack(r->data, r->len, &a)==0 && !strcmp(a.note, TESTEV_NOTE)) return 0;  /* drop */
+    if(w->used + r->len > RW_ARENA || w->nr >= RW_MAX){ w->full = 1; return 1; }
+    memcpy(w->arena + w->used, r->data, r->len);
+    w->recs[w->nr] = (PdbRec){.attr=r->attr,.uniqueID=r->uniqueID,.data=w->arena+w->used,.len=r->len};
+    w->used += r->len; w->nr++; return 0;
+}
+int data_testev_scanned(void){ return g_testev_scanned; }
+
+/* Header record count vs what pdb_read can actually walk. They should agree; when
+ * they do not the file is truncated, and with two-way sync live that difference
+ * would read as "the user deleted these" and be pushed to the server as deletes.
+ * Returns the header count (-1 if unreadable) and fills *walked / *bytes. */
+int data_db_stat(int app, int *walked, long *bytes){
+    const char *path = db_path(app);
+    if(walked) *walked = 0;
+    if(bytes)  *bytes  = 0;
+    FILE *f = fopen(path,"rb"); if(!f) return -1;
+    unsigned char h[0x50];
+    int ok = fread(h,1,sizeof h,f)==sizeof h;
+    if(bytes){ fseek(f,0,SEEK_END); *bytes = ftell(f); }
+    fclose(f);
+    if(!ok) return -1;
+    if(walked){ TestScan t={0,0}; pdb_read(path, testScanCb, &t); *walked = t.scanned; }
+    return (int)((h[0x4C]<<8) | h[0x4D]);
+}
+int data_remove_test_events(void){
+    const char *path = db_path(APP_CAL);
+    if(!file_exists(path)) return 0;
+
+    TestScan t = { 0, 0 };
+    pdb_read(path, testScanCb, &t);
+    g_testev_scanned = t.scanned;            /* so the caller can report honestly */
+    if(t.matched == 0) return 0;             /* genuinely none: do not touch the file */
+
+    uint8_t ai[512]; int al = pdb_read_appinfo(path, ai, sizeof ai); if(al<0) al=0;
+    TestRW w = { g_arena, 0, g_recs, 0, 0 };
+    pdb_read(path, testRwCb, &w);
+    if(w.full) return -1;                    /* would drop real records -- refuse, say so */
+    if(w.nr + t.matched != t.scanned) return -1;   /* the two passes disagree: refuse */
+    pdb_write_ai(path, "DatebookDB", 0x44415441, 0x64617465, al?ai:NULL, al, g_recs, w.nr);
+    return t.matched;
 }
 
 /* I2: delete exactly the demo-seeded records (uniqueIDs 1..nr per app from the

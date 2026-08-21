@@ -36,12 +36,25 @@
 
 static const char *TAG = "hotsync";
 
-/* The sync task's stack comes out of the same heap the TLS handshake needs, and
- * at 32 KB it was taking a third of what was free. Two things paid for the cut:
- * rss.c's emit_item no longer puts 8.7 KB of buffers on this stack (they are BSS
- * now), and the end-of-run high-water log below reports what is actually used,
- * so this number stays honest. Raise it only against that log. */
-#define HOTSYNC_STACK 20480
+/* The sync task's stack comes out of the same heap the TLS handshake needs, so
+ * it was cut to 20 KB when heap was the binding constraint. That cut was made
+ * against a high-water log from runs that FAILED EARLY and never walked the deep
+ * path -- "3228 bytes of 20480 still free" measured a sync that gave up before
+ * reading a single local record.
+ *
+ * Once the memory fixes let a collection actually run, buildLcRaw -> pdb_read
+ * (which alone puts a PALM_REC_MAX = 4 KB record buffer on this stack, once per
+ * record) went straight through the end of it. A task stack IS a heap
+ * allocation, so the overflow did not fault: it wrote local record text into the
+ * neighbouring heap blocks, and the damage surfaced later as a corrupt free list
+ * -- once inside lwIP's receive path, once inside our own largest-free-block
+ * logging. Two days of "out of memory" were this.
+ *
+ * Heap is no longer the binding constraint (66 KB free at wifi-up, up from 44),
+ * so the stack is back to 32 KB and hs_heap_check() now reports the high-water
+ * mark at every phase, on runs that reach the end. Raise it only against THAT
+ * log, and only from a run that completed. */
+#define HOTSYNC_STACK 32768
 static volatile int s_busy;
 static char s_status[208] = "Ready";
 static void setst(const char *s){ snprintf(s_status, sizeof s_status, "%s", s); }
@@ -64,6 +77,56 @@ static void setst(const char *s){ snprintf(s_status, sizeof s_status, "%s", s); 
  * *contiguous* draw buffer depends on. Cheap and INFO-level: this runs a handful of
  * times per sync, and the answer decides whether the never-built draw-buffer
  * teardown is needed. */
+/* TEMPORARY (memory rework): walk the whole heap and shout at the first phase
+ * whose blocks no longer make sense. A corrupted heap does not fail where it was
+ * corrupted -- on this device it surfaced in lwIP's RX path and in our own
+ * largest-free-block logging -- so the only way to find the culprit is to check
+ * at known points and see which one is the first to fail. */
+/* ---- per-phase guard rails -------------------------------------------------
+ * This hook exists because of a bug that cost days. The sync task's stack is a
+ * heap allocation, so overflowing it does not fault -- it writes into the next
+ * heap block, and the damage only surfaces much later, somewhere unrelated. It
+ * showed up as "out of memory", then as a crash inside lwIP's receive path, then
+ * inside our own largest-free-block logging. None of those were the bug.
+ *
+ * The STACK check is cheap (one read of a FreeRTOS counter) and stays on: it
+ * reports the high-water mark at each phase and shouts before an overflow rather
+ * than after. That is what turns this class of bug into a one-line log.
+ *
+ * The HEAP walk is expensive -- it visits every block -- so it is compiled out
+ * unless something is actually suspected. Build with -DHS_DEEP_HEAP_CHECK=1
+ * (ideally alongside CONFIG_HEAP_POISONING_COMPREHENSIVE) to bring it back. */
+#ifndef HS_DEEP_HEAP_CHECK
+#define HS_DEEP_HEAP_CHECK 0
+#endif
+#define HS_STACK_FLOOR 4096          /* shout below this many bytes free */
+
+static unsigned s_stack_lo = 0xFFFFFFFFu;
+static int s_stack_warned;
+#if HS_DEEP_HEAP_CHECK
+static int s_heap_bad;
+#endif
+static void hs_heap_check(const char *where){
+    unsigned sfree = (unsigned)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t));
+    if(sfree < s_stack_lo){
+        s_stack_lo = sfree;
+        ESP_LOGD(TAG,"stack low-water %u of %u (used %u) at '%s'",
+                 sfree, (unsigned)HOTSYNC_STACK, (unsigned)HOTSYNC_STACK - sfree, where);
+    }
+    if(sfree < HS_STACK_FLOOR && !s_stack_warned){
+        s_stack_warned = 1;
+        ESP_LOGE(TAG,"STACK NEARLY OUT at '%s': %u of %u free. Raise HOTSYNC_STACK -- "
+                     "an overflow here corrupts the heap silently, it does not crash here.",
+                 where, sfree, (unsigned)HOTSYNC_STACK);
+    }
+#if HS_DEEP_HEAP_CHECK
+    if(s_heap_bad) return;
+    if(heap_caps_check_integrity_all(false)) return;   /* printing the detail trips the WDT */
+    s_heap_bad = 1;
+    ESP_LOGE(TAG,"HEAP CORRUPT first detected at checkpoint '%s'", where);
+#endif
+}
+
 static void hs_heap(const char *where){
     ESP_LOGI(TAG,"heap[%s]: free=%lu min_ever=%lu largest8=%lu largestDMA=%lu",
              where,
@@ -293,12 +356,20 @@ static char *abspath(char *href, DavCtx *d){
  * yesterday's. An item whose date the feed did not give (when == 0) is KEPT: we
  * cannot prove it is old, and dropping it would silently lose whole feeds whose
  * date format we failed to parse. */
-#define NEWS_MAX_AGE_S  (24 * 3600)
-
+/* TODAY, by the local calendar date -- not "within the last 24 hours".
+ *
+ * The rolling 24-hour window kept a slice of yesterday alive: at 09:00 it let
+ * through everything published after 09:00 the previous day, so the reader was
+ * always part yesterday's news. A calendar-day test is what "today's news"
+ * actually means, and it is what the store now holds.
+ *
+ * Two things are still kept. A dated item in the FUTURE is kept, because that is
+ * clock skew between us and the publisher, not a stale story. An UNDATED item is
+ * kept, because the feed is still listing it and we have no evidence it is old --
+ * inventing an age for it would silently empty feeds that publish no dates. */
 static int news_is_current(uint32_t when, time_t now){
-    if(!when) return 1;                            /* undated -> never assumed old */
+    if(!when) return 1;                            /* undated -> no evidence it is old */
     if(when > (uint32_t)now + 3600) return 1;      /* clock skew: a "future" item is fresh */
-    if((time_t)when + NEWS_MAX_AGE_S >= now) return 1;
     struct tm a, b;
     time_t w = (time_t)when;
     localtime_r(&w, &a);
@@ -308,15 +379,17 @@ static int news_is_current(uint32_t when, time_t now){
 static int s_news_added;
 static int s_news_feeds_ok, s_news_feeds_tried;   /* for the final status line */
 static char s_news_why[48];                       /* first failure, verbatim   */
-static int s_news_stale;                          /* dropped as older than today */
+static int s_news_stale;                          /* dropped: dated before today */
+static int s_news_undated;                        /* kept, but with no date to judge */
 static time_t s_news_now;                         /* sampled once per run */
 static void news_item_cb(const char *title, const char *text, uint32_t when, void *ctx){
     if(s_news_added >= NEWS_MAX_TOTAL) return;
     if(!news_is_current(when, s_news_now)){ s_news_stale++; return; }
+    if(!when) s_news_undated++;
     if(news_add((const char*)ctx, title, text, when)) s_news_added++;
 }
 static void fetch_news(void){
-    s_news_added = s_news_feeds_ok = s_news_feeds_tried = s_news_stale = 0;
+    s_news_added = s_news_feeds_ok = s_news_feeds_tried = s_news_stale = s_news_undated = 0;
     s_news_why[0] = 0;
     time(&s_news_now);
     if(feeds_enabled_count() == 0){
@@ -375,8 +448,8 @@ static void fetch_news(void){
     news_resume();                                     /* so commit can patch the count */
     news_commit();
     dav_disconnect();                                  /* free the feed TLS handle */
-    ESP_LOGI(TAG,"news: %d items from %d/%d feeds (%d dropped as older than today)%s%s",
-             s_news_added, s_news_feeds_ok, s_news_feeds_tried, s_news_stale,
+    ESP_LOGI(TAG,"news: %d items from %d/%d feeds (%d dropped as not today, %d kept undated)%s%s",
+             s_news_added, s_news_feeds_ok, s_news_feeds_tried, s_news_stale, s_news_undated,
              s_news_why[0] ? " -- " : "", s_news_why);
 }
 
@@ -473,6 +546,12 @@ static void hotsync_task(void *arg){
 
     const Config *cfg = appcfg();
     ESP_LOGI(TAG,"config source: %s", appcfg_from_sd() ? "/sdcard/config.ini" : "secrets.h (no config.ini)");
+    /* Say out loud what the file actually yielded. "no location set" was true but
+     * unfalsifiable from here -- it could not distinguish a config.ini without the
+     * keys from one whose values failed to parse. Coordinates are not secret. */
+    ESP_LOGI(TAG,"location: latitude=%s longitude=%s",
+             cfg->latitude[0]  ? cfg->latitude  : "(unset)",
+             cfg->longitude[0] ? cfg->longitude : "(unset)");
 
     DavCtx d; memset(&d,0,sizeof d);
     snprintf(d.base,sizeof d.base,"%s",cfg->dav_base);
@@ -544,7 +623,38 @@ static void hotsync_task(void *arg){
     DavCtx dcard; int card_ready=0;
 
     SyncStats tot={0};
-    int did=0, failed=0, protec=0;
+    /* ---- declare the memory ceiling before anything allocates (sync.h) ------
+     * Measured on this device with Wi-Fi up: 44856 free, the TLS session costs
+     * 10096 steady, and a HANDSHAKE peaks around 30360 (min_ever fell to 14340
+     * from 44700 during login). The phase's own handshake happens before the
+     * scratch is taken, so it gets the whole heap; what has to be reserved is
+     * what the collection needs while it RUNS -- the sort buffers, and headroom
+     * for the session's own churn. A reconnect mid-collection is best-effort:
+     * nothing forces one any more (see sortFile), and if the server drops us the
+     * breaker ends the collection in seconds with local data untouched.
+     *
+     * Each open file also carries a FatFs sector cache of FF_MAX_SS bytes; with
+     * CONFIG_WL_SECTOR_SIZE_512 that is 512, not the 4096 it used to be. */
+    #define HS_SORT_RESERVE 6144            /* sortFile observed at 2515..3399 B */
+    #define HS_FILE_CACHE   (6 * 512)       /* 5 held across the loop, +1 transient */
+    {
+        size_t freeh  = (size_t)esp_get_free_heap_size();
+        size_t need   = HS_SORT_RESERVE + HS_FILE_CACHE;
+        size_t budget = freeh > need ? freeh - need : 0;
+        sync_set_budget(budget);
+        /* Two-way. Pull-only carried the engine through the memory rework; the
+         * stack overflow that was corrupting the heap is fixed and measured, the
+         * full sync-gate suite passes against Radicale, and a device run
+         * reconciled all three collections cleanly. Writes are back on. */
+        sync_set_pull_only(0);
+        ESP_LOGI(TAG,"budget: free %u - sort %u - files %u = %u; sync needs %u -> %s"
+                     "  (two-way: writes ENABLED)",
+                 (unsigned)freeh, (unsigned)HS_SORT_RESERVE, (unsigned)HS_FILE_CACHE,
+                 (unsigned)budget, (unsigned)sync_working_set(),
+                 sync_working_set() <= budget ? "fits" : "REFUSED");
+    }
+
+    int did=0, failed=0, protec=0, oomed=0, diskerr=0, netdown=0, overbudget=0;
     ConflictPolicy pol = (ConflictPolicy)cfg->policy;
     int step=0;
     setprog(0);
@@ -581,15 +691,30 @@ static void hotsync_task(void *arg){
         ESP_LOGI(TAG,"sync %s coll=%s pdb=%s heap=%lu largest=%lu",t->name,coll,t->pdb,
                  (unsigned long)esp_get_free_heap_size(),
                  (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+        /* Re-arm the breaker per collection: a server that refused Date Book may
+         * still answer for Address, and one bad collection must not condemn the
+         * rest of the run. */
+        dav_transport_reset();
+        sync_set_check(hs_heap_check);
+        dav_set_check(hs_heap_check);
         SyncStats st={0};
         int n = sync_collection(ctx, t->pdb, t->pdb, coll, t->kind, t->map, pol, &st);
         /* n == -2: guard refused to overwrite a non-empty PDB with an empty result
-         * (data was protected). n == -1: local out-of-memory. n >= 0: records kept. */
+         * (data was protected). n == -1: local out-of-memory. n == -3: the output
+         * temp would not open (SD full, absent or read-only). n == -4: the
+         * transport gave up (DAV_FAIL_LIMIT consecutive unreachable requests) and
+         * the partial merge was discarded. n >= 0: records kept. They are counted
+         * apart because the status line names the cause, and naming the wrong one
+         * sends the next hour of debugging the wrong way. */
         ESP_LOGI(TAG,"%s: rc=%d up +%d~%d-%d down +%d~%d-%d heap=%lu",t->name,n,
                  st.pushNew,st.pushMod,st.pushDel, st.pullNew,st.pullMod,st.pullDel,
                  (unsigned long)esp_get_free_heap_size());
         if(n == -2) protec++;
-        else if(n < 0) failed++;
+        else if(n < 0){ failed++;
+            if(n == -3)      diskerr++;
+            else if(n == -4) netdown++;
+            else if(n == -5) overbudget++;
+            else             oomed++; }
         else { did++;
             tot.pushNew+=st.pushNew; tot.pushMod+=st.pushMod; tot.pushDel+=st.pushDel;
             tot.pullNew+=st.pullNew; tot.pullMod+=st.pullMod; tot.pullDel+=st.pullDel; }
@@ -622,9 +747,27 @@ static void hotsync_task(void *arg){
 
     if(!dav_ok)
         snprintf(msg,sizeof msg,"%.23s; %.63s%.39s; no records - %.39s",clk,nws,wxs,dav_why);
-    else if(did==0 && failed>0)
-        snprintf(msg,sizeof msg,"Sync failed - low memory (heap %lu)",
-                 (unsigned long)esp_get_free_heap_size());
+    else if(did==0 && failed>0){
+        /* This used to say "low memory" for every failure, heap reading attached,
+         * which is an assertion the code was in no position to make -- an SD card
+         * that would not take the output temp reported itself as a RAM problem. */
+        if(overbudget)
+            snprintf(msg,sizeof msg,"Sync needs %u B, budget %u B - nothing was sent",
+                     (unsigned)sync_working_set(), (unsigned)(esp_get_free_heap_size()));
+        else if(netdown && !oomed && !diskerr)
+            snprintf(msg,sizeof msg,"Sync failed - server unreachable (%d collections)",
+                     netdown);
+        else if(diskerr && !oomed && !netdown)
+            snprintf(msg,sizeof msg,"Sync failed - SD card not writable (%d collections)",
+                     diskerr);
+        else if(oomed && !diskerr && !netdown)
+            snprintf(msg,sizeof msg,"Sync failed - out of memory (heap %lu, largest %lu)",
+                     (unsigned long)esp_get_free_heap_size(),
+                     (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+        else
+            snprintf(msg,sizeof msg,"Sync failed - %d out of memory, %d SD, %d unreachable",
+                     oomed, diskerr, netdown);
+    }
     else
         snprintf(msg,sizeof msg,"Done: +%d~%d-%d up +%d~%d-%d down%.16s%.20s%.10s",
                  tot.pushNew,tot.pushMod,tot.pushDel, tot.pullNew,tot.pullMod,tot.pullDel,
@@ -644,9 +787,9 @@ static void hotsync_task(void *arg){
      * stack is not free caution, it is the thing that breaks the sync. This is
      * the measurement that lets HOTSYNC_STACK be a number rather than a guess:
      * the high-water mark is the smallest the stack ever got, in bytes. */
-    ESP_LOGI(TAG,"stack: %u bytes of %u still free at the end",
+    ESP_LOGI(TAG,"stack: %u bytes of %u still free at the end (phase low-water %u)",
              (unsigned)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)),
-             (unsigned)HOTSYNC_STACK);
+             (unsigned)HOTSYNC_STACK, s_stack_lo);
     s_busy = 0;
     vTaskDelete(NULL);
 }

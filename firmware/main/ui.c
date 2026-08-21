@@ -1772,6 +1772,9 @@ static void ka_reset_progress(void){
  * no layer-compositing widget. Until a real fetch runs (or in the sim, which has
  * no network) the store is seeded with a few sample articles so it's browseable. */
 static int      g_news_i;                       /* current article index */
+/* Unread count, kept in step rather than recounted. Re-deriving it per render
+ * meant re-reading the whole index on every swipe -- see flags_scan in news.c. */
+static int      g_news_unread;
 static lv_obj_t *g_news_hdr, *g_news_feed, *g_news_title, *g_news_body, *g_news_hint;
 static char     g_news_buf[2048];
 
@@ -1813,7 +1816,15 @@ static void news_render(void){
     }
     NewsMeta m; news_meta(g_news_i, &m);
     news_read_text(g_news_i, g_news_buf, sizeof g_news_buf);
-    lv_label_set_text_fmt(g_news_hdr, "%d/%d", g_news_i+1, n);
+    /* Mark on display, not on leaving: the article is on screen and read, and a
+     * four-byte write into the index is cheap enough to do per swipe. */
+    if(!(m.flags & NEWS_F_READ)){
+        news_mark_read(g_news_i);
+        if(g_news_unread > 0) g_news_unread--;
+    }
+    if(g_news_unread > 0)
+         lv_label_set_text_fmt(g_news_hdr, "%d/%d  %d new", g_news_i+1, n, g_news_unread);
+    else lv_label_set_text_fmt(g_news_hdr, "%d/%d", g_news_i+1, n);
     lv_label_set_text(g_news_feed, m.feed);
     lv_label_set_text(g_news_title, m.title);
     lv_label_set_text(g_news_body, g_news_buf);
@@ -1869,7 +1880,15 @@ static void show_news(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0;
     news_seed_if_empty();
-    g_news_i = 0;
+    /* Resume at the first story not yet read. Reopening used to snap back to
+     * article 1, so every visit replayed what had already been flipped through.
+     * Everything read -> stay at the end rather than restart from the top. */
+    {
+        int fu = news_first_unread();
+        int n  = news_count();
+        g_news_i = fu >= 0 ? fu : (n > 0 ? n-1 : 0);
+        g_news_unread = news_unread();      /* once per open, not once per swipe */
+    }
     content_clear();
     lv_label_set_text(title_lbl, "News");
     update_cat_trigger();
@@ -2043,12 +2062,22 @@ static void toast_show(const char *msg){
  * "Label: value"; tapping opens a single-field editor with ONE textarea (light,
  * and the proven-safe widget). Edits land in the in-memory config immediately;
  * the "Save to config.ini" row persists them (also picks up Discover's writes). */
+/* PF_N bounds the Preferences LIST; the entries after it are editable fields
+ * that live on other screens. Latitude/longitude are two of those: they belong
+ * to the lock-screen dashboard, and three extra rows on the Preferences list
+ * already once pushed it past LVGL's 24 KB pool (see show_prefs), so they are
+ * reached from Lock Screen instead. Without them the only way to set a weather
+ * location was to pull the SD card and edit config.ini on a computer. */
 enum { PF_SSID, PF_WPASS, PF_USER, PF_PASS, PF_CALB, PF_CARDB,
-       PF_CAL, PF_TODO, PF_CARD, PF_TZ, PF_N };
-static const char *PF_LABELS[PF_N] = {
+       PF_CAL, PF_TODO, PF_CARD, PF_TZ, PF_N,
+       PF_LAT = PF_N, PF_LON, PF_MAX };
+static const char *PF_LABELS[PF_MAX] = {
     "Wi-Fi SSID", "Wi-Fi pass", "Apple ID", "App pass", "CalDAV host",
     "CardDAV host", "Calendar coll", "Reminders coll", "Address coll", "Time zone",
+    "Latitude", "Longitude",
 };
+/* which screen an edit returns to */
+static int pf_is_dash_field(int i){ return i==PF_LAT || i==PF_LON; }
 static const char *pol_name(int p){
     return p==CFG_POL_LOCAL ? "device wins"
          : p==CFG_POL_BOTH  ? "keep both"
@@ -2067,18 +2096,24 @@ static char *pf_buf(Config *c, int i, int *cap){
         case PF_TODO:  *cap=sizeof c->todo_coll;     return c->todo_coll;
         case PF_CARD:  *cap=sizeof c->card_coll;     return c->card_coll;
         case PF_TZ:    *cap=sizeof c->timezone;      return c->timezone;
+        case PF_LAT:   *cap=sizeof c->latitude;      return c->latitude;
+        case PF_LON:   *cap=sizeof c->longitude;     return c->longitude;
     }
     *cap=0; return NULL;
 }
 
 /* ---- single-field editor (one textarea at a time) ---- */
 static int pf_edit_idx;
-static void pf_edit_cancel_cb(lv_event_t *e){ (void)e; show_prefs(); }
+static void show_dash_settings(void);
+static void pf_edit_back(void){
+    if(pf_is_dash_field(pf_edit_idx)) show_dash_settings(); else show_prefs();
+}
+static void pf_edit_cancel_cb(lv_event_t *e){ (void)e; pf_edit_back(); }
 static void pf_edit_save_cb(lv_event_t *e){ (void)e;
     int cap=0; char *dst = pf_buf(appcfg_mut(), pf_edit_idx, &cap);
     if(dst && cap) snprintf(dst, cap, "%s", lv_textarea_get_text(g_fields[0]));
     appcfg_save();            /* persist to SD now -> survives reboot */
-    show_prefs();
+    pf_edit_back();
     toast_show("Saved");      /* I4: same transient feedback as record save/delete */
 }
 
@@ -2366,6 +2401,9 @@ static void show_zone_picker(int target){
  * list's pool footprint. World-clock rows open the shared zone picker; the format
  * row toggles in place. */
 static void ds_back_cb(lv_event_t *e){ (void)e; show_prefs(); }
+static void show_pref_edit(int i);
+static void ds_lat_cb(lv_event_t *e){ (void)e; show_pref_edit(PF_LAT); }
+static void ds_lon_cb(lv_event_t *e){ (void)e; show_pref_edit(PF_LON); }
 static void ds_world1_cb(lv_event_t *e){ (void)e; show_zone_picker(ZTGT_W1); }
 static void ds_world2_cb(lv_event_t *e){ (void)e; show_zone_picker(ZTGT_W2); }
 static void ds_fmt_cb(lv_event_t *e){ (void)e;
@@ -2400,6 +2438,12 @@ static void show_dash_settings(void){
     pf_add(list, row, ds_world2_cb, 0);
     snprintf(row, sizeof row, "Clock format: %s", c->clock24 ? "24-hour" : "12-hour");
     pf_add(list, row, ds_fmt_cb, 0);
+    /* Weather needs a location and had no way in but the SD card. Decimal
+     * degrees, east/north positive -- the same thing config.ini takes. */
+    snprintf(row, sizeof row, "Latitude: %s",  c->latitude[0]  ? c->latitude  : "(unset)");
+    pf_add(list, row, ds_lat_cb, 0);
+    snprintf(row, sizeof row, "Longitude: %s", c->longitude[0] ? c->longitude : "(unset)");
+    pf_add(list, row, ds_lon_cb, 0);
 }
 
 /* ---- the Preferences list ---- */
@@ -2691,9 +2735,14 @@ static void act_toggle_sort(lv_event_t *e){ (void)e; menu_close();
 /* debug: seed 30 test appointments into the Date Book so a >24-record collection
  * can be pushed to iCloud to exercise the streaming reconcile. Each is a new
  * record (uid 0 => data layer assigns a fresh uniqueID); the next HotSync pushes
- * all of them up. C5: dev scaffolding -- only present when UI_DEVTOOLS is
- * defined (sim builds + dev firmware builds; strip the define for release). */
-#ifdef UI_DEVTOOLS
+ * all of them up. C5: dev scaffolding.
+ *
+ * Guarded by UI_SEED_TESTEVENTS rather than UI_DEVTOOLS, and that define is set
+ * for SIM BUILDS ONLY. It was harmless while the sync could not complete; now
+ * that two-way sync is on, one tap would push 30 fabricated appointments into
+ * the real iCloud account, and the records it leaves behind are ordinary ones
+ * that "Remove demo data" does not track. The sim UI tour still exercises it. */
+#ifdef UI_SEED_TESTEVENTS
 static void act_gentest(lv_event_t *e){ (void)e; menu_close();
     time_t now=0; time(&now);
     struct tm base; localtime_r(&now,&base);
@@ -2712,7 +2761,7 @@ static void act_gentest(lv_event_t *e){ (void)e; menu_close();
     if(cur_app && cur_app->app==APP_CAL) list_view(cur_app);
     alert_show("Added 30 test events to Date Book.\nHotSync to push them to iCloud.");
 }
-#endif /* UI_DEVTOOLS */
+#endif /* UI_SEED_TESTEVENTS */
 
 /* I2: remove the demo seed before the first HotSync, so Johnny Appleseed and the
  * fake meetings never get pushed into the user's real iCloud. Deletes only the
@@ -2846,7 +2895,7 @@ static void menu_open(void){
     }
     if(data_demo_present())
         menu_item(panel, "Remove demo data", act_remove_demo);
-#ifdef UI_DEVTOOLS
+#ifdef UI_SEED_TESTEVENTS
     menu_item(panel, "Add test events", act_gentest);
 #endif
     menu_item(panel, "About", act_about);

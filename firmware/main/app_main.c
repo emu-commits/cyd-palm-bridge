@@ -235,6 +235,36 @@ void app_main(void){
     /* U4: mount the SD card and seed demo PDBs so the views have content. */
     if(sd_mount()==ESP_OK){
         data_seed_if_empty();
+        /* Two-way sync is live, so anything sitting in the local Date Book gets
+         * pushed to the real account. The devtools "Add test events" seed must
+         * not be part of that. Clearing it at boot -- before any HotSync can run
+         * -- is what makes the ordering safe; with nothing to remove this does
+         * not touch the file. */
+        /* Two-way sync is live: a local database that reads short would be pushed
+         * to the server AS DELETIONS. Say what is actually on the card first. */
+        for(int ap=0; ap<3; ap++){
+            static const char *NM[3] = { "Date Book", "Address", "To Do" };  /* APP_CAL, APP_ADDR, APP_TODO */
+            int walked = 0; long bytes = 0;
+            int hdr = data_db_stat(ap, &walked, &bytes);
+            if(hdr < 0){ ESP_LOGW(TAG,"%s: no database on the card", NM[ap]); continue; }
+            if(hdr != walked)
+                ESP_LOGE(TAG,"%s DATABASE IS SHORT: header says %d records, only %d "
+                             "readable (%ld bytes). Do not sync -- the missing %d would "
+                             "be pushed as deletions.", NM[ap], hdr, walked, bytes, hdr-walked);
+            else
+                ESP_LOGI(TAG,"%s: %d records (%ld bytes)", NM[ap], hdr, bytes);
+        }
+        int nrm = data_remove_test_events();
+        if(nrm > 0)
+            ESP_LOGW(TAG,"removed %d seeded test event(s) of %d Date Book records",
+                     nrm, data_testev_scanned());
+        else if(nrm < 0)
+            ESP_LOGE(TAG,"test-event cleanup REFUSED: %d Date Book records will not fit "
+                         "the rewrite buffer, and a partial rewrite would lose real "
+                         "appointments. Nothing was changed.", data_testev_scanned());
+        else
+            ESP_LOGI(TAG,"no seeded test events found (%d Date Book records examined)",
+                     data_testev_scanned());
     } else {
         ESP_LOGW(TAG,"no SD card -- data views will be empty");
     }

@@ -61,4 +61,32 @@ int dav_list_collections(const DavCtx*d,const char*path,dav_coll_cb cb,void*ctx)
  * of sync, so TLS never coexists with a sort. No-op on the host (curl) transport. */
 void dav_disconnect(void);
 
+/* ---- transport circuit breaker --------------------------------------------
+ * A request that cannot reach the server costs up to two 20-second timeouts,
+ * and the engine issues one request PER RECORD. Measured on device: a heap too
+ * small to mount a TLS handshake turned a single collection into forty minutes
+ * of identical failures, with nothing on screen but "Syncing Date Book...".
+ *
+ * So the transport counts consecutive unreachable requests. Once DAV_FAIL_LIMIT
+ * of them go by, it is considered DOWN and every later request returns -1
+ * immediately without touching the network -- the caller unwinds in
+ * milliseconds instead of hours, and the failure is reported as what it is.
+ * Any reply from the server clears the count, including 401 or 404: those mean
+ * the connection worked and the request was answered.
+ *
+ * dav_transport_reset() re-arms it; call at the start of each phase so one bad
+ * collection cannot condemn the next. dav_transport_down() reports the state. */
+/* Heap-integrity checkpoint hook, shared with the engine's (see sync.h) and
+ * installed by the device during the memory rework. Temporary. */
+typedef void (*DavCheckFn)(const char *where);
+void dav_set_check(DavCheckFn fn);
+void dav_check(const char *where);
+
+#define DAV_FAIL_LIMIT 3
+void dav_transport_reset(void);
+int  dav_transport_down(void);
+/* Every completed request reports its outcome here. status < 0 means the request
+ * never reached the server (DNS, TCP or TLS); any HTTP status means it did. */
+void dav_note_result(int status);
+
 #endif

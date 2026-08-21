@@ -3,6 +3,7 @@
 #include <string.h>
 #include <strings.h>
 #include "dav_xml.h"
+#include "dav.h"   /* dav_check: temporary heap checkpoints */
 
 const char* dav_strcasestr_range(const char*s,const char*end,const char*needle){
     size_t nl=strlen(needle);
@@ -102,10 +103,13 @@ int dav_parse_report_stream(FILE*f,int status,dav_sync_cb cb,void*ctx,
     if(newtoken&&tokcap) newtoken[0]=0;
     if(status!=207) return -1;
     char*buf=malloc(DAV_STREAM_WIN); if(!buf) return -1;
-    int len=0, first=1, sawMulti=0;
+    int len=0, first=1, sawMulti=0, chkw=0;
     for(;;){
+        dav_check("rep-win");
         int got=(int)fread(buf+len,1,(size_t)(DAV_STREAM_WIN-1-len),f);
         len+=got; buf[len]=0;
+        dav_check("rep-win-read");
+        chkw++;
         if(first){
             if(strcasestr(buf,"valid-sync-token")){ free(buf); return 1; }  /* token expired */
             if(strcasestr(buf,"multistatus")) sawMulti=1;
@@ -124,7 +128,7 @@ int dav_parse_report_stream(FILE*f,int status,dav_sync_cb cb,void*ctx,
                 char name[256]=""; dav_basename(href,name,sizeof name);
                 char etag[160]=""; int hasEtag=dav_xml_text(r,end,"getetag",etag,sizeof etag); dav_strip_quotes(etag);
                 const char*f404=strstr(r,"404"); int deleted=!hasEtag && f404 && f404<end;
-                if(name[0] && cb) cb(name,etag,deleted,ctx);
+                if(name[0] && cb){ cb(name,etag,deleted,ctx); dav_check("rep-cb"); }
             }
             p=end+RESP_TAG_LEN;
         }
@@ -134,7 +138,10 @@ int dav_parse_report_stream(FILE*f,int status,dav_sync_cb cb,void*ctx,
         if(got==0) break;                              /* EOF: final tail holds the token */
         if(len>=DAV_STREAM_WIN-1){ len=0; buf[0]=0; }  /* safety: oversized block -> skip */
     }
+    dav_check("rep-loop-done");
     if(newtoken&&tokcap) dav_xml_text(buf,NULL,"sync-token",newtoken,tokcap);
+    dav_check("rep-token-read");
+    (void)chkw;
     int rc = sawMulti ? 0 : -1;
     free(buf);
     return rc;

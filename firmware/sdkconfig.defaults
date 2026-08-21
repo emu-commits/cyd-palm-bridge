@@ -80,3 +80,21 @@ CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 # and remain active. Re-enable only with a board that tolerates APB gating.
 #CONFIG_PM_ENABLE=y
 #CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+
+# The peer certificate is verified during the handshake and never inspected
+# afterwards (nothing in esp-tls or in this project calls mbedtls_ssl_get_peer_cert),
+# so keeping the chain for the life of the session is ~4 KB of pure cost -- and it
+# is held during exactly the window the account sync needs it: measured post-tls
+# free was 25596 with the sync scratch wanting 23556. TLS 1.3, the only Kconfig
+# dependent of this option, is not enabled here.
+CONFIG_MBEDTLS_SSL_KEEP_PEER_CERTIFICATE=n
+
+# FatFs sizes every open file's sector cache at FF_MAX_SS, and
+# FF_MAX_SS = MAX(FF_SS_SDCARD=512, CONFIG_WL_SECTOR_SIZE). This project mounts
+# an SD card (512-byte sectors) and has NO wear-levelled FAT partition at all --
+# the table is nvs/phy_init/factory -- so a 4096 wear-levelling sector size was
+# charging every open file 4 KB to satisfy a library we never instantiate. Five
+# files stay open across the reconcile loop, so it cost ~21.5 KB of exactly the
+# heap the sync and the TLS handshake were fighting over. (This is NOT
+# CONFIG_FATFS_SECTOR_4096, which only sizes the partition generator.)
+CONFIG_WL_SECTOR_SIZE_512=y

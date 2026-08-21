@@ -78,6 +78,58 @@ int main(void){
         CHECK(!strcmp(b,"three"), "body 2 lands at the right offset");
     }
 
+    /* ---- read state ------------------------------------------------------
+     * The reader was restarting at article 1 on every open, so each visit
+     * replayed stories already flipped through. Marking has to persist, and it
+     * has to survive the rebuild a HotSync does -- otherwise finishing an
+     * article and syncing hands it straight back as new. */
+    printf("== read state ==\n");
+    CHECK(news_begin(), "read: begin");
+    CHECK(news_add("BBC","alpha","a",100)==1, "read: add alpha");
+    CHECK(news_add("BBC","beta","b",100)==1,  "read: add beta");
+    CHECK(news_add("NPR","gamma","c",100)==1, "read: add gamma");
+    CHECK(news_commit(), "read: commit");
+
+    CHECK(news_count()==3,        "read: three articles");
+    CHECK(news_unread()==3,       "everything starts unread");
+    CHECK(news_first_unread()==0, "first unread is the first article");
+    CHECK(!news_is_read(1),       "beta starts unread");
+
+    CHECK(news_mark_read(1),      "mark beta read");
+    CHECK(news_is_read(1),        "beta reads back as read");
+    CHECK(!news_is_read(0) && !news_is_read(2), "marking one does not mark its neighbours");
+    CHECK(news_unread()==2,       "unread count drops by one");
+    CHECK(news_first_unread()==0, "first unread is still alpha");
+
+    CHECK(news_mark_read(0),      "mark alpha read");
+    CHECK(news_first_unread()==2, "first unread skips both read articles");
+    CHECK(news_mark_read(2),      "mark gamma read");
+    CHECK(news_unread()==0,       "nothing left unread");
+    CHECK(news_first_unread()==-1,"first_unread reports -1 when all are read");
+
+    /* out-of-range must not write anywhere */
+    CHECK(!news_mark_read(-1) && !news_mark_read(3), "marking out of range is refused");
+
+    /* A HotSync rebuilds the store. beta and gamma come back; alpha does not,
+     * and a brand-new story arrives. Read state must follow the articles. */
+    CHECK(news_begin(), "resync: begin (truncates)");
+    CHECK(news_add("BBC","beta","b",200)==1,  "resync: beta returns");
+    CHECK(news_add("NPR","gamma","c",200)==1, "resync: gamma returns");
+    CHECK(news_add("BBC","delta","d",200)==1, "resync: delta is new");
+    CHECK(news_commit(), "resync: commit");
+    CHECK(news_count()==3,   "resync: three articles again");
+    CHECK(news_is_read(0),   "beta is still read after the rebuild");
+    CHECK(news_is_read(1),   "gamma is still read after the rebuild");
+    CHECK(!news_is_read(2),  "delta, never seen before, is unread");
+    CHECK(news_unread()==1,  "exactly the new story is unread");
+    CHECK(news_first_unread()==2, "the reader opens on the new story");
+
+    /* Same title, different feed, is a different article. */
+    CHECK(news_begin(), "identity: begin");
+    CHECK(news_add("Guardian","beta","b",300)==1, "identity: other feed, same title");
+    CHECK(news_commit(), "identity: commit");
+    CHECK(!news_is_read(0), "feed is part of the identity, so this one is unread");
+
     remove("pdb/_news.idx"); remove("pdb/_news.dat");
     printf(failures ? "\nNews gate: %d FAIL\n" : "\nNews gate: OK\n", failures);
     return failures ? 1 : 0;

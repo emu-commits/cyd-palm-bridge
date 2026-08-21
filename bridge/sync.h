@@ -1,6 +1,7 @@
 /* sync.h -- bridge sync engine interface. */
 #ifndef SYNC_H
 #define SYNC_H
+#include <stddef.h>
 #include "dav.h"
 #include "appinfo.h"   /* CAT_COUNT */
 
@@ -23,7 +24,19 @@ int sync_pull(const DavCtx*,const char*coll,const char*outpdb,int kind);
 /* incremental, conflict-aware two-way sync of one collection.
  * Reads localpdb + state mapfile + server state, reconciles, performs the
  * DAV ops, writes the merged PDB to outpdb, and rewrites mapfile.
- * localpdb may be written back to outpdb == localpdb (same path is fine).   */
+ * localpdb may be written back to outpdb == localpdb (same path is fine).
+ *
+ * Returns the number of records kept, or a negative code. The codes are distinct
+ * because the caller SHOWS the reason to the user, and "low memory" was being
+ * printed for a full SD card:
+ *   -1  out of memory (the scratch buffers or the per-run state)
+ *   -2  guard refused to overwrite a non-empty PDB with an empty result
+ *   -3  local file error -- the output temp would not open (SD full/absent/RO)
+ *   -4  the transport went down mid-collection (see DAV_FAIL_LIMIT in dav.h).
+ *       The partial merge is discarded and the local PDB is left untouched.
+ *   -5  refused up front: the working set does not fit the declared budget.
+ *       Nothing was allocated and no request was sent.
+ */
 int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
                     const char*coll,int kind,const char*mapfile,
                     ConflictPolicy pol,SyncStats*st);
@@ -32,11 +45,52 @@ int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
  * coll[id] (or def when NULL). Records partition by category, each subset syncs
  * against its collection (own map file under mapdir), and the merged PDB is
  * written to outpdb with its AppInfo preserved. Pulled records are stamped with
- * the category that routes to the collection they came from.                  */
+ * the category that routes to the collection they came from.
+ * Same negative return codes as sync_collection.                              */
 typedef struct { const char* coll[CAT_COUNT]; const char* def; } CatRoute;
 int sync_categorized(const DavCtx*d,const char*localpdb,const char*outpdb,
                      int kind,const CatRoute*rt,const char*mapdir,
                      ConflictPolicy pol,SyncStats*st);
+
+/* ---- memory budget --------------------------------------------------------
+ * The guardrail. This device has ~45 KB of heap free once Wi-Fi is up, and a
+ * TLS handshake can happen at ANY point inside a collection -- sortFile drops
+ * the connection deliberately, so a mid-collection reconnect is guaranteed
+ * rather than incidental. The sync's working set therefore has to fit in what
+ * is left after reserving for that handshake.
+ *
+ * It did not, by roughly 13 KB, and nothing checked. The shortfall surfaced as
+ * whichever unrelated allocation happened to ask next -- a 4770-byte TLS buffer,
+ * a 2.6 KB sort buffer -- four hundred seconds into a collection, which is how
+ * it stayed misdiagnosed as "low memory" for so long.
+ *
+ * So the caller declares the ceiling and the engine refuses BEFORE any network
+ * I/O if it cannot fit. sync_set_budget(0) means unlimited, which is what the
+ * host build and the gates use. sync_working_set() is what scratch_alloc will
+ * ask for, so a caller can report the shortfall in the same breath as refusing.
+ */
+void   sync_set_budget(size_t bytes);
+size_t sync_working_set(void);
+
+/* ---- pull-only -------------------------------------------------------------
+ * Refuse every write to the server: no PUT, no DELETE. The local PDB is still
+ * updated from the server, so a sync is still useful; local changes simply wait.
+ * Set while the engine's memory handling is being reworked, because a bug on a
+ * half-converted path would damage the real account, which no reflash can undo.
+ * Off by default -- the host build and the gates exercise full two-way sync. */
+void sync_set_pull_only(int on);
+int  sync_pull_only(void);
+
+/* ---- heap-integrity checkpoints (temporary, for the memory rework) ---------
+ * A heap overwrite does not fail where it happens; it fails in whatever
+ * unrelated allocation next walks the corrupted free list, which on this device
+ * was lwIP's receive path and then our own largest-free-block logging. That
+ * tells you nothing about the culprit. The device installs a hook here that
+ * checks heap integrity at each phase boundary, so the corruption can be
+ * bracketed to a phase and then to a line. NULL (the default, and what the host
+ * gates use) means no checks and no cost. */
+typedef void (*SyncCheckFn)(const char *where);
+void sync_set_check(SyncCheckFn fn);
 
 /* Optional progress hook: the engine calls fn(done,total,ctx) once as each
  * collection starts (done=0) and once per reconciled record thereafter, so a

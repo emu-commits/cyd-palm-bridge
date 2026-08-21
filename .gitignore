@@ -45,3 +45,4 @@
 # simulator: fetched LVGL source + build artifacts
 /sim/lvgl/
 /sim/build/
+/break_test
