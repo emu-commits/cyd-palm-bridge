@@ -600,3 +600,46 @@ Real feeds *in the browser emulator* remain gated on CORS: feed servers don't se
 opt-in CORS proxy (public = fragile/third-party; self-hosted = infra). Public feeds
 are low-risk (only the URL is exposed); credentialed iCloud sync in-browser stays
 the harder S5 item. On device the fetch is direct, no proxy.
+
+## Date Book enumeration still runs out of memory (open)
+
+Two-way sync works for To Do and Address. Date Book fails at `rc=-4`
+(transport down) inside the server enumeration:
+
+```
+alloc(16749 bytes) failed        <- mbedTLS RX, SSL_IN_CONTENT_LEN 16384 + overhead
+REPORT ... rn=15631 rc=-1        <- truncated; it is 41496 when it succeeds
+```
+
+It is the biggest collection, so it is the one whose REPORT needs a full-size
+TLS record while the 23556-byte sync scratch is held.
+
+The budget in `hotsync.c` says `sync needs 23556 -> fits` immediately before
+this, because its reserve covers sorts (6144) and FatFs caches (3072) but not
+the TLS receive buffer. **Do not just raise the constant.** An honest reserve
+is ~29.7 KB, which against 48 KB free leaves 18.6 KB — less than the working
+set — so the budget would then correctly refuse *every* collection, including
+the two that work today. The number is not the problem; the working set is.
+
+The fix is the streaming work scoped but not finished:
+
+- `g_objbuf` (8192) — `dav_get` into RAM. The news phase already spools to SD
+  and parses from the file; the account sync should fetch objects the same way.
+- `g_body` (8192) — the emit buffer, which `pushRec` already dumps straight to
+  `BODY_TMP` (`bridge/sync.c:158`). Emit to the file and the buffer goes away.
+- `g_lrec` (4096) is `PALM_REC_MAX`, a format limit — keep.
+- `g_state` (3076) is two 1408-byte sync tokens — probably shrinkable.
+
+That takes ~23.5 KB to ~7 KB, which fits under a reserve that includes the
+handshake, not just the session. Then the budget can be made honest and left on.
+
+Related, smaller:
+
+- `sortFile` mallocs the whole file for an in-RAM qsort, so its demand grows
+  with record count (2.5–3.4 KB today, unbounded by design). An external merge
+  sort is the bounded version.
+- The mass-delete guard's *positive* path (it fires and holds deletions back)
+  has no gate — it is covered only by the 285 checks staying silent. Forcing it
+  in `tests/` needs a fixture where the local PDB is emptied behind the map.
+- `st->pushDel` is incremented on the "deleted on both sides" branch, which
+  never touches the network. Reads as a push in the status line; it is not one.
