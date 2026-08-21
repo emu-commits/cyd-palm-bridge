@@ -92,6 +92,7 @@ run "uidmatch (UID identity, reloc+foreign)" clean ./uidmatch
 run "idempotent (etag churn + unresolvable reloc)" clean ./idempotent
 run "bigsync (device-sized, 90 recs)"  clean ./bigsync
 run "multiapp (To Do + Address sync)"  clean ./multiapp
+run "toobig (refuses, changes nothing)" clean ./toobig
 run "dav_roundtrip (PDB->server->PDB)" clean ./tests/dav_roundtrip.sh
 
 echo

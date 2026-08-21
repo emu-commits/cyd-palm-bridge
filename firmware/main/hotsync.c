@@ -654,7 +654,8 @@ static void hotsync_task(void *arg){
                  sync_working_set() <= budget ? "fits" : "REFUSED");
     }
 
-    int did=0, failed=0, protec=0, oomed=0, diskerr=0, netdown=0, overbudget=0;
+    int did=0, failed=0, protec=0, oomed=0, diskerr=0, netdown=0, overbudget=0, toobig=0;
+    char toobig_name[24] = "";
     ConflictPolicy pol = (ConflictPolicy)cfg->policy;
     int step=0;
     setprog(0);
@@ -714,6 +715,12 @@ static void hotsync_task(void *arg){
             if(n == -3)      diskerr++;
             else if(n == -4) netdown++;
             else if(n == -5) overbudget++;
+            else if(n == -6){ toobig++;
+                if(!toobig_name[0]) snprintf(toobig_name,sizeof toobig_name,"%.23s",t->name);
+                ESP_LOGE(TAG,"%s is too large for this device: it asked for %ld bytes of "
+                             "contiguous RAM in one piece. Local data was NOT changed and "
+                             "the map was NOT updated -- retrying will not help.",
+                         t->name, sync_too_big_bytes()); }
             else             oomed++; }
         else { did++;
             tot.pushNew+=st.pushNew; tot.pushMod+=st.pushMod; tot.pushDel+=st.pushDel;
@@ -751,7 +758,10 @@ static void hotsync_task(void *arg){
         /* This used to say "low memory" for every failure, heap reading attached,
          * which is an assertion the code was in no position to make -- an SD card
          * that would not take the output temp reported itself as a RAM problem. */
-        if(overbudget)
+        if(toobig)
+            snprintf(msg,sizeof msg,"%.23s too big for this device - nothing changed",
+                     toobig_name[0] ? toobig_name : "Collection");
+        else if(overbudget)
             snprintf(msg,sizeof msg,"Sync needs %u B, budget %u B - nothing was sent",
                      (unsigned)sync_working_set(), (unsigned)(esp_get_free_heap_size()));
         else if(netdown && !oomed && !diskerr)

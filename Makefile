@@ -6,7 +6,7 @@ CORE    = bridge/pdb.c bridge/datebook.c bridge/address.c bridge/ical.c bridge/v
 
 all: roundtrip bridge_cli incremental synctoken category bigsync multiapp \
      uidmatch idempotent streamparse find_test calc_test config_test rss_test news_test wx_test \
-     feeds_test break_test
+     feeds_test break_test toobig
 
 dirs:
 	@mkdir -p pdb state
@@ -77,6 +77,9 @@ feeds_test: tests/feeds_test.c bridge/feeds.c | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
 break_test: tests/break_test.c bridge/dav_break.c | dirs
+	$(CC) $(CFLAGS) -o $@ $^
+
+toobig: tests/toobig.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
 # malformed-input hardening, built with AddressSanitizer + UBSan

@@ -619,7 +619,39 @@ would still lower the peak (23556 -> ~7 KB) and is what would let the budget's
 reserve honestly cover a mid-collection handshake, so it stays on the list as
 an improvement rather than a fix.
 
-## Original analysis (kept: the byte counts are still the right ones)
+## Collection size: the safety, and the ceiling it draws (partly open)
+
+A real iCloud account with years of history is far larger than this board can
+merge, and the two ways that used to break were both SILENT and worse than a
+crash:
+
+- `sortFile()` returned with the file **unsorted** on a failed malloc, and the
+  three-way merge-join then walked it as if sorted. That mis-pairs records into
+  spurious deletes and duplicates against the live account.
+- `pdbw_rec()`'s return was never checked, so records were dropped from the
+  merged PDB — and the *next* sync read them as locally deleted and pushed those
+  deletions to the server.
+
+Both now set a "too big for this device" flag, and the collection is refused
+with `-6` before the merge runs: local data untouched, map NOT republished, and
+a status line that says so. Gated by `tests/toobig.c`, which forces the refusal
+via `sync_set_max_sort()` and asserts nothing moved on either side.
+
+**The ceiling is roughly a few hundred records per collection.** `SV_RAW` is
+~60–80 bytes per record and must be sorted in one contiguous block; with ~30 KB
+of largest-free-block during the sort phase that is ~400 records. Date Book at
+73 is comfortable; a decade of calendar history is not.
+
+Raising it is an **external merge sort** — sort fixed-size runs that fit RAM,
+write them to SD, then k-way merge the runs back. Every input to the reconcile
+is already a line-per-record file, so nothing else in the engine changes. That
+is the piece of work that turns "refuses safely" into "handles a real account".
+
+Related: `pdb_read` caps at `PDB_MAX_RECS` 20000 and returns -1 above it, which
+reads as an empty local database — the mass-delete guard covers that, but it
+should fail loudly on its own.
+
+## Original analysis of the enumeration OOM (kept: the byte counts are still the right ones)
 
 Two-way sync works for To Do and Address. Date Book fails at `rc=-4`
 (transport down) inside the server enumeration:

@@ -36,6 +36,11 @@ int sync_pull(const DavCtx*,const char*coll,const char*outpdb,int kind);
  *       The partial merge is discarded and the local PDB is left untouched.
  *   -5  refused up front: the working set does not fit the declared budget.
  *       Nothing was allocated and no request was sent.
+ *   -6  the collection is larger than this device can process: an in-RAM sort,
+ *       or the merged output's index, would not fit. Local data is untouched
+ *       and the map is NOT republished. Retrying will not help -- this is a
+ *       size limit, not a transient shortage. See sortFile/keepBytes in sync.c
+ *       for why this must never be allowed to proceed quietly.
  */
 int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
                     const char*coll,int kind,const char*mapfile,
@@ -71,6 +76,13 @@ int sync_categorized(const DavCtx*d,const char*localpdb,const char*outpdb,
  */
 void   sync_set_budget(size_t bytes);
 size_t sync_working_set(void);
+/* After a -6, the largest single allocation the collection asked for and did not
+ * get. Zero if the limit was the output index rather than a sort. */
+long   sync_too_big_bytes(void);
+/* Ceiling on any single in-RAM sort the engine performs, in bytes. 0 (default)
+ * means "whatever the allocator will give". Setting it makes the size limit a
+ * decision rather than a discovery, and lets the gates exercise the refusal. */
+void   sync_set_max_sort(long bytes);
 
 /* ---- pull-only -------------------------------------------------------------
  * Refuse every write to the server: no PUT, no DELETE. The local PDB is still
