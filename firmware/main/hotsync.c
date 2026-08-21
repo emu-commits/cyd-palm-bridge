@@ -13,6 +13,8 @@
 #include "rss.h"          /* RSS reader: feed parser */
 #include "news.h"         /* RSS reader: on-SD article store */
 #include "feeds.h"        /* RSS reader: the enabled feed sources */
+#include "dash.h"         /* lock-screen dashboard: the WxCache it renders from */
+#include "wxfetch.h"      /* Open-Meteo CSV -> WxCache */
 #include "secrets.h"
 #include "appcfg.h"
 #include "clock.h"
@@ -25,13 +27,23 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
+#include "lwip/sockets.h"
+#include "lwip/netdb.h"
+#include "lwip/inet.h"
 #include "esp_system.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 
 static const char *TAG = "hotsync";
+
+/* The sync task's stack comes out of the same heap the TLS handshake needs, and
+ * at 32 KB it was taking a third of what was free. Two things paid for the cut:
+ * rss.c's emit_item no longer puts 8.7 KB of buffers on this stack (they are BSS
+ * now), and the end-of-run high-water log below reports what is actually used,
+ * so this number stays honest. Raise it only against that log. */
+#define HOTSYNC_STACK 20480
 static volatile int s_busy;
-static char s_status[80] = "Ready";
+static char s_status[208] = "Ready";
 static void setst(const char *s){ snprintf(s_status, sizeof s_status, "%s", s); }
 
 /* ---- Mode B headroom probe -----------------------------------------------
@@ -154,6 +166,42 @@ static int wifi_up(void){
     (void)s_netif_inited;
     return (b & WIFI_OK) ? 1 : 0;
 }
+/* ---- what the network actually gave us -------------------------------------
+ * Three internet stages (SNTP, iCloud, news feeds) all failing at once is one
+ * fault, not three, and the usual single fault is name resolution: DHCP handed
+ * out an address but no usable DNS, so every hostname dies before a packet
+ * leaves. Nothing above could tell that apart from "the server is down", so
+ * print the lease and resolve one name before any of them run. Cheap: one UDP
+ * round trip, once per sync. */
+static void net_probe(void){
+    esp_netif_ip_info_t ip; memset(&ip,0,sizeof ip);
+    if(s_netif && esp_netif_get_ip_info(s_netif,&ip)==ESP_OK)
+        ESP_LOGI(TAG,"lease: ip=" IPSTR " gw=" IPSTR " mask=" IPSTR,
+                 IP2STR(&ip.ip), IP2STR(&ip.gw), IP2STR(&ip.netmask));
+
+    for(int i=0;i<2;i++){
+        esp_netif_dns_info_t dns; memset(&dns,0,sizeof dns);
+        if(s_netif && esp_netif_get_dns_info(s_netif,
+               i ? ESP_NETIF_DNS_BACKUP : ESP_NETIF_DNS_MAIN, &dns)==ESP_OK)
+            ESP_LOGI(TAG,"dns[%s]: " IPSTR, i?"backup":"main",
+                     IP2STR(&dns.ip.u_addr.ip4));
+    }
+
+    /* the resolve itself: if this fails, nothing below can possibly work */
+    const char *probe = "pool.ntp.org";
+    struct addrinfo hints = { .ai_family = AF_INET, .ai_socktype = SOCK_DGRAM };
+    struct addrinfo *res = NULL;
+    int rc = getaddrinfo(probe, "123", &hints, &res);
+    if(rc == 0 && res){
+        struct in_addr a = ((struct sockaddr_in*)res->ai_addr)->sin_addr;
+        ESP_LOGI(TAG,"dns probe: %s -> %s", probe, inet_ntoa(a));
+        freeaddrinfo(res);
+    } else {
+        ESP_LOGE(TAG,"dns probe: %s did NOT resolve (rc=%d) -- the clock, iCloud "
+                     "and the news feeds will all fail for this one reason", probe, rc);
+    }
+}
+
 static void wifi_down(void){
     dav_disconnect();   /* close any keep-alive connection before the TLS/socket stack goes away */
     esp_wifi_stop();
@@ -163,14 +211,54 @@ static void wifi_down(void){
     if(s_evt){ vEventGroupDelete(s_evt); s_evt=NULL; }
 }
 
+/* Did the LAST clock_ok() actually hear back from a time server? A plausible
+ * clock is not a synced clock: the NVS checkpoint restored at boot is always
+ * "some time in 2024 or later" and so always passes the sanity test, which is
+ * how a device can report a successful HotSync and still show a time that is
+ * hours out. The two answers are now separate, and the caller says which it got. */
+static int s_clock_synced;
+
 static int clock_ok(void){
-    esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
-    if(esp_netif_sntp_init(&cfg)!=ESP_OK) return 0;
-    for(int i=0;i<15;i++) if(esp_netif_sntp_sync_wait(pdMS_TO_TICKS(2000))==ESP_OK) break;
+    /* Three servers, not one: a single name that will not resolve (or whose NTP
+     * the router blocks) is otherwise indistinguishable from "the clock is fine",
+     * and pool.ntp.org is exactly the name most likely to be intercepted. */
+    esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(3,
+        ESP_SNTP_SERVER_LIST("pool.ntp.org", "time.cloudflare.com", "time.google.com"));
+    s_clock_synced = 0;
+    if(esp_netif_sntp_init(&cfg)!=ESP_OK){
+        ESP_LOGE(TAG,"SNTP init failed");
+        return 0;
+    }
+    time_t before=0; time(&before);
+    /* Every sync is a free measurement of how far the clock wandered since the
+     * last one -- the number that decides whether this device needs an RTC part.
+     * The bracket has to be OUTSIDE the wait, because the correction is only
+     * meaningful against the clock as it stood before SNTP touched it. */
+    clock_sync_begin();
+    int synced = 0;
+    for(int i=0;i<15;i++)
+        if(esp_netif_sntp_sync_wait(pdMS_TO_TICKS(2000))==ESP_OK){ synced = 1; break; }
+    clock_sync_end(synced);
     esp_netif_sntp_deinit();
-    time_t now=0; time(&now); struct tm ti; gmtime_r(&now,&ti);
+    s_clock_synced = synced;
+
+    time_t now=0; time(&now);
+    struct tm lt; localtime_r(&now,&lt);
+    char zone[40]; snprintf(zone,sizeof zone,"%s", clock_tz_posix());
+    if(synced)
+        ESP_LOGI(TAG,"SNTP ok: clock moved %+lld s -> %04d-%02d-%02d %02d:%02d:%02d local "
+                     "(TZ=%s%s)", (long long)(now-before),
+                 lt.tm_year+1900, lt.tm_mon+1, lt.tm_mday, lt.tm_hour, lt.tm_min, lt.tm_sec,
+                 zone, clock_tz_known() ? "" : " -- ZONE NOT RECOGNISED");
+    else
+        ESP_LOGW(TAG,"SNTP did NOT sync in 30 s -- the clock is whatever the last "
+                     "checkpoint said (%04d-%02d-%02d %02d:%02d local). Check that UDP 123 "
+                     "leaves this network.",
+                 lt.tm_year+1900, lt.tm_mon+1, lt.tm_mday, lt.tm_hour, lt.tm_min);
+
+    struct tm ti; gmtime_r(&now,&ti);
     if((ti.tm_year+1900) < 2024) return 0;
-    clock_checkpoint();   /* SNTP just set real time -> persist it durably (survives power-off) */
+    if(synced) clock_checkpoint();   /* real time -> persist it durably (survives power-off) */
     return 1;
 }
 
@@ -189,38 +277,177 @@ static char *abspath(char *href, DavCtx *d){
  * Preferences > News feeds. No credentials -- feeds are public. Compile-verified
  * here; runtime-verified on device. */
 #define NEWS_TMP        "/sdcard/.rsstmp"
-#define NEWS_MAX_TOTAL  30      /* whole store cap */
-#define NEWS_MAX_FEED   15      /* per-feed cap */
+/* The store used to stop at 30 articles across 15 per feed, which with ten feeds
+ * meant most sources never got a look in. Nothing here is held in RAM -- the
+ * fetch spools to SD, the parser keeps one item, and the reader seeks one record
+ * at a time -- so the cap is really about SD space and sync time, not memory:
+ * 240 articles is ~41 KB of index and a few hundred KB of text. */
+#define NEWS_MAX_TOTAL  240     /* whole store cap */
+#define NEWS_MAX_FEED   40      /* per-feed cap */
+
+/* KEEP TODAY'S NEWS, DROP THE REST. Feeds carry a week of history and the reader
+ * shows one headline at a time, so old stories are just distance between the
+ * user and today. "Today" is the local calendar date OR anything from the last
+ * 24 hours -- the second half matters because a strict calendar test would leave
+ * the app nearly empty at 6am, when the overnight stories are technically
+ * yesterday's. An item whose date the feed did not give (when == 0) is KEPT: we
+ * cannot prove it is old, and dropping it would silently lose whole feeds whose
+ * date format we failed to parse. */
+#define NEWS_MAX_AGE_S  (24 * 3600)
+
+static int news_is_current(uint32_t when, time_t now){
+    if(!when) return 1;                            /* undated -> never assumed old */
+    if(when > (uint32_t)now + 3600) return 1;      /* clock skew: a "future" item is fresh */
+    if((time_t)when + NEWS_MAX_AGE_S >= now) return 1;
+    struct tm a, b;
+    time_t w = (time_t)when;
+    localtime_r(&w, &a);
+    localtime_r(&now, &b);
+    return a.tm_year == b.tm_year && a.tm_yday == b.tm_yday;
+}
 static int s_news_added;
-static void news_item_cb(const char *title, const char *text, void *ctx){
+static int s_news_feeds_ok, s_news_feeds_tried;   /* for the final status line */
+static char s_news_why[48];                       /* first failure, verbatim   */
+static int s_news_stale;                          /* dropped as older than today */
+static time_t s_news_now;                         /* sampled once per run */
+static void news_item_cb(const char *title, const char *text, uint32_t when, void *ctx){
     if(s_news_added >= NEWS_MAX_TOTAL) return;
-    if(news_add((const char*)ctx, title, text, 0)) s_news_added++;
+    if(!news_is_current(when, s_news_now)){ s_news_stale++; return; }
+    if(news_add((const char*)ctx, title, text, when)) s_news_added++;
 }
 static void fetch_news(void){
-    if(feeds_enabled_count() == 0) return;             /* no feeds enabled */
+    s_news_added = s_news_feeds_ok = s_news_feeds_tried = s_news_stale = 0;
+    s_news_why[0] = 0;
+    time(&s_news_now);
+    if(feeds_enabled_count() == 0){
+        snprintf(s_news_why,sizeof s_news_why,"no feeds enabled");
+        ESP_LOGW(TAG,"news: no feeds enabled");
+        return;
+    }
     setst("Fetching news...");
-    if(!news_begin()){ ESP_LOGW(TAG,"news: store open failed"); return; }
-    s_news_added=0;
+    /* news_begin() TRUNCATES the store, so a run where every feed fails leaves the
+     * reader empty rather than stale. That is the right trade, but it means the
+     * status line has to say why -- an empty News app is otherwise unexplained. */
+    if(!news_begin()){
+        snprintf(s_news_why,sizeof s_news_why,"SD store would not open");
+        ESP_LOGE(TAG,"news: store open failed (%s / %s)","/sdcard/news.idx","/sdcard/news.dat");
+        return;
+    }
     int nf = feeds_count();
     for(int i=0; i<nf && s_news_added<NEWS_MAX_TOTAL; i++){
         const Feed *f = feeds_get(i);
         if(!f || !f->enabled || !f->url[0]) continue;
+        s_news_feeds_tried++;
+        int before = s_news_added;
+        /* the store's two file caches (8 KB) are dead weight during the fetch --
+         * hand them back for the length of the handshake, take them again to parse */
+        news_suspend();
         int st = dav_fetch_url(f->url, NEWS_TMP);
-        if(st>=200 && st<300){
+        long spooled = 0;
+        FILE *sp = fopen(NEWS_TMP,"rb");
+        if(sp){ fseek(sp,0,SEEK_END); spooled = ftell(sp); fclose(sp); }
+        if(st>=200 && st<300 && news_resume()){
             char feed[NEWS_FEED_CAP];
             /* explicit precision: the name (FEED_NAME_CAP) can exceed feed's cap,
              * so bound the copy so the compiler can prove no truncation UB. */
             snprintf(feed, sizeof feed, "%.*s", (int)sizeof feed - 1,
                      f->name[0] ? f->name : "News");
-            rss_parse_file(NEWS_TMP, NEWS_MAX_FEED, news_item_cb, (void*)feed);
+            int got = rss_parse_file(NEWS_TMP, NEWS_MAX_FEED, news_item_cb, (void*)feed);
+            if(got > 0) s_news_feeds_ok++;
+            else if(!s_news_why[0])
+                snprintf(s_news_why,sizeof s_news_why,"%.20s: %ld bytes, no items",
+                         f->name, spooled);
+            ESP_LOGI(TAG,"news: %s st=%d spooled=%ld parsed=%d kept=%d",
+                     f->name, st, spooled, got, s_news_added - before);
         } else {
-            ESP_LOGW(TAG,"news: feed '%s' GET st=%d", f->name, st);
+            /* st < 0 means the request never completed (DNS, TCP or TLS); a
+             * positive status means the server answered and refused. Those are
+             * different problems and used to print identically. */
+            if(!s_news_why[0]){
+                if(st < 0) snprintf(s_news_why,sizeof s_news_why,"%.30s unreachable", f->name);
+                else       snprintf(s_news_why,sizeof s_news_why,"%.28s HTTP %d", f->name, st);
+            }
+            ESP_LOGW(TAG,"news: feed '%s' GET st=%d spooled=%ld url=%s",
+                     f->name, st, spooled, f->url);
         }
         remove(NEWS_TMP);
     }
+    news_resume();                                     /* so commit can patch the count */
     news_commit();
     dav_disconnect();                                  /* free the feed TLS handle */
-    ESP_LOGI(TAG,"news: %d items stored", s_news_added);
+    ESP_LOGI(TAG,"news: %d items from %d/%d feeds (%d dropped as older than today)%s%s",
+             s_news_added, s_news_feeds_ok, s_news_feeds_tried, s_news_stale,
+             s_news_why[0] ? " -- " : "", s_news_why);
+}
+
+/* ---- weather (Open-Meteo) --------------------------------------------------
+ * The last internet stage, and the cheapest: two GETs of ~1.5 KB each, spooled
+ * to SD and parsed by bridge/wxfetch.c the same way a feed is. No JSON parser
+ * and no new dependency -- Open-Meteo will return CSV if asked, which is the
+ * whole reason this fits. No API key, no account. Location comes from
+ * config.ini (PRODUCT_PLAN: lat/lon for v1); with none set, this does nothing
+ * and says so, because a dashboard quietly showing sample weather forever is
+ * how we got here. */
+#define WX_TMP "/sdcard/.wxtmp"
+static char s_wx_why[48];
+static int  s_wx_ok;
+
+static void fetch_weather(const Config *cfg){
+    s_wx_ok = 0; s_wx_why[0] = 0;
+    char url[512];
+    if(!wx_build_url(url, sizeof url, cfg->latitude, cfg->longitude)){
+        snprintf(s_wx_why,sizeof s_wx_why,"%s",
+                 cfg->latitude[0] || cfg->longitude[0] ? "location not a number" : "no location set");
+        ESP_LOGW(TAG,"weather: %s (latitude/longitude in config.ini)", s_wx_why);
+        return;
+    }
+    setst("Fetching weather...");
+
+    int st = dav_fetch_url(url, WX_TMP);
+    if(st < 200 || st >= 300){
+        snprintf(s_wx_why,sizeof s_wx_why, st < 0 ? "unreachable" : "HTTP %d", st);
+        ESP_LOGW(TAG,"weather: forecast GET st=%d", st);
+        remove(WX_TMP);
+        return;
+    }
+
+    WxCache w;
+    time_t now = 0; time(&now);
+    int ok = wx_parse_file(WX_TMP, (int64_t)now, &w);
+    remove(WX_TMP);
+    if(!ok){
+        snprintf(s_wx_why,sizeof s_wx_why,"reply not understood");
+        ESP_LOGW(TAG,"weather: the forecast CSV did not parse");
+        return;
+    }
+
+    /* AQI is a separate endpoint and a nice-to-have: its failure must not cost
+     * us the forecast we already have in hand. */
+    if(wx_build_aqi_url(url, sizeof url, cfg->latitude, cfg->longitude)){
+        int ast = dav_fetch_url(url, WX_TMP);
+        if(ast >= 200 && ast < 300) w.aqi = (int16_t)wx_parse_aqi_file(WX_TMP);
+        else ESP_LOGW(TAG,"weather: AQI GET st=%d (forecast kept)", ast);
+        remove(WX_TMP);
+    }
+
+    FILE *f = fopen(WX_PATH, "wb");
+    if(!f){
+        snprintf(s_wx_why,sizeof s_wx_why,"could not write %s", WX_PATH);
+        ESP_LOGE(TAG,"weather: cannot open %s", WX_PATH);
+        return;
+    }
+    size_t n = fwrite(&w, 1, sizeof w, f);
+    fclose(f);
+    if(n != sizeof w){
+        snprintf(s_wx_why,sizeof s_wx_why,"short write");
+        ESP_LOGE(TAG,"weather: short write to %s (%u of %u)", WX_PATH,
+                 (unsigned)n, (unsigned)sizeof w);
+        return;
+    }
+    s_wx_ok = 1;
+    ESP_LOGI(TAG,"weather: %dF code=%d aqi=%d, %d hourly, sun %02d:%02d-%02d:%02d",
+             w.cur_tempF, w.cur_code, w.aqi, w.nhours,
+             w.sunrise_min/60, w.sunrise_min%60, w.sunset_min/60, w.sunset_min%60);
 }
 
 static void hotsync_task(void *arg){
@@ -235,8 +462,14 @@ static void hotsync_task(void *arg){
     setst("Connecting Wi-Fi...");
     if(!wifi_up()){ setst("Wi-Fi failed"); wifi_down(); s_busy=0; vTaskDelete(NULL); return; }
     hs_heap("wifi-up");    /* Mode B baseline: Wi-Fi+lwIP paid for, no TLS yet */
+    net_probe();           /* lease + DNS, before anything can blame the server */
     setst("Setting clock...");
-    if(!clock_ok()){ setst("Clock/SNTP failed"); wifi_down(); s_busy=0; vTaskDelete(NULL); return; }
+    /* This one IS fatal, but not because of the account: TLS certificate validity
+     * is checked against the wall clock, so an unset clock breaks every fetch
+     * below, news included. clock_ok() only fails when the clock is still
+     * implausible AFTER the attempt -- a transient SNTP timeout on a device whose
+     * clock is already good passes straight through. */
+    if(!clock_ok()){ setst("Clock unset - nothing can sync"); wifi_down(); s_busy=0; vTaskDelete(NULL); return; }
 
     const Config *cfg = appcfg();
     ESP_LOGI(TAG,"config source: %s", appcfg_from_sd() ? "/sdcard/config.ini" : "secrets.h (no config.ini)");
@@ -246,30 +479,65 @@ static void hotsync_task(void *arg){
     snprintf(d.user,sizeof d.user,"%s",cfg->dav_user);
     snprintf(d.pass,sizeof d.pass,"%s",cfg->dav_pass);
     (void)abspath;
-    char msg[80];
+    char msg[208];
 
-    hs_heap("pre-tls");    /* last sample before the first HTTPS request */
-    setst("Resolving host...");
-    char host[256]="";
-    if(dav_effective_host(&d,"/",host,sizeof host)==0 && host[0]){
-        snprintf(d.base,sizeof d.base,"%s",host);
-        ESP_LOGI(TAG,"effective host: %s",host);
+    /* ---- what is account work, and what is merely internet ----------------
+     * The clock above and the news below need nothing but a network. The account
+     * stages -- host resolve, login, collections -- need iCloud credentials, and
+     * a device with none, or with wrong ones, must still come away with a
+     * corrected clock and fresh feeds. So a failure here SKIPS the rest of the
+     * account work; it no longer ends the sync. `dav_why` carries the reason
+     * into the final status line, because a silent skip reads as a silent
+     * success and would hide a bad password indefinitely. */
+    /* ntgt also sizes the progress bar: each configured collection owns a band
+     * [k/M], the per-app step being the coarse indicator (a finer intra-collection
+     * bar would need a callback through sync_collection). Zero of them is a
+     * skip reason in its own right -- there is nothing to log in to for. */
+    int ntgt=0; for(int i=0;i<N_APPS;i++){ const char*c=app_coll(cfg,i); if(c&&c[0]) ntgt++; }
+    int dav_ok = 0;
+    char dav_why[48] = "";
+
+    if(!cfg->dav_base[0] || !cfg->dav_user[0] || !cfg->dav_pass[0]){
+        snprintf(dav_why,sizeof dav_why,"no account set up");
+        ESP_LOGW(TAG,"no iCloud credentials; internet-only sync");
+    } else if(!ntgt){
+        snprintf(dav_why,sizeof dav_why,"no collections chosen");
+        ESP_LOGW(TAG,"no collections configured; internet-only sync");
     } else {
-        ESP_LOGW(TAG,"host resolve failed (HTTP %d); using %s",dav_last_status,d.base);
-    }
+        hs_heap("pre-tls");    /* last sample before the first HTTPS request */
+        setst("Resolving host...");
+        char host[256]="";
+        if(dav_effective_host(&d,"/",host,sizeof host)==0 && host[0]){
+            snprintf(d.base,sizeof d.base,"%s",host);
+            ESP_LOGI(TAG,"effective host: %s",host);
+        } else {
+            ESP_LOGW(TAG,"host resolve failed (HTTP %d); using %s",dav_last_status,d.base);
+        }
 
-    /* probe login first so we can tell an auth failure from a bad collection */
-    setst("Checking login...");
-    char principal[256]="";
-    if(dav_prop_href(&d,"/","<d:current-user-principal/>","",principal,sizeof principal)!=0 || !principal[0]){
-        snprintf(msg,sizeof msg,"Login failed (HTTP %d) - check user/pass",dav_last_status);
-        ESP_LOGE(TAG,"%s",msg); setst(msg); wifi_down(); s_busy=0; vTaskDelete(NULL); return;
+        /* probe login first so we can tell an auth failure from a bad collection */
+        setst("Checking login...");
+        char principal[256]="";
+        if(dav_prop_href(&d,"/","<d:current-user-principal/>","",principal,sizeof principal)!=0 || !principal[0]){
+            /* A rejected password and an unreachable server are different faults
+             * and used to print the same line ("login failed (HTTP 0)"), which
+             * sent us looking at the password when the request never left. */
+            if(dav_last_status == 401 || dav_last_status == 403)
+                snprintf(dav_why,sizeof dav_why,"password rejected");
+            else if(dav_last_status == 0)
+                snprintf(dav_why,sizeof dav_why,"server unreachable");
+            else
+                snprintf(dav_why,sizeof dav_why,"login failed (HTTP %d)",dav_last_status);
+            ESP_LOGE(TAG,"iCloud: %s (HTTP %d)",dav_why,dav_last_status);
+            dav_disconnect();          /* drop the dead TLS handle before the news fetch */
+        } else {
+            ESP_LOGI(TAG,"principal: %s",principal);
+            dav_ok = 1;
+        }
+        /* THE number: a full handshake has completed, so min_ever now carries its peak.
+         * Compare min_ever here against the "pre-tls" sample -- the drop is the cost of
+         * mbedTLS with the whole UI still resident. */
+        hs_heap("post-tls");
     }
-    ESP_LOGI(TAG,"principal: %s",principal);
-    /* THE number: a full handshake has completed, so min_ever now carries its peak.
-     * Compare min_ever here against the "pre-tls" sample -- the drop is the cost of
-     * mbedTLS with the whole UI still resident. */
-    hs_heap("post-tls");
 
     /* Address book (CardDAV) lives on a separate iCloud host; resolve it lazily
      * the first time a card target is reached. Same credentials as caldav. */
@@ -278,14 +546,10 @@ static void hotsync_task(void *arg){
     SyncStats tot={0};
     int did=0, failed=0, protec=0;
     ConflictPolicy pol = (ConflictPolicy)cfg->policy;
-    /* count configured apps so the status line can show progress [k/M]; with
-     * three collections the per-app step is the coarse progress indicator (a
-     * finer intra-collection bar would need a callback through sync_collection). */
-    int ntgt=0; for(int i=0;i<N_APPS;i++){ const char*c=app_coll(cfg,i); if(c&&c[0]) ntgt++; }
     int step=0;
     setprog(0);
     sync_set_progress(hs_prog_cb, NULL);           /* engine drives the intra-collection bar */
-    for(int i=0;i<N_APPS;i++){
+    for(int i=0; dav_ok && i<N_APPS; i++){
         const SyncApp *t=&s_apps[i];
         const char *coll=app_coll(cfg,i);
         if(!coll || !coll[0]) continue;            /* app not configured -> skip */
@@ -306,7 +570,8 @@ static void hotsync_task(void *arg){
                 if(dav_effective_host(&dcard,"/",chost,sizeof chost)==0 && chost[0]){
                     snprintf(dcard.base,sizeof dcard.base,"%s",chost);
                     ESP_LOGI(TAG,"contacts host: %s",chost);
-                } else ESP_LOGW(TAG,"contacts host resolve failed (HTTP %d)",dav_last_status);
+                } else ESP_LOGW(TAG,"contacts host: no principal href in the reply "
+                                    "(HTTP %d); using %s",dav_last_status,dcard.base);
                 card_ready=1;
             }
             ctx=&dcard;
@@ -332,15 +597,40 @@ static void hotsync_task(void *arg){
 
     sync_set_progress(NULL, NULL);                 /* detach the hook */
     sync_free_scratch();   /* hand the ~20 KB sync scratch back to the interactive UI */
+    /* The account phase leaves a keep-alive TLS session open and the heap
+     * fragmented; the news phase is ten short-lived handshakes that each need a
+     * contiguous block. Measured: largest8 fell 27 KB -> 17 KB -> 10 KB across the
+     * account work and feeds began failing at FETCH_HEADER. Drop the session
+     * explicitly so the feeds start from whatever the heap can actually give back. */
+    dav_disconnect();
+    hs_heap("pre-news");
     fetch_news();          /* RSS reader: fetch configured feeds while Wi-Fi is up */
+    fetch_weather(cfg);    /* lock-screen dashboard: the last thing the network is for */
+    dav_disconnect();
     setprog(100);
-    if(did==0 && failed>0)
+    /* Every internet stage reports its own outcome. The old line asserted "Clock +
+     * news done" whether or not either had happened, so a run that set nothing and
+     * fetched nothing still read as a success with a credentials footnote. */
+    char clk[24], nws[64], wxs[40];
+    snprintf(wxs,sizeof wxs, s_wx_ok ? "; weather" : "; no weather (%.24s)",
+             s_wx_why[0] ? s_wx_why : "failed");
+    snprintf(clk,sizeof clk,"%s", s_clock_synced ? "Clock set" : "CLOCK NOT SYNCED");
+    if(s_news_added > 0)
+        snprintf(nws,sizeof nws,"%d articles", s_news_added);
+    else
+        snprintf(nws,sizeof nws,"no news (%.47s)", s_news_why[0] ? s_news_why : "all feeds failed");
+
+    if(!dav_ok)
+        snprintf(msg,sizeof msg,"%.23s; %.63s%.39s; no records - %.39s",clk,nws,wxs,dav_why);
+    else if(did==0 && failed>0)
         snprintf(msg,sizeof msg,"Sync failed - low memory (heap %lu)",
                  (unsigned long)esp_get_free_heap_size());
     else
-        snprintf(msg,sizeof msg,"Done: +%d~%d-%d up +%d~%d-%d down%s",
+        snprintf(msg,sizeof msg,"Done: +%d~%d-%d up +%d~%d-%d down%.16s%.20s%.10s",
                  tot.pushNew,tot.pushMod,tot.pushDel, tot.pullNew,tot.pullMod,tot.pullDel,
-                 (failed||protec)?" (some skipped)":"");
+                 (failed||protec)?" (some skipped)":"",
+                 s_clock_synced ? "" : " - CLOCK NOT SYNCED",
+                 s_news_added ? "" : " - no news");
     ESP_LOGI(TAG,"%s",msg);
     setst(msg);
     hs_heap("sync-done");  /* after sync_free_scratch(), before Wi-Fi goes away */
@@ -349,6 +639,14 @@ static void hotsync_task(void *arg){
      * a Wi-Fi cycle fragments the DMA region -- which is what would break a plan to
      * bring Wi-Fi up before LVGL allocates its contiguous draw buffer. */
     hs_heap("wifi-down");
+    /* HOW BIG SHOULD THIS TASK'S STACK BE? Its stack is heap, and on this device
+     * heap is exactly what the mbedTLS handshake ran out of -- so an over-sized
+     * stack is not free caution, it is the thing that breaks the sync. This is
+     * the measurement that lets HOTSYNC_STACK be a number rather than a guess:
+     * the high-water mark is the smallest the stack ever got, in bytes. */
+    ESP_LOGI(TAG,"stack: %u bytes of %u still free at the end",
+             (unsigned)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)),
+             (unsigned)HOTSYNC_STACK);
     s_busy = 0;
     vTaskDelete(NULL);
 }
@@ -455,7 +753,7 @@ void hotsync_discover_start(void){
     if(s_busy) return;
     s_busy = 1; s_disc_done = 0; s_disc_n = 0;
     setst("Starting...");
-    if(xTaskCreate(discover_task, "discover", 32768, NULL, 4, NULL) != pdPASS){
+    if(xTaskCreate(discover_task, "discover", HOTSYNC_STACK, NULL, 4, NULL) != pdPASS){
         setst("Could not start discovery"); s_disc_done=1; s_busy = 0;
     }
 }
@@ -473,7 +771,7 @@ void hotsync_start(void){
      * GET per relocated object -- 20 KB overflowed at ~30 records. The old worry
      * that 32 KB starves the heap no longer holds: streaming shrank the S struct
      * from ~16 KB to ~3 KB, so the contiguous block it needs is tiny now. */
-    if(xTaskCreate(hotsync_task, "hotsync", 32768, NULL, 4, NULL) != pdPASS){
+    if(xTaskCreate(hotsync_task, "hotsync", HOTSYNC_STACK, NULL, 4, NULL) != pdPASS){
         setst("Could not start sync task"); s_busy = 0;
     }
 }

@@ -21,6 +21,12 @@ static inline esp_err_t nvs_get_u64(nvs_handle_t h, const char *k, uint64_t *v){
 static inline esp_err_t nvs_set_u64(nvs_handle_t h, const char *k, uint64_t v){
     (void)h; (void)k; (void)v; return ESP_FAIL;
 }
+static inline esp_err_t nvs_get_u32(nvs_handle_t h, const char *k, uint32_t *v){
+    (void)h; (void)k; (void)v; return ESP_FAIL;
+}
+static inline esp_err_t nvs_set_u32(nvs_handle_t h, const char *k, uint32_t v){
+    (void)h; (void)k; (void)v; return ESP_FAIL;
+}
 static inline esp_err_t nvs_commit(nvs_handle_t h){ (void)h; return ESP_FAIL; }
 static inline void      nvs_close(nvs_handle_t h){ (void)h; }
 

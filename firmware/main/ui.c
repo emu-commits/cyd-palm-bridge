@@ -1797,6 +1797,7 @@ static void news_seed_if_empty(void){
     news_commit();
 }
 
+static void news_layout(void);
 static void news_render(void){
     int n = news_count();
     if(g_news_i < 0) g_news_i = 0;
@@ -1818,6 +1819,28 @@ static void news_render(void){
     lv_label_set_text(g_news_body, g_news_buf);
     lv_label_set_text(g_news_hint, g_news_i < n-1 ? "swipe up for next" :
                                    (n>1 ? "swipe down for previous" : ""));
+    news_layout();
+}
+
+/* The headline WRAPS and the body did not know it: the title sat at y=16 and the
+ * body was pinned at y=44, which is room for one line. A two-line headline --
+ * most of them, at this width -- printed straight through the story text.
+ * So place the body under whatever height the title actually took, and give it
+ * the rest of the panel. lv_obj_update_layout() forces LVGL to compute that
+ * height now rather than at the next refresh, which is what makes the number
+ * usable in the same pass. */
+#define NEWS_TITLE_Y   16
+#define NEWS_GAP        6      /* headline to story */
+#define NEWS_HINT_H    18      /* reserved for the swipe hint at the bottom */
+static void news_layout(void){
+    if(!g_news_title || !g_news_body) return;
+    lv_obj_update_layout(g_news_title);
+    int th = lv_obj_get_height(g_news_title);
+    int y  = NEWS_TITLE_Y + th + NEWS_GAP;
+    int avail = (PDA_H - TITLE_H) - y - NEWS_HINT_H - 12;   /* 12 = surf padding */
+    if(avail < 24) avail = 24;                 /* a headline can never eat it all */
+    lv_obj_align(g_news_body, LV_ALIGN_TOP_LEFT, 0, y);
+    lv_obj_set_height(g_news_body, avail);
 }
 
 /* Manual vertical-swipe detection (robust across the headless host and real
@@ -1877,13 +1900,12 @@ static void show_news(void){
     lv_obj_set_style_text_font(g_news_title, &lv_font_palm_bold, 0);
     lv_label_set_long_mode(g_news_title, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(g_news_title, LCD_W - 12);
-    lv_obj_align(g_news_title, LV_ALIGN_TOP_LEFT, 0, 16);
+    lv_obj_align(g_news_title, LV_ALIGN_TOP_LEFT, 0, NEWS_TITLE_Y);
 
     g_news_body = lv_label_create(surf);
     lv_label_set_long_mode(g_news_body, LV_LABEL_LONG_DOT);   /* clip long bodies (feed card) */
     lv_obj_set_width(g_news_body, LCD_W - 12);
-    lv_obj_set_height(g_news_body, PDA_H - TITLE_H - 64);
-    lv_obj_align(g_news_body, LV_ALIGN_TOP_LEFT, 0, 44);
+    /* height and y are set by news_layout(), from the headline's real height */
 
     g_news_hint = lv_label_create(surf);
     lv_obj_set_style_text_font(g_news_hint, &lv_font_palm, 0);

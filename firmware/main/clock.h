@@ -24,9 +24,36 @@ void clock_checkpoint(void);
  * most one interval of wall-clock accuracy. */
 void clock_start_autosave(void);
 
+/* ---- drift meter --------------------------------------------------------
+ * How far the free-running clock wanders between syncs. This is the number that
+ * decides whether the device needs a real RTC part at all (BACKLOG.md, "A real
+ * RTC part"): the estimates there span seconds/day to minutes/day depending on
+ * how much of the time is spent in light sleep on the uncalibrated RC, and
+ * guessing has already shaped one hardware decision too many.
+ *
+ * Bracket the SNTP call with these two. begin() takes the clock as it stands
+ * plus a MONOTONIC mark; end() reports what SNTP moved it by, over how long, and
+ * the implied rate, then re-anchors for the next sync. The monotonic mark is
+ * what makes it honest: the seconds spent waiting for SNTP to answer are real
+ * elapsed time, not clock error, and have to come off the correction.
+ *
+ * A sample whose interval contains a power loss is reported but NOT counted --
+ * the correction then measures the outage, not the drift. Each sample is logged
+ * and appended to /sdcard/drift.log, because the experiment runs on battery with
+ * no USB attached and a serial-only reading would never be read. */
+void clock_sync_begin(void);
+void clock_sync_end(int synced);
+
 /* set the system timezone so localtime() shows the user's wall clock. Accepts a
  * POSIX TZ string directly, or maps a few common IANA names; unknown -> UTC. */
 void clock_set_tz(const char *tz);
+
+/* 1 if the last clock_set_tz() actually recognised its argument; 0 means the
+ * device is silently running on the UTC fallback, which looks identical to a
+ * correct clock except that every hour is wrong. clock_tz_posix() is the POSIX
+ * TZ string in force. */
+int         clock_tz_known(void);
+const char *clock_tz_posix(void);
 
 /* enumerate the built-in DST-aware timezone list (for the picker UI). */
 int clock_zone_count(void);

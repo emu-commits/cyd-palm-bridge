@@ -3,8 +3,12 @@
  * Today Wi-Fi + iCloud + per-app collections are compile-time (secrets.h), so
  * changing them means a reflash. This parses/serialises a plain `key = value`
  * file on the SD card so Preferences can edit them at runtime. Format: one
- * `key = value` per line, `#` comments, surrounding whitespace ignored, unknown
- * keys skipped, malformed lines skipped (robust against a hand-edited file).
+ * `key = value` per line, surrounding whitespace ignored, unknown keys skipped,
+ * malformed lines skipped (robust against a hand-edited file).
+ *
+ * COMMENTS: a '#' at the start of a line comments the whole line. A '#' that
+ * FOLLOWS whitespace ends the value ("timezone = UTC   # note"). A '#' with no
+ * space before it is an ordinary character, so a password may contain one.
  *
  * NOTE: this file holds the Wi-Fi and app-specific passwords, exactly like
  * secrets.h did -- treat it as sensitive; never log the password fields.
@@ -26,6 +30,12 @@ typedef struct {
     char todo_coll[192];       /* To Do (Reminders list) collection      */
     char card_coll[192];       /* Address book collection                */
     char timezone[48];         /* e.g. America/New_York ("" = floating)  */
+    /* Weather location. Stored as text exactly as typed so a hand-edited
+     * config.ini round-trips unchanged, and because the device has no use for
+     * the number beyond pasting it into a URL. Empty = weather is not fetched
+     * (see PRODUCT_PLAN: lat/lon in config for v1, IP geolocation later). */
+    char latitude[24];
+    char longitude[24];
     char world1[48];           /* lock-screen world clock 1 (IANA zone, "" = off) */
     char world2[48];           /* lock-screen world clock 2 (IANA zone, "" = off) */
     int  brightness;           /* backlight, 0..100                      */

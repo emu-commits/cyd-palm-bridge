@@ -304,8 +304,15 @@ real battery ADC, live weather, and buzzer — those are device-bench verifies).
 
 ## Still-open (smaller) decisions
 
-- **Weather location:** single lat/lon in config, or an on-device city picker?
-  (Leaning: config lat/lon for v1, picker later.)
+- ~~**Weather location:** single lat/lon in config, or an on-device city picker?~~
+  **DECIDED 2026-08-19: lat/lon in `config.ini` for v1; IP geolocation at first sync
+  as the later product answer. WiFi positioning rejected.** The reasoning is in
+  `BACKLOG.md` under the weather-fetch item, but the short version is that a forecast
+  has a resolution of kilometres, so locating the device to tens of metres is precision
+  that gets thrown away — and the free WiFi-positioning landscape has moved (Mozilla
+  Location Service was retired in 2024; Google's is billable and would need an API key
+  shipped inside the device). This is also a desk PDA that syncs at home over a known
+  SSID: its location *is* "home", and a fixed one is the truth rather than a shortcut.
 - **Buzzer:** confirm whether this board's speaker/buzzer pad is populated (gates the
   audible-alarm + game-sound polish). **Second reason as of 2026-08-17:** Coach's
   session end is visual-only (backlight pulse) because there is no speaker/buzzer/DAC

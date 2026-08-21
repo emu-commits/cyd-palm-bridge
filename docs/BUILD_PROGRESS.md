@@ -11,6 +11,94 @@ What was built, and the non-obvious things that cost time to learn. This is the
 
 ## Milestone changelog (newest first)
 
+### 2026-08-20 — The sync stops lying, and the heap is the reason nothing worked
+
+A run of "successful" HotSyncs that set no clock, fetched no news, and blamed the
+password for it. Every symptom traced to two root causes, neither of them where
+the error messages pointed.
+
+**The clock.** `clock_ok()` returned success if the year was >= 2024 — and the NVS
+checkpoint restored at boot is ALWAYS >= 2024. So a device whose SNTP never
+answered reported a good sync while showing a two-day-old clock (measured:
+restored `2026-08-18 03:24`, real time `2026-08-20 19:52`, SNTP correction
+`+245361 s`). *Plausible* and *synced* are now separate answers and the status
+line carries the difference. SNTP also gets three servers instead of one
+(`LWIP_SNTP_MAX_SERVERS=3`); a single name that will not resolve was
+indistinguishable from a clock that was already right.
+
+**The heap — the real story.** Nothing was wrong with the password, the feeds, the
+parser, or the network. There was not enough RAM to complete a TLS handshake:
+
+| where | free | min_ever | largest8 |
+|---|---|---|---|
+| first run, wifi-up | 23180 | 20460 | 21504 |
+| first run, post-tls | 22324 | **880** | 8192 |
+| first run, sync-done | 21860 | **48** | 7424 |
+| after fixes, wifi-up | 44888 | 28304 | 27648 |
+
+Every HTTPS request in the run died with `ESP_ERR_HTTP_CONNECT` — iCloud's login
+probe and all ten feeds alike. Four claims on that heap were released, in the
+order they cost the most:
+
+- **hotsync task stack 32 KB -> 20 KB.** A task stack IS heap, and this one held a
+  third of what was free. It could shrink because `rss.c`'s `emit_item` no longer
+  parks 8.7 KB of buffers on it. The task now logs its own high-water mark every
+  run (measured: 11060 used of 20480), so the number stays honest.
+- **The LVGL draw buffer, lent for the duration of a sync.** 19 KB DMA-capable,
+  the largest contiguous block the UI holds, and a sync is the one time nothing
+  needs drawing fast. Shrinks to 6 rows while `hotsync_busy()`, restores after.
+  Safe because `flush_cb` is synchronous, so no flush is in flight across the
+  swap, and any allocation failure keeps the buffer it already has.
+- **Wi-Fi pools halved again** (static RX 4->3, dynamic RX/TX 16->8, AMPDU off).
+  Wi-Fi accounted for 26 KB: free went 23 KB -> 50 KB the moment it came down.
+- **The news store's file handles.** On device each open file costs a 4 KB FatFs
+  sector cache (`SECTOR_4096` + `PER_FILE_CACHE`), so `news.idx` + `news.dat` +
+  the feed spool was 12 KB held across every handshake. `news_suspend()` /
+  `news_resume()` close and reopen-at-append around each fetch.
+
+**Messages that sent us the wrong way** — worth remembering as a class of bug:
+`login failed (HTTP 0)` invented an auth failure out of a connection failure
+(HTTP 0 means no response at all); `contacts host resolve failed (HTTP 207)`
+called a Multi-Status success a failure. Both now say what happened.
+
+**config.ini inline comments.** `#` only started a comment at the START of a line,
+but `config.ini.example` ships six lines shaped `key = value   # note`. The
+comment became part of the value: `timezone` matched no zone and fell back to UTC
+silently, and the same shape on `dav_pass` appended a comment to the password. A
+`#` that follows whitespace now ends the value; one with no space before it stays
+literal, so a password may contain it.
+
+**Timezone resolution** no longer falls back to UTC in silence, and accepts what
+people actually type (case, spaces for underscores, the city alone, the
+abbreviation). A bare `EST` used to pass through as a POSIX TZ, which newlib
+reads as UTC — a silent five-hour error.
+
+**News, on first real contact with live feeds:**
+
+- The bold headline WRAPS and the story did not know it — title at y=16, body
+  pinned at y=44, which is room for one line. The body now flows under the
+  headline's measured height.
+- `lv_font_palm` covers U+0020..U+00FF, so curly quotes, en/em dashes and
+  ellipses drew as hollow boxes. `rss.c` folds them to ASCII. The half that
+  mattered: feeds send a curly quote as raw `E2 80 99` far more often than as
+  `&rsquo;`, so the entity path alone would have fixed almost nothing —
+  `rss_html_to_text` needed a real UTF-8 decoder.
+- 30 articles across 15 per feed meant most of ten sources never got a look in.
+  Now 240 / 40, with each item carrying a parsed publication date (RFC 822
+  `pubDate`, ISO 8601 `published`/`updated`, RDF `dc:date`) so the fetch keeps
+  today's news. "Today" = local calendar date OR the last 24 h, because a strict
+  test empties the app at 6am. **Undated items are KEPT** — a date format we
+  failed to parse must never silently delete a whole feed.
+
+**Weather exists now.** Every temperature the device had ever shown was
+`dash_weather_seed_sample()`; nothing had written `weather.dat`. Open-Meteo,
+free and keyless, will return `&format=csv` — ~1.5 KB read a line at a time, so
+no JSON parser and no new dependency. `bridge/wxfetch.c` identifies each CSV
+block by its HEADER row, never its position, so a reordered field cannot shift a
+column into the wrong `WxCache` slot. `tests/wx_test.c` runs against verbatim
+live responses in `tests/data/` — the device cannot tell a moved column from a
+plausible temperature, so CI has to.
+
 ### 2026-08-19 — Wake straight into the lock screen, and four notes' worth of polish
 Round-two notes off the glass. The theme is that three of the four were the device
 telling the truth about its own state a beat too late.

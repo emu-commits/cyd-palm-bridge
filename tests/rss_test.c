@@ -7,6 +7,7 @@
  */
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 #include "../bridge/rss.h"
 
 static int failures;
@@ -14,11 +15,12 @@ static int failures;
 #define HAS(s,sub)  (strstr((s),(sub))!=NULL)
 
 #define MAXI 16
-static struct { char title[256], text[4096]; } g_it[MAXI];
+static struct { char title[256], text[4096]; uint32_t when; } g_it[MAXI];
 static int g_n;
-static void collect(const char *t, const char *x, void *ctx){ (void)ctx;
+static void collect(const char *t, const char *x, uint32_t when, void *ctx){ (void)ctx;
     if(g_n<MAXI){ snprintf(g_it[g_n].title,sizeof g_it[0].title,"%s",t);
-                  snprintf(g_it[g_n].text,sizeof g_it[0].text,"%s",x); g_n++; } }
+                  snprintf(g_it[g_n].text,sizeof g_it[0].text,"%s",x);
+                  g_it[g_n].when = when; g_n++; } }
 
 static const char *RSS =
 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
@@ -55,7 +57,60 @@ int main(void){
     rss_html_to_text(t,sizeof t,"<p>Raw</p> &amp; more");
     CHECK(HAS(t,"Raw") && HAS(t,"& more") && !HAS(t,"<p>"), "raw tags stripped, &amp; decoded");
     rss_html_to_text(t,sizeof t,"Caf&#233; &#x2014; ok");
-    CHECK(HAS(t,"Caf\xC3\xA9") && HAS(t,"\xE2\x80\x94"), "numeric entities -> UTF-8");
+    CHECK(HAS(t,"Caf\xC3\xA9"), "numeric entity in the font's range stays UTF-8");
+    CHECK(HAS(t,"--") && !HAS(t,"\xE2\x80\x94"), "em dash folds to ASCII");
+
+    /* --- folding what lv_font_palm cannot draw (it covers U+0020..U+00FF) ---
+     * Every one of these arrived as a hollow box on the device. They come far
+     * more often as raw UTF-8 bytes than as entities, so both paths are pinned. */
+    rss_html_to_text(t,sizeof t,"\xE2\x80\x9CQuoted\xE2\x80\x9D and \xE2\x80\x98single\xE2\x80\x99");
+    CHECK(!strcmp(t,"\"Quoted\" and 'single'"), "raw curly quotes fold to ASCII quotes");
+    rss_html_to_text(t,sizeof t,"wait\xE2\x80\xA6 more");
+    CHECK(!strcmp(t,"wait... more"), "raw ellipsis folds to three dots");
+    rss_html_to_text(t,sizeof t,"a \xE2\x80\x93 b \xE2\x80\x94 c");
+    CHECK(!strcmp(t,"a - b -- c"), "en dash is one hyphen, em dash is two");
+    rss_html_to_text(t,sizeof t,"&rsquo;&ldquo;&hellip;&mdash;");
+    CHECK(!strcmp(t,"'\"...--"), "the same characters fold when they arrive as entities");
+    rss_html_to_text(t,sizeof t,"soft\xC2\xADhyphen\xE2\x80\x8Bzero");
+    CHECK(!strcmp(t,"softhyphenzero"), "invisible characters are dropped, not boxed");
+    rss_html_to_text(t,sizeof t,"nbsp\xC2\xA0gap");
+    CHECK(!strcmp(t,"nbsp gap"), "nbsp becomes a space that can wrap");
+    rss_html_to_text(t,sizeof t,"caf\xC3\xA9 na\xC3\xAFve \xC2\xA3" "5");
+    CHECK(!strcmp(t,"caf\xC3\xA9 na\xC3\xAFve \xC2\xA3" "5"), "Latin-1 the font HAS is left alone");
+    rss_html_to_text(t,sizeof t,"\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E ok");
+    CHECK(!strcmp(t,"? ok"), "an unrenderable run collapses to one mark, not three");
+    rss_html_to_text(t,sizeof t,"pre\xE2\x82\xACpost");
+    CHECK(!strcmp(t,"preEURpost"), "euro sign spells out");
+
+    /* --- publication dates ------------------------------------------------
+     * The fetch keeps today's stories and drops last week's, so a misparsed date
+     * silently empties the News app. Every shape our ten shipped feeds actually
+     * use is pinned here. 2026-08-20T14:32:00Z is 1787236320. */
+    {
+        static const char *DATED =
+        "<rss version=\"2.0\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><channel>\n"
+        "<item><title>Rfc822</title><description>d</description>"
+            "<pubDate>Wed, 20 Aug 2026 14:32:00 GMT</pubDate></item>\n"
+        "<item><title>Rfc822Off</title><description>d</description>"
+            "<pubDate>Wed, 20 Aug 2026 16:32:00 +0200</pubDate></item>\n"
+        "<item><title>Iso</title><description>d</description>"
+            "<dc:date>2026-08-20T14:32:00Z</dc:date></item>\n"
+        "<item><title>IsoOff</title><description>d</description>"
+            "<dc:date>2026-08-20T10:32:00-04:00</dc:date></item>\n"
+        "<item><title>Undated</title><description>d</description></item>\n"
+        "<item><title>Junk</title><description>d</description>"
+            "<pubDate>not a date at all</pubDate></item>\n"
+        "</channel></rss>\n";
+        const uint32_t T = 1787236320u;   /* verified: 2026-08-20T14:32:00Z */
+        g_n=0; rss_parse_buf(DATED,(int)strlen(DATED),0,collect,NULL);
+        CHECK(g_n==6, "dated feed: 6 items");
+        CHECK(g_it[0].when==T, "RFC 822 with GMT");
+        CHECK(g_it[1].when==T, "RFC 822 with a +0200 offset resolves to the same instant");
+        CHECK(g_it[2].when==T, "ISO 8601 with Z (dc:date, as RDF feeds use)");
+        CHECK(g_it[3].when==T, "ISO 8601 with a -04:00 offset");
+        CHECK(g_it[4].when==0, "an item with no date reports 0, never a guess");
+        CHECK(g_it[5].when==0, "an unparsable date reports 0 too");
+    }
 
     /* --- RSS 2.0 --- */
     g_n=0;

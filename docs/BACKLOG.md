@@ -154,9 +154,33 @@ starts with a **feasibility check on the base CYD** before committing to a build
 - **`[blocked]` C7 ✓-glyph in To Do.** Show a real checkmark instead of `[x]`.
   The Palm bitmap font has no checkmark in codepoints 32–255, so this needs a
   deliberate font regeneration (keeping the GPLv3 PumpkinOS provenance).
-- **`[blocked]` M2 — tear down LVGL draw buffers during sync.** Frees real heap
-  for TLS on-device. Needs the live sync path, which is stubbed in the sim — so
-  it's effectively **`[device]`** until **S5** lands.
+- ~~**`[blocked]` M2 — tear down LVGL draw buffers during sync.**~~ **DONE
+  2026-08-20**, and it was not optional in the end: with 23 KB free the mbedTLS
+  handshake bottomed out at 48 bytes and every HTTPS request in the sync failed.
+  The buffer is not torn down but SHRUNK — 40 rows to 6 for the duration of a
+  sync (`lvgl_port.c`, `BUF_ROWS_SYNC`), returning ~16 KB of DMA-capable heap
+  while leaving the HotSync screen's status line drawable. Swapped on the LVGL
+  task between `lv_timer_handler()` calls; `flush_cb` is synchronous, so no
+  flush is ever in flight across the swap, and a failed allocation keeps the
+  buffer it has. See BUILD_PROGRESS 2026-08-20 for the full heap table.
+
+---
+
+## Tidy-ups (small, known, not urgent)
+
+- **Move `dash.c` / `dash.h` into `bridge/`.** They are already pure C shared by
+  the firmware, the simulator and the host gates — exactly like `rss.c`,
+  `news.c`, `feeds.c` and `config.c`, all of which live in `bridge/`. The one
+  thing forcing the issue: `bridge/wxfetch.c` fills a `WxCache`, so the bridge
+  component's CMakeLists now carries an include path pointing back into
+  `firmware/main`, which is backwards. Moving the two files removes that path.
+  Touches `firmware/main/CMakeLists.txt`, the bridge component, and `sim/Makefile`.
+- **`heap[wifi-up]` is ~13 KB lower after a session of app use than after a
+  fresh boot** (measured 2026-08-20: 44.9 KB at 18 min uptime). Not yet chased.
+  If feed fetches still fail intermittently, this is the next thread — find what
+  the UI holds after visiting several apps.
+- **The CI simulator-smoke job has no `timeout-minutes`.** It hung 1h55m on an
+  apt mirror stall (2026-08-19). One line to fix.
 
 ---
 
@@ -296,6 +320,60 @@ starts with a **feasibility check on the base CYD** before committing to a build
   left open on the desk keeps counting — `ui.c` still considers the screen open. Pausing
   would need a hook from `idle_step()` (`lvgl_port.c`) into `games_pause_clocks()`.
   Deliberately not built blind: decide it on glass, where the real timeout is visible.
+- **`[device]` The device-side weather fetch — BUILT 2026-08-20, AWAITING A REAL
+  FETCH ON GLASS.** `bridge/wxfetch.c` + `fetch_weather()` in `hotsync.c`, running
+  after `fetch_news()` in the internet-only stage. Open-Meteo with `&format=csv`,
+  so there is no JSON parser and no new dependency: ~1.5 KB spooled to SD and read
+  a line at a time, exactly like an RSS feed. Two GETs — forecast and US AQI — and
+  the AQI's failure never costs a forecast already in hand. Blocks are identified
+  by their HEADER row, never their position, so a reordered field cannot shift a
+  column into the wrong `WxCache` slot; `tests/wx_test.c` pins that against
+  verbatim live responses in `tests/data/`.
+  **Still to verify on device:** that `weather.dat` is actually written and the
+  lock screen renders real numbers, which needs `latitude`/`longitude` in
+  `config.ini` (`Config` gained both, and `config.ini.example` documents them).
+  With no location the fetch does nothing and reports `no weather (no location
+  set)` — deliberately loud, since silence is exactly how the missing fetch below
+  went unnoticed for so long.
+  The original entry, kept for the reasoning that produced the decision:
+
+- ~~**`[device]` The device-side weather fetch is NOT BUILT.**~~ The lock screen reads
+  `/sdcard/weather.dat`, but nothing on the device has ever written it — the only
+  writer is `dash_weather_seed_sample()`, which fabricates a plausible snapshot so the
+  dashboard renders before a real fetch exists. So every temperature the device has
+  ever shown is synthetic, and the 24-hour staleness gate added on 2026-08-19 can only
+  ever fire on the seeded sample's age. `PRODUCT_PLAN.md` §"device-later" specifies the
+  fetch (Open-Meteo, hourly temp + precipitation probability + weathercode + daily sun
+  times, written compact to `WX_PATH` during HotSync); it belongs in the internet-only
+  stage of `hotsync_task()` beside `fetch_news()`, which now runs regardless of the
+  account.
+  **Location — decided 2026-08-19: `lat`/`lon` in `config.ini` for v1.** `Config` has no
+  location field at all today, so this is greenfield. The reasoning, because it will
+  look under-ambitious later otherwise:
+  - **A forecast's resolution is kilometres.** Open-Meteo serves off a grid, so
+    locating the device to tens of metres is precision that gets discarded on arrival.
+    That kills the whole WiFi-positioning branch on value, before cost.
+  - **And the free WiFi-positioning landscape has moved.** Mozilla Location Service —
+    the free one everyone remembers — was **retired in 2024**. Google's Geolocation API
+    still does BSSID → lat/lng, but it is billable and the key would have to ship
+    *inside the device*, where it leaks. BeaconDB (beacondb.net) is the community
+    MLS successor: free, no key, MLS-compatible — but crowd-sourced coverage is patchy,
+    so it can simply return nothing for a given street. Verify its status before relying
+    on it; this note may age badly.
+  - **This is a desk PDA that syncs at home over a known SSID.** Its location *is*
+    "home". A fixed lat/lon is the truth, not a shortcut, and geolocation only earns
+    its complexity once the device both travels and syncs while travelling.
+  **Later, and worth doing before shipping to strangers: IP geolocation at first sync.**
+  One GET, cache into config, never ask the user anything, manual lat/lon as override —
+  because "look up your coordinates and type them into a file" is a bad first five
+  minutes for a buyer. Two traps when picking a provider: a VPN puts the device in the
+  wrong country, and **several free tiers are non-commercial-only** (`ip-api.com`
+  among them), so read the licence rather than the pricing page. Incidental upside on
+  this board: some of those endpoints are plain HTTP, which skips mbedTLS entirely, and
+  heap is what this device can least afford.
+  **The no-new-dependency alternative** if a picker is ever wanted: Open-Meteo also
+  publishes a **free, keyless geocoding API** (city name → lat/lon), so a city search
+  costs no second vendor and no key.
 - **`[device]` A real RTC part — decide and fit.** The clock problem in one line: this
   board has no battery-backed RTC, so the wall clock is only as good as the last
   checkpoint. `clock.c` persists the epoch to NVS every 120 s and restores it at boot,
@@ -309,6 +387,17 @@ starts with a **feasibility check on the base CYD** before committing to a build
   map proves it (the 32K pins are GPIO32/33, both used by touch). That leaves the
   internal ~150 kHz RC oscillator: calibrated at boot, but temperature- and
   supply-dependent, drifting on the order of a percent — minutes/day, not seconds.
+  **MEASURE BEFORE BUYING — instrumented 2026-08-19.** Every HotSync is a free
+  reading of how far the clock wandered since the last one, and `clock_sync_begin/end`
+  now takes it: the correction SNTP applies, the interval it accumulated over, and the
+  implied ppm, logged and appended to `/sdcard/drift.log` (the experiment runs on
+  battery with no USB attached, so a serial-only reading would never be read). Samples
+  whose interval contains a power loss are reported but not counted — that correction
+  is the outage, not drift. **The estimates below span seconds/day to minutes/day
+  depending on how much time goes to light sleep on the uncalibrated RC; if the real
+  number lands at the low end, a battery alone closes this item and no RTC part is
+  needed.** Two syncs are required before the first real sample (the first sets the
+  anchor). Gate: `make -C sim clock`.
   **Size the part to the sync interval, not to the spec sheet.** Assume Wi-Fi once a day
   (user is home daily). At one anchor/day a plain crystal RTC at ±20 ppm drifts
   **~1.7 s/day** — already invisible. The DS3231's ±2 ppm TCXO buys ~1 min/*year*, which

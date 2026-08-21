@@ -72,6 +72,29 @@ int main(void){
     CK(e.policy==CFG_POL_LOCAL,"policy=local parsed");
     CK(!strcmp(e.timezone,"Europe/London"),"no-space key=value parsed");
 
+    /* INLINE COMMENTS -- the shape config.ini.example actually ships. Before the
+     * parser cut these, `timezone` kept the whole trailing comment and silently
+     * resolved to UTC, and `dav_pass` silently grew one. */
+    f=fopen(PATH,"w");
+    fprintf(f,
+        "timezone = America/New_York          # empty = floating local time\n"
+        "dav_pass = abcd-efgh-ijkl-mnop       # iCloud APP-SPECIFIC password\n"
+        "brightness = 80                      # backlight 0..100\n"
+        "policy = both                        # server | local | both\n"
+        "wifi_pass = P#ssw0rd\n"               /* bare '#' is NOT a comment      */
+        "wifi_ssid = Net#5   # trailing note\n"/* bare '#' kept, ' #' cut        */
+        "cal_coll =                           # deliberately empty\n");
+    fclose(f);
+    Config h; config_defaults(&h);
+    CK(config_load(PATH,&h)==0,"inline-comment load ok");
+    CK(!strcmp(h.timezone,"America/New_York"),"inline comment cut off timezone");
+    CK(!strcmp(h.dav_pass,"abcd-efgh-ijkl-mnop"),"inline comment cut off dav_pass");
+    CK(h.brightness==80,"inline comment cut off brightness");
+    CK(h.policy==CFG_POL_BOTH,"inline comment cut off policy");
+    CK(!strcmp(h.wifi_pass,"P#ssw0rd"),"'#' with no space before it is literal");
+    CK(!strcmp(h.wifi_ssid,"Net#5"),"literal '#' kept while ' #' comment is cut");
+    CK(h.cal_coll[0]==0,"comment-only value is empty, not the comment");
+
     /* missing file -> -1, defaults preserved */
     Config g; config_defaults(&g);
     CK(config_load("state/does_not_exist.ini",&g)==-1,"missing file -> -1");

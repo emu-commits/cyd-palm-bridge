@@ -38,6 +38,19 @@ const char *config_policy_to_str(int policy){
     return "server";
 }
 
+/* Cut an INLINE comment off a value: everything from a '#' that FOLLOWS
+ * whitespace to the end of the line. Deliberately NOT any bare '#' -- a password
+ * or an SSID may legitimately contain one ("P#ssw0rd" survives; "pass # note"
+ * does not, which is the documented cost of the syntax). This exists because
+ * config.ini.example ships `timezone = America/New_York   # empty = floating`
+ * and the parser used to keep the comment as part of the value: the zone then
+ * matched nothing and silently fell back to UTC, and the same line shape on
+ * `dav_pass` silently appended a comment to the password. */
+static void cut_comment(char *s){
+    for(char *p = s; *p; p++)
+        if(*p=='#' && p>s && (p[-1]==' '||p[-1]=='\t')){ *p = 0; return; }
+}
+
 /* trim leading/trailing ASCII whitespace in place; returns the start pointer. */
 static char *trim(char *s){
     while(*s==' '||*s=='\t'||*s=='\r'||*s=='\n') s++;
@@ -60,6 +73,8 @@ static void apply(Config *c, const char *key, const char *val){
     else if(!strcasecmp(key,"todo_coll")) setstr(c->todo_coll,     sizeof c->todo_coll, val);
     else if(!strcasecmp(key,"card_coll")) setstr(c->card_coll,     sizeof c->card_coll, val);
     else if(!strcasecmp(key,"timezone"))  setstr(c->timezone,      sizeof c->timezone, val);
+    else if(!strcasecmp(key,"latitude"))  setstr(c->latitude,      sizeof c->latitude, val);
+    else if(!strcasecmp(key,"longitude")) setstr(c->longitude,     sizeof c->longitude, val);
     else if(!strcasecmp(key,"world1"))    setstr(c->world1,        sizeof c->world1, val);
     else if(!strcasecmp(key,"world2"))    setstr(c->world2,        sizeof c->world2, val);
     else if(!strcasecmp(key,"brightness"))    c->brightness    = clampi(atoi(val),0,100);
@@ -79,7 +94,9 @@ int config_load(const char *path, Config *c){
         char *eq=strchr(s,'=');
         if(!eq) continue;                       /* malformed: no '=' */
         *eq=0;
-        char *key=trim(s), *val=trim(eq+1);
+        char *key=trim(s), *val=eq+1;
+        cut_comment(val);                       /* `value   # note` -> `value` */
+        val=trim(val);
         if(*key==0) continue;                   /* empty key */
         apply(c,key,val);
     }
@@ -102,6 +119,8 @@ int config_save(const char *path, const Config *c){
     fprintf(f,"todo_coll = %s\n",     c->todo_coll);
     fprintf(f,"card_coll = %s\n",     c->card_coll);
     fprintf(f,"timezone = %s\n",      c->timezone);
+    fprintf(f,"latitude = %s\n",      c->latitude);
+    fprintf(f,"longitude = %s\n",     c->longitude);
     fprintf(f,"world1 = %s\n",        c->world1);
     fprintf(f,"world2 = %s\n",        c->world2);
     fprintf(f,"brightness = %d\n",    c->brightness);

@@ -98,6 +98,39 @@ int news_add(const char *feed, const char *title, const char *text, uint32_t whe
     w_off += len; w_count++;
     return 1;
 }
+/* ---- suspend / resume ------------------------------------------------------
+ * The writer holds news.idx and news.dat open for the whole fetch, and on the
+ * device each open file costs a 4 KB FatFs sector cache (CONFIG_FATFS_SECTOR_4096
+ * + PER_FILE_CACHE). Two of those plus the feed spool is 12 KB of the heap that
+ * the TLS handshake needs -- and measurably, feed fetches start failing as the
+ * largest free block falls. So the store closes itself across the network I/O
+ * and reopens to append. Resume reopens in "r+b" and seeks to the end of each
+ * file, so the byte offsets already written stay valid. */
+int news_suspend(void){
+    if(!w_idx && !w_dat) return 0;
+    if(w_idx){ fclose(w_idx); w_idx=NULL; }
+    if(w_dat){ fclose(w_dat); w_dat=NULL; }
+    return 1;
+}
+
+int news_resume(void){
+    if(w_idx || w_dat) return 1;                  /* never suspended */
+    w_idx = fopen(s_idx, "r+b");
+    w_dat = fopen(s_dat, "r+b");
+    if(!w_idx || !w_dat){
+        if(w_idx){ fclose(w_idx); w_idx=NULL; }
+        if(w_dat){ fclose(w_dat); w_dat=NULL; }
+        return 0;
+    }
+    /* append position: the counters (w_count, w_off) were never reset, so seeking
+     * to the end of both files puts the writer exactly where it left off. */
+    if(fseek(w_idx, 0, SEEK_END)!=0 || fseek(w_dat, 0, SEEK_END)!=0){
+        fclose(w_idx); w_idx=NULL; fclose(w_dat); w_dat=NULL;
+        return 0;
+    }
+    return 1;
+}
+
 int news_commit(void){
     int ok = 1;
     if(w_idx){

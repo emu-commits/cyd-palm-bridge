@@ -5,10 +5,24 @@
  * clock must only advance while the game screen is open. Every call takes `now`, so
  * the whole thing is testable without sleeping. */
 #include <stdio.h>
+#include <string.h>
+#include <stdint.h>
 #include "playclock.h"
+
+/* clock.c's drift meter, exposed by -DCLOCK_TEST_HOOKS. The arithmetic is the
+ * part that can be wrong silently -- a flipped sign would report a fast clock as
+ * slow and send us shopping for the wrong fix. */
+void drift_line(char *out, int cap, int64_t corr_us, long long span_s, unsigned lost);
+
+/* clock.c's timezone resolver, same hook. This one failed SILENTLY: an
+ * unrecognised zone became UTC, so the device showed a confident, wrong hour --
+ * which is exactly what a trailing "# comment" left on the config.ini line did. */
+int tz_resolve(const char *z, const char **out);
 
 static int fails = 0;
 #define CK(c,m) do{ if(!(c)){ fails++; printf("  FAIL: %s\n",(m)); } else printf("  ok: %s\n",(m)); }while(0)
+
+#define HAS(hay,needle) (strstr((hay),(needle)) != NULL)
 
 int main(void){
     printf("== playclock ==\n");
@@ -90,6 +104,99 @@ int main(void){
     pc_pause(&b, T0);
     CK(pc_secs(&b, T0) == 0, "pausing on a backwards clock banks 0");
 
-    printf(fails ? "== playclock: %d FAILURE(S) ==\n" : "== playclock: all passed ==\n", fails);
+    printf("== clock drift meter ==\n");
+    {
+        char m[168];
+        const long long DAY = 86400;
+
+        /* A clock that ran SLOW is behind, so SNTP moves it FORWARD: the
+         * correction is positive. 8.64 s over a day is exactly 100 ppm, which
+         * makes this the one case worth checking by hand. */
+        drift_line(m, sizeof m, 8640000LL, DAY, 0);
+        CK(HAS(m, "SLOW"),          "a positive correction means the clock ran slow");
+        CK(HAS(m, "100.00 ppm"),    "8.64 s/day is 100 ppm");
+        CK(HAS(m, "8.64 s/day"),    "and reads back as 8.64 s/day");
+        CK(HAS(m, "+8640 ms"),      "the correction is shown in ms, signed");
+        CK(HAS(m, "24h00m"),        "the interval is shown as hours and minutes");
+
+        /* the mirror case: a fast clock is ahead, SNTP winds it back */
+        drift_line(m, sizeof m, -8640000LL, DAY, 0);
+        CK(HAS(m, "FAST"),          "a negative correction means the clock ran fast");
+        CK(HAS(m, "100.00 ppm"),    "the rate is reported unsigned, after the word");
+        CK(HAS(m, "-8640 ms"),      "the correction keeps its sign");
+        CK(!HAS(m, "--100"),        "no double negative leaks into the rate");
+
+        /* the sub-ppm end: this is the resolution that decides "no RTC needed" */
+        drift_line(m, sizeof m, 86400LL, DAY, 0);     /* 86.4 ms/day = 1 ppm */
+        CK(HAS(m, "1.00 ppm"),      "1 ppm resolves");
+        CK(HAS(m, "0.08 s/day"),    "and shows as 0.08 s/day");
+
+        /* an interval that contains a power loss is NOT a drift sample */
+        drift_line(m, sizeof m, 3600000000LL, DAY, 1);
+        CK(HAS(m, "not drift"),     "a sample spanning an outage says so");
+        CK(!HAS(m, "ppm"),          "and quotes no rate at all");
+        CK(HAS(m, "1 time(s)"),     "it reports how many times the clock stopped");
+
+        /* too short to mean anything: SNTP's own error would dominate */
+        drift_line(m, sizeof m, 40000LL, 300, 0);
+        CK(HAS(m, "too short"),     "a five-minute interval is rejected");
+        CK(!HAS(m, "ppm"),          "and quotes no rate");
+        drift_line(m, sizeof m, 40000LL, 600, 0);
+        CK(HAS(m, "ppm"),           "ten minutes is the first interval that counts");
+
+        /* a real-world-shaped sample: a few seconds across most of a day */
+        drift_line(m, sizeof m, 4812000LL, 19*3600 + 22*60, 0);
+        CK(HAS(m, "19h22m"),        "hours and minutes format with a leading zero");
+        CK(HAS(m, "SLOW"),          "and it reads as a slow clock");
+
+        /* an hour-boundary interval must not print 60 minutes */
+        drift_line(m, sizeof m, 1000000LL, 7200, 0);
+        CK(HAS(m, "2h00m"),         "an exact two hours is 2h00m, not 1h60m");
+
+        /* nothing here may overflow or truncate the buffer */
+        drift_line(m, sizeof m, 30LL*DAY*1000000, 365*DAY, 0);
+        CK(strlen(m) < sizeof m - 1, "a year-long interval still fits the line");
+        CK(HAS(m, "ppm"),           "and still produces a rate");
+    }
+
+    printf("== timezone resolution ==\n");
+    {
+        const char *p = NULL;
+
+        /* the exact IANA names from the built-in table */
+        CK(tz_resolve("America/New_York", &p) && HAS(p, "EST5EDT"), "exact IANA name resolves");
+        CK(HAS(p, "M3.2.0"),                       "and carries the US DST rules");
+        CK(tz_resolve("Asia/Kolkata", &p) && HAS(p, "IST-5:30"), "a half-hour zone resolves");
+
+        /* the ways a person actually types it */
+        CK(tz_resolve("America/New York", &p) && HAS(p,"EST5EDT"), "a space for the underscore");
+        CK(tz_resolve("america/new_york", &p) && HAS(p,"EST5EDT"), "lower case");
+        CK(tz_resolve("New York", &p)         && HAS(p,"EST5EDT"), "the city on its own");
+        CK(tz_resolve("EST", &p)              && HAS(p,"EST5EDT"), "the standard-time abbreviation");
+        CK(tz_resolve("EDT", &p)              && HAS(p,"EST5EDT"), "the daylight abbreviation");
+        CK(tz_resolve("PST", &p)              && HAS(p,"PST8PDT"), "and on the other coast");
+
+        /* a bare abbreviation must NOT be passed through as a POSIX TZ: newlib
+         * reads "EST" with no offset as UTC, which is the five-hour silent error */
+        CK(!HAS(p, "UTC"),                    "an abbreviation never falls through to UTC");
+
+        /* a real POSIX TZ string passes through untouched */
+        CK(tz_resolve("EST5EDT,M3.2.0,M11.1.0", &p) && !strcmp(p,"EST5EDT,M3.2.0,M11.1.0"),
+                                              "a full POSIX TZ passes through");
+        CK(tz_resolve("MST7", &p) && !strcmp(p,"MST7"), "so does an offset with no DST rules");
+
+        /* empty is a deliberate choice (floating local time), not a failure */
+        CK(tz_resolve("", &p) == 1 && !strcmp(p,"UTC0"),   "empty zone is UTC, and is not an error");
+        CK(tz_resolve(NULL, &p) == 1,                      "NULL zone is not an error either");
+
+        /* and the case that started all this: anything unrecognised reports 0 so
+         * the caller can say so out loud instead of quietly running on UTC */
+        CK(tz_resolve("America/New_York   # empty = floating", &p) == 0,
+                                              "a zone with a trailing comment is REJECTED, not UTC'd");
+        CK(!strcmp(p,"UTC0"),                 "and still yields a stable fallback");
+        CK(tz_resolve("Mars/Olympus_Mons", &p) == 0, "an unknown zone reports unknown");
+    }
+
+    printf(fails ? "== clock: %d FAILURE(S) ==\n" : "== clock: all passed ==\n", fails);
     return fails ? 1 : 0;
 }
