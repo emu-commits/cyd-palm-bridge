@@ -275,18 +275,48 @@ static char *abspath(char *href, DavCtx *d){
  * Preferences > News feeds. No credentials -- feeds are public. Compile-verified
  * here; runtime-verified on device. */
 #define NEWS_TMP        "/sdcard/.rsstmp"
-#define NEWS_MAX_TOTAL  30      /* whole store cap */
-#define NEWS_MAX_FEED   15      /* per-feed cap */
+/* The store used to stop at 30 articles across 15 per feed, which with ten feeds
+ * meant most sources never got a look in. Nothing here is held in RAM -- the
+ * fetch spools to SD, the parser keeps one item, and the reader seeks one record
+ * at a time -- so the cap is really about SD space and sync time, not memory:
+ * 240 articles is ~41 KB of index and a few hundred KB of text. */
+#define NEWS_MAX_TOTAL  240     /* whole store cap */
+#define NEWS_MAX_FEED   40      /* per-feed cap */
+
+/* KEEP TODAY'S NEWS, DROP THE REST. Feeds carry a week of history and the reader
+ * shows one headline at a time, so old stories are just distance between the
+ * user and today. "Today" is the local calendar date OR anything from the last
+ * 24 hours -- the second half matters because a strict calendar test would leave
+ * the app nearly empty at 6am, when the overnight stories are technically
+ * yesterday's. An item whose date the feed did not give (when == 0) is KEPT: we
+ * cannot prove it is old, and dropping it would silently lose whole feeds whose
+ * date format we failed to parse. */
+#define NEWS_MAX_AGE_S  (24 * 3600)
+
+static int news_is_current(uint32_t when, time_t now){
+    if(!when) return 1;                            /* undated -> never assumed old */
+    if(when > (uint32_t)now + 3600) return 1;      /* clock skew: a "future" item is fresh */
+    if((time_t)when + NEWS_MAX_AGE_S >= now) return 1;
+    struct tm a, b;
+    time_t w = (time_t)when;
+    localtime_r(&w, &a);
+    localtime_r(&now, &b);
+    return a.tm_year == b.tm_year && a.tm_yday == b.tm_yday;
+}
 static int s_news_added;
 static int s_news_feeds_ok, s_news_feeds_tried;   /* for the final status line */
 static char s_news_why[48];                       /* first failure, verbatim   */
-static void news_item_cb(const char *title, const char *text, void *ctx){
+static int s_news_stale;                          /* dropped as older than today */
+static time_t s_news_now;                         /* sampled once per run */
+static void news_item_cb(const char *title, const char *text, uint32_t when, void *ctx){
     if(s_news_added >= NEWS_MAX_TOTAL) return;
-    if(news_add((const char*)ctx, title, text, 0)) s_news_added++;
+    if(!news_is_current(when, s_news_now)){ s_news_stale++; return; }
+    if(news_add((const char*)ctx, title, text, when)) s_news_added++;
 }
 static void fetch_news(void){
-    s_news_added = s_news_feeds_ok = s_news_feeds_tried = 0;
+    s_news_added = s_news_feeds_ok = s_news_feeds_tried = s_news_stale = 0;
     s_news_why[0] = 0;
+    time(&s_news_now);
     if(feeds_enabled_count() == 0){
         snprintf(s_news_why,sizeof s_news_why,"no feeds enabled");
         ESP_LOGW(TAG,"news: no feeds enabled");
@@ -322,7 +352,7 @@ static void fetch_news(void){
             else if(!s_news_why[0])
                 snprintf(s_news_why,sizeof s_news_why,"%.20s: %ld bytes, no items",
                          f->name, spooled);
-            ESP_LOGI(TAG,"news: %s st=%d spooled=%ld parsed=%d stored=%d",
+            ESP_LOGI(TAG,"news: %s st=%d spooled=%ld parsed=%d kept=%d",
                      f->name, st, spooled, got, s_news_added - before);
         } else {
             /* st < 0 means the request never completed (DNS, TCP or TLS); a
@@ -339,8 +369,8 @@ static void fetch_news(void){
     }
     news_commit();
     dav_disconnect();                                  /* free the feed TLS handle */
-    ESP_LOGI(TAG,"news: %d items from %d/%d feeds%s%s", s_news_added,
-             s_news_feeds_ok, s_news_feeds_tried,
+    ESP_LOGI(TAG,"news: %d items from %d/%d feeds (%d dropped as older than today)%s%s",
+             s_news_added, s_news_feeds_ok, s_news_feeds_tried, s_news_stale,
              s_news_why[0] ? " -- " : "", s_news_why);
 }
 

@@ -30,6 +30,17 @@ static int g_wake_pending = 0;
 
 /* partial draw buffer: 40 rows. ~19KB, DMA-capable. */
 #define BUF_ROWS 40
+/* ...and 6 rows (~2.8 KB) for the duration of a HotSync. THE MEASUREMENT: with
+ * Wi-Fi up there were 28 KB of heap free and the mbedTLS handshake bottomed out
+ * at 88 bytes, so nine of ten feed fetches and the iCloud login all failed with
+ * ESP_ERR_HTTP_CONNECT. This buffer is the single largest contiguous block the
+ * UI holds, and a sync is the one time nothing needs to be drawn fast: the
+ * HotSync screen is a logo and a status line. Handing ~16 KB of DMA-capable heap
+ * to the handshake for the length of the sync costs a slower status repaint and
+ * buys the connection. Swapped on the LVGL task between lv_timer_handler()
+ * calls, and flush_cb is synchronous (blit then flush_ready), so no flush can be
+ * in flight across the swap. */
+#define BUF_ROWS_SYNC 6
 
 static uint32_t tick_cb(void){ return (uint32_t)(esp_timer_get_time() / 1000); }
 
@@ -107,6 +118,30 @@ static int idle_step(void){
     return 0;
 }
 
+static lv_display_t *g_disp;
+static void *g_buf;              /* the live draw buffer  */
+static int   g_buf_rows;         /* how many rows it holds */
+
+/* Swap the draw buffer to `rows` deep. Any failure LEAVES THE CURRENT BUFFER IN
+ * PLACE and returns 0 -- a sync that cannot free the memory is worth much less
+ * than a UI that cannot draw, so this never gives up the buffer it has until it
+ * holds the replacement. */
+static int resize_draw_buf(int rows){
+    if(!g_disp || rows == g_buf_rows) return 0;
+    size_t bytes = (size_t)LCD_W * rows * 2;
+    void *nb = heap_caps_malloc(bytes, MALLOC_CAP_DMA);
+    if(!nb){ ESP_LOGW(TAG,"draw buffer resize to %d rows failed; keeping %d", rows, g_buf_rows); return 0; }
+    void *old = g_buf;
+    lv_display_set_buffers(g_disp, nb, NULL, bytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
+    g_buf = nb; g_buf_rows = rows;
+    heap_caps_free(old);
+    lv_obj_invalidate(lv_screen_active());     /* repaint through the new buffer */
+    ESP_LOGI(TAG,"draw buffer now %d rows (%u bytes), heap free=%lu largestDMA=%lu",
+             rows, (unsigned)bytes, (unsigned long)esp_get_free_heap_size(),
+             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+    return 1;
+}
+
 void lvgl_port_init(void){
     lv_init();
     lv_tick_set_cb(tick_cb);
@@ -115,6 +150,7 @@ void lvgl_port_init(void){
     size_t buf_bytes = (size_t)LCD_W * BUF_ROWS * 2;
     void *buf = heap_caps_malloc(buf_bytes, MALLOC_CAP_DMA);
     if(!buf){ ESP_LOGE(TAG, "draw buffer alloc failed (%u bytes)", (unsigned)buf_bytes); return; }
+    g_disp = disp; g_buf = buf; g_buf_rows = BUF_ROWS;
     lv_display_set_buffers(disp, buf, NULL, buf_bytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(disp, flush_cb);
 
@@ -133,6 +169,14 @@ void lvgl_port_run(void){
         uint32_t next = lv_timer_handler();      /* ms until next work */
         /* the wake tap's repaint has now been flushed to the panel -- light it */
         if(g_wake_pending){ g_wake_pending = 0; power_backlight(1); }
+
+        /* lend the draw buffer's memory to the sync for as long as it runs */
+        static int was_syncing = 0;
+        int syncing = hotsync_busy();
+        if(syncing != was_syncing){
+            resize_draw_buf(syncing ? BUF_ROWS_SYNC : BUF_ROWS);
+            was_syncing = syncing;
+        }
         int off = idle_step();                   /* backlight off/on + wake */
         if(off && !g_wake_pending){
             /* screen blanked: nothing to draw. Idle in ~120 ms slices so the SoC

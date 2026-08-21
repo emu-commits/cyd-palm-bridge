@@ -8,11 +8,15 @@
  */
 #ifndef RSS_H
 #define RSS_H
+#include <stdint.h>
 
 /* one parsed item: UTF-8 title + plain-text body (HTML tags stripped, entities
  * decoded, whitespace collapsed). Both are NUL-terminated, caller-owned for the
- * duration of the callback only. */
-typedef void (*rss_item_cb)(const char *title, const char *text, void *ctx);
+ * duration of the callback only. `when` is the item's publication time as a Unix
+ * epoch, or 0 when the feed gave none we could parse -- an undated item is never
+ * assumed to be old. */
+typedef void (*rss_item_cb)(const char *title, const char *text,
+                            uint32_t when, void *ctx);
 
 /* Parse an RSS 2.0 or Atom feed. Recognises <item>/<entry>, picks <title> and the
  * richest body among content:encoded / description / content / summary, and emits
