@@ -123,19 +123,25 @@ static int find_tag(const char *hay, const char *name, char *out, int cap){
     return 0;
 }
 
+/* These four were stack locals -- 8.7 KB of frame on the task that also runs the
+ * mbedTLS handshake, on a device where the handshake failing for want of ~10 KB
+ * is the difference between news and no news. Static for the same reason g_item
+ * is: the fetch is single-threaded, one feed at a time. */
+static char e_rawt[TITLE_CAP], e_rawb[TEXT_CAP];
+static char e_title[TITLE_CAP], e_text[TEXT_CAP];
+
 static void emit_item(int len, int *count, int max_items, rss_item_cb cb, void *ctx){
     (void)len;
-    char rawt[TITLE_CAP], rawb[TEXT_CAP];
-    char title[TITLE_CAP], text[TEXT_CAP];
-    if(!find_tag(g_item,"title",rawt,sizeof rawt)) rawt[0]=0;
+    char *rawt = e_rawt, *rawb = e_rawb, *title = e_title, *text = e_text;
+    if(!find_tag(g_item,"title",rawt,sizeof e_rawt)) rawt[0]=0;
     /* richest body first: RSS full content, then description, Atom content/summary */
-    if(!find_tag(g_item,"content:encoded",rawb,sizeof rawb) &&
-       !find_tag(g_item,"description",    rawb,sizeof rawb) &&
-       !find_tag(g_item,"content",        rawb,sizeof rawb) &&
-       !find_tag(g_item,"summary",        rawb,sizeof rawb))
+    if(!find_tag(g_item,"content:encoded",rawb,sizeof e_rawb) &&
+       !find_tag(g_item,"description",    rawb,sizeof e_rawb) &&
+       !find_tag(g_item,"content",        rawb,sizeof e_rawb) &&
+       !find_tag(g_item,"summary",        rawb,sizeof e_rawb))
         rawb[0]=0;
-    rss_html_to_text(title,sizeof title,rawt);
-    rss_html_to_text(text, sizeof text, rawb);
+    rss_html_to_text(title,sizeof e_title,rawt);
+    rss_html_to_text(text, sizeof e_text, rawb);
     if(title[0] || text[0]){ cb(title,text,ctx); (*count)++; }
     (void)max_items;
 }

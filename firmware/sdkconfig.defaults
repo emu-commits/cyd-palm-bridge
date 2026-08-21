@@ -52,10 +52,18 @@ CONFIG_LV_USE_THEME_MONO=y
 CONFIG_LV_MEM_SIZE_KILOBYTES=32
 
 # --- Wi-Fi: trim the (generous) default buffer pools to claw back heap for TLS.
-# Sync is low-bandwidth, so fewer RX/TX buffers is fine. ---
-CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4
-CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
-CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16
+# Sync is low-bandwidth, so fewer RX/TX buffers is fine.
+# MEASURED 2026-08-20: with Wi-Fi up and the UI resident there were 23 KB free
+# and the handshake bottomed out at 880 bytes -- every HTTPS request in the sync
+# failed with ESP_ERR_HTTP_CONNECT, iCloud and all ten feeds alike. Wi-Fi itself
+# accounted for 26 KB of that (free went 23 KB -> 50 KB when it came down), so
+# these pools are halved again. The cost is throughput on a sync that moves a few
+# hundred KB at most; the benefit is a handshake that completes. ---
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=3
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=n
+CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=n
 
 # --- quieter default log level ---
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y

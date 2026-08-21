@@ -33,6 +33,13 @@
 #include "esp_log.h"
 
 static const char *TAG = "hotsync";
+
+/* The sync task's stack comes out of the same heap the TLS handshake needs, and
+ * at 32 KB it was taking a third of what was free. Two things paid for the cut:
+ * rss.c's emit_item no longer puts 8.7 KB of buffers on this stack (they are BSS
+ * now), and the end-of-run high-water log below reports what is actually used,
+ * so this number stays honest. Raise it only against that log. */
+#define HOTSYNC_STACK 20480
 static volatile int s_busy;
 static char s_status[160] = "Ready";
 static void setst(const char *s){ snprintf(s_status, sizeof s_status, "%s", s); }
@@ -514,6 +521,14 @@ static void hotsync_task(void *arg){
      * a Wi-Fi cycle fragments the DMA region -- which is what would break a plan to
      * bring Wi-Fi up before LVGL allocates its contiguous draw buffer. */
     hs_heap("wifi-down");
+    /* HOW BIG SHOULD THIS TASK'S STACK BE? Its stack is heap, and on this device
+     * heap is exactly what the mbedTLS handshake ran out of -- so an over-sized
+     * stack is not free caution, it is the thing that breaks the sync. This is
+     * the measurement that lets HOTSYNC_STACK be a number rather than a guess:
+     * the high-water mark is the smallest the stack ever got, in bytes. */
+    ESP_LOGI(TAG,"stack: %u bytes of %u still free at the end",
+             (unsigned)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)),
+             (unsigned)HOTSYNC_STACK);
     s_busy = 0;
     vTaskDelete(NULL);
 }
@@ -620,7 +635,7 @@ void hotsync_discover_start(void){
     if(s_busy) return;
     s_busy = 1; s_disc_done = 0; s_disc_n = 0;
     setst("Starting...");
-    if(xTaskCreate(discover_task, "discover", 32768, NULL, 4, NULL) != pdPASS){
+    if(xTaskCreate(discover_task, "discover", HOTSYNC_STACK, NULL, 4, NULL) != pdPASS){
         setst("Could not start discovery"); s_disc_done=1; s_busy = 0;
     }
 }
@@ -638,7 +653,7 @@ void hotsync_start(void){
      * GET per relocated object -- 20 KB overflowed at ~30 records. The old worry
      * that 32 KB starves the heap no longer holds: streaming shrank the S struct
      * from ~16 KB to ~3 KB, so the contiguous block it needs is tiny now. */
-    if(xTaskCreate(hotsync_task, "hotsync", 32768, NULL, 4, NULL) != pdPASS){
+    if(xTaskCreate(hotsync_task, "hotsync", HOTSYNC_STACK, NULL, 4, NULL) != pdPASS){
         setst("Could not start sync task"); s_busy = 0;
     }
 }
