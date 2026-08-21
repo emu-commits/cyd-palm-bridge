@@ -71,6 +71,10 @@ static char   *g_body;    /* emit scratch: one object body at a time (BODY_CAP) 
 static uint8_t *g_lrec;   /* one lazily-read local record (PALM_REC_MAX)        */
 /* defined after g_objbuf (needs its cap); used by the entry points above it. */
 static int scratch_alloc(void);
+/* defined with the pull-only switch further down; used by pushRec above it. */
+static int put_guard(const DavCtx*d,const char*coll,const char*name,const char*ctype,
+                     const char*bodyfile,const char*ifmatch,char*etag,int etagcap,int*status);
+static int del_guard(const DavCtx*d,const char*coll,const char*name,const char*ifmatch);
 
 /* ---- kind helpers ---- */
 static const char* kindExt(int k){ return k==KIND_CARD?"vcf":"ics"; }
@@ -158,7 +162,7 @@ static int pushRec(const PdbRec*r,int i,void*ctx){
     FILE*f=fopen(BODY_TMP,"wb"); fwrite(g_body,1,strlen(g_body),f); fclose(f);
     char name[64]; snprintf(name,sizeof name,"%u.%s",(unsigned)r->uniqueID,kindExt(p->kind));
     char etag[160]=""; int st=0;
-    dav_put(p->d,p->coll,name,kindCType(p->kind),BODY_TMP,NULL,etag,sizeof etag,&st);
+    put_guard(p->d,p->coll,name,kindCType(p->kind),BODY_TMP,NULL,etag,sizeof etag,&st);
     fprintf(p->map,"%d\t%u\t%s\t%s\n",p->kind,(unsigned)r->uniqueID,name,etag);
     p->n++;
     return 0;
@@ -277,6 +281,64 @@ static int locBytes(const S*s,const Loc*L,uint8_t*buf,int cap){
 #endif
 #endif
 static char *g_objbuf;    /* server-object fetch buffer (OBJ_FETCH_CAP) */
+/* The per-run reconcile state. It lives in the scratch pool rather than being
+ * calloc'd per entry so that (a) it is taken while the heap is still whole and
+ * (b) the second and later collections of a run reuse it instead of hunting for
+ * a fresh 3 KB block in a heap the first collection just carved up. The two
+ * entry points never nest (sync_categorized drives sync_one directly), so one
+ * instance is enough. */
+static S *g_state;
+
+/* ---- the budget (contract in sync.h) --------------------------------------
+ * SYNC_WORKING_SET is every byte scratch_alloc will ask the heap for, named as
+ * one number so it can be compared against a ceiling instead of discovered one
+ * failed malloc at a time. */
+#define SYNC_WORKING_SET ((size_t)OBJ_FETCH_CAP + (size_t)BODY_CAP + \
+                          (size_t)PALM_REC_MAX  + sizeof(S))
+static size_t s_budget;          /* 0 = unlimited (host build, gates) */
+void   sync_set_budget(size_t bytes){ s_budget = bytes; }
+size_t sync_working_set(void){ return SYNC_WORKING_SET; }
+/* ---- pull-only (contract in sync.h) ---------------------------------------
+ * While the memory rework is in flight the engine must not be able to write to
+ * the account. A bug in a half-converted reconcile path would corrupt real data
+ * on the server, and unlike a local PDB that is not something a reflash undoes.
+ * Writes are refused at the points that reach the network, and the existing
+ * "push failed -- kept local, will retry" handling takes it from there, so no
+ * new untested branch is introduced on the path that matters. */
+static SyncCheckFn s_check;
+void sync_set_check(SyncCheckFn fn){ s_check = fn; }
+#define CHK(w) do{ if(s_check) s_check(w); }while(0)
+static void chk_n(const char *tag,int n){
+    if(!s_check) return;
+    char b[40]; snprintf(b,sizeof b,"%s#%d",tag,n); s_check(b);
+}
+
+static int s_pull_only;
+void sync_set_pull_only(int on){ s_pull_only = on; }
+int  sync_pull_only(void){ return s_pull_only; }
+
+static int put_guard(const DavCtx*d,const char*coll,const char*name,const char*ctype,
+                     const char*bodyfile,const char*ifmatch,
+                     char*etag,int etagcap,int*status){
+    if(s_pull_only){
+        if(etag && etagcap) etag[0]=0;
+        if(status) *status=0;              /* reads as a failed push: keep local */
+        return 0;
+    }
+    return dav_put(d,coll,name,ctype,bodyfile,ifmatch,etag,etagcap,status);
+}
+static int del_guard(const DavCtx*d,const char*coll,const char*name,const char*ifmatch){
+    if(s_pull_only) return 0;              /* server keeps the record; next run re-pulls it */
+    return dav_delete(d,coll,name,ifmatch);
+}
+
+static int over_budget(void){
+    if(!s_budget || SYNC_WORKING_SET <= s_budget) return 0;
+    fprintf(stderr,"[sync] REFUSED before any network I/O: working set %u B "
+                   "exceeds the %u B budget\n",
+            (unsigned)SYNC_WORKING_SET, (unsigned)s_budget);
+    return 1;
+}
 
 /* Acquire/release the sync scratch. scratch_alloc() runs at each public sync
  * entry; it is idempotent, so a nested entry point (sync_categorized ->
@@ -284,15 +346,35 @@ static char *g_objbuf;    /* server-object fetch buffer (OBJ_FETCH_CAP) */
  * back -- the device calls it after a HotSync so interactive mode gets the RAM;
  * the host CLI/tests may skip it (the process exits). Returns 1 ok, 0 on OOM. */
 static int scratch_alloc(void){
+    /* LARGEST FIRST, and the order is load-bearing. Measured on device with a
+     * live TLS session the heap had ~25.5 KB free but only 17408 of it in one
+     * run, so the two 8 KB blocks are the only ones with nowhere else to go:
+     * they must be placed while the big run is still whole, and the 4 KB and
+     * 3 KB blocks can then take the remnants. Interleaved sizes (the original
+     * order) and smallest-first were both measured on device and both stranded
+     * a block -- smallest-first merely moved the failure from the 3 KB state to
+     * the last 8 KB buffer. */
+    if(!g_objbuf) g_objbuf = malloc(OBJ_FETCH_CAP);
     if(!g_body)   g_body   = malloc(BODY_CAP);
     if(!g_lrec)   g_lrec   = malloc(PALM_REC_MAX);
-    if(!g_objbuf) g_objbuf = malloc(OBJ_FETCH_CAP);
-    return g_body && g_lrec && g_objbuf;
+    if(!g_state)  g_state  = malloc(sizeof(S));
+    if(g_state && g_body && g_lrec && g_objbuf) return 1;
+    /* WHICH block could not be found matters more than the total. These are three
+     * separate contiguous requests, the two 8 KB ones being the hard asks; on a
+     * fragmented heap the total free can look healthy while no 8 KB run exists.
+     * Naming the failed block turns "out of memory" into an actionable number. */
+    fprintf(stderr,"sync: scratch_alloc FAILED -- objbuf(%d)=%s body(%d)=%s lrec(%d)=%s state(%d)=%s\n",
+            (int)OBJ_FETCH_CAP, g_objbuf ? "ok" : "FAILED",
+            (int)BODY_CAP,      g_body   ? "ok" : "FAILED",
+            (int)PALM_REC_MAX,  g_lrec   ? "ok" : "FAILED",
+            (int)sizeof(S),     g_state  ? "ok" : "FAILED");
+    return 0;
 }
 void sync_free_scratch(void){
     free(g_body);   g_body=NULL;
     free(g_lrec);   g_lrec=NULL;
     free(g_objbuf); g_objbuf=NULL;
+    free(g_state);  g_state=NULL;
 }
 
 /* per-collection index temp files (STATE_DIR). Each is rebuilt per collection;
@@ -324,11 +406,15 @@ static int cmpLine(const void*a,const void*b){
  * (For collections beyond what free heap can sort, an external merge sort is the
  * next increment; Palm-scale data is well within an in-RAM sort.) */
 static void sortFile(const char*path){
-    /* About to malloc the whole file for an in-memory qsort. On the no-PSRAM
-     * device this heap must not fight the ~40 KB TLS working set, so release any
-     * live keep-alive connection first (no-op on the host). The next DAV call
-     * transparently reconnects; this keeps "TLS never resident during a sort". */
-    dav_disconnect();
+    /* This used to dav_disconnect() first, on the reasoning that a sort must not
+     * fight the ~40 KB TLS working set. Measured on device, that trade is the
+     * wrong way round: the sort needs 2.5-3.4 KB, while the reconnect it forces
+     * needs a ~30 KB handshake peak -- with the sync scratch held, that handshake
+     * cannot be mounted, and the deliberate disconnect was itself manufacturing
+     * the failure it meant to avoid ("alloc(4770 bytes) failed"). So the
+     * connection now stays up across a sort. If the server drops it anyway the
+     * reconnect is best-effort, and the circuit breaker (dav.h) ends the
+     * collection in seconds with local data untouched. */
     FILE*f=fopen(path,"rb"); if(!f) return;
     fseek(f,0,SEEK_END); long sz=ftell(f); fseek(f,0,SEEK_SET);
     if(sz<=0){ fclose(f); return; }
@@ -375,7 +461,20 @@ static void buildMapIdx(const char*mapfile,char*token,int tokcap,uint32_t*maxuid
         fclose(f);
     }
     if(a){fclose(a);} if(b){fclose(b);} if(c){fclose(c);}
-    sortFile(MP_IDX); sortFile(MP_HREF); sortFile(MP_PALM);
+    CHK("map-built"); sortFile(MP_IDX); sortFile(MP_HREF); sortFile(MP_PALM); CHK("map-sorted");
+}
+
+/* Trip the mass-delete guard only once a collection is big enough for "most of
+ * it vanished" to mean anything. Below this, a small collection legitimately
+ * emptying is ordinary. */
+#define MASSDEL_MIN 8
+static int countLines(const char*path){
+    FILE*f=fopen(path,"r"); if(!f) return 0;
+    int n=0, c, last='\n';
+    while((c=fgetc(f))!=EOF){ if(c=='\n') n++; last=c; }
+    if(last!='\n') n++;               /* a final line without a newline still counts */
+    fclose(f);
+    return n;
 }
 
 /* build LC_RAW (key=palmuid) from the source PDB, optionally filtered to records
@@ -402,7 +501,7 @@ static void buildLcRaw(const char*pdbpath,int kind,const CatRoute*rt,const char*
     pdb_read(pdbpath,lcBuildCb,&b);
     if(b.f)fclose(b.f);
     *maxuid=b.maxuid;
-    sortFile(LC_RAW);
+    CHK("lc-raw-built"); sortFile(LC_RAW); CHK("lc-raw-sorted");
 }
 /* join LC_RAW (key palmuid) with MP_PALM (key palmuid) -> LC_IDX (key objhash).
  * A local record with no map row (never synced) gets synthHash(palmuid). */
@@ -419,7 +518,7 @@ static void joinLcIdx(void){
         haveL=l&&fgets(ll,sizeof ll,l)!=NULL;
     }
     if(l){fclose(l);} if(m){fclose(m);} if(o){fclose(o);}
-    sortFile(LC_IDX);
+    CHK("lc-idx-built"); sortFile(LC_IDX); CHK("lc-idx-sorted");
 }
 
 /* enumerate the server into SV_RAW (key=href): "href etag present". Prefers the
@@ -482,7 +581,7 @@ static int enumServer(const DavCtx*d,const char*coll,const char*token,
  * and it retries cleanly next sync. Map-only rows are therefore staged to SV_MO
  * and only flushed as deletes once we know the enumeration was fully resolved. */
 static int resolveServer(const DavCtx*d,const char*coll,int incremental){
-    sortFile(SV_RAW);                         /* merge-join needs it keyed (by href) */
+    CHK("sv-raw-built"); sortFile(SV_RAW); CHK("sv-raw-sorted");  /* merge-join needs it keyed (by href) */
     FILE*s=fopen(SV_RAW,"r"),*m=fopen(MP_HREF,"r"),*o=fopen(SV_IDX,"w");
     FILE*mo=fopen(SV_MO,"w");                  /* map-only rows, present decided after merge */
     int unresolved=0;
@@ -539,7 +638,7 @@ static int resolveServer(const DavCtx*d,const char*coll,int incremental){
     }
     if(mr) fclose(mr);
     if(o){fclose(o);}
-    sortFile(SV_IDX);
+    CHK("sv-idx-built"); sortFile(SV_IDX); CHK("sv-idx-sorted");
     return unresolved;
 }
 
@@ -636,7 +735,7 @@ static int pushLocal(const DavCtx*d,const char*coll,int kind,Sink*k,
     const char*storedUid = (objuid&&objuid[0]) ? objuid : synth;
     FILE*f=fopen(BODY_TMP,"wb"); if(!f) return -1; fwrite(g_body,1,strlen(g_body),f); fclose(f);
     char etag[160]=""; int st=0;
-    dav_put(d,coll,name,kindCType(kind),BODY_TMP,ifmatch,etag,sizeof etag,&st);
+    put_guard(d,coll,name,kindCType(kind),BODY_TMP,ifmatch,etag,sizeof etag,&st);
     if(st>=200 && st<300){
         if(!etag[0]) dav_getetag(d,coll,name,etag,sizeof etag);   /* fallback */
         /* hash over the synth-UID body (UID-independent), matching loadRec. */
@@ -717,11 +816,37 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
     Sink*k=&K;
     const char*ext = kindExt(s->kind); int kind=s->kind;
 
+    /* ---- mass-delete guard --------------------------------------------------
+     * "Present in the map, absent locally" means the user deleted it, and the
+     * engine pushes that deletion to the server. That inference is only sound
+     * while the local database is intact. It is not always intact: a crash
+     * during kindCommit leaves the PDB truncated (it is opened "wb"), and the
+     * next boot reseeds an ABSENT database with demo rows -- after which every
+     * real record looks locally deleted and a two-way sync would erase the whole
+     * collection from the account. That is unrecoverable from this end.
+     *
+     * So when most of the mapped records have vanished at once, treat it as the
+     * local side being wrong rather than the user having deleted everything.
+     * Deletions are skipped for the run and said out loud; pulls still happen,
+     * which is exactly what repopulates a database that was lost. A genuine bulk
+     * delete by the user costs one extra sync to take effect. */
+    int nLoc = countLines(LC_IDX), nMap = countLines(MP_IDX);
+    int massGuard = (nMap >= MASSDEL_MIN) && (nLoc * 2 < nMap);
+    int guardedDel = 0;
+    if(massGuard)
+        fprintf(stderr,"[sync] MASS-DELETE GUARD for %s: %d local records against %d "
+                       "mapped. Not pushing deletions this run -- if the local database "
+                       "was lost, this sync restores it instead of erasing the server.\n",
+                coll, nLoc, nMap);
+
     FILE*flc=fopen(LC_IDX,"r"),*fmp=fopen(MP_IDX,"r"),*fsv=fopen(SV_IDX,"r");
     LcRow lc; MpRow mp; SvRow sv;
     lcRead(flc,&lc); mpRead(fmp,&mp); svRead(fsv,&sv);
 
+    CHK("merge-start");
+    int chkIter = 0;
     while(lc.v||mp.v||sv.v){
+        chk_n("merge", chkIter++);
         uint64_t mn=~0ULL;
         if(lc.v&&lc.oh<mn)mn=lc.oh;
         if(mp.v&&mp.oh<mn)mn=mp.oh;
@@ -792,7 +917,7 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
             } else if(serverWins){
                 if(scs!=SDEL) keepFromServer(d,coll,kind,k,uid,srvName,sEtag);
             } else if(localWins){
-                if(lcs==LDEL){ dav_delete(d,coll,srvName,NULL); }
+                if(lcs==LDEL){ del_guard(d,coll,srvName,NULL); }
                 else pushLocal(d,coll,kind,k,s,L,uid,srvName,NULL, mHref,mEtag,mHash, mObjuid);
             }
         }
@@ -823,13 +948,15 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         } else if(lcs==LCLEAN && scs==SDEL){
             st->pullDel++;
         } else if(lcs==LDEL && scs==SCLEAN){
-            dav_delete(d,coll,srvName,mEtag); st->pushDel++;
+            if(massGuard) guardedDel++;
+            else if(!s_pull_only){ dav_delete(d,coll,srvName,mEtag); st->pushDel++; }
         } else if(lcs==LDEL && scs==SDEL){
-            st->pushDel++;
+            if(massGuard) guardedDel++; else st->pushDel++;
         } else if(lcs==LABSENT && scs==SNEW){
             if(keepFromServer(d,coll,kind,k,uid,srvName,sEtag)==0) st->pullNew++;
         } else if(lcs==LABSENT && scs==SCLEAN){
-            dav_delete(d,coll,srvName,mEtag); st->pushDel++;
+            if(massGuard) guardedDel++;
+            else if(!s_pull_only){ dav_delete(d,coll,srvName,mEtag); st->pushDel++; }
         }
 
         progTick();                             /* one reconciled record */
@@ -838,6 +965,10 @@ static void sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         /* server rows at this objhash were already consumed above */
         (void)hasSraw;
     }
+    CHK("merge-done");
+    if(guardedDel)
+        fprintf(stderr,"[sync] MASS-DELETE GUARD held back %d deletion(s) for %s\n",
+                guardedDel, coll);
     if(flc){fclose(flc);} if(fmp){fclose(fmp);} if(fsv){fclose(fsv);}
 
     if(mapf){
@@ -857,9 +988,9 @@ static int countRecs(const char*pdb){ int n=0; pdb_read(pdb,countRecsCb,&n); ret
 int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
                     const char*coll,int kind,const char*mapfile,
                     ConflictPolicy pol,SyncStats*st){
-    if(!scratch_alloc()) return -1;
-    S *s = calloc(1,sizeof *s);
-    if(!s){ fprintf(stderr,"sync_collection: out of memory\n"); return -1; }
+    if(over_budget()) return -5;
+    if(!scratch_alloc()){ fprintf(stderr,"sync_collection: out of memory\n"); return -1; }
+    S *s = g_state; memset(s,0,sizeof *s);
     s->kind=kind; snprintf(s->pdbpath,sizeof s->pdbpath,"%s",localpdb);
     static uint8_t ai[512]; int ailen=pdb_read_appinfo(localpdb,ai,sizeof ai); if(ailen<0)ailen=0;
     int nin = countRecs(localpdb);
@@ -867,9 +998,17 @@ int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
     SyncStats z={0}; if(!st) st=&z;
 
     PdbW *w = pdbw_begin(OUT_TMP);
-    if(!w){ free(s); fprintf(stderr,"sync_collection: cannot open output temp\n"); return -1; }
+    if(!w){ fprintf(stderr,"sync_collection: cannot open output temp\n"); return -3; }
     progReset(nin);
     sync_one(d,s,coll,mapfile,pol,w,0,st,NULL,NULL);
+    /* The transport gave up partway through, so the merged output is missing an
+     * unknown number of server records. Publishing it would look like deletions.
+     * Discard it and keep local untouched -- the next run reconciles from the
+     * same map file, so nothing is lost but time. */
+    if(dav_transport_down()){
+        fprintf(stderr,"[sync] %s: transport down -- discarding partial merge, keeping local\n",coll);
+        pdbw_abort(w); return -4;
+    }
     int nrec = pdbw_count(w);
     SYNC_LOG("[sync] %s: out=%d push=%d/%d/%d pull=%d/%d/%d\n",
             coll,nrec,st->pushNew,st->pushMod,st->pushDel,
@@ -879,10 +1018,9 @@ int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
      * allowed to wipe the on-device data. Discard the streamed output, keep local. */
     if(nin > 0 && nrec == 0){
         fprintf(stderr,"[sync] REFUSED overwrite of %s (had %d recs) with 0 -- keeping local\n",outpdb,nin);
-        pdbw_abort(w); free(s); return -2;
+        pdbw_abort(w); return -2;
     }
     int rc = kindCommit(w,kind,outpdb, ailen?ai:NULL, ailen);
-    free(s);
     return rc<0 ? -1 : nrec;
 }
 
@@ -894,15 +1032,15 @@ static void sanitizeColl(const char*coll,char*out,int cap){
 int sync_categorized(const DavCtx*d,const char*localpdb,const char*outpdb,
                      int kind,const CatRoute*rt,const char*mapdir,
                      ConflictPolicy pol,SyncStats*st){
-    if(!scratch_alloc()) return -1;
+    if(over_budget()) return -5;
+    if(!scratch_alloc()){ fprintf(stderr,"sync_categorized: out of memory\n"); return -1; }
     static uint8_t ai[512]; int ailen=pdb_read_appinfo(localpdb,ai,sizeof ai); if(ailen<0)ailen=0;
-    S *s = calloc(1,sizeof *s);
-    if(!s){ fprintf(stderr,"sync_categorized: out of memory\n"); return -1; }
+    S *s = g_state; memset(s,0,sizeof *s);
     s->kind=kind; snprintf(s->pdbpath,sizeof s->pdbpath,"%s",localpdb);
     SyncStats z={0}; if(!st) st=&z;
 
     PdbW *w = pdbw_begin(OUT_TMP);
-    if(!w){ free(s); fprintf(stderr,"sync_categorized: cannot open output temp\n"); return -1; }
+    if(!w){ fprintf(stderr,"sync_categorized: cannot open output temp\n"); return -3; }
     progReset(countRecs(localpdb));
 
     /* distinct destination collections + a representative category id each */
@@ -922,8 +1060,11 @@ int sync_categorized(const DavCtx*d,const char*localpdb,const char*outpdb,
         snprintf(mapfile,sizeof mapfile,"%s/%s.map",mapdir,san);
         sync_one(d,s,C,mapfile,pol,w,catOf[ci],st,rt,C);   /* rt/C filter local records to this coll */
     }
+    if(dav_transport_down()){
+        fprintf(stderr,"[sync] transport down -- discarding partial merge, keeping local\n");
+        pdbw_abort(w); return -4;
+    }
     int nrec = pdbw_count(w);
     int rc = kindCommit(w,kind,outpdb, ailen?ai:NULL, ailen);
-    free(s);
     return rc<0 ? -1 : nrec;
 }

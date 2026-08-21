@@ -114,6 +114,16 @@ static int davreq(const DavCtx*d, esp_http_client_method_t method, const char*ur
                   const char*body, int bodylen,
                   char*resp, int respcap, int*respn,
                   char*etag, int etagcap, char*effurl, int effcap){
+    /* Breaker first: once the transport is down, spending another 20-second
+     * timeout tells us nothing we do not already know, and there is one request
+     * per record behind this. */
+    if(dav_transport_down()){
+        if(resp && respcap) resp[0]=0;
+        if(respn) *respn = 0;
+        if(etag && etagcap) etag[0]=0;
+        return -1;
+    }
+
     RespAcc acc = { .buf=resp, .cap=respcap, .spool=s_spoolfile };
     s_acc = &acc;
 
@@ -127,6 +137,11 @@ static int davreq(const DavCtx*d, esp_http_client_method_t method, const char*ur
     /* Try on the reused connection; if perform fails (e.g. the server dropped an
      * idle keep-alive socket), drop the handle and retry once on a fresh one. */
     for(int attempt=0; attempt<2; attempt++){
+        /* Whether there is a connection to blame. The retry below exists for one
+         * case only: a keep-alive socket the server closed while it sat idle. If
+         * we are opening a fresh connection anyway, a second identical attempt
+         * just spends another 20 seconds arriving at the same answer. */
+        int had_reuse = (s_client != NULL);
         acc.len=0; acc.truncated=0; acc.etag[0]=0;
         if(resp && respcap) resp[0]=0;
         if(acc.spool){ rewind(acc.spool); ftruncate(fileno(acc.spool),0); }  /* fresh spool per attempt */
@@ -173,10 +188,15 @@ static int davreq(const DavCtx*d, esp_http_client_method_t method, const char*ur
         /* failed: the connection may be stale -- tear it down and, on the first
          * attempt, retry fresh. A second failure is a real error. */
         ESP_LOGW(TAG,"%s failed: %s%s", url, esp_err_to_name(err),
-                 attempt==0 ? " (retrying on a fresh connection)" : "");
+                 (attempt==0 && had_reuse) ? " (retrying on a fresh connection)" : "");
         dav_disconnect();
+        if(!had_reuse) break;          /* nothing stale to blame -- do not pay twice */
     }
 
+    dav_note_result(status);
+    if(status < 0 && dav_transport_down())
+        ESP_LOGE(TAG,"transport down after %d consecutive unreachable requests -- "
+                     "abandoning the rest of this phase", DAV_FAIL_LIMIT);
     if(etag && etagcap) snprintf(etag,etagcap,"%s",acc.etag);
     if(respn) *respn = acc.len;
     if(acc.truncated) ESP_LOGW(TAG,"response truncated at %d bytes: %s", respcap, url);
@@ -289,12 +309,15 @@ int dav_sync_report(const DavCtx*d,const char*coll,const char*token,
      * sync-token can be far larger than any RAM buffer, and truncating would lose
      * records + the token. Streaming removes the 8 KB enumeration cap entirely. */
     FILE*sp=fopen(ENUM_SPOOL,"w+b"); if(!sp){ ESP_LOGW(TAG,"REPORT %s: spool open failed",coll); return -1; }
+    dav_check("rep-spool-open");
     s_spoolfile=sp;
     int st=davreq(d,HTTP_METHOD_REPORT,url,1,"application/xml",NULL,body,bl,
                   NULL,0,NULL, NULL,0, NULL,0);
     s_spoolfile=NULL;
+    dav_check("rep-req-done");
     long rn = ftell(sp); rewind(sp);
     int rc = st<0 ? -1 : dav_parse_report_stream(sp,st,cb,ctx,newtoken,tokcap);
+    dav_check("rep-parse-done");
     fclose(sp); remove(ENUM_SPOOL);
     fprintf(stderr,"[dav] REPORT %s tok=%s -> st=%d rn=%ld rc=%d (stream)\n",coll,token&&token[0]?"incr":"full",st,rn,rc);
     return rc;

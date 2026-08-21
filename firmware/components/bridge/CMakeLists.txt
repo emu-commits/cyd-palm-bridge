@@ -16,6 +16,7 @@ idf_component_register(
         "${BRIDGE_DIR}/charset.c"
         "${BRIDGE_DIR}/appinfo.c"
         "${BRIDGE_DIR}/dav_xml.c"
+        "${BRIDGE_DIR}/dav_break.c"
         "${BRIDGE_DIR}/sync.c"
         "${BRIDGE_DIR}/find.c"
         "${BRIDGE_DIR}/calc.c"
