@@ -225,14 +225,21 @@ starts with a **feasibility check on the base CYD** before committing to a build
   start/finish, and alarmed on appointments. Needs the CYD's audio out
   (DAC/I2S + speaker). Highest perceived-charm-per-byte item on the list; also
   unlocks Date Book alarms actually *alarming* (VALARM already syncs).
-- **`[device]` U8 — Power.** Battery gauge (GPIO34 ADC → battery % by the clock);
-  confirm light-sleep + PWM backlight behave on a real cell.
-  **Confirmed against the vendor docs (2026-08-19):** this board *does* carry a charge
-  path — a **TP4054** charge-management IC on the 2-pin `JP2` battery seat, with a
-  P-channel FET for discharge switching (user manual Fig. 3.13). `BAT_ADC` is wired to
-  `IO34`. So the battery charges over USB with no extra part, and `power_battery_pct()`
-  is implementable rather than blocked — it returns `-1` today purely because the
-  divider was never calibrated, which is a bench measurement, not a code problem.
+- **`[device]` U8 — Power. GAUGE SHIPPED (2026-08-22), TWO CHECKS OPEN.**
+  A cell is fitted to `JP2` and `power_battery_pct()` reads it on ADC1 ch6 (GPIO34)
+  through the 2:1 divider — eFuse-calibrated, median-of-15, Li-ion discharge curve,
+  `-1` outside 2600..4600 mV. First bench reading `4176 mV -> 97%`. See the
+  `2026-08-22` entry in `BUILD_PROGRESS.md`. Still open:
+  - **Does it track a discharge?** On USB the TP4054 holds the rail at charge
+    voltage, so the gauge only means anything unplugged. Wanted: readings across a
+    run down from full, to confirm the curve is not wildly off through the flat
+    middle (3.84→3.80 V is a tenth of the pack).
+  - **Is the divider on tolerance?** `BAT_TRIM_PERMILLE` in `power.c` is at unity.
+    One multimeter reading at the `JP2` pads against the logged `power: battery:`
+    line settles it; until then the divider ratio is assumed nominal.
+  - Also unconfirmed: light-sleep + PWM backlight behaviour on a real cell.
+  **No charge indicator is possible** — the TP4054's `CHRG` status pin is not
+  broken out to a GPIO, so "charging" cannot be distinguished from "full".
 - **`[device]` U9 — Case.** Printed enclosure.
 
 ## Needs hardware — on-device verifies (written, awaiting flash)

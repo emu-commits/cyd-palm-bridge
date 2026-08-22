@@ -3806,6 +3806,8 @@ static lv_obj_t *g_dash_cv;              /* the I1 graphics canvas */
 static lv_obj_t *g_dash_time_ap;         /* AM/PM label (repositioned to the clock width) */
 static WxCache   g_wx;                    /* weather snapshot for this lock session */
 static int       g_havewx;                /* 1 if g_wx is valid */
+static int       g_wxloaded;              /* 1 if a snapshot exists at all (fresh or not) */
+static lv_obj_t *g_dash_stat;             /* top-right status line (weather age + charge) */
 static uint8_t   dash_buf[LV_CANVAS_BUF_SIZE(DASH_CW, DASH_CH, 1, 1) + 16];
 
 /* 4x7 pixel digits 0-9 (top row first; a set bit = leftmost of 4 columns). Drawn
@@ -4036,13 +4038,28 @@ static void lock_pressing_cb(lv_event_t *e){ (void)e;
     lv_point_t p; lv_indev_get_point(lv_indev_active(),&p); if(p.y>0) g_lock_ly=p.y; }
 static void lock_release_cb(lv_event_t *e){ (void)e;
     if(g_lock_py - g_lock_ly > 40){                 /* dragged up -> unlock */
-        if(g_lock){ lv_obj_del(g_lock); g_lock=NULL; g_dash_cv=NULL; g_dash_db=NULL; g_dash_time_ap=NULL; }
+        if(g_lock){ lv_obj_del(g_lock); g_lock=NULL; g_dash_cv=NULL; g_dash_db=NULL; g_dash_time_ap=NULL;
+                    g_dash_stat=NULL; }
         /* the launcher is built lazily on the FIRST unlock (at boot the content area
          * is empty behind the lock, so the launcher grid and the dashboard never share
          * the 24 KB pool). Later wakes re-lock over whatever app is showing, so only
          * rebuild the launcher when nothing is there. */
         if(lv_obj_get_child_count(content) == 0) show_launcher();
     }
+}
+
+/* Top-right status line: how old the weather is, then the charge. Built here
+ * rather than inline so the dash tick can refresh it -- the lock now goes up when
+ * the screen sleeps and can stay up for hours, and a battery level frozen at the
+ * moment it was raised is a worse reading than none. */
+static void dash_status_text(char *b, size_t n){
+    int bp = power_battery_pct();
+    if(g_wxloaded) snprintf(b,n,"synced %s ago \xC2\xB7 ", dash_age_span(&g_wx));
+    else           snprintf(b,n," ");
+    size_t l = strlen(b);
+    /* -1 is "no cell on the seat, or a voltage that isn't one" -- say USB, don't guess. */
+    if(bp>=0) snprintf(b+l,n-l,"%d%%",bp);
+    else      snprintf(b+l,n-l,"USB");
 }
 
 /* paint the canvas graphics + (re)set the time labels from the current clock. */
@@ -4064,6 +4081,9 @@ static void dash_paint(void){
             lv_obj_set_pos(g_dash_time_ap, tx+tw+8, ty+14);
         }
     }
+    if(g_dash_stat){ char sb[48]; dash_status_text(sb,sizeof sb);
+                     lv_label_set_text(g_dash_stat, sb); }
+
     /* zone separators + unlock chevron */
     dhdots(10,DASH_CW-10,104);
     dhdots(10,DASH_CW-10,140);
@@ -4112,7 +4132,7 @@ void ui_show_lock(void){
      * the wrong one, and this screen is read at a glance with no second look. */
     WxCache wx; int loaded = dash_weather_load(&wx);
     int havewx = loaded && dash_weather_fresh(&wx, WX_STALE_MIN);
-    g_wx = wx; g_havewx = havewx;                    /* dash_paint() draws the bars from this */
+    g_wx = wx; g_havewx = havewx; g_wxloaded = loaded;  /* dash_paint() draws from this */
 
     g_lock = lv_obj_create(lv_screen_active());     /* on the active screen (like News),
                                                        so the swipe events fire reliably */
@@ -4142,12 +4162,8 @@ void ui_show_lock(void){
     snprintf(sb,sizeof sb,"%s \xC2\xB7 %s %d",
              DASH_DOW_S[ti_wday(now)], CAL_MON[localtime_mon(now)], localtime_mday(now));
     dash_lbl(6,4,sb,0);
-    int bp = power_battery_pct();
-    if(loaded) snprintf(sb,sizeof sb,"synced %s ago \xC2\xB7 ", dash_age_span(&wx));
-    else       snprintf(sb,sizeof sb," ");
-    if(bp>=0) snprintf(sb+strlen(sb),sizeof sb-strlen(sb),"%d%%",bp);
-    else      snprintf(sb+strlen(sb),sizeof sb-strlen(sb),"USB");
-    lv_obj_t *sr=dash_lbl(0,4,sb,0); lv_obj_align(sr,LV_ALIGN_TOP_RIGHT,-6,4);
+    dash_status_text(sb,sizeof sb);
+    g_dash_stat = dash_lbl(0,4,sb,0); lv_obj_align(g_dash_stat,LV_ALIGN_TOP_RIGHT,-6,4);
 
     /* ---- AM/PM (positioned beside the hero clock in dash_paint) ---- */
     g_dash_time_ap = dash_lbl(0,0,"",1);

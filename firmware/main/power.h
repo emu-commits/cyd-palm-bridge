@@ -22,9 +22,19 @@ void power_backlight(int on);
 /* 1 if the screen is currently blanked by the idle timeout. */
 int  power_screen_off(void);
 
-/* battery charge estimate 0..100, or -1 if unknown (no gauge / not yet calibrated).
- * The base CYD's GPIO34 divider is coarse; until it's calibrated on the bench this
- * returns -1 and the dashboard shows a "USB" state instead of a fake percentage. */
+/* battery charge estimate 0..100, or -1 if there is no usable reading -- no cell
+ * on the JP2 seat, or a voltage outside the single-cell range. The dashboard shows
+ * "USB" for -1 rather than inventing a percentage.
+ *
+ * The board reads the cell on ADC1 channel 6 (GPIO34) through a 2:1 divider. The
+ * percentage comes off a Li-ion discharge curve, not a linear voltage map: these
+ * cells sit near 3.8 V for most of their charge, so linear scaling reads wrong by
+ * tens of percent through the middle of the range. */
 int  power_battery_pct(void);
+
+/* raw cell voltage in millivolts, or -1 if the gauge is unavailable. Exposed for
+ * calibration: compare it against a multimeter at the JP2 pads and trim
+ * BAT_TRIM_PERMILLE in power.c if the divider's resistors are off tolerance. */
+int  power_battery_mv(void);
 
 #endif

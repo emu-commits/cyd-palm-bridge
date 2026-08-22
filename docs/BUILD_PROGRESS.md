@@ -11,6 +11,47 @@ What was built, and the non-obvious things that cost time to learn. This is the
 
 ## Milestone changelog (newest first)
 
+### 2026-08-22 — The battery gauge (U8), now that there is a cell to read
+
+A cell on the `JP2` seat, so `power_battery_pct()` stopped returning -1. ADC1
+channel 6 (GPIO34) through the board's 2:1 divider, read in `power.c`. First
+reading on the bench: **4176 mV -> 97%**, `2088 mV at IO34, cali=eFuse`.
+
+Three things stood between a raw read and an honest percentage, and skipping any
+one of them produces a number that looks fine and is wrong:
+
+- **The 12 dB attenuator is not linear.** `raw * 3300 / 4095` is off by more than
+  100 mV near the top of the range. We go through `esp_adc`'s line-fitting
+  scheme; this part has calibration burnt (`cali=eFuse`), so the boot line says
+  which one is in force and therefore what the error bar is. A part without it
+  logs a warning and falls back to nominal Vref.
+- **The rail is noisy** — backlight PWM and Wi-Fi bursts move it tens of mV. A
+  burst of 15 samples, **median** not mean (one spike cannot drag a median), then
+  a 3:1 smoothing across reads. Re-samples at most every 5 s.
+- **Li-ion voltage is not linear in charge.** A discharge curve maps mV to
+  percent. The cells sit near 3.8 V for most of their life: 3.84 V to 3.80 V is a
+  tenth of the pack, which a linear map renders as 1%.
+
+**Implausible readings report -1, not a number.** Outside 2600..4600 mV there is
+no cell on the seat (GPIO34 is input-only with no pull, so an unpopulated divider
+floats) and the dashboard says "USB". A floating pin reading as "31%" is worse
+than admitting we cannot tell.
+
+**Known limit — a plugged-in device always reads full.** The TP4054 holds the rail
+at charge voltage while USB is attached, and no `CHRG` status line is broken out
+to a GPIO, so charging is indistinguishable from a full cell. The gauge only
+means something on battery.
+
+The lock screen's top-right status line moved into `dash_status_text()` and is now
+refreshed by the dash tick. It used to be built once in `ui_show_lock()` — fine
+when the lock went up on demand, wrong since the lock started going up the moment
+the screen sleeps, because the charge shown was the charge from hours ago.
+
+`BAT_TRIM_PERMILLE` in `power.c` is the calibration knob for the divider's
+resistor tolerance. Left at unity: there is no bench measurement to justify a
+correction yet, and an invented one is worse than none.
+
+
 ### 2026-08-20 — The sync stops lying, and the heap is the reason nothing worked
 
 A run of "successful" HotSyncs that set no clock, fetched no news, and blamed the
