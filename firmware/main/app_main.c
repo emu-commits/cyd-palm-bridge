@@ -281,6 +281,11 @@ void app_main(void){
     /* U8 power: PWM backlight (configured brightness) + automatic light-sleep.
      * After LVGL/config are up so it can read appcfg() and own the backlight. */
     power_init();
+    /* The drain experiment (Menu > Options > Power). Started after the SD mount
+     * above, because a log that only exists over serial answers nothing: plugging
+     * in USB is what ENDS a discharge, so the readings have to survive on the
+     * card. */
+    power_log_start();
     lvgl_port_run();
 
     if(wifi_connect()!=ESP_OK){ ESP_LOGE(TAG,"wifi failed; halting"); return; }

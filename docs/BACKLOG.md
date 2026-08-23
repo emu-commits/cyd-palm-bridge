@@ -225,11 +225,13 @@ starts with a **feasibility check on the base CYD** before committing to a build
   start/finish, and alarmed on appointments. Needs the CYD's audio out
   (DAC/I2S + speaker). Highest perceived-charm-per-byte item on the list; also
   unlocks Date Book alarms actually *alarming* (VALARM already syncs).
-- **`[device]` U8 — Power. GAUGE SHIPPED (2026-08-22), TWO CHECKS OPEN.**
+- **`[device]` U8 — Power. GAUGE + INSTRUMENTATION SHIPPED (2026-08-22).**
   A cell is fitted to `JP2` and `power_battery_pct()` reads it on ADC1 ch6 (GPIO34)
   through the 2:1 divider — eFuse-calibrated, median-of-15, Li-ion discharge curve,
-  `-1` outside 2600..4600 mV. First bench reading `4176 mV -> 97%`. See the
-  `2026-08-22` entry in `BUILD_PROGRESS.md`. Still open:
+  `-1` outside 2600..4600 mV. Shown on the launcher title bar; logged to
+  `/sdcard/power.log` with per-interval residency; read on-device at
+  **Menu > Options > Power**. See the two `2026-08-22` entries in
+  `BUILD_PROGRESS.md`. Still open:
   - **Does it track a discharge?** On USB the TP4054 holds the rail at charge
     voltage, so the gauge only means anything unplugged. Wanted: readings across a
     run down from full, to confirm the curve is not wildly off through the flat
@@ -237,9 +239,46 @@ starts with a **feasibility check on the base CYD** before committing to a build
   - **Is the divider on tolerance?** `BAT_TRIM_PERMILLE` in `power.c` is at unity.
     One multimeter reading at the `JP2` pads against the logged `power: battery:`
     line settles it; until then the divider ratio is assumed nominal.
-  - Also unconfirmed: light-sleep + PWM backlight behaviour on a real cell.
   **No charge indicator is possible** — the TP4054's `CHRG` status pin is not
   broken out to a GPIO, so "charging" cannot be distinguished from "full".
+
+- **`[device]` U8b — Ultra-low-power idle. THE MEASUREMENT IS BUILT; THE EXPERIMENT
+  IS NOT RUN.** Goal: while the screen is off, draw as little as possible and still
+  keep the clock. Everything below is *unmeasured* — the point of `power.log` is to
+  stop this being decided by argument.
+
+  **The obvious lever is already closed.** Automatic light-sleep
+  (`CONFIG_PM_ENABLE` + tickless idle) is commented out in `sdkconfig.defaults`
+  with a reason: on this CYD it gates the APB clock between LVGL frames and the
+  panel visibly flashes every cycle. Turning it back on is not a free win, it is a
+  regression someone already found.
+
+  **So the candidate is deep sleep while the screen is off, waking on touch** —
+  which trades against the clock, and that is the whole difficulty. The WROOM-32
+  has no 32.768 kHz crystal fitted (the 32K pins are GPIO32/33 and touch uses
+  both), so across sleep the clock runs on the internal ~150 kHz RC: calibrated at
+  boot, temperature- and supply-dependent. **A device that sleeps most of the day
+  spends most of the day on the oscillator that drifts.** The drift meter measures
+  exactly that, and it now survives an unplugged run (`drift.log`, surfaced on the
+  Power screen).
+
+  **The experiment, in order — do not skip to the optimisation:**
+  1. **Baseline.** Charge full, unplug, use it normally, leave it a day. Read
+     `power.log`: %/hour overall, and the drain split by `lit_s` vs `dark_s`. That
+     single number decides whether idle draw is even worth attacking — if the
+     backlight dominates, sleep is the wrong target and the backlight timeout is
+     the right one.
+  2. **Drift on battery.** Two HotSyncs on the same discharge give the first real
+     ppm sample. Under a few seconds/day, deep sleep is affordable; minutes/day and
+     it is not, and the answer is the RTC part instead (see "A real RTC part").
+  3. **Only then** implement a sleep mode, and re-run 1 and 2 against it. The
+     `note` field in `power.log` and the "Mark log" button exist so the two runs
+     can be told apart in one file.
+
+  **Not yet instrumented, and it should be:** current draw is inferred from the
+  cell's voltage slope, which is coarse in the flat middle of the curve. If the
+  numbers come back ambiguous, an inline meter on the USB/battery lead is the
+  honest next instrument, not a longer log.
 - **`[device]` U9 — Case.** Printed enclosure.
 
 ## Needs hardware — on-device verifies (written, awaiting flash)

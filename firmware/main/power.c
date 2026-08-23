@@ -8,7 +8,9 @@
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "sdkconfig.h"
+#include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #if CONFIG_PM_ENABLE
 #include "esp_pm.h"
 #endif
@@ -24,6 +26,8 @@ static const char *TAG = "power";
 
 static int g_bright = 80;                  /* current "on" brightness 0..100 */
 static int g_off     = 0;                  /* 1 while blanked by idle timeout */
+
+static void res_accrue(void);              /* drain-log residency, defined below */
 
 static void apply_duty(int pct){
     if(pct < 0) pct = 0;
@@ -225,8 +229,113 @@ void power_set_brightness(int pct){
 }
 
 void power_backlight(int on){
+    res_accrue();                          /* bank the interval under the OLD state */
     g_off = !on;
     apply_duty(on ? g_bright : 0);
 }
 
 int power_screen_off(void){ return g_off; }
+
+/* ========================== drain log (see power.h) ========================= */
+#define POWER_LOG    "/sdcard/power.log"
+#define POWER_LOG_S  300                  /* one sample every 5 minutes */
+
+static int64_t  s_res_mark;               /* esp_timer at the last state change */
+static int64_t  s_lit_us, s_dark_us;      /* cumulative residency this boot */
+static int64_t  s_lit_at_log, s_dark_at_log;
+static unsigned s_syncs, s_syncs_at_log;
+static int64_t  s_last_log_us;
+static int      s_first_mv = -1, s_first_pct = -1;
+static unsigned s_samples;
+static int      s_logging;
+
+/* Bank the time since the last transition under whichever state was in force.
+ * Called on every backlight change and before every sample, so the split is
+ * exact rather than sampled -- a screen lit for 40 s between two 5-minute
+ * samples is 40 s, not a coin flip. */
+static void res_accrue(void){
+    int64_t now = esp_timer_get_time();
+    if(s_res_mark){
+        if(g_off) s_dark_us += now - s_res_mark;
+        else      s_lit_us  += now - s_res_mark;
+    }
+    s_res_mark = now;
+}
+
+void power_note_sync(void){ s_syncs++; }
+
+/* One line. `note` distinguishes the boot marker from an ordinary interval --
+ * without it a reboot looks like a discontinuity in the voltage series with no
+ * explanation, and those are exactly the samples that must not be regressed on. */
+static void log_line(const char *note){
+    res_accrue();
+    int mv = power_battery_mv(), pct = power_battery_pct();
+
+    int64_t now  = esp_timer_get_time();
+    long lit  = (long)((s_lit_us  - s_lit_at_log ) / 1000000);
+    long dark = (long)((s_dark_us - s_dark_at_log) / 1000000);
+    s_lit_at_log = s_lit_us; s_dark_at_log = s_dark_us;
+    unsigned syncs = s_syncs - s_syncs_at_log; s_syncs_at_log = s_syncs;
+    s_last_log_us = now;
+
+    time_t t = 0; time(&t); struct tm ti; localtime_r(&t, &ti);
+
+    /* The header goes in only when the file is new, so an existing log is
+     * appended to across power cycles -- the run being measured is longer than
+     * any one boot. */
+    int fresh = 0;
+    FILE *probe = fopen(POWER_LOG, "r");
+    if(probe) fclose(probe); else fresh = 1;
+
+    FILE *f = fopen(POWER_LOG, "a");
+    if(!f){ if(!s_logging) ESP_LOGW(TAG, "power.log: cannot open (no card?)"); return; }
+    if(fresh)
+        fprintf(f, "# epoch,iso,mv,pct,uptime_s,lit_s,dark_s,syncs,note\n"
+                   "# lit_s/dark_s/syncs are for THIS interval; uptime_s is cumulative.\n");
+    fprintf(f, "%lld,%04d-%02d-%02dT%02d:%02d:%02d,%d,%d,%ld,%ld,%ld,%u,%s\n",
+            (long long)t, ti.tm_year+1900, ti.tm_mon+1, ti.tm_mday,
+            ti.tm_hour, ti.tm_min, ti.tm_sec,
+            mv, pct, (long)(now / 1000000), lit, dark, syncs, note);
+    fclose(f);
+    s_samples++;
+}
+
+void power_log_start(void){
+    if(s_logging) return;
+    s_logging  = 1;
+    s_res_mark = esp_timer_get_time();
+    s_first_mv = power_battery_mv();
+    s_first_pct = power_battery_pct();
+    log_line("boot");
+    ESP_LOGI(TAG, "power.log: logging every %d s (opening reading %d mV / %d%%)",
+             POWER_LOG_S, s_first_mv, s_first_pct);
+}
+
+void power_log_mark(const char *note){
+    if(!s_logging) return;
+    char safe[16]; int j = 0;
+    for(int i = 0; note && note[i] && j < (int)sizeof safe - 1; i++)
+        if(note[i] != ',' && note[i] != '\n') safe[j++] = note[i];
+    safe[j] = 0;
+    log_line(j ? safe : "mark");
+}
+
+void power_log_tick(void){
+    if(!s_logging) return;
+    if(esp_timer_get_time() - s_last_log_us < (int64_t)POWER_LOG_S * 1000000) return;
+    log_line("");
+}
+
+void power_stats(PowerStats *st){
+    if(!st) return;
+    res_accrue();
+    st->mv        = power_battery_mv();
+    st->pct       = power_battery_pct();
+    st->first_mv  = s_first_mv;
+    st->first_pct = s_first_pct;
+    st->up_s      = (long)(esp_timer_get_time() / 1000000);
+    st->lit_s     = (long)(s_lit_us  / 1000000);
+    st->dark_s    = (long)(s_dark_us / 1000000);
+    st->syncs     = s_syncs;
+    st->samples   = s_samples;
+}

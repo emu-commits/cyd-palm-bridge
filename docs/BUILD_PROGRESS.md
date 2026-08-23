@@ -11,6 +11,60 @@ What was built, and the non-obvious things that cost time to learn. This is the
 
 ## Milestone changelog (newest first)
 
+### 2026-08-22 (2) — Charge on the home screen, and the rig for the power experiment
+
+**The launcher shows the level.** Title bar, hard right: `72%` and a 13x8 battery
+glyph built from four plain objects (label, outline, fill, nub) so the fill can
+track the percentage. Shown on the launcher only -- inside an app that corner is
+the category picker's seat, and two things cannot own it.
+
+**They are built and torn down with the launcher, not parked on the title bar.**
+Parking them cost ~1 KB of the 24 KB LVGL pool on *every* screen, and the screen
+that pays is the Address edit form -- ten fields, already the tightest view in the
+build. `make -C sim smoke32` (the true-24 KB-pool gate) segfaulted opening it.
+`content_clear()` destroys them, `show_launcher()` rebuilds them last, after the
+app grid, so if the pool ever does run short the thing lost is the readout and not
+an app icon.
+
+**A gate can pass while the picture is wrong.** Inserting "Power" into the Options
+menu shifted every tap below it in `sim/tests/smoke.txt`, which drives the UI by
+absolute coordinates: the About tap landed on "Remove demo data", the demo seed the
+rest of the tour depends on was deleted early -- and the smoke still reported OK,
+because it asserts the exit code and the existence of `.ppm` files, not their
+contents. Coordinates re-measured off a screenshot (`s addr_menu`) rather than
+guessed; the rule is now written down in the file itself.
+
+**The drain log (`/sdcard/power.log`).** The experiment this is for cannot be run
+over serial, because **attaching USB is what ends it** -- the TP4054 holds the rail
+at charge voltage and the discharge stops. So it goes to the card, and is readable
+on-device at Menu > Options > Power.
+
+A voltage series alone would not answer the question either. A sample that dropped
+40 mV says nothing unless you know whether the screen was lit for that interval, so
+every line carries the **residency** of the interval it covers:
+
+```
+# epoch,iso,mv,pct,uptime_s,lit_s,dark_s,syncs,note
+1755900000,2026-08-22T20:15:00,4240,100,312,120,192,0,boot
+```
+
+`lit_s`/`dark_s` are banked on each backlight transition rather than sampled, so a
+screen lit for 40 s between two 5-minute samples is 40 s and not a coin flip.
+`power_note_sync()` is called *before* the radio comes up, so a sync that fails at
+Wi-Fi still explains why its interval cost more than the one before it.
+"Mark log" on the Power screen names a moment ("unplugged") so a step in the series
+reads as a cause instead of a mystery.
+
+**The Power screen never invents a rate.** Under 10 minutes of uptime it says
+"measuring". With no drop it says so and names the reason (the charger) instead of
+reporting 0%/hour, which would render as "lasts indefinitely". A projected runtime
+appears only once a real drop has been measured.
+
+First on-device reading after the flash: `4240 mV -> 100%`, up from `4176 mV` at
+the previous boot -- the cell topping off over USB, which is the gauge tracking
+something real rather than reading a constant.
+
+
 ### 2026-08-22 — The battery gauge (U8), now that there is a cell to read
 
 A cell on the `JP2` seat, so `power_battery_pct()` stopped returning -1. ADC1

@@ -58,6 +58,28 @@ static void content_clear(void);
 static lv_obj_t *title_lbl;
 static lv_obj_t *clock_lbl;    /* live clock in the title bar (Palm) */
 
+/* ---- title-bar battery indicator (launcher only) -------------------------
+ * Charge belongs on the home screen for the same reason the clock does: it is
+ * the screen you pass through, not one you go to. It is NOT shown inside an app,
+ * because the top-right of the title bar is the category picker's seat there --
+ * two things cannot own the same corner, and the picker is the one you tap.
+ *
+ * Drawn from four plain objects rather than an image, because the fill has to
+ * track the level: label, outline, fill, terminal nub.
+ *
+ * THEY ARE BUILT AND TORN DOWN WITH THE LAUNCHER, not parked on the title bar for
+ * the life of the app. Parking them cost ~1 KB of the 24 KB LVGL pool on every
+ * screen, and the screen that pays for that is the Address edit form -- ten
+ * fields, already the tightest view in the build. `make -C sim smoke32` (the
+ * true-24 KB-pool gate) segfaulted opening it. The launcher is a cheap screen and
+ * can afford them; the edit form cannot, and it never shows them anyway. */
+#define BATT_W  13             /* body, in px -- sized to the Palm font's cap height */
+#define BATT_H   8
+static lv_obj_t *title_bar;             /* parent for the indicator (outlives content) */
+static lv_obj_t *batt_lbl, *batt_body, *batt_fill, *batt_nub;
+static int       g_on_launcher;         /* 1 while the app grid is the content view */
+static void      batt_refresh(void);
+
 /* Kana is NOT a top-level app -- it lives inside Graffiti (a handwriting sibling of
  * the Latin drill), reached by the "あ" button there. Keeps the launcher focused. */
 static const char *APPS[] = { "Date Book", "Address", "To Do List", "Memo Pad", "HotSync", "Graffiti", "News", "Games", "Coach" };
@@ -1938,7 +1960,8 @@ static void show_launcher(void){
     kill_kb();
     cur_app = NULL;
     cur_uid = 0;
-    content_clear();
+    content_clear();                     /* clears g_on_launcher; re-set it below */
+    g_on_launcher = 1;
     lv_label_set_text(title_lbl, "Applications");
     update_cat_trigger();   /* hides it (no data app) */
 
@@ -1990,6 +2013,11 @@ static void show_launcher(void){
                                 "edit config.ini on the card, or tap\n"
                                 "Menu > Preferences.");
     }
+
+    /* LAST, so the app grid gets the pool first. If there is not enough left for
+     * four small objects, the right thing to lose is the charge readout, not an
+     * app icon. */
+    batt_refresh();
 }
 
 /* ============ P1.5: Preferences + collection discovery ============ */
@@ -2838,6 +2866,167 @@ static void menu_header(lv_obj_t *par, const char *txt){
     lv_obj_set_style_pad_top(l, 3, 0);
 }
 
+/* ======================== Power (Menu > Options > Power) ====================
+ * The readout for two experiments that cannot be run over serial, because USB is
+ * what ends them: how fast the cell drains, and how far the clock wanders. Both
+ * write to the SD card (power.log, drift.log); this screen is how they are read
+ * on a device that is deliberately unplugged.
+ *
+ * Everything here is a statement about measured data or an explicit admission
+ * that there is none yet. It never projects a runtime from a drain it has not
+ * seen -- an invented "18 hours remaining" is the one number that would make the
+ * whole experiment pointless. */
+static lv_obj_t *g_pw_body;
+
+/* Last `want` lines of a text file, oldest first, into `out`. Reads only the tail
+ * (drift.log grows for the life of the device and must never be slurped whole).
+ * Returns the number of lines found. */
+static int tail_lines(const char *path, char *out, int cap, int want){
+    out[0] = 0;
+    FILE *f = fopen(path, "r");
+    if(!f) return 0;
+    fseek(f, 0, SEEK_END);
+    long end = ftell(f);
+    long from = end > 1024 ? end - 1024 : 0;
+    fseek(f, from, SEEK_SET);
+    static char buf[1025];
+    size_t n = fread(buf, 1, sizeof buf - 1, f);
+    fclose(f);
+    buf[n] = 0;
+    if(!n) return 0;
+
+    /* Walk back over `want` newlines. A partial first line (we seeked into the
+     * middle of one) is dropped rather than shown truncated. */
+    char *p = buf + n;
+    if(p > buf && p[-1] == '\n') p--;      /* ignore the trailing newline */
+    int found = 0;
+    while(p > buf && found < want){
+        p--;
+        if(*p == '\n'){ found++; if(found == want){ p++; break; } }
+    }
+    if(p == buf && from > 0){              /* ran out mid-line -> skip to a clean one */
+        char *nl = strchr(buf, '\n');
+        if(nl) p = nl + 1;
+    }
+    { int i = 0; while(p[i] && i < cap-1){ out[i] = p[i]; i++; } out[i] = 0; }
+    /* trim a trailing newline so the caller controls the spacing */
+    int l = (int)strlen(out);
+    while(l > 0 && (out[l-1] == '\n' || out[l-1] == '\r')) out[--l] = 0;
+    return found ? found : 1;
+}
+
+static void pw_span(char *b, int cap, long s){
+    if(s < 60)   snprintf(b, cap, "%lds", s);
+    else if(s < 3600) snprintf(b, cap, "%ldm", s/60);
+    else         snprintf(b, cap, "%ldh%02ldm", s/3600, (s%3600)/60);
+}
+
+static void pw_fill(void){
+    if(!g_pw_body) return;
+    PowerStats st; power_stats(&st);
+    char b[900]; int n = 0;
+    char t1[24], t2[24], t3[24];      /* 24: `long` is 64-bit in the host sim */
+
+    if(st.mv < 0){
+        n += snprintf(b+n, sizeof b-n, "Battery\n  no gauge reading\n\n");
+    } else {
+        n += snprintf(b+n, sizeof b-n, "Battery\n  %d mV", st.mv);
+        if(st.pct >= 0) n += snprintf(b+n, sizeof b-n, "   %d%%", st.pct);
+        else            n += snprintf(b+n, sizeof b-n, "   (not a cell voltage)");
+        if(st.first_mv >= 0)
+            n += snprintf(b+n, sizeof b-n, "\n  power-up  %d mV", st.first_mv);
+        n += snprintf(b+n, sizeof b-n, "\n\n");
+    }
+
+    /* Drain. Only reported once the cell has actually moved: on USB the TP4054
+     * holds the rail at charge voltage and nothing drops, so a rate computed
+     * there would be zero forever and read as "lasts indefinitely". */
+    pw_span(t1, sizeof t1, st.up_s);
+    n += snprintf(b+n, sizeof b-n, "Drain\n");
+    int dpct = (st.first_pct >= 0 && st.pct >= 0) ? st.first_pct - st.pct : 0;
+    int dmv  = (st.first_mv  >= 0 && st.mv  >= 0) ? st.first_mv  - st.mv  : 0;
+    if(st.up_s < 600){
+        n += snprintf(b+n, sizeof b-n, "  measuring (%s so far)\n\n", t1);
+    } else if(dpct <= 0){
+        n += snprintf(b+n, sizeof b-n,
+                      "  nothing lost in %s.\n  Unplug USB to measure --\n"
+                      "  the charger holds it full.\n\n", t1);
+    } else {
+        long per_h100 = (long)dpct * 100 * 3600 / st.up_s;      /* hundredths of %/h */
+        n += snprintf(b+n, sizeof b-n, "  %d%% (%d mV) in %s\n  %ld.%02ld%%/hour",
+                      dpct, dmv, t1, per_h100/100, per_h100%100);
+        if(per_h100 > 0 && st.pct > 0)
+            n += snprintf(b+n, sizeof b-n, ", ~%ldh left", (long)st.pct * 100 / per_h100);
+        n += snprintf(b+n, sizeof b-n, "\n\n");
+    }
+
+    /* Residency -- the half that makes a drain attributable. A voltage series
+     * with no record of what the device was DOING is a plot, not a measurement. */
+    pw_span(t2, sizeof t2, st.lit_s);
+    pw_span(t3, sizeof t3, st.dark_s);
+    n += snprintf(b+n, sizeof b-n,
+                  "Where it went\n  lit %s    dark %s\n  syncs %u    samples %u\n\n",
+                  t2, t3, st.syncs, st.samples);
+
+    /* The drift line is prose and it is long. Its "YYYY-MM-DD " prefix costs a
+     * whole wrapped line on a 240 px screen and says the least -- the reading is
+     * the rate, and the time of day is enough to tell two samples apart. */
+    char tail[280];
+    if(tail_lines("/sdcard/drift.log", tail, sizeof tail, 1)){
+        const char *d = tail;
+        if(strlen(d) > 20 && d[4]=='-' && d[7]=='-' && d[13]==':') d += 11;  /* -> "HH:MM:SS  ..." */
+        n += snprintf(b+n, sizeof b-n, "Clock drift\n  %s\n", d);
+    }
+    else
+        n += snprintf(b+n, sizeof b-n,
+                      "Clock drift\n  no samples yet -- two HotSyncs\n"
+                      "  are needed (the first anchors).\n");
+
+    lv_label_set_text(g_pw_body, b);
+}
+
+static void pw_mark_cb(lv_event_t *e){ (void)e;
+    power_log_mark("mark");
+    pw_fill();
+    toast_show("Sample written to power.log");
+}
+static void pw_refresh_cb(lv_event_t *e){ (void)e; pw_fill(); }
+
+static void show_power(void){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    content_clear();
+    lv_label_set_text(title_lbl, "Power");
+    update_cat_trigger();
+
+    lv_obj_t *sc = lv_obj_create(content);
+    lv_obj_set_size(sc, lv_pct(100), (PDA_H - TITLE_H) - 28);
+    lv_obj_set_pos(sc, 0, 0);
+    lv_obj_set_style_radius(sc, 0, 0);
+    lv_obj_set_style_border_width(sc, 0, 0);
+    lv_obj_set_style_bg_color(sc, COL_BODY, 0);
+    lv_obj_set_style_pad_all(sc, 6, 0);
+
+    g_pw_body = lv_label_create(sc);
+    lv_label_set_long_mode(g_pw_body, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(g_pw_body, LCD_W - 20);
+    lv_obj_set_style_text_font(g_pw_body, &lv_font_palm, 0);
+    pw_fill();
+
+    lv_obj_t *mk = lv_button_create(content);
+    lv_obj_set_style_radius(mk, 0, 0);
+    lv_obj_align(mk, LV_ALIGN_BOTTOM_LEFT, 6, -2);
+    lv_obj_add_event_cb(mk, pw_mark_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *ml = lv_label_create(mk); lv_label_set_text(ml, "Mark log"); lv_obj_center(ml);
+
+    lv_obj_t *rf = lv_button_create(content);
+    lv_obj_set_style_radius(rf, 0, 0);
+    lv_obj_align(rf, LV_ALIGN_BOTTOM_RIGHT, -6, -2);
+    lv_obj_add_event_cb(rf, pw_refresh_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *rl = lv_label_create(rf); lv_label_set_text(rl, "Refresh"); lv_obj_center(rl);
+}
+static void act_power(lv_event_t *e){ (void)e; menu_close(); show_power(); }
+
 /* Palm menu: tap Menu (silkscreen) -> pull-down of the context's commands,
  * grouped by Palm's menu categories (Record / Options). */
 static void menu_open(void){
@@ -2878,6 +3067,7 @@ static void menu_open(void){
         menu_item(panel, g_todo_sort_due ? "Sort by Priority" : "Sort by Due Date", act_toggle_sort);
     }
     menu_item(panel, "Preferences", act_prefs);
+    menu_item(panel, "Power", act_power);
     if(g_trainer_open)
         menu_item(panel, "Reset progress", act_tr_reset);   /* Graffiti trainer only */
     if(g_kana_open)
@@ -3778,8 +3968,81 @@ static lv_obj_t *mk_silk(lv_obj_t *par, const lv_image_dsc_t *ic, lv_align_t al,
 
 /* refresh the title-bar clock: 12h time + date to its right ("12:34p  Jul 10").
  * Persists across screen swaps since it lives on the title bar, not content. */
+/* Set the level and decide whether the indicator is on screen at all.
+ * power_battery_pct() returns -1 when there is no cell on the JP2 seat (GPIO34
+ * is input-only with no pull, so an unpopulated divider floats). A device with
+ * no battery gets no indicator rather than an empty outline, because an empty
+ * outline is what a FLAT battery looks like. */
+static void batt_destroy(void){
+    if(batt_lbl)  lv_obj_del(batt_lbl);      /* batt_fill is a child of batt_body */
+    if(batt_body) lv_obj_del(batt_body);
+    if(batt_nub)  lv_obj_del(batt_nub);
+    batt_lbl = batt_body = batt_fill = batt_nub = NULL;
+}
+
+static void batt_build(void){
+    if(!title_bar || batt_body) return;
+
+    batt_lbl = lv_label_create(title_bar);
+    lv_obj_set_style_text_color(batt_lbl, COL_TITLE_FG, 0);
+    lv_obj_set_style_text_font(batt_lbl, &lv_font_palm, 0);
+    lv_obj_align(batt_lbl, LV_ALIGN_RIGHT_MID, -(BATT_W + 8), 0);
+
+    batt_body = lv_obj_create(title_bar);              /* the outline */
+    lv_obj_set_size(batt_body, BATT_W, BATT_H);
+    lv_obj_set_style_radius(batt_body, 0, 0);
+    lv_obj_set_style_pad_all(batt_body, 0, 0);
+    lv_obj_set_style_bg_opa(batt_body, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(batt_body, 1, 0);
+    lv_obj_set_style_border_color(batt_body, COL_TITLE_FG, 0);
+    lv_obj_clear_flag(batt_body, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(batt_body, LV_ALIGN_RIGHT_MID, -5, 0);
+
+    batt_fill = lv_obj_create(batt_body);              /* the level */
+    lv_obj_set_style_radius(batt_fill, 0, 0);
+    lv_obj_set_style_border_width(batt_fill, 0, 0);
+    lv_obj_set_style_pad_all(batt_fill, 0, 0);
+    lv_obj_set_style_bg_color(batt_fill, COL_TITLE_FG, 0);
+    lv_obj_set_style_bg_opa(batt_fill, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(batt_fill, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(batt_fill, LV_ALIGN_LEFT_MID, 0, 0);
+
+    batt_nub = lv_obj_create(title_bar);               /* the terminal */
+    lv_obj_set_size(batt_nub, 2, 4);
+    lv_obj_set_style_radius(batt_nub, 0, 0);
+    lv_obj_set_style_border_width(batt_nub, 0, 0);
+    lv_obj_set_style_pad_all(batt_nub, 0, 0);
+    lv_obj_set_style_bg_color(batt_nub, COL_TITLE_FG, 0);
+    lv_obj_set_style_bg_opa(batt_nub, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(batt_nub, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(batt_nub, LV_ALIGN_RIGHT_MID, -3, 0);
+}
+
+static void batt_refresh(void){
+    int pct = g_on_launcher ? power_battery_pct() : -1;
+    if(pct < 0){ batt_destroy(); return; }
+    batt_build();
+    if(!batt_body || !batt_lbl || !batt_fill) return;   /* pool said no; the launcher still works */
+
+    lv_obj_clear_flag(batt_fill, LV_OBJ_FLAG_HIDDEN);
+    if(pct > 100) pct = 100;                 /* the curve clamps, but be explicit */
+    char b[12]; snprintf(b, sizeof b, "%d%%", pct);
+    lv_label_set_text(batt_lbl, b);
+
+    /* The outline's 1 px border eats a pixel each side, so the fill runs over
+     * BATT_W-2. A non-zero charge always draws at least one column -- rounding a
+     * real 3% down to an empty cell would read as flat. */
+    int inner = BATT_W - 2, w = pct * inner / 100;
+    if(w < 1 && pct > 0) w = 1;
+    if(w > inner) w = inner;
+    if(w == 0) lv_obj_add_flag(batt_fill, LV_OBJ_FLAG_HIDDEN);
+    else       lv_obj_set_size(batt_fill, w, BATT_H - 2);
+}
+
 static void clock_tick(lv_timer_t *t){
     (void)t;
+    batt_refresh();          /* same 15 s tick -- the charge is title-bar chrome too */
+    power_log_tick();        /* and the drain log's cadence gate lives inside it */
     if(!clock_lbl) return;
     time_t now=0; time(&now);
     struct tm ti; localtime_r(&now, &ti);
@@ -5061,8 +5324,13 @@ static lv_obj_t *g_zp_cv, *g_zp_status, *g_zp_timelbl;
 static void content_clear(void){
     if(!content) return;
     lv_obj_clean(content);
+    /* Every screen swap comes through here, so this is the one place that can
+     * know the app grid is gone -- show_launcher() sets it back on the way in. */
+    g_on_launcher = 0;
+    batt_refresh();
 
     /* edit / preferences forms */
+    g_pw_body = NULL;
     g_form = NULL; active_ta = NULL; edit_cat_lbl = NULL; g_due_lbl = NULL;
     for(int i = 0; i < 12; i++) g_fields[i] = NULL;
     g_nfields = 0;
@@ -6614,6 +6882,11 @@ void ui_init(void){
     lv_label_set_text(cat_label, "All");
     lv_obj_center(cat_label);
     lv_obj_add_flag(cat_trigger, LV_OBJ_FLAG_HIDDEN);   /* only shown in data apps */
+
+    /* the indicator's parent; the widgets themselves come and go with the
+     * launcher (see the note at the declarations). */
+    title_bar = bar;
+    batt_refresh();
 
     /* content area (swappable views) */
     content = panel(scr, 0, TITLE_H, LCD_W, PDA_H - TITLE_H, COL_BODY);

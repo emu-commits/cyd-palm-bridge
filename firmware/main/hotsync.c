@@ -18,6 +18,7 @@
 #include "secrets.h"
 #include "appcfg.h"
 #include "clock.h"
+#include "power.h"        /* drain log: a sync is the expensive interval */
 #include <string.h>
 #include <time.h>
 #include "freertos/FreeRTOS.h"
@@ -531,6 +532,11 @@ static void hotsync_task(void *arg){
     esp_log_level_set("mbedtls", ESP_LOG_VERBOSE);
     esp_log_level_set("esp_http_client", ESP_LOG_VERBOSE);
     esp_log_level_set("transport_base", ESP_LOG_VERBOSE);
+
+    /* Count it against the current drain-log interval BEFORE the radio comes up,
+     * so a sync that fails at Wi-Fi still shows up as the reason that interval
+     * cost more than the one before it. */
+    power_note_sync();
 
     setst("Connecting Wi-Fi...");
     if(!wifi_up()){ setst("Wi-Fi failed"); wifi_down(); s_busy=0; vTaskDelete(NULL); return; }

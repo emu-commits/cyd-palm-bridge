@@ -37,4 +37,49 @@ int  power_battery_pct(void);
  * BAT_TRIM_PERMILLE in power.c if the divider's resistors are off tolerance. */
 int  power_battery_mv(void);
 
+/* ---- drain log -----------------------------------------------------------
+ * The experiment this exists for: how long does the device last on a cell, and
+ * where does the charge actually go? That question cannot be answered over
+ * serial, because attaching USB is what removes the battery from the circuit --
+ * the TP4054 holds the rail at charge voltage and the discharge stops. So the
+ * readings go to /sdcard/power.log and are also readable on-device (Menu >
+ * Options > Power).
+ *
+ * A voltage series alone would not answer it either: a sample that dropped 40 mV
+ * says nothing unless you know whether the screen was lit for that interval. So
+ * every line carries the RESIDENCY of the interval it covers -- seconds lit,
+ * seconds dark, syncs run -- which is what lets a drain be attributed to a cause
+ * rather than just plotted. */
+
+/* begin logging: writes the boot line and starts residency accounting. Call once
+ * after the SD card is mounted. Safe to call with no card (the writes just fail). */
+void power_log_start(void);
+
+/* append one sample if the interval has elapsed. Drive from a UI timer -- it does
+ * SD I/O and must not run on the small esp_timer task stack. */
+void power_log_tick(void);
+
+/* force a sample now, tagged with `note` (<=15 chars, no commas). This is how a
+ * point in a discharge run gets a name -- "unplugged", "wifi off" -- so a step in
+ * the series can be read back as a cause instead of a mystery. */
+void power_log_mark(const char *note);
+
+/* count a HotSync against the current interval (radio + SD are the expensive
+ * parts of the budget, and they need separating from screen-on time). */
+void power_note_sync(void);
+
+/* Everything the Power screen reports, gathered in one call so the readings are
+ * consistent with each other. Voltages are mV, -1 when the gauge is unavailable;
+ * *_s are seconds. `first_*` is the opening reading of this power-up, which is
+ * what a drain rate is measured against. */
+typedef struct {
+    int   mv, pct;             /* now                                        */
+    int   first_mv, first_pct; /* at power_log_start()                        */
+    long  up_s;                /* uptime                                      */
+    long  lit_s, dark_s;       /* cumulative screen-on / screen-off this boot  */
+    unsigned syncs;            /* HotSyncs this boot                          */
+    unsigned samples;          /* lines appended to power.log this boot        */
+} PowerStats;
+void power_stats(PowerStats *st);
+
 #endif
