@@ -5,7 +5,7 @@ idf_component_register(
     INCLUDE_DIRS "."
     REQUIRES bridge nvs_flash esp_wifi esp_netif esp_event
              fatfs sdmmc esp_driver_sdspi esp_driver_spi esp_driver_gpio lwip
-             lvgl esp_timer esp_driver_ledc esp_pm
+             lvgl esp_timer esp_driver_ledc esp_pm esp_adc
 )
 
 # UI_DEVTOOLS keeps the Options -> "Add test events" item (seeds 30 events to

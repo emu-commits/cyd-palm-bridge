@@ -18,6 +18,7 @@
 #include "secrets.h"
 #include "appcfg.h"
 #include "clock.h"
+#include "power.h"        /* drain log: a sync is the expensive interval */
 #include <string.h>
 #include <time.h>
 #include "freertos/FreeRTOS.h"
@@ -210,6 +211,9 @@ static void wifi_ev(void *a, esp_event_base_t base, int32_t id, void *data){
 }
 
 static int wifi_up(void){
+    /* Paired with wifi_down(), so discovery is covered as symmetrically as a sync
+     * and no exit path can leave the gauge believing the radio is still up. */
+    power_busy(1);          /* the gauge must not read a sagging cell as a flat one */
     s_evt = xEventGroupCreate();
     if(esp_netif_init()!=ESP_OK) return 0;
     if(esp_event_loop_create_default()!=ESP_OK){ /* may already exist */ }
@@ -266,6 +270,7 @@ static void net_probe(void){
 }
 
 static void wifi_down(void){
+    power_busy(0);      /* here, not at each exit path: every one of them lands on this */
     dav_disconnect();   /* close any keep-alive connection before the TLS/socket stack goes away */
     esp_wifi_stop();
     esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, s_h_wifi);
@@ -531,6 +536,11 @@ static void hotsync_task(void *arg){
     esp_log_level_set("mbedtls", ESP_LOG_VERBOSE);
     esp_log_level_set("esp_http_client", ESP_LOG_VERBOSE);
     esp_log_level_set("transport_base", ESP_LOG_VERBOSE);
+
+    /* Count it against the current drain-log interval BEFORE the radio comes up,
+     * so a sync that fails at Wi-Fi still shows up as the reason that interval
+     * cost more than the one before it. */
+    power_note_sync();
 
     setst("Connecting Wi-Fi...");
     if(!wifi_up()){ setst("Wi-Fi failed"); wifi_down(); s_busy=0; vTaskDelete(NULL); return; }

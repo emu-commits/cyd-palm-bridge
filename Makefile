@@ -61,8 +61,10 @@ find_test: tests/find_test.c $(CORE) | dirs
 calc_test: tests/calc_test.c bridge/calc.c | dirs
 	$(CC) $(CFLAGS) -o $@ $^ -lm
 
-wx_test: tests/wx_test.c bridge/wxfetch.c | dirs
-	$(CC) $(CFLAGS) -Ibridge -Ifirmware/main -o $@ tests/wx_test.c bridge/wxfetch.c
+# dash.c joins the link because the gate now checks the STEP as well as the parse:
+# a cache that parses perfectly and never advances is the bug this pair exists for.
+wx_test: tests/wx_test.c bridge/wxfetch.c firmware/main/dash.c | dirs
+	$(CC) $(CFLAGS) -Ibridge -Ifirmware/main -o $@ tests/wx_test.c bridge/wxfetch.c firmware/main/dash.c -lm
 
 config_test: tests/config_test.c bridge/config.c | dirs
 	$(CC) $(CFLAGS) -o $@ $^

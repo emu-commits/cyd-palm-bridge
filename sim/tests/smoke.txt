@@ -192,9 +192,13 @@ t 150
 s address_saved
 t 900
 # Options menu -> About: the C6 honesty lines (Memo device-only, To Do = CalDAV)
+# NOTE: y here tracks the Options list. Adding a row above About moves this tap;
+# it hit "Remove demo data" for one build and the gate still passed, because the
+# gate asserts the exit code, not what is in the picture. Check about_box.png.
 c 18 300
 t 400
-c 60 185
+s addr_menu
+c 60 250
 t 400
 s about_box
 c 120 30
@@ -224,6 +228,16 @@ c 18 300
 t 400
 s menu_open
 c 200 180
+t 300
+# Options -> Power: the battery/drain/drift readout. Worth a shot because every
+# number on it is either measured or an explicit "not measured yet", and the
+# wording is the part that can regress silently.
+c 18 300
+t 400
+c 60 91
+t 400
+s power_screen
+c 18 225
 t 300
 # Preferences field editor with the I1.2 tap keyboard; type one key, then Save ->
 # I4 transient "Saved" toast (config edits close the feedback loop like records do)
@@ -729,7 +743,7 @@ c 18 225
 t 300
 c 18 300
 t 400
-c 70 85
+c 70 119
 t 150
 s demo_removed
 t 900

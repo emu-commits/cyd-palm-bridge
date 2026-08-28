@@ -225,14 +225,92 @@ starts with a **feasibility check on the base CYD** before committing to a build
   start/finish, and alarmed on appointments. Needs the CYD's audio out
   (DAC/I2S + speaker). Highest perceived-charm-per-byte item on the list; also
   unlocks Date Book alarms actually *alarming* (VALARM already syncs).
-- **`[device]` U8 — Power.** Battery gauge (GPIO34 ADC → battery % by the clock);
-  confirm light-sleep + PWM backlight behave on a real cell.
-  **Confirmed against the vendor docs (2026-08-19):** this board *does* carry a charge
-  path — a **TP4054** charge-management IC on the 2-pin `JP2` battery seat, with a
-  P-channel FET for discharge switching (user manual Fig. 3.13). `BAT_ADC` is wired to
-  `IO34`. So the battery charges over USB with no extra part, and `power_battery_pct()`
-  is implementable rather than blocked — it returns `-1` today purely because the
-  divider was never calibrated, which is a bench measurement, not a code problem.
+- **`[device]` U8 — Power. GAUGE + INSTRUMENTATION SHIPPED (2026-08-22).**
+  A cell is fitted to `JP2` and `power_battery_pct()` reads it on ADC1 ch6 (GPIO34)
+  through the 2:1 divider — eFuse-calibrated, median-of-15, Li-ion discharge curve,
+  `-1` outside 2600..4600 mV. Shown on the launcher title bar; logged to
+  `/sdcard/power.log` with per-interval residency; read on-device at
+  **Menu > Options > Power**. See the two `2026-08-22` entries in
+  `BUILD_PROGRESS.md`. Still open:
+  - **Does it track a discharge?** On USB the TP4054 holds the rail at charge
+    voltage, so the gauge only means anything unplugged. Wanted: readings across a
+    run down from full, to confirm the curve is not wildly off through the flat
+    middle (3.84→3.80 V is a tenth of the pack).
+  - **Is the divider on tolerance?** `BAT_TRIM_PERMILLE` in `power.c` is at unity.
+    One multimeter reading at the `JP2` pads against the logged `power: battery:`
+    line settles it; until then the divider ratio is assumed nominal.
+  **No charge indicator is possible** — the TP4054's `CHRG` status pin is not
+  broken out to a GPIO, so "charging" cannot be distinguished from "full".
+
+- **`[device]` U8b — Ultra-low-power idle. THE MEASUREMENT IS BUILT; THE EXPERIMENT
+  IS NOT RUN.** Goal: while the screen is off, draw as little as possible and still
+  keep the clock. Everything below is *unmeasured* — the point of `power.log` is to
+  stop this being decided by argument.
+
+  **The obvious lever is already closed.** Automatic light-sleep
+  (`CONFIG_PM_ENABLE` + tickless idle) is commented out in `sdkconfig.defaults`
+  with a reason: on this CYD it gates the APB clock between LVGL frames and the
+  panel visibly flashes every cycle. Turning it back on is not a free win, it is a
+  regression someone already found.
+
+  **So the candidate is deep sleep while the screen is off, waking on touch** —
+  which trades against the clock, and that is the whole difficulty. The WROOM-32
+  has no 32.768 kHz crystal fitted (the 32K pins are GPIO32/33 and touch uses
+  both), so across sleep the clock runs on the internal ~150 kHz RC: calibrated at
+  boot, temperature- and supply-dependent. **A device that sleeps most of the day
+  spends most of the day on the oscillator that drifts.** The drift meter measures
+  exactly that, and it now survives an unplugged run (`drift.log`, surfaced on the
+  Power screen).
+
+  **FIELD RESULTS (2026-08-27), and what they change.** Idle on a 1100 mAh cell:
+  **well over 24 h** — under 46 mA average, physically consistent, and the answer
+  to step 1: idle is *not* the problem. Clock drift on battery: **under a minute a
+  day**, which closes the RTC question — no part needed. The two load figures
+  reported alongside them (6% per sync, ~1%/min of use) were **measurement
+  artifacts**, not drain; see the `2026-08-27` entry in `BUILD_PROGRESS.md`. A sync
+  really costs about **half a percent**, and one a day is therefore not worth
+  optimising at all.
+
+  So the target is **screen-on time**, which is where the charge actually goes.
+  Ranked by expected return, none of them measured yet:
+  1. **Backlight.** The largest single draw, and it is already a runtime setting —
+     `brightness` (default 80) and `backlight_sec` in `config.ini`. Halving
+     brightness roughly halves its share, at zero code risk. Try this before
+     touching anything that needs a build.
+  2. **DFS without light sleep.** `CONFIG_PM_ENABLE=y` with
+     `esp_pm_configure(.light_sleep_enable = false, .min_freq_mhz = 80)`. **This
+     has never actually been tried.** What was tried and reverted was *automatic
+     light-sleep*, which gates the APB clock between LVGL frames and flashes the
+     panel. Pure frequency scaling does not gate APB (it stays at 80 MHz on this
+     part), so the failure that closed the door may not apply. Needs one on-device
+     look at the panel to find out.
+  3. **CPU 160 → 80 MHz fixed.** Already at 160, not 240, so this is the last
+     step rather than the first. Costs slower LVGL and a slower TLS handshake —
+     and a slower handshake means the radio is up longer, so the net is genuinely
+     unclear. A/B it with `power.log`.
+  4. **Panel sleep (ILI9341 `SLPIN`, 0x10) when the backlight blanks.** The panel
+     keeps its oscillator running and drives the glass with the backlight off. A
+     few mA, and idle is where the device spends its life. Needs `SLPOUT` + 120 ms
+     and a full repaint on wake.
+
+  **The experiment, in order — do not skip to the optimisation:**
+  1. **Baseline.** Charge full, unplug, use it normally, leave it a day. Read
+     `power.log`: %/hour overall, and the drain split by `lit_s` vs `dark_s`. That
+     single number decides whether idle draw is even worth attacking — if the
+     backlight dominates, sleep is the wrong target and the backlight timeout is
+     the right one.
+  2. ~~**Drift on battery.**~~ **ANSWERED 2026-08-27: under a minute a day on
+     battery.** Deep sleep is affordable as far as timekeeping is concerned, and no
+     RTC part is needed. What is *not* yet established is whether deep sleep buys
+     anything worth having, given idle already clears 24 h.
+  3. **Only then** implement a sleep mode, and re-run 1 and 2 against it. The
+     `note` field in `power.log` and the "Mark log" button exist so the two runs
+     can be told apart in one file.
+
+  **Not yet instrumented, and it should be:** current draw is inferred from the
+  cell's voltage slope, which is coarse in the flat middle of the curve. If the
+  numbers come back ambiguous, an inline meter on the USB/battery lead is the
+  honest next instrument, not a longer log.
 - **`[device]` U9 — Case.** Printed enclosure.
 
 ## Needs hardware — on-device verifies (written, awaiting flash)

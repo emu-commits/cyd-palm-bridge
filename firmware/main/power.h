@@ -22,9 +22,80 @@ void power_backlight(int on);
 /* 1 if the screen is currently blanked by the idle timeout. */
 int  power_screen_off(void);
 
-/* battery charge estimate 0..100, or -1 if unknown (no gauge / not yet calibrated).
- * The base CYD's GPIO34 divider is coarse; until it's calibrated on the bench this
- * returns -1 and the dashboard shows a "USB" state instead of a fake percentage. */
+/* battery charge estimate 0..100, or -1 if there is no usable reading -- no cell
+ * on the JP2 seat, or a voltage outside the single-cell range. The dashboard shows
+ * "USB" for -1 rather than inventing a percentage.
+ *
+ * The board reads the cell on ADC1 channel 6 (GPIO34) through a 2:1 divider. The
+ * percentage comes off a Li-ion discharge curve, not a linear voltage map: these
+ * cells sit near 3.8 V for most of their charge, so linear scaling reads wrong by
+ * tens of percent through the middle of the range. */
 int  power_battery_pct(void);
+
+/* raw cell voltage in millivolts, or -1 if the gauge is unavailable. Exposed for
+ * calibration: compare it against a multimeter at the JP2 pads and trim
+ * BAT_TRIM_PERMILLE in power.c if the divider's resistors are off tolerance. */
+int  power_battery_mv(void);
+
+/* ---- drain log -----------------------------------------------------------
+ * The experiment this exists for: how long does the device last on a cell, and
+ * where does the charge actually go? That question cannot be answered over
+ * serial, because attaching USB is what removes the battery from the circuit --
+ * the TP4054 holds the rail at charge voltage and the discharge stops. So the
+ * readings go to /sdcard/power.log and are also readable on-device (Menu >
+ * Options > Power).
+ *
+ * A voltage series alone would not answer it either: a sample that dropped 40 mV
+ * says nothing unless you know whether the screen was lit for that interval. So
+ * every line carries the RESIDENCY of the interval it covers -- seconds lit,
+ * seconds dark, syncs run -- which is what lets a drain be attributed to a cause
+ * rather than just plotted. */
+
+/* begin logging: writes the boot line and starts residency accounting. Call once
+ * after the SD card is mounted. Safe to call with no card (the writes just fail). */
+void power_log_start(void);
+
+/* append one sample if the interval has elapsed. Drive from a UI timer -- it does
+ * SD I/O and must not run on the small esp_timer task stack. */
+void power_log_tick(void);
+
+/* force a sample now, tagged with `note` (<=15 chars, no commas). This is how a
+ * point in a discharge run gets a name -- "unplugged", "wifi off" -- so a step in
+ * the series can be read back as a cause instead of a mystery. */
+void power_log_mark(const char *note);
+
+/* Tell the gauge a heavy load (the radio) is up or down. The reported percentage
+ * is only refreshed from a rested cell, and a sync is the largest load there is --
+ * without this, one sync reads as 6% of the pack gone when it actually costs
+ * nearer half a percent (see the note in power.c). */
+void power_busy(int on);
+
+/* last cell voltage measured with the load quiet, or -1 if there has not been one
+ * yet. This is what power_battery_pct() is derived from. */
+int  power_battery_rest_mv(void);
+
+/* what the device was doing at the last sample: 0 screen off, 1 screen on,
+ * 2 radio up. Logged so a voltage drop can be told apart from a voltage sag. */
+int  power_battery_load(void);
+
+/* count a HotSync against the current interval (radio + SD are the expensive
+ * parts of the budget, and they need separating from screen-on time). */
+void power_note_sync(void);
+
+/* Everything the Power screen reports, gathered in one call so the readings are
+ * consistent with each other. Voltages are mV, -1 when the gauge is unavailable;
+ * *_s are seconds. `first_*` is the opening reading of this power-up, which is
+ * what a drain rate is measured against. */
+typedef struct {
+    int   mv, pct;             /* now (mv sags under load; pct is from rest_mv) */
+    int   rest_mv;             /* last quiet reading, -1 if none yet           */
+    int   load;                /* 0 screen off, 1 screen on, 2 radio up        */
+    int   first_mv, first_pct; /* at power_log_start()                        */
+    long  up_s;                /* uptime                                      */
+    long  lit_s, dark_s;       /* cumulative screen-on / screen-off this boot  */
+    unsigned syncs;            /* HotSyncs this boot                          */
+    unsigned samples;          /* lines appended to power.log this boot        */
+} PowerStats;
+void power_stats(PowerStats *st);
 
 #endif

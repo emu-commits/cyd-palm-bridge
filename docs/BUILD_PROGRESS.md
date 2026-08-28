@@ -11,6 +11,157 @@ What was built, and the non-obvious things that cost time to learn. This is the
 
 ## Milestone changelog (newest first)
 
+### 2026-08-27 — The forecast steps through the day, and the gauge stops lying under load
+
+**The weather was frozen at sync time.** The snapshot held six hourly rows
+starting from the fetch, and the reading beside the clock was whatever was
+current when the sync ran. Sync once a morning — which is the intended rhythm —
+and the lock screen showed the morning's temperature until the next sync.
+
+The cache now holds **24 hourly rows** (`WX_HOURS`), carries a **per-hour WMO
+code** as well as a temperature, and the dashboard walks it: `dash_paint()` picks
+the row covering `now` for the headline reading and starts the six-column strip
+there. The columns are live labels refreshed on the 15 s dash tick, not text
+baked in when the lock went up, so the strip advances on the hour with no network
+in between.
+
+**Hour-of-day cannot index a 24-row cache, and the gate caught it.** The first
+implementation matched `hr[i].hour24` against the current hour — which works for
+six rows and is silently wrong for twenty-four, because at that size *every* hour
+of the day is present, so a clock a day and a half past the fetch matches a row
+from the wrong day and reads as current. `dash_test` failed on exactly that case.
+The cache now carries `hr0_epoch`, the Unix time of row 0, and the index is
+arithmetic: `(now - hr0_epoch)/3600`, bounds-checked, `-1` past the end.
+
+Computing that epoch needs the FEED's UTC offset, not the device's: `mktime()`
+would apply the device zone to a timestamp that is in the forecast's zone. The
+offset is read from the CSV's own header block (`utc_offset_seconds`) and the
+civil-date arithmetic is done inline (days-from-civil, integer, no zone
+database). No offset in the response means no anchor, and `dash_wx_index_at()`
+refuses rather than guessing.
+
+The hourly block also gained `weather_code` — which is what the parser previously
+used to tell the *current* block from the *hourly* one. That discriminator is now
+`precipitation_probability`, asked for only in the hourly block. `WX_MAGIC` bumped
+to `WX02`; a `WX01` file on the card is ignored and reseeded.
+
+**The gauge was reporting sag as depletion.** Reported drain: 6% per HotSync, and
+~1%/minute of use. Neither survives arithmetic. 6% of 1100 mAh is 66 mAh, and the
+radio is only up for **65–85 s** per sync (measured, `wifi:state assoc->run` to
+`run->init` in `bulk.log`) — which would demand **~2800 mA**, an order of
+magnitude past anything this board can draw. 1%/minute is 660 mA sustained,
+likewise impossible. The idle figure (>24 h → <46 mA average) is the only one that
+is physically consistent, and it is the one taken with the load quiet.
+
+The cause is IR drop. A small pouch cell is 200–400 mΩ; idle→sync is a ~200 mA
+step, so ~60 mV — and near the top of the discharge curve 60 mV *is* six percent.
+The reading was the artifact, not the drain. A real sync costs nearer **half a
+percent**.
+
+So the reported percentage is now only refreshed from samples taken with the
+screen blanked, the radio down, and the load settled 30 s (`power_busy()` is
+paired with `wifi_up`/`wifi_down`, so no exit path can leave it armed). It is
+held between rests — "as of the last rest", which is the only number a voltage
+gauge can honestly report. The instantaneous value is still sampled and still
+logged, with a `load` column, because the sag itself is worth seeing; the Power
+screen names it outright ("rested 4210 mV (-58 sag)").
+
+
+### 2026-08-22 (2) — Charge on the home screen, and the rig for the power experiment
+
+**The launcher shows the level.** Title bar, hard right: `72%` and a 13x8 battery
+glyph built from four plain objects (label, outline, fill, nub) so the fill can
+track the percentage. Shown on the launcher only -- inside an app that corner is
+the category picker's seat, and two things cannot own it.
+
+**They are built and torn down with the launcher, not parked on the title bar.**
+Parking them cost ~1 KB of the 24 KB LVGL pool on *every* screen, and the screen
+that pays is the Address edit form -- ten fields, already the tightest view in the
+build. `make -C sim smoke32` (the true-24 KB-pool gate) segfaulted opening it.
+`content_clear()` destroys them, `show_launcher()` rebuilds them last, after the
+app grid, so if the pool ever does run short the thing lost is the readout and not
+an app icon.
+
+**A gate can pass while the picture is wrong.** Inserting "Power" into the Options
+menu shifted every tap below it in `sim/tests/smoke.txt`, which drives the UI by
+absolute coordinates: the About tap landed on "Remove demo data", the demo seed the
+rest of the tour depends on was deleted early -- and the smoke still reported OK,
+because it asserts the exit code and the existence of `.ppm` files, not their
+contents. Coordinates re-measured off a screenshot (`s addr_menu`) rather than
+guessed; the rule is now written down in the file itself.
+
+**The drain log (`/sdcard/power.log`).** The experiment this is for cannot be run
+over serial, because **attaching USB is what ends it** -- the TP4054 holds the rail
+at charge voltage and the discharge stops. So it goes to the card, and is readable
+on-device at Menu > Options > Power.
+
+A voltage series alone would not answer the question either. A sample that dropped
+40 mV says nothing unless you know whether the screen was lit for that interval, so
+every line carries the **residency** of the interval it covers:
+
+```
+# epoch,iso,mv,pct,uptime_s,lit_s,dark_s,syncs,note
+1755900000,2026-08-22T20:15:00,4240,100,312,120,192,0,boot
+```
+
+`lit_s`/`dark_s` are banked on each backlight transition rather than sampled, so a
+screen lit for 40 s between two 5-minute samples is 40 s and not a coin flip.
+`power_note_sync()` is called *before* the radio comes up, so a sync that fails at
+Wi-Fi still explains why its interval cost more than the one before it.
+"Mark log" on the Power screen names a moment ("unplugged") so a step in the series
+reads as a cause instead of a mystery.
+
+**The Power screen never invents a rate.** Under 10 minutes of uptime it says
+"measuring". With no drop it says so and names the reason (the charger) instead of
+reporting 0%/hour, which would render as "lasts indefinitely". A projected runtime
+appears only once a real drop has been measured.
+
+First on-device reading after the flash: `4240 mV -> 100%`, up from `4176 mV` at
+the previous boot -- the cell topping off over USB, which is the gauge tracking
+something real rather than reading a constant.
+
+
+### 2026-08-22 — The battery gauge (U8), now that there is a cell to read
+
+A cell on the `JP2` seat, so `power_battery_pct()` stopped returning -1. ADC1
+channel 6 (GPIO34) through the board's 2:1 divider, read in `power.c`. First
+reading on the bench: **4176 mV -> 97%**, `2088 mV at IO34, cali=eFuse`.
+
+Three things stood between a raw read and an honest percentage, and skipping any
+one of them produces a number that looks fine and is wrong:
+
+- **The 12 dB attenuator is not linear.** `raw * 3300 / 4095` is off by more than
+  100 mV near the top of the range. We go through `esp_adc`'s line-fitting
+  scheme; this part has calibration burnt (`cali=eFuse`), so the boot line says
+  which one is in force and therefore what the error bar is. A part without it
+  logs a warning and falls back to nominal Vref.
+- **The rail is noisy** — backlight PWM and Wi-Fi bursts move it tens of mV. A
+  burst of 15 samples, **median** not mean (one spike cannot drag a median), then
+  a 3:1 smoothing across reads. Re-samples at most every 5 s.
+- **Li-ion voltage is not linear in charge.** A discharge curve maps mV to
+  percent. The cells sit near 3.8 V for most of their life: 3.84 V to 3.80 V is a
+  tenth of the pack, which a linear map renders as 1%.
+
+**Implausible readings report -1, not a number.** Outside 2600..4600 mV there is
+no cell on the seat (GPIO34 is input-only with no pull, so an unpopulated divider
+floats) and the dashboard says "USB". A floating pin reading as "31%" is worse
+than admitting we cannot tell.
+
+**Known limit — a plugged-in device always reads full.** The TP4054 holds the rail
+at charge voltage while USB is attached, and no `CHRG` status line is broken out
+to a GPIO, so charging is indistinguishable from a full cell. The gauge only
+means something on battery.
+
+The lock screen's top-right status line moved into `dash_status_text()` and is now
+refreshed by the dash tick. It used to be built once in `ui_show_lock()` — fine
+when the lock went up on demand, wrong since the lock started going up the moment
+the screen sleeps, because the charge shown was the charge from hours ago.
+
+`BAT_TRIM_PERMILLE` in `power.c` is the calibration knob for the divider's
+resistor tolerance. Left at unity: there is no bench measurement to justify a
+correction yet, and an invented one is worse than none.
+
+
 ### 2026-08-20 — The sync stops lying, and the heap is the reason nothing worked
 
 A run of "successful" HotSyncs that set no clock, fetched no news, and blamed the
