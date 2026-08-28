@@ -11,6 +11,62 @@ What was built, and the non-obvious things that cost time to learn. This is the
 
 ## Milestone changelog (newest first)
 
+### 2026-08-27 — The forecast steps through the day, and the gauge stops lying under load
+
+**The weather was frozen at sync time.** The snapshot held six hourly rows
+starting from the fetch, and the reading beside the clock was whatever was
+current when the sync ran. Sync once a morning — which is the intended rhythm —
+and the lock screen showed the morning's temperature until the next sync.
+
+The cache now holds **24 hourly rows** (`WX_HOURS`), carries a **per-hour WMO
+code** as well as a temperature, and the dashboard walks it: `dash_paint()` picks
+the row covering `now` for the headline reading and starts the six-column strip
+there. The columns are live labels refreshed on the 15 s dash tick, not text
+baked in when the lock went up, so the strip advances on the hour with no network
+in between.
+
+**Hour-of-day cannot index a 24-row cache, and the gate caught it.** The first
+implementation matched `hr[i].hour24` against the current hour — which works for
+six rows and is silently wrong for twenty-four, because at that size *every* hour
+of the day is present, so a clock a day and a half past the fetch matches a row
+from the wrong day and reads as current. `dash_test` failed on exactly that case.
+The cache now carries `hr0_epoch`, the Unix time of row 0, and the index is
+arithmetic: `(now - hr0_epoch)/3600`, bounds-checked, `-1` past the end.
+
+Computing that epoch needs the FEED's UTC offset, not the device's: `mktime()`
+would apply the device zone to a timestamp that is in the forecast's zone. The
+offset is read from the CSV's own header block (`utc_offset_seconds`) and the
+civil-date arithmetic is done inline (days-from-civil, integer, no zone
+database). No offset in the response means no anchor, and `dash_wx_index_at()`
+refuses rather than guessing.
+
+The hourly block also gained `weather_code` — which is what the parser previously
+used to tell the *current* block from the *hourly* one. That discriminator is now
+`precipitation_probability`, asked for only in the hourly block. `WX_MAGIC` bumped
+to `WX02`; a `WX01` file on the card is ignored and reseeded.
+
+**The gauge was reporting sag as depletion.** Reported drain: 6% per HotSync, and
+~1%/minute of use. Neither survives arithmetic. 6% of 1100 mAh is 66 mAh, and the
+radio is only up for **65–85 s** per sync (measured, `wifi:state assoc->run` to
+`run->init` in `bulk.log`) — which would demand **~2800 mA**, an order of
+magnitude past anything this board can draw. 1%/minute is 660 mA sustained,
+likewise impossible. The idle figure (>24 h → <46 mA average) is the only one that
+is physically consistent, and it is the one taken with the load quiet.
+
+The cause is IR drop. A small pouch cell is 200–400 mΩ; idle→sync is a ~200 mA
+step, so ~60 mV — and near the top of the discharge curve 60 mV *is* six percent.
+The reading was the artifact, not the drain. A real sync costs nearer **half a
+percent**.
+
+So the reported percentage is now only refreshed from samples taken with the
+screen blanked, the radio down, and the load settled 30 s (`power_busy()` is
+paired with `wifi_up`/`wifi_down`, so no exit path can leave it armed). It is
+held between rests — "as of the last rest", which is the only number a voltage
+gauge can honestly report. The instantaneous value is still sampled and still
+logged, with a `load` column, because the sag itself is worth seeing; the Power
+screen names it outright ("rested 4210 mV (-58 sag)").
+
+
 ### 2026-08-22 (2) — Charge on the home screen, and the rig for the power experiment
 
 **The launcher shows the level.** Title bar, hard right: `72%` and a 13x8 battery

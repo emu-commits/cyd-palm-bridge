@@ -60,6 +60,33 @@ const char *dash_wcode_desc(int code){
     }
 }
 
+/* ---- stepping through the cached day (see dash.h) ------------------------- */
+
+int dash_wx_index_at(const WxCache *w, time_t t){
+    if(!w || w->nhours == 0 || w->hr0_epoch <= 0) return -1;
+    int64_t d = (int64_t)t - w->hr0_epoch;
+    if(d < 0) return -1;                       /* before the first row */
+    int64_t i = d / 3600;
+    if(i >= w->nhours || i >= WX_HOURS) return -1;   /* the day has run out */
+    return (int)i;
+}
+
+int dash_wx_now(const WxCache *w, time_t t, int *tempF, int *code){
+    if(!w){ if(tempF) *tempF = 0; if(code) *code = 0; return 0; }
+    int i = dash_wx_index_at(w, t);
+    /* A row with no code (an older feed that did not carry hourly weather_code)
+     * is still a good temperature -- take the hourly temperature and keep the
+     * fetch-time code, rather than throwing away the half that stepped. */
+    if(i >= 0){
+        if(tempF) *tempF = w->hr[i].tempF;
+        if(code)  *code  = w->hr[i].code ? w->hr[i].code : w->cur_code;
+        return 1;
+    }
+    if(tempF) *tempF = w->cur_tempF;
+    if(code)  *code  = w->cur_code;
+    return 0;
+}
+
 /* Write a plausible sample snapshot if one isn't already present. Sun times are
  * computed for a sample location (New York); the real fetch replaces all of this. */
 void dash_weather_seed_sample(const char *path){
@@ -83,13 +110,20 @@ void dash_weather_seed_sample(const char *path){
     w.sunrise_min = 5 * 60 + 52;
     w.sunset_min  = 20 * 60 + 31;
     w.nhours    = WX_HOURS;
-    /* a warm afternoon with rain building -- matches the approved mock-up */
-    static const int16_t temps[WX_HOURS] = { 76, 79, 81, 82, 80, 77 };
-    static const uint8_t rains[WX_HOURS] = { 10,  5,  0, 20, 55, 70 };
+    /* A full day, generated from the hour rather than a fixed table, so the sample
+     * actually STEPS when the clock moves -- a flat table would have hidden the very
+     * bug this cache was widened to fix. Warm afternoon, cool small hours, a band of
+     * rain in the evening. */
+    w.hr0_epoch = (int64_t)now - (int64_t)lt.tm_min * 60 - lt.tm_sec + 3600;  /* top of the next hour */
     for(int i = 0; i < WX_HOURS; i++){
-        w.hr[i].hour24 = (uint8_t)((lt.tm_hour + 1 + i) % 24);
-        w.hr[i].tempF  = temps[i];
-        w.hr[i].rain   = rains[i];
+        int h = (lt.tm_hour + 1 + i) % 24;
+        /* peak near 16:00, trough near 04:00 */
+        static const int8_t swing[24] = { -6,-7,-8,-8,-9,-8,-6,-3, 0, 3, 5, 7,
+                                           8, 9,10,10, 9, 7, 5, 3, 1, 0,-2,-4 };
+        w.hr[i].hour24 = (uint8_t)h;
+        w.hr[i].tempF  = (int16_t)(74 + swing[h]);
+        w.hr[i].rain   = (uint8_t)(h >= 17 && h <= 21 ? 20 + (h - 17) * 15 : 5);
+        w.hr[i].code   = (uint8_t)(h >= 17 && h <= 21 ? 61 : (h >= 8 && h <= 16 ? 2 : 1));
     }
     FILE *f = fopen(path, "wb");
     if(!f) return;

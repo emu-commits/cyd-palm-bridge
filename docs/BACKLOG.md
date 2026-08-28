@@ -262,15 +262,47 @@ starts with a **feasibility check on the base CYD** before committing to a build
   exactly that, and it now survives an unplugged run (`drift.log`, surfaced on the
   Power screen).
 
+  **FIELD RESULTS (2026-08-27), and what they change.** Idle on a 1100 mAh cell:
+  **well over 24 h** — under 46 mA average, physically consistent, and the answer
+  to step 1: idle is *not* the problem. Clock drift on battery: **under a minute a
+  day**, which closes the RTC question — no part needed. The two load figures
+  reported alongside them (6% per sync, ~1%/min of use) were **measurement
+  artifacts**, not drain; see the `2026-08-27` entry in `BUILD_PROGRESS.md`. A sync
+  really costs about **half a percent**, and one a day is therefore not worth
+  optimising at all.
+
+  So the target is **screen-on time**, which is where the charge actually goes.
+  Ranked by expected return, none of them measured yet:
+  1. **Backlight.** The largest single draw, and it is already a runtime setting —
+     `brightness` (default 80) and `backlight_sec` in `config.ini`. Halving
+     brightness roughly halves its share, at zero code risk. Try this before
+     touching anything that needs a build.
+  2. **DFS without light sleep.** `CONFIG_PM_ENABLE=y` with
+     `esp_pm_configure(.light_sleep_enable = false, .min_freq_mhz = 80)`. **This
+     has never actually been tried.** What was tried and reverted was *automatic
+     light-sleep*, which gates the APB clock between LVGL frames and flashes the
+     panel. Pure frequency scaling does not gate APB (it stays at 80 MHz on this
+     part), so the failure that closed the door may not apply. Needs one on-device
+     look at the panel to find out.
+  3. **CPU 160 → 80 MHz fixed.** Already at 160, not 240, so this is the last
+     step rather than the first. Costs slower LVGL and a slower TLS handshake —
+     and a slower handshake means the radio is up longer, so the net is genuinely
+     unclear. A/B it with `power.log`.
+  4. **Panel sleep (ILI9341 `SLPIN`, 0x10) when the backlight blanks.** The panel
+     keeps its oscillator running and drives the glass with the backlight off. A
+     few mA, and idle is where the device spends its life. Needs `SLPOUT` + 120 ms
+     and a full repaint on wake.
+
   **The experiment, in order — do not skip to the optimisation:**
   1. **Baseline.** Charge full, unplug, use it normally, leave it a day. Read
      `power.log`: %/hour overall, and the drain split by `lit_s` vs `dark_s`. That
      single number decides whether idle draw is even worth attacking — if the
      backlight dominates, sleep is the wrong target and the backlight timeout is
      the right one.
-  2. **Drift on battery.** Two HotSyncs on the same discharge give the first real
-     ppm sample. Under a few seconds/day, deep sleep is affordable; minutes/day and
-     it is not, and the answer is the RTC part instead (see "A real RTC part").
+  2. ~~**Drift on battery.**~~ **ANSWERED 2026-08-27: under a minute a day on
+     battery.** Deep sleep is affordable as far as timekeeping is concerned, and no
+     RTC part is needed. What is *not* yet established is whether deep sleep buys
+     anything worth having, given idle already clears 24 h.
   3. **Only then** implement a sleep mode, and re-run 1 and 2 against it. The
      `note` field in `power.log` and the "Mark log" button exist so the two runs
      can be told apart in one file.

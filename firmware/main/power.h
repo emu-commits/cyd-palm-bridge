@@ -64,6 +64,20 @@ void power_log_tick(void);
  * the series can be read back as a cause instead of a mystery. */
 void power_log_mark(const char *note);
 
+/* Tell the gauge a heavy load (the radio) is up or down. The reported percentage
+ * is only refreshed from a rested cell, and a sync is the largest load there is --
+ * without this, one sync reads as 6% of the pack gone when it actually costs
+ * nearer half a percent (see the note in power.c). */
+void power_busy(int on);
+
+/* last cell voltage measured with the load quiet, or -1 if there has not been one
+ * yet. This is what power_battery_pct() is derived from. */
+int  power_battery_rest_mv(void);
+
+/* what the device was doing at the last sample: 0 screen off, 1 screen on,
+ * 2 radio up. Logged so a voltage drop can be told apart from a voltage sag. */
+int  power_battery_load(void);
+
 /* count a HotSync against the current interval (radio + SD are the expensive
  * parts of the budget, and they need separating from screen-on time). */
 void power_note_sync(void);
@@ -73,7 +87,9 @@ void power_note_sync(void);
  * *_s are seconds. `first_*` is the opening reading of this power-up, which is
  * what a drain rate is measured against. */
 typedef struct {
-    int   mv, pct;             /* now                                        */
+    int   mv, pct;             /* now (mv sags under load; pct is from rest_mv) */
+    int   rest_mv;             /* last quiet reading, -1 if none yet           */
+    int   load;                /* 0 screen off, 1 screen on, 2 radio up        */
     int   first_mv, first_pct; /* at power_log_start()                        */
     long  up_s;                /* uptime                                      */
     long  lit_s, dark_s;       /* cumulative screen-on / screen-off this boot  */

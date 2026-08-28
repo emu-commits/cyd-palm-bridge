@@ -211,6 +211,9 @@ static void wifi_ev(void *a, esp_event_base_t base, int32_t id, void *data){
 }
 
 static int wifi_up(void){
+    /* Paired with wifi_down(), so discovery is covered as symmetrically as a sync
+     * and no exit path can leave the gauge believing the radio is still up. */
+    power_busy(1);          /* the gauge must not read a sagging cell as a flat one */
     s_evt = xEventGroupCreate();
     if(esp_netif_init()!=ESP_OK) return 0;
     if(esp_event_loop_create_default()!=ESP_OK){ /* may already exist */ }
@@ -267,6 +270,7 @@ static void net_probe(void){
 }
 
 static void wifi_down(void){
+    power_busy(0);      /* here, not at each exit path: every one of them lands on this */
     dav_disconnect();   /* close any keep-alive connection before the TLS/socket stack goes away */
     esp_wifi_stop();
     esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, s_h_wifi);

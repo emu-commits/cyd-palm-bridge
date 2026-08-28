@@ -13,6 +13,7 @@
  * a snapshot stamped in the future (a device whose clock jumped backwards must not
  * report a negative age or wrap it into something enormous). */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include "dash.h"
@@ -31,7 +32,26 @@ static WxCache aged(int min){
     return w;
 }
 
+/* A snapshot holding a full day, hour `start` onward, with a temperature that is
+ * distinct per row so an off-by-one in the stepping cannot pass. */
+static WxCache dayfrom(int start, int64_t hr0){
+    WxCache w; memset(&w, 0, sizeof w);
+    w.magic = WX_MAGIC; w.nhours = WX_HOURS; w.hr0_epoch = hr0;
+    w.cur_tempF = 50; w.cur_code = 95;          /* deliberately unlike any hourly row */
+    for(int i = 0; i < WX_HOURS; i++){
+        w.hr[i].hour24 = (uint8_t)((start + i) % 24);
+        w.hr[i].tempF  = (int16_t)(60 + i);
+        w.hr[i].rain   = (uint8_t)i;
+        w.hr[i].code   = (uint8_t)(i == 0 ? 0 : 3);   /* row 0 has none -> must fall back */
+    }
+    return w;
+}
+
 int main(void){
+    /* The stepping is pure epoch arithmetic and needs no zone, but the age
+     * arithmetic below calls time(), so pin the zone for reproducibility. */
+    setenv("TZ", "UTC", 1); tzset();
+
     printf("dash: age arithmetic\n");
     {
         WxCache w = aged(0);
@@ -55,6 +75,47 @@ int main(void){
         CK(!dash_weather_fresh(&w, WX_STALE_MIN),       "past the cut is not fresh");
         w = aged(30 * 24 * 60);
         CK(!dash_weather_fresh(&w, WX_STALE_MIN),       "a month old is not fresh");
+    }
+
+    printf("dash: stepping through the cached day\n");
+    {
+        /* 2026-08-27T09:00Z; the snapshot starts at 09:00 and runs 24 hours. */
+        const time_t T9 = 1787821200;
+        WxCache w = dayfrom(9, T9);
+        int tf = 0, cd = 0;
+
+        CK(dash_wx_index_at(&w, T9) == 0,          "the fetch hour is row 0");
+        CK(dash_wx_index_at(&w, T9 + 3*3600) == 3, "three hours on is row 3");
+        CK(dash_wx_index_at(&w, T9 + 23*3600) == 23, "the last cached hour is row 23");
+
+        CK(dash_wx_now(&w, T9 + 5*3600, &tf, &cd) == 1, "a covered hour reports as stepped");
+        CK(tf == 65,                                "and gives THAT hour's temperature");
+        CK(cd == 3,                                 "and that hour's code");
+
+        /* This is the bug the widening was for: six hours on, the reading must have
+         * moved off the one taken at sync time. */
+        dash_wx_now(&w, T9 + 6*3600, &tf, NULL);
+        CK(tf == 66 && tf != w.cur_tempF,           "six hours on it is NOT the sync-time reading");
+
+        /* A row the feed gave no code for keeps the fetch-time code rather than
+         * reading as WMO 0 ("Clear"), which would be a fabricated forecast. */
+        dash_wx_now(&w, T9, NULL, &cd);
+        CK(cd == 95,                                "a row with no code falls back, not to 'Clear'");
+
+        /* Walked off the end: say so, do not wrap around to row 0. */
+        CK(dash_wx_index_at(&w, T9 + 25*3600) == -1, "past the cache is -1, not a wrap");
+        CK(dash_wx_now(&w, T9 + 25*3600, &tf, &cd) == 0, "and reports as NOT stepped");
+        CK(tf == 50 && cd == 95,                    "falling back to the fetch-time reading");
+
+        CK(dash_wx_index_at(&w, T9 - 60) == -1,     "before the first row is -1");
+
+        WxCache e; memset(&e, 0, sizeof e); e.magic = WX_MAGIC; e.nhours = 0;
+        CK(dash_wx_index_at(&e, T9) == -1,          "an empty cache is -1");
+        WxCache u = dayfrom(9, 0);                  /* no anchor -> refuse, do not guess */
+        CK(dash_wx_index_at(&u, T9) == -1,          "an unanchored cache is -1, not row 0");
+        CK(dash_wx_index_at(NULL, T9) == -1,        "NULL is -1, not a crash");
+        tf = 7; cd = 7;
+        CK(dash_wx_now(NULL, T9, &tf, &cd) == 0 && tf == 0, "NULL through dash_wx_now is safe");
     }
 
     printf("dash: nothing to show\n");

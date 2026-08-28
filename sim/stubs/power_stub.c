@@ -18,13 +18,17 @@ int  power_battery_mv(void)        { return 3850; }
  * sim to sample. The Power screen still has to RENDER, though -- its layout and
  * its "no drain measured yet" wording are exactly the kind of thing worth seeing
  * without a device -- so the stats come back as a plausible early run. */
+void power_busy(int on)                { (void)on; }
+int  power_battery_rest_mv(void)       { return 3850; }
+int  power_battery_load(void)          { return 0; }
 void power_log_start(void)             {}
 void power_log_tick(void)              {}
 void power_log_mark(const char *note)  { (void)note; }
 void power_note_sync(void)             {}
 void power_stats(PowerStats *st){
     if(!st) return;
-    st->mv = 3850; st->pct = 72;
+    st->mv = 3812; st->pct = 72;      /* mv sags under load; pct comes off rest_mv */
+    st->rest_mv = 3850; st->load = 1;
     st->first_mv = 4176; st->first_pct = 97;
     st->up_s = 5*3600 + 12*60;
     st->lit_s = 41*60; st->dark_s = st->up_s - st->lit_s;

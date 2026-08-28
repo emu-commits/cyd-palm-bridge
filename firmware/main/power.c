@@ -66,6 +66,24 @@ static void apply_duty(int pct){
 #define BAT_PLAUSIBLE_HI 4600            /* above any single-cell charge voltage */
 #define BAT_PERIOD_US   (5*1000*1000)    /* re-sample at most this often */
 
+/* ---- why the REPORTED percentage comes from a rested cell -----------------
+ * A cell under load reads low, by IR drop across its own internal resistance
+ * (a small pouch cell is 200-400 mOhm) plus the connector and the divider. Going
+ * from idle to a HotSync is a ~200 mA step, so ~60 mV -- and near the top of the
+ * discharge curve 60 mV IS six percent. Reported instantaneously, one sync looks
+ * like it ate 6% of the pack.
+ *
+ * It did not: 6% of 1100 mAh over the ~85 s the radio is actually up would demand
+ * ~2800 mA, which is an order of magnitude past anything this board can draw. The
+ * true cost of a sync is nearer half a percent. The reading was the artifact.
+ *
+ * So the percentage on screen is only updated from samples taken with the screen
+ * blanked, no sync running, and the load settled -- and held between them. It is
+ * "as of the last rest", which is the only kind of number a voltage gauge can
+ * honestly report. The instantaneous value is still sampled and still logged,
+ * because the sag itself is worth seeing. */
+#define BAT_REST_SETTLE_US (30*1000*1000) /* load must be quiet this long to count */
+
 /* Trim for the divider's resistor tolerance, in per-mille (1000 = no change).
  * Raise it if the reported voltage reads low against a multimeter at the JP2
  * pads. Left at unity until there is a bench measurement to justify otherwise
@@ -75,7 +93,10 @@ static void apply_duty(int pct){
 static adc_oneshot_unit_handle_t g_adc;
 static adc_cali_handle_t         g_cali;      /* NULL = no eFuse calibration */
 static int      g_bat_mv;                     /* smoothed cell voltage, 0 = no reading yet */
+static int      g_bat_rest_mv;                /* last reading taken with the load quiet */
 static int64_t  g_bat_when;                   /* esp_timer stamp of that reading */
+static int64_t  s_load_mark;                  /* when the load state last changed */
+static int      s_heavy;                      /* 1 while the radio is up */
 
 /* Discharge curve for a single Li-ion/LiPo cell under a light load, descending.
  * The flat middle is why a linear voltage->percent map feels so wrong on these
@@ -137,6 +158,22 @@ static int bat_sample_mv(void){
     return at_pin * BAT_DIVIDER * BAT_TRIM_PERMILLE / 1000;
 }
 
+void power_busy(int on){
+    if(!!on == s_heavy) return;
+    s_heavy    = !!on;
+    s_load_mark = esp_timer_get_time();
+}
+
+/* 1 when the cell has been left alone long enough for its voltage to mean
+ * something: screen blanked, radio down, and settled since the last change. */
+static int bat_rested(void){
+    if(!g_off || s_heavy) return 0;
+    return esp_timer_get_time() - s_load_mark >= BAT_REST_SETTLE_US;
+}
+
+int power_battery_rest_mv(void){ return g_bat_rest_mv ? g_bat_rest_mv : -1; }
+int power_battery_load(void){ return s_heavy ? 2 : (g_off ? 0 : 1); }
+
 int power_battery_mv(void){
     if(!g_adc) return -1;
     int64_t now = esp_timer_get_time();
@@ -148,11 +185,13 @@ int power_battery_mv(void){
     /* Smooth across reads (3:1 toward the running value). The cell moves over
      * hours; the noise moves over milliseconds. */
     g_bat_mv = g_bat_mv ? (g_bat_mv * 3 + mv) / 4 : mv;
+    if(bat_rested()) g_bat_rest_mv = g_bat_rest_mv ? (g_bat_rest_mv * 3 + mv) / 4 : mv;
     return g_bat_mv;
 }
 
 int power_battery_pct(void){
-    int mv = power_battery_mv();
+    int inst = power_battery_mv();               /* always sample, so the log sees the sag */
+    int mv   = g_bat_rest_mv ? g_bat_rest_mv : inst;
     if(mv < BAT_PLAUSIBLE_LO || mv > BAT_PLAUSIBLE_HI) return -1;   /* no cell fitted, or USB-only */
 
     const int N = (int)(sizeof BAT_CURVE / sizeof BAT_CURVE[0]);
@@ -230,6 +269,7 @@ void power_set_brightness(int pct){
 
 void power_backlight(int on){
     res_accrue();                          /* bank the interval under the OLD state */
+    if(!!on == g_off) s_load_mark = esp_timer_get_time();   /* the load just changed */
     g_off = !on;
     apply_duty(on ? g_bright : 0);
 }
@@ -290,12 +330,15 @@ static void log_line(const char *note){
     FILE *f = fopen(POWER_LOG, "a");
     if(!f){ if(!s_logging) ESP_LOGW(TAG, "power.log: cannot open (no card?)"); return; }
     if(fresh)
-        fprintf(f, "# epoch,iso,mv,pct,uptime_s,lit_s,dark_s,syncs,note\n"
+        fprintf(f, "# epoch,iso,mv,mv_rest,load,pct,uptime_s,lit_s,dark_s,syncs,note\n"
+                   "# mv is instantaneous (sags under load); mv_rest is the last quiet\n"
+                   "# reading, and pct is derived from it. load: 0 dark, 1 lit, 2 radio.\n"
                    "# lit_s/dark_s/syncs are for THIS interval; uptime_s is cumulative.\n");
-    fprintf(f, "%lld,%04d-%02d-%02dT%02d:%02d:%02d,%d,%d,%ld,%ld,%ld,%u,%s\n",
+    fprintf(f, "%lld,%04d-%02d-%02dT%02d:%02d:%02d,%d,%d,%d,%d,%ld,%ld,%ld,%u,%s\n",
             (long long)t, ti.tm_year+1900, ti.tm_mon+1, ti.tm_mday,
             ti.tm_hour, ti.tm_min, ti.tm_sec,
-            mv, pct, (long)(now / 1000000), lit, dark, syncs, note);
+            mv, power_battery_rest_mv(), power_battery_load(), pct,
+            (long)(now / 1000000), lit, dark, syncs, note);
     fclose(f);
     s_samples++;
 }
@@ -331,6 +374,8 @@ void power_stats(PowerStats *st){
     res_accrue();
     st->mv        = power_battery_mv();
     st->pct       = power_battery_pct();
+    st->rest_mv   = power_battery_rest_mv();
+    st->load      = power_battery_load();
     st->first_mv  = s_first_mv;
     st->first_pct = s_first_pct;
     st->up_s      = (long)(esp_timer_get_time() / 1000000);

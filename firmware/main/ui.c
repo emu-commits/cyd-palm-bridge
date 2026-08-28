@@ -2933,6 +2933,13 @@ static void pw_fill(void){
         n += snprintf(b+n, sizeof b-n, "Battery\n  %d mV", st.mv);
         if(st.pct >= 0) n += snprintf(b+n, sizeof b-n, "   %d%%", st.pct);
         else            n += snprintf(b+n, sizeof b-n, "   (not a cell voltage)");
+        /* The gap between the two is IR drop, not charge spent. Naming it here is
+         * the whole point: it is what made a sync look like it cost 6%. */
+        if(st.rest_mv > 0 && st.rest_mv != st.mv)
+            n += snprintf(b+n, sizeof b-n, "\n  rested %d mV (%+d sag)",
+                          st.rest_mv, st.mv - st.rest_mv);
+        else if(st.rest_mv <= 0)
+            n += snprintf(b+n, sizeof b-n, "\n  no rested reading yet");
         if(st.first_mv >= 0)
             n += snprintf(b+n, sizeof b-n, "\n  power-up  %d mV", st.first_mv);
         n += snprintf(b+n, sizeof b-n, "\n\n");
@@ -4070,6 +4077,14 @@ static lv_obj_t *g_dash_time_ap;         /* AM/PM label (repositioned to the clo
 static WxCache   g_wx;                    /* weather snapshot for this lock session */
 static int       g_havewx;                /* 1 if g_wx is valid */
 static int       g_wxloaded;              /* 1 if a snapshot exists at all (fresh or not) */
+/* The weather is CACHED FOR A DAY and stepped through as the hours pass, so every
+ * part of it that names an hour is a live label refreshed by dash_paint(), not
+ * text baked in when the lock went up. Built once with their positions; the words
+ * arrive on the first paint and change on every subsequent one. */
+static lv_obj_t *g_wx_now_lbl;                          /* "81 deg  Partly cloudy" */
+static lv_obj_t *g_wx_col_t[WX_STRIP];                  /* per-column temperature */
+static lv_obj_t *g_wx_col_h[WX_STRIP];                  /* per-column hour         */
+static lv_obj_t *g_wx_col_r[WX_STRIP];                  /* per-column rain %       */
 static lv_obj_t *g_dash_stat;             /* top-right status line (weather age + charge) */
 static uint8_t   dash_buf[LV_CANVAS_BUF_SIZE(DASH_CW, DASH_CH, 1, 1) + 16];
 
@@ -4302,7 +4317,8 @@ static void lock_pressing_cb(lv_event_t *e){ (void)e;
 static void lock_release_cb(lv_event_t *e){ (void)e;
     if(g_lock_py - g_lock_ly > 40){                 /* dragged up -> unlock */
         if(g_lock){ lv_obj_del(g_lock); g_lock=NULL; g_dash_cv=NULL; g_dash_db=NULL; g_dash_time_ap=NULL;
-                    g_dash_stat=NULL; }
+                    g_dash_stat=NULL; g_wx_now_lbl=NULL;
+                    for(int i=0;i<WX_STRIP;i++){ g_wx_col_t[i]=g_wx_col_h[i]=g_wx_col_r[i]=NULL; } }
         /* the launcher is built lazily on the FIRST unlock (at boot the content area
          * is empty behind the lock, so the launcher grid and the dashboard never share
          * the 24 KB pool). Later wakes re-lock over whatever app is showing, so only
@@ -4354,11 +4370,44 @@ static void dash_paint(void){
     dhdots(10,DASH_CW-10,262);
     for(int i=0;i<6;i++){ dpx(DASH_CW/2-6+i,306-i); dpx(DASH_CW/2+6-i,306-i); }
 
-    /* hourly rain-probability bars (fill_bg above wiped the canvas, so all the
-     * graphics are redrawn here, not in ui_show_lock). */
+    /* ---- the weather, stepped to the current hour ------------------------
+     * The snapshot holds a day of hourly rows and is refreshed about once a day,
+     * so the dashboard must walk it rather than display the row that happened to
+     * be current when the sync ran. Everything below -- the reading beside the
+     * clock, the six columns, the rain bars -- comes off `now`.
+     *
+     * If the clock has walked off the end of the cache, dash_wx_index_at()
+     * returns -1 and we fall back to the start of the strip rather than showing
+     * nothing; the "synced N ago" line in the corner is what tells the user the
+     * data is old, and past WX_STALE_MIN the whole block is hidden anyway. */
     if(g_havewx){
-        for(int i=0;i<g_wx.nhours && i<6;i++){
-            int cx = 22 + i*39, bh = g_wx.hr[i].rain*28/100;
+        int tf = 0, cd = 0;
+        dash_wx_now(&g_wx, now, &tf, &cd);
+        if(g_wx_now_lbl){
+            char wl[48];
+            snprintf(wl,sizeof wl,"%d\xC2\xB0  %s", tf, dash_wcode_desc(cd));
+            lv_label_set_text(g_wx_now_lbl, wl);
+        }
+        int base = dash_wx_index_at(&g_wx, now);
+        if(base < 0) base = 0;
+        for(int i=0;i<WX_STRIP;i++){
+            int k  = base + i;
+            int cx = 22 + i*39;
+            char c[12];
+            if(k >= g_wx.nhours){          /* cache ran out -- blank the column, don't repeat one */
+                if(g_wx_col_t[i]) lv_label_set_text(g_wx_col_t[i], "");
+                if(g_wx_col_h[i]) lv_label_set_text(g_wx_col_h[i], "");
+                if(g_wx_col_r[i]) lv_label_set_text(g_wx_col_r[i], "");
+                continue;
+            }
+            int hh = g_wx.hr[k].hour24 % 12; if(hh==0) hh = 12;
+            if(g_wx_col_t[i]){ snprintf(c,sizeof c,"%d\xC2\xB0",g_wx.hr[k].tempF);
+                               lv_label_set_text(g_wx_col_t[i], c); }
+            if(g_wx_col_h[i]){ snprintf(c,sizeof c,"%d%s",hh,g_wx.hr[k].hour24<12?"a":"p");
+                               lv_label_set_text(g_wx_col_h[i], c); }
+            if(g_wx_col_r[i]){ snprintf(c,sizeof c,"%d%%",g_wx.hr[k].rain);
+                               lv_label_set_text(g_wx_col_r[i], c); }
+            int bh = g_wx.hr[k].rain*28/100;
             dfill(cx-7,190-bh,15,bh?bh:1);
             dhdots(cx-8,cx+8,191);
         }
@@ -4455,18 +4504,18 @@ void ui_show_lock(void){
     /* ---- weather ---- */
     if(havewx){
         char wl[48];
-        snprintf(wl,sizeof wl,"%d\xC2\xB0  %s",wx.cur_tempF,dash_wcode_desc(wx.cur_code));
-        dash_lbl(10,110,wl,1);
+        /* AQI is a single daily figure, not an hourly series -- it is the one
+         * reading here that does NOT step, so it is written once. */
+        g_wx_now_lbl = dash_lbl(10,110,"",1);
         if(wx.aqi>=0){ snprintf(wl,sizeof wl,"Air %d \xC2\xB7 %s",wx.aqi,aqi_word(wx.aqi)); dash_lbl(10,126,wl,0); }
-        /* 6-hour strip: temp (top), rain bar (canvas), hour + rain% (bottom) */
-        for(int i=0;i<wx.nhours && i<6;i++){
+        /* 6-hour strip: temp (top), rain bar (canvas), hour + rain% (bottom).
+         * Positions only -- which SIX of the cached twenty-four these are is a
+         * question about the current time, so dash_paint() answers it. */
+        for(int i=0;i<WX_STRIP;i++){
             int cx = 22 + i*39;
-            char c[12];
-            int hh=wx.hr[i].hour24%12; if(hh==0) hh=12;
-            snprintf(c,sizeof c,"%d\xC2\xB0",wx.hr[i].tempF); dash_lbl(cx-8,146,c,0);
-            /* the rain bar itself is drawn on the canvas in dash_paint() */
-            snprintf(c,sizeof c,"%d%s",hh,wx.hr[i].hour24<12?"a":"p"); dash_lbl(cx-8,196,c,0);
-            snprintf(c,sizeof c,"%d%%",wx.hr[i].rain);     dash_lbl(cx-8,208,c,0);
+            g_wx_col_t[i] = dash_lbl(cx-8,146,"",0);
+            g_wx_col_h[i] = dash_lbl(cx-8,196,"",0);
+            g_wx_col_r[i] = dash_lbl(cx-8,208,"",0);
         }
     } else if(loaded){
         /* Say which it is. A blank space where the weather was reads as a fault; a
