@@ -6648,7 +6648,12 @@ static void co_tail_paint(lv_obj_t *cv){
 #define CO_FACE_R   232                          /* portrait's right edge, inside
                                                     the page scrollbar            */
 #define CO_FACE_TOP 4                            /* its y on a quiet week          */
-#define CO_CHIN_GAP 4                            /* chin to the tip of the tail    */
+#define CO_CHIN_GAP 4                            /* portrait's bottom edge to the
+                                                    tip of the tail. That edge was
+                                                    his chin until he grew a neck
+                                                    and shoulders; it is now the
+                                                    shoulder line, so the tail
+                                                    rises to his shoulder          */
 #define CO_STAT_W   168                          /* stats column, clear of the face */
 #define CO_STAT_ROW 164                          /* every row fits without wrapping */
 
@@ -6725,7 +6730,7 @@ static void show_coach_report(void){
     #undef CO_ROW
 
     /* Read the portrait's size off the descriptor rather than restating it: it is
-     * generated art (tools/gen_coach_face.py) and everything below is placed from
+     * generated art (tools/gen_faces.py) and everything below is placed from
      * it, so a regenerated face at a different size still lands correctly. */
     const int face_w = (int)coach_face.header.w;
     const int face_h = (int)coach_face.header.h;
@@ -6733,9 +6738,9 @@ static void show_coach_report(void){
     /* Where the bubble lands: below the stats, but never so high that it eats into
      * the portrait's spot at the top of the page. The coach then hangs off the
      * bubble rather than off the top of the screen -- a long week pushes the pair
-     * down together, so the tail stays the short hop from his chin to the balloon
-     * instead of stretching into a wire. He is beside the stat column either way;
-     * on a heavy week it is the lower half of it. */
+     * down together, so the tail stays the short hop from his shoulder to the
+     * balloon instead of stretching into a wire. He is beside the stat column
+     * either way; on a heavy week it is the lower half of it. */
     const int bub_min = CO_FACE_TOP + face_h + CO_CHIN_GAP + (CO_TAIL_H - 1);
     lv_obj_update_layout(box);
     int bub_y = lv_obj_get_height(box) + 6;
