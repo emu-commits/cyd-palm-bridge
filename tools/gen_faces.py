@@ -8,18 +8,14 @@ the Guru are here for the screens that come after it. FACES below holds the
 three reduced to 60 wide, which is what the margin right of the 164 px stat
 column leaves on a 240 px screen.
 
-Each was derived from its source artwork once, by binarising at 50%% grey,
-cropping, and box-filtering down against an ink-coverage threshold; SOURCES
-records the crop and threshold each one used, and `--from-image` reruns that
-recipe, so a new source or a different size is a one-liner rather than a
-redraw. The reduced art is checked in as text because it is the thing that
-actually ships: it reviews as a diff, and the normal path needs nothing but the
-standard library.
-
-The threshold is per-face on purpose. The Coach is drawn as solid ink and
-reduces at 50%% coverage; the other two are thin-outline art, where 50%% eats
-the outline and leaves a hollow face, so they come down at 25%%. Neither
-survived the reduction untouched -- see the notes above each one.
+Each began as a reduction of its source artwork -- binarise at 50%% grey, crop
+to the framing, box-filter down against an ink-coverage threshold -- and each
+was then finished by hand. **The text below is the artwork.** Nothing here is
+re-derivable from a source image any more: re-running the reduction would throw
+away a drawn neck and shoulders, a rebuilt lens rim, a mirrored eye. The source
+files are not kept for that reason, and `--from-image` is for the *next*
+portrait someone converts, not for these three. `--from-exact` is the door back
+into the art below.
 
 A8 (0 = transparent, 255 = ink) matches the launcher icons in palm_icons.c, so
 ui.c recolors them to COL_LINE exactly the way it recolors those. They live in
@@ -31,31 +27,23 @@ never sees it. See docs/BUILD_PROGRESS.md, "LVGL on a 24 KB object pool".
     python3 tools/gen_faces.py coach             # just the one
     python3 tools/gen_faces.py --preview NAME f.png [zoom]   # look at it (6x)
     python3 tools/gen_faces.py --from-exact NAME f.png       # take edits back
-    python3 tools/gen_faces.py --from-image NAME src.png     # needs Pillow
+    python3 tools/gen_faces.py --from-image NAME src.png [W [ink [crop]]]
 
 `--preview NAME f.png 1` and `--from-exact NAME` are a lossless round trip: the
 art goes out as a black-on-white PNG at 1:1 or an integer zoom, comes back
 pixel for pixel, and prints the new art on stderr to paste above and the new C
 on stdout.
+
+Two things worth knowing before converting a fourth portrait, both learned the
+expensive way here. **Ink coverage is per-artwork**: solid-ink drawing reduces
+at 128, but thin-outline drawing needs about 64, because at 15:1 a source line
+covers roughly 7%% of a target pixel and 128 erases the outline outright,
+leaving a hollow face. **The crop is the framing, not a margin trim**: cropping
+to the ink bounding box puts a whole figure inside 60 px and leaves a head half
+the size of one cropped to the shoulders, so pass a crop that frames the head
+and lets the shoulders run off the sides.
 """
 import sys
-
-# name -> (source file, crop box in source pixels, ink-coverage threshold).
-# Kept so --from-image can reproduce a face rather than only re-deriving a
-# different one. The crop is the framing, not a margin trim: it puts the three
-# heads at one scale, and for the Assistant it reaches low enough to take her
-# collar whole -- cut above it, the collar stops mid-stroke and her neck has to
-# be invented rather than reduced.
-#
-# The neck idiom, where it *is* drawn, is measured off the Guru's artwork with
-# the target pixel grid laid over it: vertical sides, a sharp corner, and a
-# shoulder falling ten columns over six rows that leaves through the bottom of
-# the frame. Splayed sides and near-flat shoulders read as a yoke, not a body.
-SOURCES = {
-    "coach":     (None, None, 128),
-    "assistant": ("assistant.jpg", (182, 60, 813, 870), 64),
-    "guru":      ("guru.jpg", (140, 70, 890, 990), 64),
-}
 
 # beanie, headband, long hair, moustache. The neck and shoulders are drawn, not
 # reduced: the source artwork stops at his chin, and he needs them to stand
@@ -235,6 +223,12 @@ ASSISTANT = """\
 # actually hang in, every other pixel, because a solid arc reads as a neckline
 # rather than as beads. Her neck and shoulders are drawn too -- the source has
 # them, but as thin verticals they fell through the filter into dots.
+#
+# Her artwork is where the neck idiom the other two follow was measured from,
+# with the target pixel grid laid over it: vertical sides, a sharp corner, and a
+# shoulder falling ten columns over six rows that leaves through the *bottom* of
+# the frame. Splayed sides and near-flat shoulders to the edges read as a yoke
+# rather than a body. Copy the idiom, not the pixels -- see the Coach.
 GURU = """\
 ......................##############........................
 ....................##################......................
@@ -364,20 +358,23 @@ def emit_png(path, grid=GRID, w=W, h=H, scale=6):
     print("wrote %s (%dx%d)" % (path, w * scale, h * scale), file=sys.stderr)
 
 
-def from_image(name, path, w=60, h=None):
-    """re-derive a face from source artwork, by that face's recipe in SOURCES.
+def from_image(path, w=60, thresh=128, box=None):
+    """Reduce source artwork to art text. For NEW portraits, not for these three.
 
-    The crop is the framing, not just a margin trim: it is what puts the three
-    heads at one scale and runs the shoulders off the sides. Without one in
-    SOURCES the ink bounding box stands in, which is the whole figure.
+    Every face above was finished by hand after its own reduction, so running
+    this at one of them would discard that work -- the text above is the
+    artwork. This is the importer for the next one.
+
+    `thresh` is ink coverage per target pixel, 0..255; `box` is a source-pixel
+    crop, and it is the framing rather than a margin trim. See the module
+    docstring for why both of those matter more than they look like they do.
+    Height follows the crop's aspect.
     """
     from PIL import Image                      # only this path needs Pillow
-    _, box, thresh = SOURCES[name]
     im = Image.open(path).convert("L")
     ink = im.point(lambda v: 255 if v < 128 else 0)
     ink = ink.crop(box or ink.getbbox())
-    if h is None:
-        h = int(round(w * ink.size[1] / float(ink.size[0])))
+    h = int(round(w * ink.size[1] / float(ink.size[0])))
     cov = ink.resize((w, h), Image.BOX).load() # per-target-pixel ink coverage
     grid = ["".join("#" if cov[x, y] >= thresh else "." for x in range(w))
             for y in range(h)]
@@ -503,15 +500,17 @@ if __name__ == "__main__":
     if len(a) > 2 and a[0] == "--from-exact":
         redraw(need(a[1]), *from_exact(a[1], a[2]))
     elif len(a) > 2 and a[0] == "--from-image":
-        size = (int(a[3]), int(a[4])) if len(a) > 4 else (60, None)
-        redraw(need(a[1]), *from_image(a[1], a[2], *size))
+        box = tuple(int(v) for v in a[5].split(",")) if len(a) > 5 else None
+        redraw(need(a[1]), *from_image(a[2], int(a[3]) if len(a) > 3 else 60,
+                                       int(a[4]) if len(a) > 4 else 128, box))
     elif len(a) > 2 and a[0] == "--preview":
         grid, w, h = art(need(a[1]))
         emit_png(a[2], grid, w, h, int(a[3]) if len(a) > 3 else 6)
     elif a and not a[0].startswith("-"):
         emit_c(need(a[0]))
     elif a:
-        raise SystemExit(__doc__.split("\n\n")[-2].strip())
+        raise SystemExit("\n".join(l for l in __doc__.split("\n")
+                                   if l.startswith("    python3")))
     else:
         for i, name in enumerate(FACES):
             if i:

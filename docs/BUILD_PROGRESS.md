@@ -22,13 +22,19 @@ three. `coach_face` keeps its symbol; `assistant_face` and `guru_face` join it.
   drawn as filled shapes and reduces cleanly at a 50% threshold. The two new sources
   are thin-outline drawings: at 15:1 a source line covers roughly 7% of a target
   pixel, so 50% erased every outline and left a hollow face with a broken jaw. They
-  come down at 25% instead, which is why the threshold is per-face in `SOURCES`
-  rather than a constant in the filter.
+  come down at 25% instead, which is why the threshold is an argument to
+  `--from-image` rather than a constant in the filter.
 - **The crop is the framing, not a margin trim.** `--from-image` used to crop to the
   ink bbox, which for a figure with shoulders puts the whole body in 60 px and leaves
-  a head half the Coach's size. Each face now records a crop that lands the three
-  heads at one scale and runs the shoulders off the sides, the way the Coach's hair
-  already did. Without a crop in `SOURCES` the bbox still stands in.
+  a head half the Coach's size. It takes a crop that frames the head and lets the
+  shoulders run off the sides, the way the Coach's hair already did; the ink bbox
+  still stands in when no crop is given.
+- **The art is the artwork; the sources are not kept.** All three were finished by
+  hand after their reduction, so re-deriving one from its source image would throw
+  away a drawn neck, a rebuilt lens rim, a mirrored eye. There is nothing to
+  regenerate and no recipe worth recording per face — `--from-image` is the importer
+  for the *next* portrait, `--from-exact` is the door back into these. Keeping a table
+  of source paths would only have promised a reproducibility that does not exist.
 - **Features three pixels apart get redrawn, not rescued.** The Assistant's hair
   strand, ear and cheek sit inside six pixels and reduced to speckle either side of a
   doubled, dotted jaw; the jaw is drawn as one line and the ear as its outer arc plus
