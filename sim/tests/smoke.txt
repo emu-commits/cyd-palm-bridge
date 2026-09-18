@@ -578,6 +578,13 @@ t 300
 # only canvas is the sigil, which reuses game_cv_buf.
 c 194 160
 t 400
+# The FIRST open since the lock went up greets you: his portrait, a line from his
+# pool, and the whole content area as the tap target. coach_greet must show the
+# face and a bubble -- if it ever shows the Today screen instead, the greeting is
+# firing on the wrong window (it is scoped to the unlock, not to boot).
+s coach_greet
+c 120 150
+t 400
 s coach_today
 # Start -> Energy? -> High. Every ritual step now carries a line of explanatory
 # copy under its question, which pushed the button-matrix down to content y=48

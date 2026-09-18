@@ -80,6 +80,13 @@ static lv_obj_t *batt_lbl, *batt_body, *batt_fill, *batt_nub;
 static int       g_on_launcher;         /* 1 while the app grid is the content view */
 static void      batt_refresh(void);
 
+/* Which speakers still owe a greeting this unlock session -- declared up here
+ * because the lock's release handler resets it long before the greeting code
+ * that reads it. See "greetings" further down for the rules. */
+enum { GREET_COACH, GREET_GURU, GREET_NSPEAKER };
+static uint8_t g_greet_due = 0xFF;            /* bit per speaker; all owed at boot */
+static uint8_t g_greet_last[GREET_NSPEAKER];  /* index of the line last shown      */
+
 /* Kana is NOT a top-level app -- it lives inside Graffiti (a handwriting sibling of
  * the Latin drill), reached by the "あ" button there. Keeps the launcher focused. */
 static const char *APPS[] = { "Date Book", "Address", "To Do List", "Memo Pad", "HotSync", "Graffiti", "News", "Games", "Coach" };
@@ -4319,6 +4326,10 @@ static void lock_release_cb(lv_event_t *e){ (void)e;
         if(g_lock){ lv_obj_del(g_lock); g_lock=NULL; g_dash_cv=NULL; g_dash_db=NULL; g_dash_time_ap=NULL;
                     g_dash_stat=NULL; g_wx_now_lbl=NULL;
                     for(int i=0;i<WX_STRIP;i++){ g_wx_col_t[i]=g_wx_col_h[i]=g_wx_col_r[i]=NULL; } }
+        /* Every speaker owes a greeting again. This is the one place the lock goes
+         * up, so it is the one place that defines an "unlock session" -- see the
+         * greeting block for why that is the right window. */
+        g_greet_due = 0xFF;
         /* the launcher is built lazily on the FIRST unlock (at boot the content area
          * is empty behind the lock, so the launcher grid and the dashboard never share
          * the 24 KB pool). Later wakes re-lock over whatever app is showing, so only
@@ -6586,28 +6597,38 @@ static const char *co_advice_text(int code){
     return "Keep logging -- five sessions unlocks advice.";
 }
 
-/* ---- the coach's speech-bubble tail -------------------------------------
- * A wedge from the top of the bubble up to the portrait's chin. It is the one
- * shape here that is neither a rectangle nor a glyph, so it is painted -- but
- * NOT with an lv_bar/lv_arc/lv_triangle-style widget, which would allocate a
- * draw layer out of the 24 KB pool and live-lock LVGL (docs/BUILD_PROGRESS.md,
- * "Never use a widget that allocates a draw LAYER"). It is a 24x26 I1 canvas
- * over a 94-byte static buffer, written through the shared i1_px helpers with
- * exactly ONE lv_obj_invalidate() at the end -- the set_px invalidate storm that
- * cost every game a second of tap latency is the other trap on this screen.
+/* ==== the speakers: a portrait with a speech bubble ========================
+ * Coach's weekly report was the first screen to stand a face beside its content
+ * and hang the words off it in a balloon. The Guru and the Assistant do the same
+ * thing, so the geometry and the tail live here rather than inside Coach.
+ *
+ * ---- the tail ----
+ * A wedge from the top of the bubble up to the portrait. It is the one shape
+ * here that is neither a rectangle nor a glyph, so it is painted -- but NOT with
+ * an lv_bar/lv_arc/lv_triangle-style widget, which would allocate a draw layer
+ * out of the 24 KB pool and live-lock LVGL (docs/BUILD_PROGRESS.md, "Never use a
+ * widget that allocates a draw LAYER"). It is a 24x26 I1 canvas over a 94-byte
+ * static buffer, written through the shared i1_px helpers with exactly ONE
+ * lv_obj_invalidate() at the end -- the set_px invalidate storm that cost every
+ * game a second of tap latency is the other trap on this screen.
  *
  * The canvas is opaque, so its bottom row IS the bubble's top border: the row is
  * drawn black outside the wedge and left white between its edges, which is what
  * makes the tail read as an opening into the balloon rather than a sticker on
- * top of it. */
-#define CO_TAIL_W   24
-#define CO_TAIL_H   26
-#define CO_TAIL_APX 20                         /* apex x: points up at the chin  */
-#define CO_TAIL_B0  2                          /* base runs from x=B0..          */
-#define CO_TAIL_B1  13                         /* ...to x=B1 on the bottom row   */
-static uint8_t co_tail_buf[LV_CANVAS_BUF_SIZE(CO_TAIL_W, CO_TAIL_H, 1, 1) + 16];
+ * top of it.
+ *
+ * ONE static buffer serves every speaker, which is the whole point of sharing
+ * them -- but it also means only one may be on screen at a time. That is the
+ * product rule anyway (a screen has a single speaker), and it is why this is a
+ * helper rather than a widget you could instantiate twice. */
+#define SPK_TAIL_W   24
+#define SPK_TAIL_H   26
+#define SPK_TAIL_APX 20                        /* apex x: points up at the face  */
+#define SPK_TAIL_B0  2                         /* base runs from x=B0..          */
+#define SPK_TAIL_B1  13                        /* ...to x=B1 on the bottom row   */
+static uint8_t spk_tail_buf[LV_CANVAS_BUF_SIZE(SPK_TAIL_W, SPK_TAIL_H, 1, 1) + 16];
 
-static void co_tail_line(lv_draw_buf_t *db, int x0, int y0, int x1, int y1){
+static void spk_tail_line(lv_draw_buf_t *db, int x0, int y0, int x1, int y1){
     int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
     int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1, err = dx + dy;
     for(;;){
@@ -6619,41 +6640,165 @@ static void co_tail_line(lv_draw_buf_t *db, int x0, int y0, int x1, int y1){
     }
 }
 
-static void co_tail_paint(lv_obj_t *cv){
+static void spk_tail_paint(lv_obj_t *cv){
     lv_draw_buf_t *db = lv_canvas_get_draw_buf(cv);
     if(!db) return;
     i1_clear(db);
     /* the bubble's top border, continued across this canvas except where the
      * wedge opens into it */
-    for(int x = 0; x < CO_TAIL_W; x++)
-        if(x < CO_TAIL_B0 || x > CO_TAIL_B1) i1_px(db, x, CO_TAIL_H - 1, 1);
-    co_tail_line(db, CO_TAIL_B0, CO_TAIL_H - 1, CO_TAIL_APX, 0);   /* trailing edge */
-    co_tail_line(db, CO_TAIL_B1, CO_TAIL_H - 1, CO_TAIL_APX, 0);   /* leading edge  */
+    for(int x = 0; x < SPK_TAIL_W; x++)
+        if(x < SPK_TAIL_B0 || x > SPK_TAIL_B1) i1_px(db, x, SPK_TAIL_H - 1, 1);
+    spk_tail_line(db, SPK_TAIL_B0, SPK_TAIL_H - 1, SPK_TAIL_APX, 0); /* trailing */
+    spk_tail_line(db, SPK_TAIL_B1, SPK_TAIL_H - 1, SPK_TAIL_APX, 0); /* leading  */
     lv_obj_invalidate(cv);                      /* exactly one, for the whole tail */
 }
 
-/* Geometry of the report, in `content` coordinates (240 x 184 visible).
- * The screen is ONE scrolling page, not a scrolling sub-panel with fixed
- * furniture around it: the stats, the coach and his bubble move together, and
- * the only scrollbar that can ever appear is the page's own, at the far right
- * and clear of the portrait. A quiet week fits with no scrollbar at all.
+/* ---- geometry, in `content` coordinates (240 x 184 visible) ----
+ * A speaker screen is ONE scrolling page, not a scrolling sub-panel with fixed
+ * furniture around it: the content, the portrait and the bubble move together,
+ * and the only scrollbar that can ever appear is the page's own, at the far
+ * right and clear of the portrait. A quiet page fits with no scrollbar at all. */
+#define SPK_BUB_X    2
+#define SPK_BUB_W    230                         /* clear of the page scrollbar   */
+#define SPK_FACE_R   232                         /* portrait's right edge, inside
+                                                    the page scrollbar            */
+#define SPK_FACE_TOP 4                           /* its y with nothing above it    */
+#define SPK_CHIN_GAP 4                           /* portrait's bottom edge to the
+                                                    tip of the tail. That edge was
+                                                    the Coach's chin until he grew
+                                                    a neck and shoulders; on all
+                                                    three it is now the shoulder
+                                                    line, so the tail rises to the
+                                                    shoulder                       */
+
+/* The highest the balloon may sit for a given portrait: any higher and the face
+ * would be pushed off the top of the page. Callers that place the bubble from
+ * their own content (Coach's stats column) clamp to this. */
+#define SPK_BUB_MIN(face) (SPK_FACE_TOP + (int)(face)->header.h \
+                           + SPK_CHIN_GAP + (SPK_TAIL_H - 1))
+
+/* Stand `face` on `page` saying `text`, with the tail joining them. `bub_y` is
+ * the balloon's top edge; the portrait hangs above it, so a caller that pushes
+ * the balloon down (a long week) moves the pair down together and the tail stays
+ * the short hop from the shoulder to the balloon instead of stretching into a
+ * wire. Returns the y just past the balloon, for whatever comes next.
  *
+ * The portrait is flash-resident A8 recolored to the ink colour exactly the way
+ * the launcher icons are: no pool cost and nothing to repaint. Its size is read
+ * off the descriptor rather than restated, so a regenerated face at a different
+ * height still lands correctly (tools/gen_faces.py). */
+static int speaker_say(lv_obj_t *page, const lv_image_dsc_t *face,
+                       const char *text, int bub_y, int bub_h){
+    const int face_w = (int)face->header.w;
+    const int face_h = (int)face->header.h;
+    const int face_x = SPK_FACE_R - face_w;
+    const int face_y = bub_y - (SPK_TAIL_H - 1) - SPK_CHIN_GAP - face_h;
+
+    lv_obj_t *img = lv_image_create(page);
+    lv_image_set_src(img, face);
+    lv_obj_set_pos(img, face_x, face_y);
+    lv_obj_set_style_image_recolor(img, COL_LINE, 0);
+    lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);
+
+    /* a plain bordered rectangle: rounded corners and a border are drawn straight
+     * into the frame buffer; only the indicator widgets take a layer. */
+    lv_obj_t *bub = lv_obj_create(page);
+    lv_obj_set_size(bub, SPK_BUB_W, bub_h);
+    lv_obj_set_pos(bub, SPK_BUB_X, bub_y);
+    lv_obj_set_style_radius(bub, 6, 0);
+    lv_obj_set_style_border_width(bub, 1, 0);
+    lv_obj_set_style_border_color(bub, COL_LINE, 0);
+    lv_obj_set_style_bg_color(bub, COL_BODY, 0);
+    lv_obj_set_style_pad_all(bub, 6, 0);
+    lv_obj_clear_flag(bub, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *say = lv_label_create(bub);
+    lv_label_set_long_mode(say, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(say, SPK_BUB_W - 2 - 12);
+    lv_obj_set_style_text_align(say, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(say, text);
+    lv_obj_center(say);
+
+    /* the tail last, so it paints over the bubble's top border -- the border it
+     * replaces. */
+    lv_obj_t *tail = lv_canvas_create(page);
+    lv_canvas_set_buffer(tail, spk_tail_buf, SPK_TAIL_W, SPK_TAIL_H, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_palette(tail, 0, lv_color_to_32(COL_BODY, 0xFF));
+    lv_canvas_set_palette(tail, 1, lv_color_to_32(COL_LINE, 0xFF));
+    lv_obj_set_pos(tail, face_x + face_w / 2 - SPK_TAIL_APX, bub_y - (SPK_TAIL_H - 1));
+    spk_tail_paint(tail);
+
+    return bub_y + bub_h;
+}
+
+/* ==== greetings: what a speaker says when you walk in ======================
+ * Coach and Guru open on their portrait the first time you reach them after an
+ * unlock, say something light, and step aside on a tap. Two rules keep that
+ * charming rather than irritating: it happens once per unlock *session*, not
+ * once per open, and the line is never the one just shown.
+ *
+ * "Since unlock" is the right window and "since boot" is not: the lock re-raises
+ * over whatever app is running when the screen sleeps, so a boot-scoped greeting
+ * would fire once a day on a device that is never power-cycled, and an
+ * open-scoped one would nag every time you came back from the week screen. */
+static int  greet_due(int who){ return (g_greet_due >> who) & 1; }
+static void greet_done(int who){ g_greet_due &= (uint8_t)~(1u << who); }
+
+/* Pick a line, never the one shown last. Drawing from the n-1 lines that are not
+ * `*last` is uniform over the real choices -- unlike re-rolling until it differs
+ * (which can spin) or stepping in order (which is a pattern the user learns).
+ * Seeded the way Wordie seeds a fresh board. */
+static const char *greet_pick(const char *const *lines, int n, uint8_t *last){
+    if(n <= 1) return lines[0];
+    static uint32_t seq;
+    uint32_t r = (uint32_t)time(NULL) ^ (seq++ * 2654435761u);
+    int i = (int)(r % (uint32_t)(n - 1));
+    if(i >= *last) i++;             /* skip the repeat, keeping the draw uniform */
+    *last = (uint8_t)i;
+    return lines[i];
+}
+
+#define SPK_GREET_BUB_H 58          /* 3 * 14 text + pad + border, as the report */
+
+/* The greeting screen: the speaker centred, saying one line, and a hint. The
+ * WHOLE content area is the tap target -- a button would be a smaller thing to
+ * hit and would read as a step to complete rather than a moment to pass through.
+ * `on_tap` is responsible for clearing the greeting bit and showing what's next. */
+static void speaker_greet(const lv_image_dsc_t *face, const char *line,
+                          lv_event_cb_t on_tap){
+    content_clear();
+
+    lv_obj_t *page = lv_obj_create(content);
+    lv_obj_set_size(page, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_radius(page, 0, 0);
+    lv_obj_set_style_border_width(page, 0, 0);
+    lv_obj_set_style_bg_color(page, COL_BODY, 0);
+    lv_obj_set_style_pad_all(page, 0, 0);
+    lv_obj_clear_flag(page, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(page, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(page, on_tap, LV_EVENT_CLICKED, NULL);
+
+    speaker_say(page, face, line, SPK_BUB_MIN(face), SPK_GREET_BUB_H);
+
+    lv_obj_t *hint = lv_label_create(page);
+    lv_label_set_text(hint, "tap anywhere to continue");
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -4);
+
+    /* "anywhere" has to mean anywhere. The balloon is an lv_obj and those are
+     * clickable by default, so a tap on the speech bubble -- which is most of the
+     * screen, and the obvious place to aim -- would be swallowed by it and never
+     * reach the page. Drop the flag on every child so the whole area is one
+     * target. */
+    for(uint32_t i = 0; i < lv_obj_get_child_count(page); i++)
+        lv_obj_clear_flag(lv_obj_get_child(page, i), LV_OBJ_FLAG_CLICKABLE);
+}
+
+/* ---- the weekly report's own geometry ----
  * The bubble is sized to the WORST CASE of co_advice_text(): all six strings
  * wrap to at most three lines at this width (measured against lv_font_palm,
  * 14 px a line), so the balloon is a fixed height whatever the coach says, and
  * short advice is centred in it rather than left rattling at the top. */
-#define CO_BUB_X    2
-#define CO_BUB_W    230                          /* clear of the page scrollbar   */
 #define CO_BUB_H    58                           /* 3 * 14 text + pad + border    */
-#define CO_FACE_R   232                          /* portrait's right edge, inside
-                                                    the page scrollbar            */
-#define CO_FACE_TOP 4                            /* its y on a quiet week          */
-#define CO_CHIN_GAP 4                            /* portrait's bottom edge to the
-                                                    tip of the tail. That edge was
-                                                    his chin until he grew a neck
-                                                    and shoulders; it is now the
-                                                    shoulder line, so the tail
-                                                    rises to his shoulder          */
 #define CO_STAT_W   168                          /* stats column, clear of the face */
 #define CO_STAT_ROW 164                          /* every row fits without wrapping */
 
@@ -6729,68 +6874,46 @@ static void show_coach_report(void){
     if(hi >= 0 && lo >= 0) CO_ROW("Energy      Hi %d%% Lo %d%%", hi, lo);
     #undef CO_ROW
 
-    /* Read the portrait's size off the descriptor rather than restating it: it is
-     * generated art (tools/gen_faces.py) and everything below is placed from
-     * it, so a regenerated face at a different size still lands correctly. */
-    const int face_w = (int)coach_face.header.w;
-    const int face_h = (int)coach_face.header.h;
-    const int face_x = CO_FACE_R - face_w;
     /* Where the bubble lands: below the stats, but never so high that it eats into
      * the portrait's spot at the top of the page. The coach then hangs off the
      * bubble rather than off the top of the screen -- a long week pushes the pair
      * down together, so the tail stays the short hop from his shoulder to the
      * balloon instead of stretching into a wire. He is beside the stat column
      * either way; on a heavy week it is the lower half of it. */
-    const int bub_min = CO_FACE_TOP + face_h + CO_CHIN_GAP + (CO_TAIL_H - 1);
     lv_obj_update_layout(box);
     int bub_y = lv_obj_get_height(box) + 6;
-    if(bub_y < bub_min) bub_y = bub_min;
-    int face_y = bub_y - (CO_TAIL_H - 1) - CO_CHIN_GAP - face_h;
+    if(bub_y < SPK_BUB_MIN(&coach_face)) bub_y = SPK_BUB_MIN(&coach_face);
 
-    /* ---- the coach himself: flash-resident A8, recolored to the ink colour the
-     * same way the launcher icons are. No pool cost and nothing to repaint. */
-    lv_obj_t *face = lv_image_create(page);
-    lv_image_set_src(face, &coach_face);
-    lv_obj_set_pos(face, face_x, face_y);
-    lv_obj_set_style_image_recolor(face, COL_LINE, 0);
-    lv_obj_set_style_image_recolor_opa(face, LV_OPA_COVER, 0);
-
-    /* ---- the bubble: a plain bordered rectangle. Rounded corners and a border
-     * are drawn straight into the frame buffer; only the indicator widgets take
-     * a layer, and this is not one of them. */
-    lv_obj_t *bub = lv_obj_create(page);
-    lv_obj_set_size(bub, CO_BUB_W, CO_BUB_H);
-    lv_obj_set_pos(bub, CO_BUB_X, bub_y);
-    lv_obj_set_style_radius(bub, 6, 0);
-    lv_obj_set_style_border_width(bub, 1, 0);
-    lv_obj_set_style_border_color(bub, COL_LINE, 0);
-    lv_obj_set_style_bg_color(bub, COL_BODY, 0);
-    lv_obj_set_style_pad_all(bub, 6, 0);
-    lv_obj_clear_flag(bub, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *say = lv_label_create(bub);
-    lv_label_set_long_mode(say, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(say, CO_BUB_W - 2 - 12);
-    lv_obj_set_style_text_align(say, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(say, co_advice_text(coach_advise(&a)));
-    lv_obj_center(say);
-
-    /* ---- and the tail, joining the two. Created after the bubble so it paints
-     * over the top border, which is the border it replaces. */
-    lv_obj_t *tail = lv_canvas_create(page);
-    lv_canvas_set_buffer(tail, co_tail_buf, CO_TAIL_W, CO_TAIL_H, LV_COLOR_FORMAT_I1);
-    lv_canvas_set_palette(tail, 0, lv_color_to_32(COL_BODY, 0xFF));
-    lv_canvas_set_palette(tail, 1, lv_color_to_32(COL_LINE, 0xFF));
-    lv_obj_set_pos(tail, face_x + face_w / 2 - CO_TAIL_APX, bub_y - (CO_TAIL_H - 1));
-    co_tail_paint(tail);
-
-    co_home_link_at(page, bub_y + CO_BUB_H + 4);
+    int after = speaker_say(page, &coach_face, co_advice_text(coach_advise(&a)),
+                            bub_y, CO_BUB_H);
+    co_home_link_at(page, after + 4);
 }
 
 /* ------------------------------------------------------------------ the home */
 static void co_start_cb(lv_event_t *e){ (void)e; co_show_ritual(0); }
 static void co_marks_cb(lv_event_t *e){ (void)e; show_coach_marks(); }
 static void co_week_cb(lv_event_t *e){ (void)e; show_coach_report(); }
+
+/* His hellos. Light and short, and never about what you failed to do -- the week
+ * screen is the place where performance gets discussed. Kept under three lines
+ * at the balloon's width so none of them clips. */
+static const char *const CO_GREETINGS[] = {
+    "Good to see you. One honest session beats three distracted ones.",
+    "Ready when you are. Pick one small thing and give it your whole head.",
+    "No warm-up needed. The first minute is the only hard one.",
+    "Back again. Momentum is mostly just showing up twice in a row.",
+    "Let's make a quiet hour. Nothing fancy -- just start.",
+    "Whatever yesterday was, it doesn't get a vote today.",
+};
+#define CO_NGREET ((int)(sizeof(CO_GREETINGS) / sizeof(CO_GREETINGS[0])))
+
+/* The tap that dismisses him re-enters the app, which now finds the greeting
+ * spent and builds the home screen. Deleting the greeting out from under its own
+ * click is the same thing the launcher does when a cell opens an app. */
+static void co_greet_tap_cb(lv_event_t *e){ (void)e;
+    greet_done(GREET_COACH);
+    show_coach();
+}
 
 static void show_coach(void){
     kill_kb(); cur_app = NULL; cur_uid = 0;
@@ -6800,9 +6923,20 @@ static void show_coach(void){
     lv_label_set_text(title_lbl, "Coach");
     update_cat_trigger();
 
-    /* a session survived the trip here: pick it back up rather than starting over */
+    /* a session survived the trip here: pick it back up rather than starting over.
+     * Ahead of the greeting on purpose -- a live Pomodoro is not a thing to
+     * interrupt with hello. */
     if(g_co.phase == CO_PH_RUNNING){ co_seal(); return; }
     if(g_co.phase == CO_PH_REFLECT){ co_show_reflect(); return; }
+
+    /* first time in since the lock came up: he says something, and the tap that
+     * clears him lands on the home screen. */
+    if(greet_due(GREET_COACH)){
+        speaker_greet(&coach_face,
+                      greet_pick(CO_GREETINGS, CO_NGREET, &g_greet_last[GREET_COACH]),
+                      co_greet_tap_cb);
+        return;
+    }
     g_co_view = CO_VIEW_HOME;
 
     uint32_t now = (uint32_t)time(NULL);

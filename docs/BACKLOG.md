@@ -47,26 +47,26 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
 > disclaimer ships in the Guru app's Menu > About.
 
 ### P0 — groundwork (do first; everything else leans on it)
-- [ ] **Lift the speech bubble out of Coach.** `co_tail_paint`, `co_tail_buf` and
+- [x] **Lift the speech bubble out of Coach.** `co_tail_paint`, `co_tail_buf` and
       the `CO_BUB_*`/`CO_TAIL_*`/`CO_FACE_*` constants are Coach-local, and
       `show_coach_report` hardcodes `coach_face`. Three speakers need one shared
       `speaker_say(portrait, text, y)` helper. Pool cost must not rise: the tail
       is one static I1 canvas buffer and must stay exactly one.
-- [ ] **A "first open since unlock" flag.** The greeting screens key off it.
+- [x] **A "first open since unlock" flag.** The greeting screens key off it.
       `lock_release_cb` (ui.c ~4317) is the one place the lock goes up; set a
       `g_since_unlock` bitmask there, clear the per-app bit when its greeting has
       shown. Note the lock re-raises over a running app on sleep, so "first open"
       must mean *since the last unlock*, not *since boot*.
-- [ ] **Greeting-line pools + a non-repeating picker.** Cycling "several things"
+- [x] **Greeting-line pools + a non-repeating picker.** Cycling "several things"
       needs to not repeat the last one; a stored last-index per speaker is enough
       and costs one byte each in the app's saved state.
 
 ### P1 — Coach greeting
-- [ ] `[s]` Coach greeting screen on first launch after unlock: portrait +
+- [x] `[s]` Coach greeting screen on first launch after unlock: portrait +
       bubble, light and encouraging, cycling.
-- [ ] `[s]` Tap **anywhere** advances into the normal Pomodoro main screen. Must
+- [x] `[s]` Tap **anywhere** advances into the normal Pomodoro main screen. Must
       not be a button — a full-content-area click target.
-- [ ] `[s]` Second launch in the same unlock session goes straight to the main
+- [x] `[s]` Second launch in the same unlock session goes straight to the main
       screen.
 - [ ] `[d]` On glass.
 
@@ -104,10 +104,22 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
       *Indices are persisted: never reorder* (same rule as `CO_DOM_*`).
 - [ ] **Record format**, byte-counted and frozen before any UI is written — the
       Coach's 12-byte `CoachRec` is the precedent. Append-only log on SD.
+      **A task is a stable numeric ID, not a list position** — the pool is fixed
+      *for now* but gets a Menu editor in a later phase, and a log written today
+      has to still mean the same thing after the user adds one. IDs are assigned
+      once and never reused; the const table is allowed to grow, never reorder.
 - [ ] **Daily target = rolling user average, floor of 1/day.** Define the window
       and the rounding in `guru.h`, and host-test it.
-- [ ] **Main screen:** a short list of today's tasks, tap to check off. Palm
-      theme, no scroll-hunting, intuitive without instruction.
+- [ ] **Main screen: the full pool, always visible**, grouped by category, tap to
+      check off. *Decided 2026-09-18.*
+- [ ] **⚠ Measure the object cost before building that screen.** The pool has to
+      be deep enough not to feel repetitive, but the LVGL pool is 24 KB and every
+      row is objects. The launcher's 9 cells are ~27 objects and fit; a 40-task
+      list at a row + label each is ~80 and may not. **Measure first** (the
+      `heap used=... of 147456` line the smoke prints, plus `smoke32` for the true
+      24 KB pool). If the whole pool will not fit on one screen, the fallback that
+      keeps the decision intact is **one category per page** — everything is still
+      visible and nothing is dealt or hidden, it just paginates.
 - [ ] **Streak / success tracking**, daily and weekly.
 - [ ] `[s]` `[d]`
 
@@ -118,9 +130,12 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
 - [ ] `[s]` `[d]`
 
 ### P6 — Assistant onboarding (Wi-Fi + CalDAV)
-- [ ] **Trigger:** pressing **Sync Now** with no Wi-Fi credentials starts the
-      guided flow instead of failing. *Open: the second entry point — see the
-      question below.*
+All three entry points, *decided 2026-09-18*:
+- [ ] **Sync Now with no credentials** starts the guided flow instead of failing.
+      The primary trigger — it is where the user already is when they want it.
+- [ ] **Menu > Setup Assistant**, permanent, so it is re-runnable after a wrong
+      password without clearing config by hand.
+- [ ] **The launcher's demo-data hint becomes a button** into the flow.
 - [ ] Assistant portrait + bubble guides each step; keyboard/Graffiti entry for
       SSID, password, Apple ID, app-specific password.
 - [ ] Hands off to the existing **Discover collections** flow
@@ -146,17 +161,18 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
       as cancelled rather than failed.
 - [ ] `[s]` `[d]`
 
-### Open questions (answer before the group that needs them)
-- **P6 entry point.** "How would the user launch this?" — proposed: Sync Now with
-  no credentials is the *primary* trigger (it is where the user already is when
-  they want it), plus a permanent **Menu > Setup Assistant** so it is re-runnable
-  after a wrong password, and the launcher's demo-data hint becomes a button into
-  it. Confirm.
-- **Assistant's other jobs.** Proposed, cheapest first: first-boot welcome; a
-  "sync failed N times" explainer that reads the actual error; the Preferences
-  screens that currently expect pasted paths; an SD-card-missing/corrupt
-  explainer; time-zone and clock-drift setup. Pick which are in scope.
-- **Guru pool depth and editability** — see the question put to the user.
+### Parked until this phase lands — the Assistant's other jobs
+Ideas only. **Do not build any of these in this phase** (*decided 2026-09-18:
+document now, choose after*). Cheapest first:
+- **Sync failure explainer.** After repeated failures she reads the actual error
+  and says what to do. Probably the highest value of the five — sync errors are
+  raw status text today.
+- **First-boot welcome.** "Here's what this device is", before anything is set up.
+- **Preferences that still expect pasted paths.** Collection and feed settings
+  that want a UUID or URL typed in.
+- **SD card missing or corrupt.** An explanation and a next step instead of a
+  failure state.
+- **Time zone / clock drift setup.** The drift machinery exists and is opaque.
 
 ## Next up when we resume (priority order)
 
