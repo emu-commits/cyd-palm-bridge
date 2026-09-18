@@ -90,32 +90,27 @@ static uint8_t g_greet_last[GREET_NSPEAKER];  /* index of the line last shown   
 /* Kana is NOT a top-level app -- it lives inside Graffiti (a handwriting sibling of
  * the Latin drill), reached by the "あ" button there. Keeps the launcher focused.
  *
- * The ORDER is deliberate and the two NULLs are load-bearing. The grid is three
- * wide, so nine apps fill three rows exactly and HotSync -- which is a device
- * operation rather than somewhere you go -- sits alone on a fourth, centred, with
- * an empty cell either side. The blanks have to be real cells: LV_FLEX_FLOW_ROW_WRAP
- * packs what it is given, so a gap that is merely "not an app" would close up and
- * pull HotSync to the left.
+ * NINE apps, three rows, no fourth. The grid is three wide and the content area
+ * holds exactly three rows of 52 px cells, so everything a new user needs to find
+ * is on screen without scrolling. A fourth row was tried twice -- once by
+ * shrinking every cell to fit it, once by leaving it below the fold -- and both
+ * were wrong: the first made the whole launcher pay for one button, and the
+ * second hid HotSync from anyone who did not already know to swipe for it.
  *
- * That fourth row is BELOW THE FOLD, and deliberately so. Three rows of 52 px
- * cells is what the 184 px content area holds; the grid scrolls (it already did,
- * for the onboarding hint), so HotSync is one swipe up rather than always in
- * sight. Shrinking every cell to fit four rows was tried and undone -- the whole
- * launcher paying for one button is the worse trade, and syncing is a thing you
- * go and do, not a thing you need in your eyeline.
+ * Graffiti is NOT here any more: it lives in the Games folder, which is where the
+ * other practice-and-score screens already are. Kana travels with it, since Kana
+ * has always been reached from inside Graffiti.
  *
  * Anything that reads a launcher position -- notably sim/tests/smoke.txt, which
  * taps cells by coordinate -- must be re-pointed when this changes. That file
- * already carries a scar from the last reorder. */
+ * already carries a scar from an earlier reorder. */
 static const char *APPS[] = { "Date Book", "Address", "To Do List",
-                              "Memo Pad", "Games", "Graffiti",
-                              "News", "Guru", "Coach",
-                              NULL, "HotSync", NULL };
+                              "Memo Pad", "HotSync", "Games",
+                              "News", "Guru", "Coach" };
 /* authentic Palm app launcher icons (from PumpkinOS), Guru's drawn to match */
 static const lv_image_dsc_t *APP_ICONS[] = { &icon_datebook, &icon_address, &icon_todo,
-                                             &icon_memo, &icon_games, &icon_graffiti,
-                                             &icon_news, &icon_guru, &icon_coach,
-                                             NULL, &icon_hotsync, NULL };
+                                             &icon_memo, &icon_hotsync, &icon_games,
+                                             &icon_news, &icon_guru, &icon_coach };
 #define NAPPS ((int)(sizeof(APPS)/sizeof(APPS[0])))
 
 static void show_launcher(void);
@@ -2015,10 +2010,6 @@ static void show_launcher(void){
         lv_obj_set_style_pad_row(cell, 3, 0);
         lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        /* a spacer: it holds its column open so HotSync stays centred, and that
-         * is all it does -- no icon, no label, and NOT clickable, so a tap on an
-         * empty cell is nothing rather than a silent hit on the last app. */
-        if(!APPS[i]) continue;
         lv_obj_add_flag(cell, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(cell, app_cb, LV_EVENT_CLICKED, (void *)APPS[i]);
 
@@ -5681,17 +5672,25 @@ static void games_pause_clocks(void){
 
 /* The Games "folder": an icon grid mirroring the app launcher (each game is a
  * tappable icon + label), so it reads as a sub-folder of the main launcher rather
- * than a list of text buttons. Add a game by extending GAMES[] + its dispatch. */
-static const char           *GAMES[]      = { "Mines", "Wordie", "Sudoku", "Zip" };
-static const lv_image_dsc_t *GAME_ICONS[] = { &icon_mines, &icon_wordie, &icon_sudoku, &icon_zip };
+ * than a list of text buttons. Add a game by extending GAMES[] + its dispatch.
+ *
+ * Graffiti is in here, which makes this the practice folder as much as the games
+ * one. It earns the slot on behaviour rather than genre: like the four games it is
+ * a thing you open to drill at, it keeps a score and a streak, and it is not where
+ * any of your data lives. Kana comes with it -- the "あ" button inside Graffiti has
+ * always been the only way in, and that is unchanged. */
+static const char           *GAMES[]      = { "Mines", "Wordie", "Sudoku", "Zip", "Graffiti" };
+static const lv_image_dsc_t *GAME_ICONS[] = { &icon_mines, &icon_wordie, &icon_sudoku,
+                                              &icon_zip, &icon_graffiti };
 #define NGAMES ((int)(sizeof(GAMES)/sizeof(GAMES[0])))
 
 static void games_pick_cb(lv_event_t *e){
     const char *g = lv_event_get_user_data(e);
-    if(!strcmp(g,"Mines"))       show_minesweeper();
-    else if(!strcmp(g,"Wordie")) show_wordie();
-    else if(!strcmp(g,"Sudoku")) show_sudoku();
-    else if(!strcmp(g,"Zip"))    show_zip();
+    if(!strcmp(g,"Mines"))         show_minesweeper();
+    else if(!strcmp(g,"Wordie"))   show_wordie();
+    else if(!strcmp(g,"Sudoku"))   show_sudoku();
+    else if(!strcmp(g,"Zip"))      show_zip();
+    else if(!strcmp(g,"Graffiti")) show_trainer();
 }
 static void show_games(void){
     kill_kb(); cur_app=NULL; cur_uid=0;

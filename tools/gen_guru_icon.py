@@ -1,55 +1,75 @@
 #!/usr/bin/env python3
 """Emit the Guru launcher icon as an LVGL A8 image descriptor for palm_icons.c.
 
-24x22 A8 (0 = transparent, 255 = ink), matching the other post-Palm icons so it
-sits in the launcher grid without a colour-format conversion.
+24x22 A8 (0 = transparent, 255 = ink), matching the other launcher icons so it
+sits in the grid without a colour-format conversion.
 
-It is her portrait reduced to a mark: the bob as a solid ellipse, the face
-knocked out of it, and the third eye above the pair -- the one feature that is
-unmistakably hers at any size. A literal checklist was the obvious alternative
-and was rejected: the To Do List icon is already a checklist, and two apps with
-the same mark is worse than an app whose mark needs one look to learn.
+Her third eye, lit. Built the way the Palm icons are built -- Memo Pad, To Do,
+Date Book and Address are all a SOLID DISK with the subject knocked out of it in
+white -- so the disk is the ink and the eye is the hole, not the other way round.
+The iris is then painted back in, which is what stops it reading as a doughnut.
 
-The face is knocked OUT of the hair rather than drawn on top of it, which is why
-the two ellipses share a centre column but not a centre row -- the hair sits a
-pixel high so it reads as a fringe above the brow rather than a helmet.
+The aura is four arcs CONCENTRIC with the disk, not spokes radiating from it.
+Spokes were tried first and read as eyelashes, which turns an enlightened eye
+into a cartoon one. Arcs sit at a constant radius, so the eye looks surrounded
+rather than fringed. Four with wide gaps beats eight with narrow ones at this
+size: the gaps are what make it a halo instead of a second ring.
+
+A galaxy-brain head was the first idea and does not survive 24x22 in one bit --
+a profile only reads as a head if the brow, nose and chin each get pixels of
+their own, and here they collapse into a blob. It wants about twice this canvas.
 
     python3 tools/gen_guru_icon.py       # prints the C to paste into palm_icons.c
 """
+import math
+
 W, H = 24, 22
+CX, CY = 12, 11
+DISK_R, IRIS_R = 7.4, 2.6          # the disk, and the iris painted back into it
+EYE_HW, EYE_HH = 5.6, 3.3          # the eye's half-width and half-height
+AURA_R = 9.8                       # the halo's radius, clear of the disk
+
 g = [[0] * W for _ in range(H)]
 
-CX = 12                       # both ellipses share this column
-HAIR_CY, HAIR_RX, HAIR_RY = 11, 9.4, 10.4
-FACE_CY, FACE_RX, FACE_RY = 12, 5.5, 7.5
+
+def px(x, y, v=255):
+    if 0 <= x < W and 0 <= y < H:
+        g[y][x] = v
 
 
-def ellipse(cx, cy, rx, ry, v):
+def disc(cx, cy, r, v=255):
     for j in range(H):
         for i in range(W):
-            if ((i - cx) ** 2) / (rx * rx) + ((j - cy) ** 2) / (ry * ry) <= 1.0:
-                g[j][i] = v
+            if (i - cx) ** 2 + (j - cy) ** 2 <= r * r:
+                px(i, j, v)
 
 
-def box(x, y, w, h):
-    for j in range(y, y + h):
-        for i in range(x, x + w):
-            if 0 <= i < W and 0 <= j < H:
-                g[j][i] = 255
+def vesica(cx, cy, hw, hh, v=255):
+    """a pointed oval -- an eye, not an ellipse: the corners come to a point"""
+    for x in range(int(cx - hw), int(cx + hw) + 1):
+        t = (x - cx) / float(hw)
+        h = hh * (1.0 - t * t)
+        for y in range(int(round(cy - h)), int(round(cy + h)) + 1):
+            px(x, y, v)
 
 
-ellipse(CX, HAIR_CY, HAIR_RX, HAIR_RY, 255)    # the bob
-ellipse(CX, FACE_CY, FACE_RX, FACE_RY, 0)      # ...with the face cut out of it
+def arc(cx, cy, r, a0, a1, v=255):
+    """stepped by ANGLE, not by x -- stepping by x leaves holes on the steep part"""
+    steps = max(8, int(math.radians(abs(a1 - a0)) * r * 4))
+    for k in range(steps + 1):
+        a = math.radians(a0 + (a1 - a0) * k / steps)
+        px(round(cx + math.cos(a) * r), round(cy + math.sin(a) * r), v)
 
-box(9, 13, 2, 2)                               # eyes
-box(13, 13, 2, 2)
-box(11, 9, 2, 2)                               # the third
-box(10, 17, 4, 1)                              # mouth
+
+disc(CX, CY, DISK_R)                       # the disk is the ink
+vesica(CX, CY, EYE_HW, EYE_HH, 0)          # the eye is the hole
+disc(CX, CY, IRIS_R, 255)                  # ...with the iris painted back in
+for start in (0, 90, 180, 270):            # the aura: four concentric arcs
+    arc(CX, CY, AURA_R, start + 12, start + 78)
 
 rows = [",".join(str(v) for v in r) for r in g]
-data = ",".join(rows)
 print("/* the Guru's launcher icon -- tools/gen_guru_icon.py */")
-print("static const uint8_t icon_guru_map[] = {%s};" % data)
+print("static const uint8_t icon_guru_map[] = {%s};" % ",".join(rows))
 print("const lv_image_dsc_t icon_guru = {")
 print("  .header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.flags=0,"
       ".w=%d,.h=%d,.stride=%d,.reserved_2=0}," % (W, H, W))

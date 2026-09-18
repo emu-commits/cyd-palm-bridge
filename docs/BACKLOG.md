@@ -71,15 +71,14 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
 - [ ] `[d]` On glass.
 
 ### P2 — launcher reorder + Guru icon
-- [x] **Reorder to:** Date Book, Address, To Do List, Memo Pad, Games, Graffiti,
-      News, Guru, Coach, *(blank)*, HotSync, *(blank)*. That is a 3-wide grid, so
-      the blanks exist to centre HotSync on row 4 — the grid is
-      `LV_FLEX_FLOW_ROW_WRAP` and needs real empty cells, not gaps.
-      **Row 4 is below the fold on purpose** (*decided 2026-09-18*): three rows of
-      52 px cells is what the 184 px content area holds, and the grid already
-      scrolls, so HotSync is one swipe up. Shrinking every cell to fit four rows
-      was built and reverted — the whole launcher paying for one button is the
-      worse trade.
+- [x] **Reorder to:** Date Book, Address, To Do List, Memo Pad, HotSync, Games,
+      News, Guru, Coach — nine apps, three rows, nothing below the fold.
+      *Settled 2026-09-18 after two wrong turns:* a fourth row for HotSync was
+      built twice, once by shrinking every cell to fit it and once by leaving it
+      below the fold behind a swipe. The first made the whole launcher pay for one
+      button; the second hid the sync button from anyone who did not already know
+      to swipe. **Graffiti moved into the Games folder** (Kana travels with it —
+      the "あ" button inside Graffiti was always the only way in).
 - [x] **Guru app icon**, PalmOS-style, matching the existing PumpkinOS `tAIB`
       icons (A8, ~18x16, 1-bit feel). Same `palm_icons.c` pipeline.
 - [x] `[s]` Smoke script touches launcher cells by coordinate — **the reorder

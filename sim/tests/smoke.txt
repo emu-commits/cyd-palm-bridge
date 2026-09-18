@@ -16,12 +16,18 @@ t 30
 u
 t 400
 s launcher
-# Graffiti Trainer (roadmap #2): launcher app (Graffiti icon, row 2 col 3) opens
+# Graffiti Trainer (roadmap #2): now inside the Games folder -- it opens
 # the drill (target letter + a stroke guide on an I1 canvas + a graded score). On a
 # fresh box file the first target is 'm'; draw it -> "Nice! NN%" + advance. Then tap
 # the Train toggle and draw once -> captures a per-device template ("saved your..").
 # Pool-safe (labels + one canvas); a regression here would HANG or misdraw.
-c 200 110
+# Graffiti moved into the Games folder: open Games (row 2 col 3) first, then
+# Graffiti. It shares the folder's second row with Zip, and that row is
+# SPACE_EVENLY across the full width -- so Graffiti is at x=169, not x=120.
+c 195 110
+t 400
+s games_folder_graf
+c 169 108
 t 400
 s trainer
 d 45 300
@@ -69,13 +75,19 @@ s news_reader_next
 c 18 225
 t 300
 # Kana trainer (roadmap #3, Tier 1): NOW folded under Graffiti -- open the Graffiti
-# app (row 2 col 3) and tap the compact "あ" button (top row, left of Drill/Train).
+# app from the Games folder and tap the compact "あ" button (top row, left of Drill/Train).
 # Shows a kana (first target: hiragana 'a') rendered with the lv_font_kana bitmap
 # subset + its romaji note, and you answer the SOUND by drawing romaji letters in
 # the Graffiti strip (reusing the Latin recognizer, untouched). Draw a caret '^'
 # (= 'a') to answer -> "Correct!" + deterministic advance to the next kana.
 # Pool-safe (labels only; a regression here would HANG or misrender the kana).
-c 200 110
+# Graffiti moved into the Games folder: open Games (row 2 col 3) first, then
+# Graffiti. It shares the folder's second row with Zip, and that row is
+# SPACE_EVENLY across the full width -- so Graffiti is at x=169, not x=120.
+c 195 110
+t 400
+s games_folder_graf
+c 169 108
 t 400
 c 161 38
 t 400
@@ -217,19 +229,8 @@ t 400
 s memo_list
 c 18 225
 t 300
-# HotSync sits alone on the launcher's FOURTH row, below the fold -- three rows
-# of icons is what the content area holds. The grid scrolls, so swipe up first.
-# launcher_scrolled is the evidence that row is reachable at all.
-d 120 190
-t 30
-m 120 150
-t 30
-m 120 110
-t 30
-u
-t 400
-s launcher_scrolled
-c 120 176
+# HotSync -- launcher row 2 col 2, back in the middle where it is findable
+c 120 110
 t 400
 s hotsync
 c 18 225
@@ -343,16 +344,7 @@ s graffiti_lookup
 # HotSync step that streams real RSS on device. A hang/crash here fails the run.
 c 18 225
 t 300
-# the launcher's fourth row again: swipe up before reaching for HotSync
-d 120 190
-t 30
-m 120 150
-t 30
-m 120 110
-t 30
-u
-t 400
-c 120 176
+c 120 110
 t 400
 s hotsync_prefetch
 # Sync Now. It is BOTTOM_MID -14 of content, so y=175 -- which is within a pixel
@@ -416,7 +408,7 @@ t 300
 # Tap the Minesweeper mine icon (left) to open it. Minesweeper draws its 9x9 board on a
 # 1-bpp canvas; the first tap is always safe and floods open; then switch to Flag mode and
 # flag a cell. The board takes taps via PRESSED (resistive-panel robust). Pool-safe.
-c 120 110
+c 195 110
 t 300
 s games_menu
 c 40 55
@@ -439,7 +431,7 @@ t 300
 # Persistence: leave to the launcher, reopen Games -> Mines, and the dug board is
 # restored exactly (saved to /sdcard after every move). mines_persist must match
 # mines_dug, not a fresh board.
-c 120 110
+c 195 110
 t 300
 c 40 55
 t 400
@@ -453,7 +445,7 @@ t 300
 # The row scores with mono state tiles: filled=correct, double-border=present, slashed=absent;
 # used keys pick up the same states. Grid + keyboard are ONE pool-cheap I1 canvas; taps
 # hit-test via PRESSED. (The physical Graffiti strip also types letters on the device.)
-c 120 110
+c 195 110
 t 300
 c 120 55
 t 400
@@ -477,7 +469,7 @@ t 300
 # Persistence: leave to the launcher, reopen Games -> Wordie, and the scored guess
 # grid + keyboard states are restored (saved to /sdcard after every keystroke).
 # wordie_persist must match wordie_scored, not a fresh daily.
-c 120 110
+c 195 110
 t 300
 c 120 55
 t 400
@@ -489,7 +481,7 @@ t 300
 # tab, the first blank is pre-selected (thick border). Tap a number-pad digit to fill
 # it (the physical Graffiti strip also enters digits on the device), then reopen from
 # the folder to confirm the in-progress board persists (saved to /sdcard).
-c 120 110
+c 195 110
 t 300
 c 198 55
 t 400
@@ -499,14 +491,16 @@ t 300
 s sudoku_entered
 c 18 225
 t 300
-c 120 110
+c 195 110
 t 300
 c 198 55
 t 400
 s sudoku_persist
 c 18 225
 t 300
-# Zip: the fourth game, on the folder's SECOND row (row 2 col 1, the snake icon).
+# Zip: on the folder's SECOND row, which now holds Zip AND Graffiti. The row is
+# SPACE_EVENLY like every other, so adding Graffiti pushed Zip off centre: it is
+# at x=68 now, not the x=120 it sat at while it had the row to itself.
 # A 6x6 one-line path puzzle: start on 1, hit the numbers in ascending order, cover
 # every cell. Board + Undo/Clear are ONE pool-cheap I1 canvas; input is a DRAG
 # (PRESSED starts it, PRESSING continues it -- never CLICKED, see Mines).
@@ -516,9 +510,9 @@ t 300
 # is correctly refused, and from the moment the pen crosses it the path draws along
 # the sweep until a number would come out of turn. That exercises the whole drag
 # path on ANY board. Cell centres are (60+24c, 56+24r).
-c 120 110
+c 195 110
 t 300
-c 120 108
+c 68 108
 t 400
 s zip_open
 d 60 56
@@ -571,9 +565,9 @@ s zip_clock_running
 c 18 225
 t 300
 w 3000
-c 120 110
+c 195 110
 t 300
-c 120 108
+c 68 108
 t 400
 s zip_clock_resumed
 # Undo pops one cell; Clear rewinds to the '1'. Both live on the canvas button row
@@ -587,9 +581,9 @@ s zip_cleared
 c 18 225
 t 300
 # Persistence: reopen from the folder -- the cleared board comes back, not a new one.
-c 120 110
+c 195 110
 t 300
-c 120 108
+c 68 108
 t 400
 s zip_persist
 c 18 225
