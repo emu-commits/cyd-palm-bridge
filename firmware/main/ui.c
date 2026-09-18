@@ -97,6 +97,13 @@ static uint8_t g_greet_last[GREET_NSPEAKER];  /* index of the line last shown   
  * packs what it is given, so a gap that is merely "not an app" would close up and
  * pull HotSync to the left.
  *
+ * That fourth row is BELOW THE FOLD, and deliberately so. Three rows of 52 px
+ * cells is what the 184 px content area holds; the grid scrolls (it already did,
+ * for the onboarding hint), so HotSync is one swipe up rather than always in
+ * sight. Shrinking every cell to fit four rows was tried and undone -- the whole
+ * launcher paying for one button is the worse trade, and syncing is a thing you
+ * go and do, not a thing you need in your eyeline.
+ *
  * Anything that reads a launcher position -- notably sim/tests/smoke.txt, which
  * taps cells by coordinate -- must be re-pointed when this changes. That file
  * already carries a scar from the last reorder. */
@@ -1994,18 +2001,18 @@ static void show_launcher(void){
     lv_obj_set_style_radius(grid, 0, 0);
     lv_obj_set_style_border_width(grid, 0, 0);
     lv_obj_set_style_bg_color(grid, COL_BODY, 0);
-    lv_obj_set_style_pad_all(grid, 4, 0);
+    lv_obj_set_style_pad_all(grid, 6, 0);
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
 
     for(int i=0;i<NAPPS;i++){
         lv_obj_t *cell = lv_obj_create(grid);
-        lv_obj_set_size(cell, 68, 42);
+        lv_obj_set_size(cell, 68, 52);
         lv_obj_set_style_radius(cell, 0, 0);
         lv_obj_set_style_border_width(cell, 0, 0);
         lv_obj_set_style_bg_opa(cell, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_pad_all(cell, 1, 0);
-        lv_obj_set_style_pad_row(cell, 2, 0);
+        lv_obj_set_style_pad_all(cell, 2, 0);
+        lv_obj_set_style_pad_row(cell, 3, 0);
         lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         /* a spacer: it holds its column open so HotSync stays centred, and that

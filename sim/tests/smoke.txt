@@ -21,7 +21,7 @@ s launcher
 # fresh box file the first target is 'm'; draw it -> "Nice! NN%" + advance. Then tap
 # the Train toggle and draw once -> captures a per-device template ("saved your..").
 # Pool-safe (labels + one canvas); a regression here would HANG or misdraw.
-c 195 91
+c 200 110
 t 400
 s trainer
 d 45 300
@@ -54,7 +54,7 @@ t 300
 # feed (seeded with samples in the sim).
 # Press-drag UP navigates to the next article. Pool-safe (labels + content swap on
 # a gesture surface; a regression here would HANG or fail to advance).
-c 45 133
+c 46 160
 t 400
 s news_reader
 d 120 185
@@ -75,7 +75,7 @@ t 300
 # the Graffiti strip (reusing the Latin recognizer, untouched). Draw a caret '^'
 # (= 'a') to answer -> "Correct!" + deterministic advance to the next kana.
 # Pool-safe (labels only; a regression here would HANG or misrender the kana).
-c 195 91
+c 200 110
 t 400
 c 161 38
 t 400
@@ -212,13 +212,24 @@ s todo_list
 c 18 225
 t 300
 # Memo Pad (launcher row 2 col 1 after the Graffiti app was added)
-c 45 91
+c 40 110
 t 400
 s memo_list
 c 18 225
 t 300
-# HotSync (C2: logo + status + Sync Now) -- launcher row 2 col 2
-c 120 175
+# HotSync sits alone on the launcher's FOURTH row, below the fold -- three rows
+# of icons is what the content area holds. The grid scrolls, so swipe up first.
+# launcher_scrolled is the evidence that row is reachable at all.
+d 120 190
+t 30
+m 120 150
+t 30
+m 120 110
+t 30
+u
+t 400
+s launcher_scrolled
+c 120 176
 t 400
 s hotsync
 c 18 225
@@ -332,18 +343,27 @@ s graffiti_lookup
 # HotSync step that streams real RSS on device. A hang/crash here fails the run.
 c 18 225
 t 300
-c 120 175
+# the launcher's fourth row again: swipe up before reaching for HotSync
+d 120 190
+t 30
+m 120 150
+t 30
+m 120 110
+t 30
+u
+t 400
+c 120 176
 t 400
 s hotsync_prefetch
-# Sync Now, which is BOTTOM_MID -14 of content and so has always been y=175 --
-# the same y the launcher's HotSync cell now sits at, which is a coincidence of
-# two different screens and not a shared constant.
+# Sync Now. It is BOTTOM_MID -14 of content, so y=175 -- which is within a pixel
+# of where the scrolled launcher puts the HotSync cell. Two different screens
+# that happen to agree, not a shared constant.
 c 120 175
 t 500
 s hotsync_news
 c 18 225
 t 300
-c 45 133
+c 46 160
 t 500
 s news_from_sync
 # Preferences > News feeds: the checkbox manager + the URL editor keyboard. Pin the
@@ -396,7 +416,7 @@ t 300
 # Tap the Minesweeper mine icon (left) to open it. Minesweeper draws its 9x9 board on a
 # 1-bpp canvas; the first tap is always safe and floods open; then switch to Flag mode and
 # flag a cell. The board takes taps via PRESSED (resistive-panel robust). Pool-safe.
-c 120 91
+c 120 110
 t 300
 s games_menu
 c 40 55
@@ -419,7 +439,7 @@ t 300
 # Persistence: leave to the launcher, reopen Games -> Mines, and the dug board is
 # restored exactly (saved to /sdcard after every move). mines_persist must match
 # mines_dug, not a fresh board.
-c 120 91
+c 120 110
 t 300
 c 40 55
 t 400
@@ -433,7 +453,7 @@ t 300
 # The row scores with mono state tiles: filled=correct, double-border=present, slashed=absent;
 # used keys pick up the same states. Grid + keyboard are ONE pool-cheap I1 canvas; taps
 # hit-test via PRESSED. (The physical Graffiti strip also types letters on the device.)
-c 120 91
+c 120 110
 t 300
 c 120 55
 t 400
@@ -457,7 +477,7 @@ t 300
 # Persistence: leave to the launcher, reopen Games -> Wordie, and the scored guess
 # grid + keyboard states are restored (saved to /sdcard after every keystroke).
 # wordie_persist must match wordie_scored, not a fresh daily.
-c 120 91
+c 120 110
 t 300
 c 120 55
 t 400
@@ -469,7 +489,7 @@ t 300
 # tab, the first blank is pre-selected (thick border). Tap a number-pad digit to fill
 # it (the physical Graffiti strip also enters digits on the device), then reopen from
 # the folder to confirm the in-progress board persists (saved to /sdcard).
-c 120 91
+c 120 110
 t 300
 c 198 55
 t 400
@@ -479,7 +499,7 @@ t 300
 s sudoku_entered
 c 18 225
 t 300
-c 120 91
+c 120 110
 t 300
 c 198 55
 t 400
@@ -496,7 +516,7 @@ t 300
 # is correctly refused, and from the moment the pen crosses it the path draws along
 # the sweep until a number would come out of turn. That exercises the whole drag
 # path on ANY board. Cell centres are (60+24c, 56+24r).
-c 120 91
+c 120 110
 t 300
 c 120 108
 t 400
@@ -551,7 +571,7 @@ s zip_clock_running
 c 18 225
 t 300
 w 3000
-c 120 91
+c 120 110
 t 300
 c 120 108
 t 400
@@ -567,7 +587,7 @@ s zip_cleared
 c 18 225
 t 300
 # Persistence: reopen from the folder -- the cleared board comes back, not a new one.
-c 120 91
+c 120 110
 t 300
 c 120 108
 t 400
@@ -579,7 +599,7 @@ t 300
 # full-screen session -> reflect -> note, and it writes a Memo + a Date Book block
 # on the way out. Every screen here is labels, buttons and one button-matrix; the
 # only canvas is the sigil, which reuses game_cv_buf.
-c 195 133
+c 194 160
 t 400
 # The FIRST open since the lock went up greets you: his portrait, a line from his
 # pool, and the whole content area as the tap target. coach_greet must show the
@@ -663,7 +683,7 @@ t 300
 # A SECOND session, abandoned via the five-second press-and-hold, so the wall shows
 # a hollow mark beside the solid one and the streak breaks. `w` burns real time --
 # the hold is measured in lv ticks, so `t` alone would never trip it.
-c 195 133
+c 194 160
 t 400
 c 120 129
 t 400
@@ -696,7 +716,7 @@ t 300
 # which now reads as the coach SAYING it: his portrait sits right of the stat
 # column and a speech bubble hangs off his chin. coach_week must show the face,
 # the tail joining it to the balloon, and no scrollbar beside the portrait.
-c 195 133
+c 194 160
 t 400
 c 186 188
 t 600
@@ -753,7 +773,7 @@ t 300
 # would mean the cell is a dead tap.
 c 18 225
 t 300
-c 120 133
+c 120 160
 t 400
 s guru_shell
 c 18 225
