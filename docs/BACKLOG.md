@@ -71,13 +71,13 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
 - [ ] `[d]` On glass.
 
 ### P2 — launcher reorder + Guru icon
-- [ ] **Reorder to:** Date Book, Address, To Do List, Memo Pad, Games, Graffiti,
+- [x] **Reorder to:** Date Book, Address, To Do List, Memo Pad, Games, Graffiti,
       News, Guru, Coach, *(blank)*, HotSync, *(blank)*. That is a 3-wide grid, so
       the blanks exist to centre HotSync on row 4 — the grid is
       `LV_FLEX_FLOW_ROW_WRAP` and will need real empty cells, not gaps.
-- [ ] **Guru app icon**, PalmOS-style, matching the existing PumpkinOS `tAIB`
+- [x] **Guru app icon**, PalmOS-style, matching the existing PumpkinOS `tAIB`
       icons (A8, ~18x16, 1-bit feel). Same `palm_icons.c` pipeline.
-- [ ] `[s]` Smoke script touches launcher cells by coordinate — **the reorder
+- [x] `[s]` Smoke script touches launcher cells by coordinate — **the reorder
       moves every tap target below the change**. `tests/smoke.txt` already carries
       a scar from exactly this (see its note at line ~387: adding Coach as the 9th
       app silently redirected an old tap). Re-point every launcher tap and check

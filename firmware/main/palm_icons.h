@@ -12,6 +12,7 @@ extern const lv_image_dsc_t icon_wordie;    /* Wordie (Games sub-launcher) */
 extern const lv_image_dsc_t icon_sudoku;    /* Sudoku (Games sub-launcher) */
 extern const lv_image_dsc_t icon_zip;       /* Zip path puzzle (Games sub-launcher) */
 extern const lv_image_dsc_t icon_coach;     /* Coach focus timer (ritual Pomodoro) */
+extern const lv_image_dsc_t icon_guru;      /* Guru longevity habits (gen_guru_icon.py) */
 /* The speakers: a portrait stands in the right-hand margin of a screen that has
  * something to say, beside the content and attached to a speech bubble. Coach's
  * is on the weekly report; the Assistant and the Guru are for the screens that

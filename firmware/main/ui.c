@@ -88,13 +88,27 @@ static uint8_t g_greet_due = 0xFF;            /* bit per speaker; all owed at bo
 static uint8_t g_greet_last[GREET_NSPEAKER];  /* index of the line last shown      */
 
 /* Kana is NOT a top-level app -- it lives inside Graffiti (a handwriting sibling of
- * the Latin drill), reached by the "あ" button there. Keeps the launcher focused. */
-static const char *APPS[] = { "Date Book", "Address", "To Do List", "Memo Pad", "HotSync", "Graffiti", "News", "Games", "Coach" };
-/* authentic Palm app launcher icons (from PumpkinOS) */
-static const lv_image_dsc_t *APP_ICONS[] = { &icon_datebook, &icon_address,
-                                             &icon_todo, &icon_memo, &icon_hotsync,
-                                             &icon_graffiti, &icon_news, &icon_games,
-                                             &icon_coach };
+ * the Latin drill), reached by the "あ" button there. Keeps the launcher focused.
+ *
+ * The ORDER is deliberate and the two NULLs are load-bearing. The grid is three
+ * wide, so nine apps fill three rows exactly and HotSync -- which is a device
+ * operation rather than somewhere you go -- sits alone on a fourth, centred, with
+ * an empty cell either side. The blanks have to be real cells: LV_FLEX_FLOW_ROW_WRAP
+ * packs what it is given, so a gap that is merely "not an app" would close up and
+ * pull HotSync to the left.
+ *
+ * Anything that reads a launcher position -- notably sim/tests/smoke.txt, which
+ * taps cells by coordinate -- must be re-pointed when this changes. That file
+ * already carries a scar from the last reorder. */
+static const char *APPS[] = { "Date Book", "Address", "To Do List",
+                              "Memo Pad", "Games", "Graffiti",
+                              "News", "Guru", "Coach",
+                              NULL, "HotSync", NULL };
+/* authentic Palm app launcher icons (from PumpkinOS), Guru's drawn to match */
+static const lv_image_dsc_t *APP_ICONS[] = { &icon_datebook, &icon_address, &icon_todo,
+                                             &icon_memo, &icon_games, &icon_graffiti,
+                                             &icon_news, &icon_guru, &icon_coach,
+                                             NULL, &icon_hotsync, NULL };
 #define NAPPS ((int)(sizeof(APPS)/sizeof(APPS[0])))
 
 static void show_launcher(void);
@@ -103,6 +117,7 @@ static void show_kana(void);
 static void show_news(void);
 static void show_games(void);
 static void show_coach(void);
+static void show_guru(void);
 static void co_save(void);        /* persist Coach state (defined with the app) */
 static void show_coach_marks(void);
 static void show_coach_report(void);
@@ -1133,6 +1148,7 @@ static void show_app(const char *name){
     if(!strcmp(name, "News")){ show_news(); return; }
     if(!strcmp(name, "Games")){ show_games(); return; }
     if(!strcmp(name, "Coach")){ show_coach(); return; }
+    if(!strcmp(name, "Guru")){ show_guru(); return; }
     cur_app = NULL;
     content_clear();
     lv_label_set_text(title_lbl, name);
@@ -1978,20 +1994,24 @@ static void show_launcher(void){
     lv_obj_set_style_radius(grid, 0, 0);
     lv_obj_set_style_border_width(grid, 0, 0);
     lv_obj_set_style_bg_color(grid, COL_BODY, 0);
-    lv_obj_set_style_pad_all(grid, 6, 0);
+    lv_obj_set_style_pad_all(grid, 4, 0);
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
 
     for(int i=0;i<NAPPS;i++){
         lv_obj_t *cell = lv_obj_create(grid);
-        lv_obj_set_size(cell, 68, 52);
+        lv_obj_set_size(cell, 68, 42);
         lv_obj_set_style_radius(cell, 0, 0);
         lv_obj_set_style_border_width(cell, 0, 0);
         lv_obj_set_style_bg_opa(cell, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_pad_all(cell, 2, 0);
-        lv_obj_set_style_pad_row(cell, 3, 0);
+        lv_obj_set_style_pad_all(cell, 1, 0);
+        lv_obj_set_style_pad_row(cell, 2, 0);
         lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        /* a spacer: it holds its column open so HotSync stays centred, and that
+         * is all it does -- no icon, no label, and NOT clickable, so a tap on an
+         * empty cell is nothing rather than a silent hit on the last app. */
+        if(!APPS[i]) continue;
         lv_obj_add_flag(cell, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(cell, app_cb, LV_EVENT_CLICKED, (void *)APPS[i]);
 
@@ -6893,6 +6913,27 @@ static void show_coach_report(void){
 static void co_start_cb(lv_event_t *e){ (void)e; co_show_ritual(0); }
 static void co_marks_cb(lv_event_t *e){ (void)e; show_coach_marks(); }
 static void co_week_cb(lv_event_t *e){ (void)e; show_coach_report(); }
+
+/* ======================================================================= Guru
+ * A treadmill of specific longevity habits to check off, with a week analysis in
+ * her own voice. The engine lands in guru.c/guru.h next to coach.c; this is the
+ * shell, so the launcher slot added alongside her icon is not a dead tap. */
+static void show_guru(void){
+    kill_kb(); cur_app = NULL; cur_uid = 0;
+    content_clear();
+    lv_label_set_text(title_lbl, "Guru");
+    update_cat_trigger();
+
+    lv_obj_t *l = lv_label_create(content);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(l, LCD_W - 24);
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(l, "Guru is being built.\n\n"
+                         "A short list of specific daily\n"
+                         "habits, and how you are doing\n"
+                         "at them.");
+    lv_obj_center(l);
+}
 
 /* His hellos. Light and short, and never about what you failed to do -- the week
  * screen is the place where performance gets discussed. Kept under three lines
