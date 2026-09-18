@@ -40,6 +40,28 @@ by eye), `[d]` = verified on the glass. The device is on `/dev/ttyUSB0` with
 ESP-IDF at `~/esp/esp-idf`, so `[d]` is reachable in this phase rather than
 deferred. Keep each numbered group to its own commit and branch off `main`.
 
+> ### RESUME HERE — state at 2026-09-18
+>
+> Branch **`feat/speaker-portraits`**, pushed, tree clean, no PR opened. The
+> device has this build flashed. **P0, P1 and P2 are done; P3 is next.**
+>
+> - **P0** — `speaker_say()` + `SPK_*` geometry in `ui.c` is the shared portrait +
+>   bubble; `g_greet_due` (reset in `lock_release_cb`) is the once-per-unlock flag;
+>   `greet_pick()` is the never-repeat line picker.
+> - **P1** — Coach greets on first open after unlock, tap anywhere continues.
+>   Confirmed on the glass by the user.
+> - **P2** — launcher is nine apps / three rows / no scrolling; Graffiti moved
+>   into the Games folder; Guru icon is her third eye on a Palm-style solid disk
+>   with a four-arc aura. User confirmed the icon.
+> - **P3 next** — `guru.c`/`guru.h` pure clock-injected logic mirroring `coach.c`,
+>   `sim/tests/guru_test.c` + a `make -C sim guru` target wired in like `coach`,
+>   then her greeting screen. `show_guru()` in `ui.c` is currently a placeholder
+>   screen so the launcher slot is not a dead tap — replace it.
+>
+> **Still un-ticked and genuinely not done:** every `[d]` box below P1, and all of
+> P3–P8. Two decisions are already locked in the items themselves (Guru shows the
+> full pool grouped by category; all three Assistant onboarding entry points).
+
 > **Health content disclaimer (P4).** The Guru task pool is widely-discussed
 > consumer wellness practice, NOT medical advice, and must not be presented as
 > it. No dosages, no disease claims, no "prevents cancer" phrasing in user-facing
