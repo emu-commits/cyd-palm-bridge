@@ -27,6 +27,137 @@ mostly away from the bench via the browser simulator).
 
 ---
 
+## PHASE: the three speakers (ACTIVE — work this top to bottom)
+
+The portraits landed on `feat/speaker-portraits` (`coach_face` 60x67,
+`assistant_face` 60x77, `guru_face` 60x74 — flash rodata, `tools/gen_faces.py`).
+This phase spends them: a greeting for Coach, a whole new **Guru** app, a guided
+**Assistant** onboarding, plus a lock-screen restyle and a HotSync cancel.
+
+**Working agreement for this phase.** Tick a box only when it is verified, not
+when it is written — `[s]` = sim-verified (`make -C sim smoke` + the shot checked
+by eye), `[d]` = verified on the glass. The device is on `/dev/ttyUSB0` with
+ESP-IDF at `~/esp/esp-idf`, so `[d]` is reachable in this phase rather than
+deferred. Keep each numbered group to its own commit and branch off `main`.
+
+> **Health content disclaimer (P4).** The Guru task pool is widely-discussed
+> consumer wellness practice, NOT medical advice, and must not be presented as
+> it. No dosages, no disease claims, no "prevents cancer" phrasing in user-facing
+> copy — the categories are named for the *habit*, not for an outcome. A one-line
+> disclaimer ships in the Guru app's Menu > About.
+
+### P0 — groundwork (do first; everything else leans on it)
+- [ ] **Lift the speech bubble out of Coach.** `co_tail_paint`, `co_tail_buf` and
+      the `CO_BUB_*`/`CO_TAIL_*`/`CO_FACE_*` constants are Coach-local, and
+      `show_coach_report` hardcodes `coach_face`. Three speakers need one shared
+      `speaker_say(portrait, text, y)` helper. Pool cost must not rise: the tail
+      is one static I1 canvas buffer and must stay exactly one.
+- [ ] **A "first open since unlock" flag.** The greeting screens key off it.
+      `lock_release_cb` (ui.c ~4317) is the one place the lock goes up; set a
+      `g_since_unlock` bitmask there, clear the per-app bit when its greeting has
+      shown. Note the lock re-raises over a running app on sleep, so "first open"
+      must mean *since the last unlock*, not *since boot*.
+- [ ] **Greeting-line pools + a non-repeating picker.** Cycling "several things"
+      needs to not repeat the last one; a stored last-index per speaker is enough
+      and costs one byte each in the app's saved state.
+
+### P1 — Coach greeting
+- [ ] `[s]` Coach greeting screen on first launch after unlock: portrait +
+      bubble, light and encouraging, cycling.
+- [ ] `[s]` Tap **anywhere** advances into the normal Pomodoro main screen. Must
+      not be a button — a full-content-area click target.
+- [ ] `[s]` Second launch in the same unlock session goes straight to the main
+      screen.
+- [ ] `[d]` On glass.
+
+### P2 — launcher reorder + Guru icon
+- [ ] **Reorder to:** Date Book, Address, To Do List, Memo Pad, Games, Graffiti,
+      News, Guru, Coach, *(blank)*, HotSync, *(blank)*. That is a 3-wide grid, so
+      the blanks exist to centre HotSync on row 4 — the grid is
+      `LV_FLEX_FLOW_ROW_WRAP` and will need real empty cells, not gaps.
+- [ ] **Guru app icon**, PalmOS-style, matching the existing PumpkinOS `tAIB`
+      icons (A8, ~18x16, 1-bit feel). Same `palm_icons.c` pipeline.
+- [ ] `[s]` Smoke script touches launcher cells by coordinate — **the reorder
+      moves every tap target below the change**. `tests/smoke.txt` already carries
+      a scar from exactly this (see its note at line ~387: adding Coach as the 9th
+      app silently redirected an old tap). Re-point every launcher tap and check
+      the shots, not the exit code.
+- [ ] `[d]` On glass.
+
+### P3 — Guru app shell
+- [ ] `guru.c` / `guru.h` as **pure logic, clock-injected**, mirroring the
+      `coach.c` split: no LVGL, no ESP-IDF, no stdio; ui.c owns copy and file I/O.
+- [ ] `sim/tests/guru_test.c` + a `make -C sim guru` target, wired into `games:`
+      and CI the way `coach` is.
+- [ ] `[s]` Guru greeting screen (same pattern as P1, her own lines).
+- [ ] `[d]` On glass.
+
+### P4 — Guru: the task treadmill
+- [ ] **The task pool.** Specific, actionable, individually checkable directives —
+      never "eat healthy". Seeded from the examples given (zone-2 140bpm burst,
+      one brazil nut, black garlic, broccoli, natto, volcanic mineral water from
+      glass, micro-strength to local failure, breath/meditation cycle, morning
+      sunlight, targeted stretch, creatine, protein before bed, 12-second sprints,
+      sardines/mackerel). Needs to reach a pool deep enough not to feel repetitive.
+- [ ] **Categories** (drives the week analysis): proposed **Gut, Metabolic,
+      Cognitive, Structural, Recovery** — every task tagged with exactly one.
+      *Indices are persisted: never reorder* (same rule as `CO_DOM_*`).
+- [ ] **Record format**, byte-counted and frozen before any UI is written — the
+      Coach's 12-byte `CoachRec` is the precedent. Append-only log on SD.
+- [ ] **Daily target = rolling user average, floor of 1/day.** Define the window
+      and the rounding in `guru.h`, and host-test it.
+- [ ] **Main screen:** a short list of today's tasks, tap to check off. Palm
+      theme, no scroll-hunting, intuitive without instruction.
+- [ ] **Streak / success tracking**, daily and weekly.
+- [ ] `[s]` `[d]`
+
+### P5 — Guru week analysis
+- [ ] Week screen mirroring Coach's: stats column + `guru_face` + bubble.
+- [ ] Per-category performance analysis, advice codes in `guru.h` mapped to copy
+      in ui.c (the `CA_*` pattern — retune tone without touching logic or tests).
+- [ ] `[s]` `[d]`
+
+### P6 — Assistant onboarding (Wi-Fi + CalDAV)
+- [ ] **Trigger:** pressing **Sync Now** with no Wi-Fi credentials starts the
+      guided flow instead of failing. *Open: the second entry point — see the
+      question below.*
+- [ ] Assistant portrait + bubble guides each step; keyboard/Graffiti entry for
+      SSID, password, Apple ID, app-specific password.
+- [ ] Hands off to the existing **Discover collections** flow
+      (`hotsync_discover_*`) rather than asking for UUID paths.
+- [ ] Replaces the current dead-end hint on the launcher ("edit config.ini on the
+      card, or tap Menu > Preferences").
+- [ ] `[d]` **device-only** — real Wi-Fi join and a live iCloud account.
+
+### P7 — lock screen restyle
+- [ ] Japanese-weather-channel aesthetic: crisp data zones, strong separators,
+      clear hierarchy. Dashboard is `ui.c` ~4071–4560 plus `dash.c`.
+- [ ] **Constraint:** the dashboard is the tightest pool screen in the firmware
+      (one I1 canvas + labels, built lazily so it never coexists with the
+      launcher). Restyle must not add widget classes that take a draw layer —
+      borders and radii are fine, indicators are not.
+- [ ] `[s]` `[d]` — and re-check `smoke32` (the true 24 KB pool), not just `smoke`.
+
+### P8 — HotSync cancel
+- [ ] While syncing, **Sync Now** becomes **Cancel**.
+- [ ] Cancel opens a confirmation modal; confirming aborts the run.
+- [ ] **`hotsync.h` has no cancel API** — needs a flag the background task checks
+      at safe points (between records, never mid-write), and a status that reads
+      as cancelled rather than failed.
+- [ ] `[s]` `[d]`
+
+### Open questions (answer before the group that needs them)
+- **P6 entry point.** "How would the user launch this?" — proposed: Sync Now with
+  no credentials is the *primary* trigger (it is where the user already is when
+  they want it), plus a permanent **Menu > Setup Assistant** so it is re-runnable
+  after a wrong password, and the launcher's demo-data hint becomes a button into
+  it. Confirm.
+- **Assistant's other jobs.** Proposed, cheapest first: first-boot welcome; a
+  "sync failed N times" explainer that reads the actual error; the Preferences
+  screens that currently expect pasted paths; an SD-card-missing/corrupt
+  explainer; time-zone and clock-drift setup. Pick which are in scope.
+- **Guru pool depth and editability** — see the question put to the user.
+
 ## Next up when we resume (priority order)
 
 The sim-testable charm/intuitiveness backlog is done, and so is the **Games app**
