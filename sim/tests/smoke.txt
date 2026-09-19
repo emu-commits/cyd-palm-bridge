@@ -814,6 +814,34 @@ c 200 190
 t 400
 # back on the list, with BOTH habits now ticked and the header counting them
 s guru_back
+# Tick four more, all of them in Gut, so the week has enough in it for the rule
+# engine to say something AND to be lopsided enough to be worth saying: six
+# checks, all one category, is GA_NARROW. Under five she declines to analyse at
+# all (GA_NONE), which would make this shot prove nothing.
+c 18 139
+t 200
+c 18 161
+t 200
+c 18 183
+t 200
+c 18 205
+t 300
+s guru_six
+# Options -> Her week. The menu item only exists while a Guru screen is up.
+c 18 300
+t 400
+s guru_menu
+# "Her week" is the third row (Preferences / Power / Her week). Her portrait and
+# a balloon over a stats column, mirroring Coach's report -- the per-day figures
+# come from the saved ring, the category rows from the log. With six checks all
+# in Gut this MUST read as the narrow-week verdict, not the "not enough yet" one.
+c 70 118
+t 500
+s guru_week
+# back returns to her list, not to the launcher
+c 30 200
+t 400
+s guru_week_back
 c 18 225
 t 300
 # I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.

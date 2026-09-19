@@ -121,6 +121,7 @@ static void show_news(void);
 static void show_games(void);
 static void show_coach(void);
 static void show_guru(void);
+static void show_guru_report(void);
 static void co_save(void);        /* persist Coach state (defined with the app) */
 static void show_coach_marks(void);
 static void show_coach_report(void);
@@ -2785,6 +2786,7 @@ static void act_co_goal(lv_event_t *e){ (void)e;
 }
 static void act_co_marks(lv_event_t *e){ (void)e; menu_close(); show_coach_marks(); }
 static void act_co_week(lv_event_t *e){ (void)e; menu_close(); show_coach_report(); }
+static void act_gu_week(lv_event_t *e){ (void)e; menu_close(); show_guru_report(); }
 static void act_co_reset(lv_event_t *e){ (void)e; menu_close();
     /* the counters go, the marks stay -- coach.log/coach.sig are the record of
      * what actually happened and are never rewritten from the UI. */
@@ -3134,6 +3136,7 @@ static void menu_open(void){
         menu_item(panel, "Reset progress", act_tr_reset);   /* Graffiti trainer only */
     if(g_kana_open)
         menu_item(panel, "Reset progress", act_ka_reset);   /* Kana trainer only */
+    if(g_gu_open) menu_item(panel, "Her week", act_gu_week);  /* Guru only */
     if(g_co_open){                                          /* Coach only */
         menu_header(panel, "Coach");
         static char lenbuf[24], goalbuf[24];
@@ -7218,6 +7221,154 @@ static void gu_show_task(int id){
     lv_obj_t *bl = lv_label_create(bk);
     lv_label_set_text(bl, "Back"); lv_obj_center(bl);
     lv_obj_add_event_cb(bk, gu_detail_back_cb, LV_EVENT_CLICKED, NULL);
+}
+
+/* ---- the week ------------------------------------------------------------
+ * Her half of Coach's weekly report, and built the same way: a narrow stats
+ * column with the portrait beside it and the verdict in a balloon underneath.
+ *
+ * Where the numbers come from is split on purpose. The per-day figures (total,
+ * days out of seven, best day) are read out of the saved ring, which already
+ * holds exactly one week of counts -- streaming the log to recompute those would
+ * be a second implementation of the same arithmetic. The log supplies only the
+ * thing the ring cannot: which CATEGORY each check belonged to. */
+#define GU_STAT_W   168                  /* stats column, clear of her face */
+#define GU_STAT_ROW 164                  /* every row fits without wrapping */
+#define GU_BUB_H    58                   /* 3 * 14 text + pad + border      */
+
+/* Stream the log into the fold. Records are read one at a time -- the history is
+ * never resident, only the ~14-byte aggregate. */
+static int gu_fold(GuruAgg *a, uint32_t since){
+    guru_agg_reset(a);
+    FILE *f = fopen(GU_LOG, "rb");
+    if(!f) return 0;
+    uint32_t m = 0;
+    if(fread(&m, 4, 1, f) != 1 || m != GU_LOG_MAGIC){ fclose(f); return 0; }
+    int n = 0;
+    GuruRec r;
+    while(fread(&r, sizeof r, 1, f) == 1){
+        if(r.when < since) continue;
+        guru_agg_add(a, &r);
+        n++;
+    }
+    fclose(f);
+    return n;
+}
+
+/* What she says about the week. Two of the five name a category, so this fills a
+ * buffer rather than returning a literal -- otherwise the analysis would have to
+ * be phrased vaguely enough to avoid saying which one, which is the whole value.
+ * Sized to wrap to at most three lines at the balloon's width. */
+static void gu_advice_text(char *buf, size_t n, int code, const GuruAgg *a){
+    switch(code){
+        case GA_NEGLECTED: {
+            int w = guru_weakest_cat(a);
+            snprintf(buf, n, "Nothing from %s at all this week. Pick one thing "
+                             "from there tomorrow.", guru_cat_name(w < 0 ? 0 : w));
+            return;
+        }
+        case GA_NARROW: {
+            int t = guru_top_cat(a);
+            snprintf(buf, n, "Most of this week was %s. The other four are getting "
+                             "lonely.", guru_cat_name(t < 0 ? 0 : t));
+            return;
+        }
+        case GA_SPOTTY:
+            snprintf(buf, n, "Big days, then nothing. A little every day beats "
+                             "everything at once.");
+            return;
+        case GA_STEADY:
+            snprintf(buf, n, "You turned up nearly every day. That is the whole "
+                             "trick -- nothing else here matters as much.");
+            return;
+        case GA_KEEPGOING:
+            snprintf(buf, n, "A reasonable week. Nothing here needs changing.");
+            return;
+    }
+    snprintf(buf, n, "Tick a few more things off and I will have something "
+                     "useful to tell you.");
+}
+
+static void gu_week_back_cb(lv_event_t *e){ (void)e; show_guru(); }
+
+static void show_guru_report(void){
+    kill_kb(); cur_app = NULL; cur_uid = 0;
+    content_clear();
+    gu_load();
+    g_gu_open = 1;
+    lv_label_set_text(title_lbl, "Her week");
+    update_cat_trigger();
+
+    uint32_t now   = (uint32_t)time(NULL);
+    int      tz    = ui_tz();
+    uint32_t since = now > (uint32_t)GU_WIN * 86400u ? now - (uint32_t)GU_WIN * 86400u : 0;
+
+    GuruAgg a;
+    gu_fold(&a, since);
+
+    int total  = guru_window_total(&g_gu, now, tz);
+    int days   = guru_window_days_active(&g_gu, now, tz);
+    int best   = guru_window_best(&g_gu, now, tz);
+    int streak = guru_streak_now(&g_gu, now, tz);
+
+    lv_obj_t *page = lv_obj_create(content);
+    lv_obj_set_size(page, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_radius(page, 0, 0);
+    lv_obj_set_style_border_width(page, 0, 0);
+    lv_obj_set_style_bg_color(page, COL_BODY, 0);
+    lv_obj_set_style_pad_all(page, 0, 0);
+    lv_obj_set_scroll_dir(page, LV_DIR_VER);
+
+    lv_obj_t *box = lv_obj_create(page);
+    lv_obj_set_size(box, GU_STAT_W, LV_SIZE_CONTENT);
+    lv_obj_set_pos(box, 0, 0);
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_radius(box, 0, 0);
+    lv_obj_set_style_border_width(box, 0, 0);
+    lv_obj_set_style_bg_color(box, COL_BODY, 0);
+    lv_obj_set_style_pad_all(box, 3, 0);
+    lv_obj_set_style_pad_left(box, 4, 0);
+    lv_obj_set_style_pad_row(box, 1, 0);
+    lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
+
+    #define GU_ROW(...) do{ lv_obj_t *l_ = lv_label_create(box); \
+                            lv_label_set_long_mode(l_, LV_LABEL_LONG_WRAP); \
+                            lv_obj_set_width(l_, GU_STAT_ROW); \
+                            lv_label_set_text_fmt(l_, __VA_ARGS__); }while(0)
+
+    GU_ROW("Ticked off  %d", total);
+    GU_ROW("Days        %d of %d", days, GU_WIN);
+    if(best > 0)   GU_ROW("Best day    %d", best);
+    if(streak > 0) GU_ROW("Streak      %d day%s", streak, streak == 1 ? "" : "s");
+
+    /* Only the categories that saw something. Printing the empty ones pushed the
+     * verdict -- the point of the screen -- off the bottom, which is the same
+     * lesson Coach's domain list learned. The empty one gets named in the bubble
+     * instead, where it reads as advice rather than as a row of zero. */
+    for(int c = 0; c < GU_NCAT; c++){
+        if(!a.cat[c]) continue;
+        char bar[7];
+        int nb = a.cat[c] > 6 ? 6 : a.cat[c];
+        for(int i = 0; i < nb; i++) bar[i] = '#';
+        bar[nb] = 0;
+        GU_ROW("%-9s %-6s %d", guru_cat_name(c), bar, (int)a.cat[c]);
+    }
+    #undef GU_ROW
+
+    lv_obj_update_layout(box);
+    int bub_y = lv_obj_get_height(box) + 6;
+    if(bub_y < SPK_BUB_MIN(&guru_face)) bub_y = SPK_BUB_MIN(&guru_face);
+
+    char say[160];
+    gu_advice_text(say, sizeof say, guru_advise(&a, days, GU_WIN), &a);
+    int after = speaker_say(page, &guru_face, say, bub_y, GU_BUB_H);
+
+    lv_obj_t *b = lv_button_create(page);
+    lv_obj_set_style_pad_all(b, 4, 0);
+    lv_obj_align(b, LV_ALIGN_TOP_LEFT, 4, after + 4);
+    lv_obj_t *l = lv_label_create(b);
+    lv_label_set_text(l, "back");
+    lv_obj_add_event_cb(b, gu_week_back_cb, LV_EVENT_CLICKED, NULL);
 }
 
 static void show_guru(void){

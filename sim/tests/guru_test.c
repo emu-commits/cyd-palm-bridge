@@ -287,6 +287,113 @@ int main(void){
         CK(guru_toggle(0, id1, AT(1), 0) == 0,         "a null state cannot be toggled");
     }
 
+    /* ------------------------------------------------- the week, out of the ring */
+    {
+        GuruState s;
+        guru_state_init(&s);
+        /* three days on, two days off, two days on -- inside one window */
+        int plan[7] = { 2, 3, 0, 0, 1, 4, 2 };
+        for(int d = 0; d < 7; d++)
+            for(int i = 0; i < plan[d]; i++) guru_note_check(&s, AT(d), 0);
+
+        CK(guru_window_total(&s, AT(6), 0) == 12,      "the window totals the whole week");
+        CK(guru_window_days_active(&s, AT(6), 0) == 5, "and counts only the days with something on them");
+        CK(guru_window_best(&s, AT(6), 0) == 4,        "and remembers the biggest day");
+
+        /* an empty state must not claim a week of nothing is a week of something */
+        GuruState e;
+        guru_state_init(&e);
+        CK(guru_window_days_active(&e, AT(0), 0) == 0, "a fresh user has no active days");
+        CK(guru_window_best(&e, AT(0), 0) == 0,        "and no best day");
+        CK(guru_window_days_active(0, AT(0), 0) == 0,  "a null state is survivable here too");
+    }
+
+    /* ------------------------------------------------------------- folding a log */
+    {
+        GuruAgg a;
+        guru_agg_reset(&a);
+        CK(a.n == 0,                      "a reset fold is empty");
+        CK(guru_top_cat(&a) == -1,        "an empty fold has no top category");
+        CK(guru_weakest_cat(&a) == -1,    "and no weakest one");
+
+        GuruRec r = { 0, 1, GU_CAT_GUT, 0 };
+        guru_agg_add(&a, &r);
+        guru_agg_add(&a, &r);
+        r.cat = GU_CAT_METAB;
+        guru_agg_add(&a, &r);
+        CK(a.n == 3,                          "three checks fold to three");
+        CK(a.cat[GU_CAT_GUT] == 2,            "and land in their categories");
+        CK(guru_top_cat(&a) == GU_CAT_GUT,    "the busiest category is the top one");
+
+        /* an undo is a row in the log, not an erasure -- the fold nets it out */
+        r.cat = GU_CAT_GUT; r.flags = GU_F_UNDO;
+        guru_agg_add(&a, &r);
+        CK(a.n == 2,                          "an undo record nets out of the total");
+        CK(a.cat[GU_CAT_GUT] == 1,            "and out of its category");
+
+        /* an undo with no matching check in range must not wrap a uint16 */
+        GuruAgg z;
+        guru_agg_reset(&z);
+        guru_agg_add(&z, &r);
+        CK(z.n == 0,                          "an orphan undo clamps at zero");
+        CK(z.cat[GU_CAT_GUT] == 0,            "rather than wrapping into a huge week");
+
+        /* a record from a future category (a log written by a later build) is
+         * ignored rather than indexed off the end of cat[] */
+        GuruRec bad = { 0, 1, GU_NCAT, 0 };
+        guru_agg_reset(&z);
+        guru_agg_add(&z, &bad);
+        CK(z.n == 0,                          "an unknown category is ignored, not indexed");
+        guru_agg_add(0, &r);
+        guru_agg_reset(0);
+        CK(1,                                 "a null fold is survivable");
+    }
+
+    /* ------------------------------------------------------------- advice rules */
+    {
+        GuruAgg a;
+        /* helper: fill a fold with per-category counts */
+        #define FOLD(...) do{ int cc[GU_NCAT] = { __VA_ARGS__ }; guru_agg_reset(&a); \
+                              for(int c = 0; c < GU_NCAT; c++){ GuruRec q = {0,1,(uint8_t)c,0}; \
+                                  for(int i = 0; i < cc[c]; i++) guru_agg_add(&a, &q); } }while(0)
+
+        /* R0 -- too little to say anything */
+        FOLD(1,1,1,0,0);
+        CK(guru_advise(&a, 3, 7) == GA_NONE,      "R0: four checks is not a week to analyse");
+        guru_agg_reset(&a);
+        CK(guru_advise(&a, 0, 7) == GA_NONE,      "R0: an empty week says nothing");
+        CK(guru_advise(0, 3, 7) == GA_NONE,       "R0: a null fold says nothing");
+
+        /* R1 -- one category got nothing at all */
+        FOLD(3,3,2,2,0);
+        CK(guru_advise(&a, 5, 7) == GA_NEGLECTED, "R1: an empty category is named");
+        CK(guru_weakest_cat(&a) == GU_CAT_RECOV,  "R1: and it is the empty one");
+        /* ...but not before there is enough of a week for the gap to mean something */
+        FOLD(2,2,1,1,0);
+        CK(guru_advise(&a, 4, 7) != GA_NEGLECTED, "R1: six checks is too early to call it neglected");
+
+        /* R2 -- most of the week in one place */
+        FOLD(1,7,1,1,1);
+        CK(guru_advise(&a, 5, 7) == GA_NARROW,    "R2: a lopsided week is narrow");
+        CK(guru_top_cat(&a) == GU_CAT_METAB,      "R2: and the crowded category is named");
+        FOLD(2,3,2,2,2);
+        CK(guru_advise(&a, 5, 7) != GA_NARROW,    "R2: an even week is not narrow");
+
+        /* R3 -- volume, but crammed into a couple of days */
+        FOLD(3,3,2,2,2);
+        CK(guru_advise(&a, 3, 7) == GA_SPOTTY,    "R3: three days of a week is spotty");
+        CK(guru_advise(&a, 2, 7) == GA_SPOTTY,    "R3: two is spottier still");
+
+        /* R4 -- showed up almost every day */
+        CK(guru_advise(&a, 7, 7) == GA_STEADY,    "R4: every day is steady");
+        CK(guru_advise(&a, 6, 7) == GA_STEADY,    "R4: six of seven is still steady");
+
+        /* R5 -- the unremarkable middle */
+        CK(guru_advise(&a, 5, 7) == GA_KEEPGOING, "R5: five of seven is just keep going");
+        CK(guru_advise(&a, 4, 7) == GA_KEEPGOING, "R5: and so is four");
+        #undef FOLD
+    }
+
     printf(fails ? "== guru: %d FAILURE(S) ==\n" : "== guru: all passed ==\n", fails);
     return fails ? 1 : 0;
 }

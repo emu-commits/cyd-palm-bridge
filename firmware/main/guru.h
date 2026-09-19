@@ -175,4 +175,48 @@ int guru_streak_now(const GuruState *s, uint32_t now, int tz_off_min);
  * number guru_target() rounds, but including today) -- for the week screen. */
 int guru_window_total(const GuruState *s, uint32_t now, int tz_off_min);
 
+/* ---- the week, read out of the ring ---------------------------------------
+ * These come from the saved state rather than the log because the ring already
+ * holds exactly one week of per-day counts -- streaming the log to recompute
+ * what is sitting in a seven-byte array would be a second implementation of the
+ * same thing, and the two would eventually disagree. The log's job is the
+ * per-category breakdown below, which the ring does NOT hold. */
+/* local days in the window that got at least one check, 0..GU_WIN. */
+int guru_window_days_active(const GuruState *s, uint32_t now, int tz_off_min);
+/* the most checks landed on any single day of the window. */
+int guru_window_best(const GuruState *s, uint32_t now, int tz_off_min);
+
+/* ---- folded stats over a range of log records -----------------------------
+ * Deliberately tiny: the whole history is never resident, records stream in one
+ * at a time and only this fold is held. An undo record decrements what its
+ * matching check added, which is what makes an append-only log net out. */
+typedef struct {
+    uint16_t n;                 /* net checks folded                          */
+    uint16_t cat[GU_NCAT];      /* net checks per category                    */
+} GuruAgg;
+
+void guru_agg_reset(GuruAgg *a);
+void guru_agg_add(GuruAgg *a, const GuruRec *r);
+
+/* the category with the most checks, and the one with the fewest. Ties go to the
+ * LOWEST index both times, so the order of GU_CAT_* decides ties and the answer
+ * is stable across runs. -1 if there is nothing to rank. */
+int guru_top_cat(const GuruAgg *a);
+int guru_weakest_cat(const GuruAgg *a);
+
+/* ---- the rule engine ------------------------------------------------------
+ * Advice codes, mapped to wording in ui.c (the same split coach.h uses), so her
+ * tone can be retuned without touching logic or invalidating a single test. */
+enum { GA_NONE, GA_NEGLECTED, GA_NARROW, GA_SPOTTY, GA_STEADY, GA_KEEPGOING };
+
+/* Deterministic, fixed priority, first match wins. `days_active` and
+ * `window_days` come from the two ring read-outs above; passing them in rather
+ * than reaching for a GuruState keeps this pure and trivially testable.
+ *
+ * GA_NEGLECTED means one category got nothing at all -- the caller pairs it with
+ * guru_weakest_cat() to name which. It is deliberately ahead of GA_NARROW: "you
+ * did nothing from Recovery" is more actionable than "most of it was Movement",
+ * and a week can be both. */
+int guru_advise(const GuruAgg *a, int days_active, int window_days);
+
 #endif

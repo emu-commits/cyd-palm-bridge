@@ -326,3 +326,94 @@ int guru_window_total(const GuruState *s, uint32_t now, int tz_off_min){
     for(int d = 0; d < GU_WIN; d++) sum += gu_count_on(s, today - d, today);
     return sum;
 }
+
+int guru_window_days_active(const GuruState *s, uint32_t now, int tz_off_min){
+    if(!s) return 0;
+    int32_t today = gu_today(now, tz_off_min);
+    int days = 0;
+    for(int d = 0; d < GU_WIN; d++) if(gu_count_on(s, today - d, today) > 0) days++;
+    return days;
+}
+
+int guru_window_best(const GuruState *s, uint32_t now, int tz_off_min){
+    if(!s) return 0;
+    int32_t today = gu_today(now, tz_off_min);
+    int best = 0;
+    for(int d = 0; d < GU_WIN; d++){
+        int c = gu_count_on(s, today - d, today);
+        if(c > best) best = c;
+    }
+    return best;
+}
+
+/* ------------------------------------------------------------- the week's fold */
+void guru_agg_reset(GuruAgg *a){
+    if(!a) return;
+    unsigned char *p = (unsigned char *)a;
+    for(unsigned i = 0; i < sizeof *a; i++) p[i] = 0;
+}
+
+void guru_agg_add(GuruAgg *a, const GuruRec *r){
+    if(!a || !r || r->cat >= GU_NCAT) return;
+    if(r->flags & GU_F_UNDO){
+        /* an undo cancels a check that is already in the fold. Clamped at zero
+         * rather than allowed to wrap: a log truncated mid-file, or one whose
+         * matching check fell outside the range being folded, would otherwise
+         * turn a uint16 into 65535 and make the week look extraordinary. */
+        if(a->n) a->n--;
+        if(a->cat[r->cat]) a->cat[r->cat]--;
+        return;
+    }
+    if(a->n < 0xFFFF)          a->n++;
+    if(a->cat[r->cat] < 0xFFFF) a->cat[r->cat]++;
+}
+
+int guru_top_cat(const GuruAgg *a){
+    if(!a || a->n == 0) return -1;
+    int best = 0;
+    for(int c = 1; c < GU_NCAT; c++) if(a->cat[c] > a->cat[best]) best = c;
+    return a->cat[best] > 0 ? best : -1;
+}
+
+int guru_weakest_cat(const GuruAgg *a){
+    if(!a || a->n == 0) return -1;
+    int worst = 0;
+    for(int c = 1; c < GU_NCAT; c++) if(a->cat[c] < a->cat[worst]) worst = c;
+    return worst;
+}
+
+/* ---------------------------------------------------------------- rule engine */
+/* The rule engine stays quiet until it has seen this much of a week. Advice off
+ * two checks is not analysis, it is pattern-matching on noise. */
+#define GU_MIN_ADVISE 5
+/* ...and it will not call a category neglected until there is enough of a week
+ * for the gap to mean something rather than just be early. */
+#define GU_MIN_NEGLECT 8
+
+int guru_advise(const GuruAgg *a, int days_active, int window_days){
+    if(!a || a->n < GU_MIN_ADVISE) return GA_NONE;                 /* R0 */
+
+    /* R1 -- a whole category got nothing. Ahead of R2 on purpose: naming the
+     * empty one is more actionable than naming the crowded one, and a lopsided
+     * week is usually both at once. */
+    if(a->n >= GU_MIN_NEGLECT){
+        int w = guru_weakest_cat(a);
+        if(w >= 0 && a->cat[w] == 0) return GA_NEGLECTED;
+    }
+
+    /* R2 -- most of the week went into one category. */
+    {
+        int t = guru_top_cat(a);
+        if(t >= 0 && a->cat[t] * 100 >= a->n * 60) return GA_NARROW;
+    }
+
+    /* R3 -- big days with nothing between them. Real volume, but landing on at
+     * most half the week: the habit is the streak, not the total. */
+    if(window_days > 0 && days_active > 0 && days_active * 2 <= window_days)
+        return GA_SPOTTY;
+
+    /* R4 -- showed up nearly every day. The thing the app is actually for. */
+    if(window_days > 0 && days_active >= window_days - 1) return GA_STEADY;
+
+    return GA_KEEPGOING;                                           /* R5 */
+}
