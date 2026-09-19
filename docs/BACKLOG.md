@@ -50,13 +50,27 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
 >   **one `lv_table`**, which is what made the whole pool fit the 24 KB object
 >   pool; the one-category-per-page fallback is not needed and should not be
 >   built. Col 0 ticks, col 1 opens the habit's `why`.
-> - **P5 next** — the week screen: `guru_face` + bubble, per-category analysis,
->   advice codes in `guru.h` mapped to copy in ui.c (the `CA_*` pattern). The data
->   it needs is `guru.log`, which P4 is already writing.
+> - **P5** — her week screen, `GA_*` advice rules, reached from Options > Her
+>   week. Ring for per-day figures, log for the category split.
+> - **P6 next** — Assistant onboarding (Wi-Fi + CalDAV). All three entry points
+>   are already decided in the item. This one is **device-only** to verify: it
+>   needs a real Wi-Fi join and a live iCloud account, so the sim cannot gate it.
 >
-> **Two device checks are outstanding and neither has been done:** P3 (greeting +
-> header) and P4 (the list, ticking, the detail view). The user has said they will
-> test later — do not tick those boxes without them.
+> **Three device checks are outstanding and none has been done:** P3 (greeting +
+> header), P4 (the list, ticking, the detail view) and P5 (her week). The user has
+> said they will test later — do not tick those boxes without them.
+>
+> **The web emulator is deployed** at https://emu-commits.github.io/cyd-palm-bridge/
+> — `feat/speaker-portraits` was added to the `github-pages` environment's
+> deployment-branch policy (id 60412682) so a non-main branch could publish. That
+> policy should be removed once this work merges.
+>
+> **Known, pre-existing, NOT from this phase:** `smoke32` logs LVGL image-decode
+> OOM warnings (~42 here, 145 at the P3 baseline) when the launcher is rebuilt
+> after leaving an app — 5 of its 9 icons fail to decode on that frame because
+> `LV_CACHE_DEF_SIZE` is 0 and each A8 icon re-decodes into a fresh ~550-byte
+> buffer. No screenshot has ever caught a visibly missing icon; LVGL recovers on
+> redraw. Worth a look before ship, but it is not a Guru bug.
 >
 > - **P0** — `speaker_say()` + `SPK_*` geometry in `ui.c` is the shared portrait +
 >   bubble; `g_greet_due` (reset in `lock_release_cb`) is the once-per-unlock flag;
@@ -203,10 +217,26 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
 - [ ] `[d]` On glass.
 
 ### P5 — Guru week analysis
-- [ ] Week screen mirroring Coach's: stats column + `guru_face` + bubble.
-- [ ] Per-category performance analysis, advice codes in `guru.h` mapped to copy
-      in ui.c (the `CA_*` pattern — retune tone without touching logic or tests).
-- [ ] `[s]` `[d]`
+- [x] Week screen mirroring Coach's: stats column + `guru_face` + bubble, reached
+      from **Options > Her week** while a Guru screen is up.
+      *The numbers come from two places on purpose:* per-day figures (total, days
+      of seven, best day) from the saved **ring**, which already holds a week of
+      counts; the **log** supplies only the per-category split, which the ring
+      cannot. Recomputing days from the log would be a second implementation of
+      the same arithmetic and the two would drift apart.
+- [x] Per-category analysis, advice codes `GA_*` in `guru.h` mapped to copy in
+      ui.c. Fixed priority, first match wins:
+      **NEGLECTED** (a category got nothing — named, and ahead of NARROW because
+      naming the empty one is more actionable than naming the crowded one) >
+      **NARROW** (≥60% in one category) > **SPOTTY** (volume, but on ≤ half the
+      days) > **STEADY** (6–7 days) > **KEEPGOING**. Silent under 5 checks, and
+      will not call a category neglected under 8.
+      An undo nets out of the fold and **clamps at zero**, so a truncated log
+      cannot wrap a uint16 into an extraordinary week.
+- [x] `[s]` — the tour ticks six habits in one category so it photographs a real
+      verdict rather than the "not enough yet" default. `smoke` and `smoke32`
+      render it identically.
+- [ ] `[d]` On glass.
 
 ### P6 — Assistant onboarding (Wi-Fi + CalDAV)
 All three entry points, *decided 2026-09-18*:
