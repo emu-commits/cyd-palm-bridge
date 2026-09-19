@@ -50,11 +50,24 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
 > not code.** Pick up at either (a) the five `[d]` checks once the user has
 > looked, or (b) P6, the last unbuilt group.
 >
-> - **P4** — 35 habits in `guru.c` as const rodata, five categories, `GuruRec`
->   frozen at 8 bytes, append-only `guru.log`, `guru.sav` now written. The list is
->   **one `lv_table`**, which is what made the whole pool fit the 24 KB object
->   pool; the one-category-per-page fallback is not needed and should not be
->   built. Col 0 ticks, col 1 opens the habit's `why`.
+> - **P4** — 35 habits, five categories, `GuruRec` frozen at 8 bytes, append-only
+>   `guru.log`, `guru.sav` now written. The list is **one `lv_table`**, which is
+>   what made the whole pool fit the object pool; the one-category-per-page
+>   fallback is not needed and should not be built. Col 0 ticks, col 1 opens the
+>   habit's `why`.
+> - **P4a (2026-09-19)** — **the habits are no longer in the source.**
+>   `firmware/main/guru_pool.txt` is the source of truth;
+>   `tools/gen_guru_pool.py` compiles it into `guru_pool.c`, and the same file
+>   can be dropped on the card as `/sdcard/guru.txt` to replace the list without
+>   a reflash (`gurupool.c` parses it, Guru > Menu > Export habit list writes a
+>   copy). **Edit the .txt, never the .c** — CI regenerates and diffs.
+>   The copy pass that came with it fixed real errors the user caught: the
+>   category displayed as "Movement" but the enum has always meant *metabolic*,
+>   which is how food and supplements ended up filed under a heading that read as
+>   exercise. The display name is now **"Metabolic"**; `Protein before bed`
+>   (id 13) moved to Recovery and `Creatine` (id 14) to Mind. **Ids did not
+>   change**, so existing `guru.log` records still resolve, and the `cat` stored
+>   in each record means the week is still analysed as it was lived.
 > - **P5** — her week screen, `GA_*` advice rules, reached from Options > Her
 >   week. Ring for per-day figures, log for the category split.
 > - **P7** — lock screen restyled into three declared zones. Zero new widget
@@ -68,11 +81,12 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
 >   verify: a real Wi-Fi join and a live iCloud account, so the sim cannot gate
 >   it, and it will need the user's Apple ID and an app-specific password.
 >
-> **Five device checks are outstanding and none has been done:** P3 (greeting +
+> **Six device checks are outstanding and none has been done:** P3 (greeting +
 > header), P4 (the list, ticking, the detail view), P5 (her week), P7 (the
-> restyled lock screen) and P8 (cancel a real sync — the only way to exercise
-> that path at all). The user has said they will test later — do not tick those
-> boxes without them.
+> restyled lock screen), P8 (cancel a real sync — the only way to exercise
+> that path at all) and P4a (Export habit list writes `guru.txt`; edit it on a
+> computer and confirm the edited list comes back). The user has said they will
+> test later — do not tick those boxes without them.
 >
 > **The web emulator is deployed** at https://emu-commits.github.io/cyd-palm-bridge/
 > — `feat/speaker-portraits` was added to the `github-pages` environment's
