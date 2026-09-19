@@ -52,13 +52,22 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
 >   built. Col 0 ticks, col 1 opens the habit's `why`.
 > - **P5** — her week screen, `GA_*` advice rules, reached from Options > Her
 >   week. Ring for per-day figures, log for the category split.
-> - **P6 next** — Assistant onboarding (Wi-Fi + CalDAV). All three entry points
->   are already decided in the item. This one is **device-only** to verify: it
->   needs a real Wi-Fi join and a live iCloud account, so the sim cannot gate it.
+> - **P7** — lock screen restyled into three declared zones. Zero new widget
+>   classes; the furniture is canvas ink. `DASH_Y_*` constants are shared between
+>   `dash_paint()` and `ui_show_lock()` and must stay in step.
+> - **P8** — `hotsync_cancel()` + the confirmation modal. The cancel is a
+>   *request* checked at safe points, never a kill.
+> - **P6 is the ONLY group left** — Assistant onboarding (Wi-Fi + CalDAV). It was
+>   skipped at the user's direction on 2026-09-19 to take P7 and P8 first. All
+>   three entry points are already decided in the item. It is **device-only** to
+>   verify: a real Wi-Fi join and a live iCloud account, so the sim cannot gate
+>   it, and it will need the user's Apple ID and an app-specific password.
 >
-> **Three device checks are outstanding and none has been done:** P3 (greeting +
-> header), P4 (the list, ticking, the detail view) and P5 (her week). The user has
-> said they will test later — do not tick those boxes without them.
+> **Five device checks are outstanding and none has been done:** P3 (greeting +
+> header), P4 (the list, ticking, the detail view), P5 (her week), P7 (the
+> restyled lock screen) and P8 (cancel a real sync — the only way to exercise
+> that path at all). The user has said they will test later — do not tick those
+> boxes without them.
 >
 > **The web emulator is deployed** at https://emu-commits.github.io/cyd-palm-bridge/
 > — `feat/speaker-portraits` was added to the `github-pages` environment's
@@ -262,21 +271,48 @@ All three entry points, *decided 2026-09-18*:
 - [ ] `[d]` **device-only** — real Wi-Fi join and a live iCloud account.
 
 ### P7 — lock screen restyle
-- [ ] Japanese-weather-channel aesthetic: crisp data zones, strong separators,
-      clear hierarchy. Dashboard is `ui.c` ~4071–4560 plus `dash.c`.
-- [ ] **Constraint:** the dashboard is the tightest pool screen in the firmware
-      (one I1 canvas + labels, built lazily so it never coexists with the
-      launcher). Restyle must not add widget classes that take a draw layer —
-      borders and radii are fine, indicators are not.
-- [ ] `[s]` `[d]` — and re-check `smoke32` (the true 24 KB pool), not just `smoke`.
+- [x] Japanese-weather-channel aesthetic. Three declared zones —
+      **CONDITIONS / AHEAD / SUN & MOON** — each a reversed header strip with
+      shoulders and a closing rule, plus a reversed status strip along the top.
+      The six rain bars now grow to **one shared baseline**, which is the only
+      rule on the screen doing real work: a common baseline is what lets six
+      columns be compared at a glance.
+- [x] **Constraint honoured:** zero new widget classes. The furniture is ink on
+      the I1 canvas that was already there; the only new objects are three
+      heading labels recoloured to the background. Nothing takes a draw layer.
+- [x] The vertical budget is `DASH_Y_*` / `DASH_H_*` constants instead of
+      literals in two functions. *This split is load-bearing:* the furniture is
+      painted in `dash_paint()` (must survive the per-tick clear), the labels on
+      it are built in `ui_show_lock()` (must not) — they have to agree, and only
+      a shared constant makes that checkable.
+- [x] `[s]` — `smoke` **and** `smoke32`, both 0 OOM, rendering identically.
+      *Reversed labels sit at the bar's own y, not y+1:* the Palm font already
+      carries a pixel of leading above its caps, so y+1 put white glyphs on the
+      bar's bottom edge. Caught by the user on review of the first cut.
+- [ ] `[d]` On glass.
 
 ### P8 — HotSync cancel
-- [ ] While syncing, **Sync Now** becomes **Cancel**.
-- [ ] Cancel opens a confirmation modal; confirming aborts the run.
-- [ ] **`hotsync.h` has no cancel API** — needs a flag the background task checks
-      at safe points (between records, never mid-write), and a status that reads
-      as cancelled rather than failed.
-- [ ] `[s]` `[d]`
+- [x] One button, **three** jobs: Sync Now → Cancel while running → **"Stopping…"**
+      (disabled) once asked. The third state earns its keep — a cancel can take
+      until the end of the current collection, and a button still reading
+      "Cancel" would invite a second press and read as broken.
+- [x] Confirmation modal, because the press is one tap from the button that
+      *starts* a sync. It answers the question a confirmation actually has to:
+      **what survives**. Plain objects only (it appears mid-sync, when the heap
+      is at its most fragmented); on `lv_layer_top()`, dropped by `kill_hs()`.
+- [x] **`hotsync_cancel()` is a request, not a kill.** It raises a flag and
+      returns; the task is never suspended from outside, because it can be
+      mid-write when the button is pressed and a half-written PDB is worse than
+      a few seconds' delay. Safe points: the top of the collection loop (one
+      collection is one merge) and before news/weather (each replaces a cache
+      wholesale). A cancelled run reads as **cancelled** — never "Done" (claims
+      work never attempted) nor "failed" (sends you debugging a fine network) —
+      and names what did land.
+- [x] `[s]` — the sim gates that the button still reads "Sync Now" and still
+      syncs.
+- [ ] `[d]` **The stop itself is device-only.** The sim's "sync" is a synchronous
+      call that finishes before any button could be pressed, so `hotsync_busy()`
+      is never 1 there and the confirmation can never open. Needs hardware.
 
 ### Parked until this phase lands — the Assistant's other jobs
 Ideas only. **Do not build any of these in this phase** (*decided 2026-09-18:
