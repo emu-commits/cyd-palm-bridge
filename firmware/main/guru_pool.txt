@@ -29,47 +29,47 @@
 # disclaimer that ships with this list.
 # ---------------------------------------------------------------------------
 
-# --- Gut ---------------------------------------------------------------------
-1 | gut | One brazil nut | A single nut is the whole ritual. More is not better here.
-2 | gut | Black garlic | Garlic aged until it is sweet and soft. Eaten as-is, a clove at a time.
-3 | gut | Broccoli or sprouts | The sprouts are the concentrated version of the same plant.
-4 | gut | Natto or another ferment | Fermented soybeans. Kimchi, sauerkraut or miso count for this one.
-5 | gut | Kefir or live yoghurt | Live cultures rather than the sweetened, pasteurised sort.
-6 | gut | A plant you have not had | Variety is the point -- people who track this aim at thirty a week.
-7 | gut | Twelve hours between meals | An overnight gap. Dinner early or breakfast late, whichever you prefer.
+# --- Gut -------------------------------------------------------------------
+1 | gut | One brazil nut | Brazil nuts are the densest food source of selenium, which the thyroid and the body's own antioxidant enzymes run on. One is the whole ritual -- more is genuinely not better here, which makes restraint the skill.
+2 | gut | Black garlic | Garlic aged slowly until it is sweet, soft and jammy. The ageing drops the harshness and concentrates the antioxidant compounds, so it is eaten as it is, a clove at a time.
+3 | gut | Broccoli or sprouts | Broccoli sprouts carry many times the sulforaphane of the mature head -- the compound the cruciferous family is studied for. Either works; the sprouts are simply the concentrated version of the same plant.
+4 | gut | Natto or another ferment | Live fermented food feeds gut bacteria directly rather than just feeding you. Natto is the strongest version and brings vitamin K2 with it; kimchi, sauerkraut and miso all count.
+5 | gut | Kefir or live yoghurt | A drinkable culture with a far wider range of organisms than yoghurt has. Look for live cultures and little sugar -- the sweetened, pasteurised sort is dessert with a health label.
+6 | gut | A plant you have not had | Gut bacteria diversity tracks the variety of plants you eat more closely than the amount. People who track this aim at thirty different plants a week; herbs, spices, nuts and seeds all count.
+7 | gut | Twelve hours between meals | An overnight gap long enough for digestion to finish and for repair processes to get a clear run at it. Dinner earlier or breakfast later, whichever fits your day better.
 
-# --- Movement ----------------------------------------------------------------
-8 | metabolic | Zone 2, with a 140 burst | Steady enough to hold a conversation, with one hard push in it.
-9 | metabolic | Twelve-second sprints | All-out and very short, with a long walk back between each one.
-10 | metabolic | Walk after the big meal | Ten minutes on your feet rather than sitting straight down.
-11 | metabolic | Sardines or mackerel | Small oily fish. Tinned counts, and is what most people actually eat.
-12 | metabolic | Mineral water, glass bottle | Volcanic if you can get it; glass because plastic is the part people mind.
-13 | metabolic | Protein before bed | A small savoury something rather than a sweet one.
-14 | metabolic | Creatine | The most boring and most studied supplement on the shelf.
+# --- Metabolic -------------------------------------------------------------
+8 | metabolic | Zone 2 cardio, one hard push | Zone 2 is easy aerobic effort -- steady, nose-breathable, still able to hold a conversation in full sentences. That pace is what builds mitochondria and aerobic base, and it is deliberately easier than most people train. Finish with one burst hard enough to put your heart rate past about 140 beats per minute, which trains the top end that the easy work never reaches.
+9 | metabolic | Twelve-second sprints | All-out and very short, with a long walk back between each one. Brief maximal efforts push VO2 max and glucose clearance harder than steady cardio does, without the recovery cost of a long hard session.
+10 | metabolic | Walk after the big meal | Ten minutes on your feet blunts the blood sugar rise from a meal, because working muscle draws glucose straight out of the blood without waiting on insulin. Walking beats sitting down straight afterwards.
+11 | metabolic | Sardines or mackerel | Small oily fish eaten whole: omega-3 fats, vitamin D, and calcium from the soft bones. Prefer glass jars to tins -- tin liners are usually plastic, and that is the part worth avoiding if you eat these often.
+12 | metabolic | Mineral water, glass bottle | Magnesium and bicarbonate in a form that is easy to get every day, and volcanic sources carry the most. Glass rather than plastic for the same reason as the fish: it is the packaging people object to, not the water.
 
-# --- Mind --------------------------------------------------------------------
-15 | mind | Morning sunlight, outdoors | Outside, without glasses or a window in the way. Early is the point.
-16 | mind | A slow breath cycle | Longer out than in, until the hurry goes out of it.
-17 | mind | Ten minutes of stillness | Sitting, doing nothing, not listening to anything. Harder than it sounds.
-18 | mind | Learn something by heart | A few lines, a phone number, a route. Recall is the exercise.
-19 | mind | Read on paper | Long-form and un-scrollable, for as long as it holds you.
-20 | mind | A real conversation | Voice or face, not typing. Length matters less than attention.
-21 | mind | Screens off before bed | An hour of dimmer, duller things first.
+# --- Mind ------------------------------------------------------------------
+14 | mind | Creatine | Best known for muscle, but the reason to take it daily is upstairs: creatine buffers energy inside brain cells, and what people notice is clearer thinking when tired and better quality sleep. Among the most studied supplements there is, and one of the cheapest.
+15 | mind | Morning sunlight, outdoors | Bright light in the first hour after waking sets the body clock for the day, and that is what decides when you get sleepy tonight. Outdoors, without sunglasses -- window glass and lenses cut out most of the intensity doing the work.
+16 | mind | Slow breathing, long exhale | Breathe out for roughly twice as long as you breathe in, for a few minutes. The long exhale is the part that engages the parasympathetic side and slows the heart -- the fastest deliberate way to come down out of stress.
+17 | mind | Ten minutes of stillness | Sitting, doing nothing, with nothing playing. Attention is trainable and this is the training; it is also the only stretch of the day with no input arriving to react to. Harder than it sounds.
+18 | mind | Learn something by heart | A few lines, a phone number, a route. Deliberate recall is what builds memory and keeps it -- looking things up instead is exactly what lets the ability fade.
+19 | mind | Read on paper | Long-form and un-scrollable, for as long as it holds you. Sustained reading keeps attention in one place far longer than a screen will, and paper carries none of the interruptions.
+20 | mind | A real conversation | Voice or face, not typing. Social connection is one of the strongest long-term predictors of health there is, and it needs the real thing to count. Length matters less than attention.
+21 | mind | Screens off before bed | An hour of dimmer, duller things first. Evening light and the alertness a screen brings both push back the onset of sleep, and the cost turns up as time spent lying awake.
 
-# --- Strength ----------------------------------------------------------------
-22 | strength | One set to real failure | A single movement taken until the next rep will not happen.
-23 | strength | Hang from a bar | Dead weight, shoulders loose, for as long as your grip lasts.
-24 | strength | Sit in a deep squat | Heels down, all the way at the bottom. Rest there.
-25 | strength | Calf raises to burning | Slow, off a step, until they complain.
-26 | strength | Grip work | Carry something heavy until you have to put it down.
-27 | strength | Hip and hamstring stretch | The two that shorten from sitting. Held, not bounced.
-28 | strength | Stand on one leg, eyes shut | Balance is the one that quietly goes. Both legs, near a wall.
+# --- Strength --------------------------------------------------------------
+22 | strength | One set to real failure | A single movement taken until the next rep genuinely will not happen. Hard sets are what signal muscle to adapt, and one honest set does more than three comfortable ones.
+23 | strength | Hang from a bar | Dead weight, shoulders loose, for as long as your grip lasts. Decompresses the spine, opens the shoulders back out after a day of sitting, and builds grip while you are there.
+24 | strength | Sit in a deep squat | Heels down, all the way at the bottom, and rest there. It is a position most of the world still uses daily and most desk-bound adults have quietly lost; keeping it keeps the hips and ankles.
+25 | strength | Calf raises to burning | Slow, off a step, until they complain. The calves are the pump that pushes blood back up out of the legs, and they are the first thing a day of sitting takes away.
+26 | strength | Grip work | Carry something heavy until you have to put it down. Grip strength is one of the best single markers of how well the whole body is ageing, and it trains by simply holding things.
+27 | strength | Hip and hamstring stretch | The two that shorten from sitting, and the pair most back trouble traces back to. Held for a while rather than bounced.
+28 | strength | Stand on one leg, eyes shut | Balance is the capacity that goes quietly, and the one that decides whether a stumble becomes a fall. Shutting your eyes takes away the shortcut. Both legs, near a wall.
 
-# --- Recovery ----------------------------------------------------------------
-29 | recovery | Woke at your usual time | The same hour as yesterday, weekend included.
-30 | recovery | Cold finish to the shower | The last stretch on cold, long enough to change your breathing.
-31 | recovery | Sauna or a long hot bath | Heat, until you have properly had enough of it.
-32 | recovery | No caffeine after noon | It is still working at bedtime whether you feel it or not.
-33 | recovery | Bedroom cold and dark | Colder than feels reasonable, and dark enough to lose your hand.
-34 | recovery | A day without alcohol | Simply a day that did not have any in it.
-35 | recovery | Nose-breathe overnight | Mouth shut. People who chase this tape it; you do not have to.
+# --- Recovery --------------------------------------------------------------
+29 | recovery | Woke at your usual time | The same hour every day, weekends included. A consistent wake time anchors the body clock harder than bedtime does, which makes it the highest-return sleep habit on this list.
+13 | recovery | Protein before bed | Overnight is when muscle is actually repaired, and that work needs amino acids available while you sleep. A slow protein late -- cottage cheese, yoghurt, casein -- gives the night something to build from, and savoury keeps the sugar out of it.
+30 | recovery | Cold finish to the shower | The last stretch on cold, long enough to change your breathing. The lasting part is the effect on mood and alertness: deliberate cold lifts noradrenaline for hours afterwards.
+31 | recovery | Sauna or a long hot bath | Heat, until you have properly had enough of it. Regular heat sits alongside cardiovascular health in the populations that do it daily, and it makes falling asleep easier that night.
+32 | recovery | No caffeine after noon | Half the caffeine in a midday coffee is still in you at bedtime. It will not always stop you falling asleep -- it quietly takes the deep sleep out of the night instead, which is the part you would miss.
+33 | recovery | Bedroom cold and dark | Core temperature has to fall for sleep to start, and a cold room lets that happen. Dark enough to lose your hand, too; even small amounts of light register through closed eyelids.
+34 | recovery | A day without alcohol | Simply a day that did not have any in it. Alcohol sedates rather than putting you to sleep: it shortens the time to drop off and then takes the REM out of the second half of the night.
+35 | recovery | Nose-breathe overnight | Mouth shut. Nasal breathing filters and humidifies the air, keeps the airway more stable, and is most of what separates quiet sleep from snoring. People who chase this tape their mouths; you do not have to.

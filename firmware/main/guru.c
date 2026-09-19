@@ -66,13 +66,15 @@ const GuruTask *guru_task_by_id(int id){
     return 0;
 }
 
-/* Category headings as they appear on screen. "Movement" and "Strength" rather
- * than the internal GU_CAT_METAB / GU_CAT_STRUCT: the enum names are for the log
- * and must never move, the words are for the user and can be retuned freely. */
+/* Category headings as they appear on screen. "Metabolic" rather than the old
+ * "Movement": the enum has always meant metabolic health, and the display name
+ * disagreeing with it is what let food and supplements end up filed under a
+ * heading that read as exercise. The enum names are for the log and must never
+ * move; these words are for the user and can be retuned freely. */
 const char *guru_cat_name(int cat){
     switch(cat){
         case GU_CAT_GUT:    return "Gut";
-        case GU_CAT_METAB:  return "Movement";
+        case GU_CAT_METAB:  return "Metabolic";
         case GU_CAT_COGN:   return "Mind";
         case GU_CAT_STRUCT: return "Strength";
         case GU_CAT_RECOV:  return "Recovery";
