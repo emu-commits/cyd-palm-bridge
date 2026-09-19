@@ -1,2 +1,20 @@
+# PINNED, deliberately. This was "^9.2.0", which floats, and on 2026-09-19 the
+# component manager resolved it to 9.6.0 in CI while every local build and every
+# flashed device was still on the cached 9.5.0. The firmware then failed to link:
+#
+#   region `dram0_0_seg' overflowed by 9264 bytes
+#
+# 9.6.0 deprecates LV_MEM_SIZE_KILOBYTES in favour of LV_MEM_SIZE and, when both
+# are defined, silently uses LV_MEM_SIZE -- whose default is 64 KB. So
+# sdkconfig.defaults' carefully measured CONFIG_LV_MEM_SIZE_KILOBYTES=32 stopped
+# applying and the pool doubled, taking DRAM with it.
+#
+# This project is built around the size of that pool -- see the long note in
+# sdkconfig.defaults about why 24 KB live-locks the dashboard and 32 KB does not
+# -- so the LVGL version is not something to let float. Raise it deliberately,
+# rebuild, and re-measure the pool on hardware.
+#
+# NOTE: sim/Makefile pins its own LVGL clone separately (LVGL_TAG := v9.2.2), so
+# the simulator and the firmware are NOT on the same version today.
 dependencies:
-  lvgl/lvgl: "^9.2.0"
+  lvgl/lvgl: "9.5.0"
