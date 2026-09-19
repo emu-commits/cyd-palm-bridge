@@ -43,7 +43,20 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
 > ### RESUME HERE — state at 2026-09-19
 >
 > Branch **`feat/speaker-portraits`**. The device has this build flashed and boots
-> clean. **P0–P3 are done bar P3's on-glass check; P4 is next.**
+> clean. **P0–P4 are done bar their on-glass checks; P5 is next.**
+>
+> - **P4** — 35 habits in `guru.c` as const rodata, five categories, `GuruRec`
+>   frozen at 8 bytes, append-only `guru.log`, `guru.sav` now written. The list is
+>   **one `lv_table`**, which is what made the whole pool fit the 24 KB object
+>   pool; the one-category-per-page fallback is not needed and should not be
+>   built. Col 0 ticks, col 1 opens the habit's `why`.
+> - **P5 next** — the week screen: `guru_face` + bubble, per-category analysis,
+>   advice codes in `guru.h` mapped to copy in ui.c (the `CA_*` pattern). The data
+>   it needs is `guru.log`, which P4 is already writing.
+>
+> **Two device checks are outstanding and neither has been done:** P3 (greeting +
+> header) and P4 (the list, ticking, the detail view). The user has said they will
+> test later — do not tick those boxes without them.
 >
 > - **P0** — `speaker_say()` + `SPK_*` geometry in `ui.c` is the shared portrait +
 >   bubble; `g_greet_due` (reset in `lock_release_cb`) is the once-per-unlock flag;
@@ -136,16 +149,21 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
 - [ ] `[d]` On glass.
 
 ### P4 — Guru: the task treadmill
-- [ ] **The task pool.** Specific, actionable, individually checkable directives —
-      never "eat healthy". Seeded from the examples given (zone-2 140bpm burst,
-      one brazil nut, black garlic, broccoli, natto, volcanic mineral water from
-      glass, micro-strength to local failure, breath/meditation cycle, morning
-      sunlight, targeted stretch, creatine, protein before bed, 12-second sprints,
-      sardines/mackerel). Needs to reach a pool deep enough not to feel repetitive.
-- [ ] **Categories** (drives the week analysis): proposed **Gut, Metabolic,
-      Cognitive, Structural, Recovery** — every task tagged with exactly one.
-      *Indices are persisted: never reorder* (same rule as `CO_DOM_*`).
-- [ ] **Record format**, byte-counted and frozen before any UI is written — the
+- [x] **The task pool.** 35 tasks, const flash rodata in `guru.c`, each with a
+      one-line `why` (a list of cryptic imperatives is a list nobody trusts). The
+      bar for every line was *"could two people disagree about whether I did this
+      today?"* -- if yes it is a tip, not a task, and "eat healthy" is not in it.
+      Every example given is in the pool (zone-2 with a 140 burst, one brazil nut,
+      black garlic, broccoli, natto, mineral water from glass, micro-strength to
+      failure, breath cycle, morning sunlight, targeted stretch, creatine, protein
+      before bed, 12-second sprints, sardines/mackerel) plus twenty-one more, so
+      no category is thin enough to feel repetitive.
+- [x] **Categories** — `GU_CAT_GUT / METAB / COGN / STRUCT / RECOV`, seven tasks
+      each. *Indices are persisted: never reorder* (same rule as `CO_DOM_*`). The
+      enum names are frozen; the words shown to the user come from
+      `guru_cat_name()` ("Gut", "Movement", "Mind", "Strength", "Recovery") and
+      can be retuned freely without touching the log.
+- [x] **Record format**, byte-counted and frozen before any UI is written — the
       Coach's 12-byte `CoachRec` is the precedent. Append-only log on SD.
       **A task is a stable numeric ID, not a list position** — the pool is fixed
       *for now* but gets a Menu editor in a later phase, and a log written today
@@ -162,18 +180,27 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
       the bar you cleared before you stopped). The streak counts days with *any*
       check, deliberately not days that met target — a target-based streak breaks
       exactly when someone improves enough to raise their own bar.
-- [ ] **Main screen: the full pool, always visible**, grouped by category, tap to
-      check off. *Decided 2026-09-18.*
-- [ ] **⚠ Measure the object cost before building that screen.** The pool has to
+- [x] **Main screen: the full pool, always visible**, grouped by category, tap to
+      check off. *Decided 2026-09-18.* Column 0 ticks, column 1 opens the habit
+      and its `why` — the same split To Do uses. Only the tapped cell repaints, so
+      ticking something near the bottom keeps the scroll position.
+- [x] **⚠ Measured, and it fits — no pagination needed.** The pool has to
       be deep enough not to feel repetitive, but the LVGL pool is 24 KB and every
       row is objects. The launcher's 9 cells are ~27 objects and fit; a 40-task
       list at a row + label each is ~80 and may not. **Measure first** (the
       `heap used=... of 147456` line the smoke prints, plus `smoke32` for the true
       24 KB pool). If the whole pool will not fit on one screen, the fallback that
-      keeps the decision intact is **one category per page** — everything is still
-      visible and nothing is dealt or hidden, it just paginates.
-- [ ] **Streak / success tracking**, daily and weekly.
-- [ ] `[s]` `[d]`
+      keeps the decision intact is **one category per page**.
+      *Resolved 2026-09-19:* the fear was 40 rows x (row + label) = ~80 objects.
+      The list is **one `lv_table`** instead — the same trick the record lists
+      already use — so the whole pool costs ONE object plus its cell strings.
+      `smoke32` renders it pixel-identically to the 64-bit sim. The fallback is
+      not needed and should not be built.
+- [x] **Streak / success tracking**, daily. `guru_streak_now()` + the header's
+      "N of M today" / "N today -- done". The weekly read-out is P5's screen.
+- [x] `[s]` — list, tick, detail view and its Did-it/Undo button all photographed
+      and checked by eye, under `smoke` and `smoke32` both.
+- [ ] `[d]` On glass.
 
 ### P5 — Guru week analysis
 - [ ] Week screen mirroring Coach's: stats column + `guru_face` + bubble.
