@@ -4129,6 +4129,37 @@ static void clock_tick(lv_timer_t *t){
  * widgets. Swipe up to unlock into the launcher. */
 #define DASH_CW LCD_W
 #define DASH_CH LCD_H
+
+/* ---- the lock screen's vertical budget -----------------------------------
+ * 320 px, spent once and written down, because every one of these numbers used
+ * to be a literal buried in two different functions -- the furniture is painted
+ * in dash_paint() (it must survive a clear on every tick) while the labels that
+ * sit on it are built in ui_show_lock() (they do not). Those two have to agree,
+ * and a named constant is the only thing that makes that checkable.
+ *
+ * The layout is three declared zones under the clock. A zone is a reversed
+ * header strip, shoulders down each side, and a rule across the bottom; the
+ * last one is left open-bottomed because the screen edge already closes it. */
+#define DASH_TOPBAR_H   15               /* reversed status strip, y 0..14   */
+#define DASH_MARGIN     8                /* zone inset from both edges       */
+
+#define DASH_Y_WX       106              /* CONDITIONS header                */
+#define DASH_H_WX       112              /*   ...closing rule at 218         */
+#define DASH_Y_AGENDA   222              /* AHEAD header                     */
+#define DASH_H_AGENDA   44               /*   ...closing rule at 266         */
+#define DASH_Y_SUN      268              /* SUN & MOON header, open-bottomed */
+#define DASH_H_SUN      36
+
+/* content baselines inside the weather zone */
+#define DASH_Y_WXNOW    122
+#define DASH_Y_AIR      136
+#define DASH_Y_COLT     148              /* the six temperatures             */
+#define DASH_Y_BARBASE  188              /* rain bars grow UP to this line   */
+#define DASH_Y_COLH     192              /* hour                             */
+#define DASH_Y_COLR     204              /* rain % -- ends at 216, and the   */
+                                         /* zone's rule is at 218, so it     */
+                                         /* clears. Shrinking the bars was   */
+                                         /* the price of that clearance.     */
 static lv_obj_t *g_lock;                 /* the overlay root, or NULL when unlocked */
 static lv_obj_t *g_dash_cv;              /* the I1 graphics canvas */
 static lv_obj_t *g_dash_time_ap;         /* AM/PM label (repositioned to the clock width) */
@@ -4199,7 +4230,30 @@ static void dash_clear(void){        /* clear to palette index 0 (COL_BODY) */
 static void dfill(int x,int y,int w,int h){
     for(int j=0;j<h;j++) for(int i=0;i<w;i++) dpx(x+i,y+j);
 }
-static void dhdots(int x0,int x1,int y){ for(int x=x0;x<=x1;x+=3) dpx(x,y); }
+
+/* ---- the lock screen's furniture -----------------------------------------
+ * A broadcast weather board reads the way it does because the data sits in
+ * declared zones: a reversed strip naming the block, a hairline closing it, and
+ * numbers on a shared baseline. That is all this is -- a solid rule, a filled
+ * bar, and a tick. Every one of them is ink on the SAME I1 canvas that was
+ * already there, so the restyle costs nothing from the 24 KB object pool: no
+ * new widgets, and nothing that takes a draw layer (an lv_bar or lv_arc here
+ * would live-lock LVGL -- see docs/BUILD_PROGRESS.md).
+ *
+ * The labels that sit ON a reversed bar are ordinary LVGL labels recoloured to
+ * the background, which is why dash_lbl() grew a `rev` variant below. */
+static void drule(int x0,int x1,int y){ for(int x=x0;x<=x1;x++) dpx(x,y); }
+
+/* A section header: a filled strip the width of the zone. The label goes on top
+ * in reverse. `h` is the bar height -- 13 clears the Palm font's cap height with
+ * a pixel to spare top and bottom. */
+#define DASH_BAR_H 13
+static void dbar(int x0,int x1,int y){ dfill(x0,y,x1-x0+1,DASH_BAR_H); }
+
+/* The zone's left and right shoulders: a short vertical tick dropping from the
+ * header bar, which is what makes a band read as a bounded block rather than as
+ * a line with text under it. Cheap, and it does the most work of anything here. */
+static void dshoulder(int x,int y,int h){ for(int j=0;j<h;j++) dpx(x,y+j); }
 
 /* The hero clock is drawn as seven-segment digits: bars with 45-degree bevelled
  * ends that miter cleanly at the corners, so the big time reads as a smooth
@@ -4366,6 +4420,15 @@ static lv_obj_t *dash_lbl(int x,int y,const char *txt,int bold){
     return l;
 }
 
+/* The same label, recoloured to sit on top of a filled bar. Knocked out of the
+ * ink rather than drawn in it -- which is the whole reason the section headings
+ * read as headings and not as more data. */
+static lv_obj_t *dash_lbl_rev(int x,int y,const char *txt){
+    lv_obj_t *l = dash_lbl(x,y,txt,1);
+    lv_obj_set_style_text_color(l, COL_BODY, 0);
+    return l;
+}
+
 /* swipe-up detection (same robust manual scheme the News reader uses). */
 static int g_lock_py, g_lock_ly;
 static void lock_press_cb(lv_event_t *e){ (void)e;
@@ -4425,11 +4488,33 @@ static void dash_paint(void){
     if(g_dash_stat){ char sb[48]; dash_status_text(sb,sizeof sb);
                      lv_label_set_text(g_dash_stat, sb); }
 
-    /* zone separators + unlock chevron */
-    dhdots(10,DASH_CW-10,104);
-    dhdots(10,DASH_CW-10,140);
-    dhdots(10,DASH_CW-10,220);
-    dhdots(10,DASH_CW-10,262);
+    /* ---- the furniture: a reversed strip at the top, then one declared zone
+     * per kind of data. The bars and their labels are static, so they are built
+     * once in ui_show_lock(); what is painted here is only what has to survive
+     * a dash_clear() on every tick. Keep the two in step -- the bar is drawn
+     * here, the word that sits on it is created there. */
+    dfill(0,0,DASH_CW,DASH_TOPBAR_H);              /* status strip, reversed   */
+
+    dbar(DASH_MARGIN, DASH_CW-DASH_MARGIN, DASH_Y_WX);       /* CONDITIONS     */
+    dbar(DASH_MARGIN, DASH_CW-DASH_MARGIN, DASH_Y_AGENDA);   /* AHEAD          */
+    dbar(DASH_MARGIN, DASH_CW-DASH_MARGIN, DASH_Y_SUN);      /* SUN & MOON     */
+
+    /* Shoulders + a closing rule turn each strip into a bounded block. The
+     * weather zone is the tall one, so it is the one that most needs them. */
+    dshoulder(DASH_MARGIN,        DASH_Y_WX, DASH_H_WX);
+    dshoulder(DASH_CW-DASH_MARGIN,DASH_Y_WX, DASH_H_WX);
+    drule(DASH_MARGIN, DASH_CW-DASH_MARGIN, DASH_Y_WX + DASH_H_WX);
+
+    dshoulder(DASH_MARGIN,        DASH_Y_AGENDA, DASH_H_AGENDA);
+    dshoulder(DASH_CW-DASH_MARGIN,DASH_Y_AGENDA, DASH_H_AGENDA);
+    drule(DASH_MARGIN, DASH_CW-DASH_MARGIN, DASH_Y_AGENDA + DASH_H_AGENDA);
+
+    /* the last zone is open-bottomed on purpose: the screen edge closes it, and
+     * a rule there would sit on top of the unlock affordance. */
+    dshoulder(DASH_MARGIN,        DASH_Y_SUN, DASH_H_SUN);
+    dshoulder(DASH_CW-DASH_MARGIN,DASH_Y_SUN, DASH_H_SUN);
+
+    /* unlock chevron */
     for(int i=0;i<6;i++){ dpx(DASH_CW/2-6+i,306-i); dpx(DASH_CW/2+6-i,306-i); }
 
     /* ---- the weather, stepped to the current hour ------------------------
@@ -4469,15 +4554,19 @@ static void dash_paint(void){
                                lv_label_set_text(g_wx_col_h[i], c); }
             if(g_wx_col_r[i]){ snprintf(c,sizeof c,"%d%%",g_wx.hr[k].rain);
                                lv_label_set_text(g_wx_col_r[i], c); }
-            int bh = g_wx.hr[k].rain*28/100;
-            dfill(cx-7,190-bh,15,bh?bh:1);
-            dhdots(cx-8,cx+8,191);
+            /* the rain bar, growing UP from a shared baseline. A common
+             * baseline across six columns is what lets them be compared at a
+             * glance -- it is the one line on this screen that is doing real
+             * work rather than decoration. */
+            int bh = g_wx.hr[k].rain*24/100;
+            dfill(cx-7,DASH_Y_BARBASE-bh,15,bh?bh:1);
+            drule(cx-8,cx+8,DASH_Y_BARBASE+1);
         }
     }
     /* moon disc (far right, clear of its label) */
     { int illum=0,wax=1;
       dash_moon(now,&illum,&wax,NULL);
-      dash_moon_draw(224,282,13,illum,wax); }
+      dash_moon_draw(222,292,10,illum,wax); }
 
     /* one invalidate for the whole canvas, instead of one per pixel */
     lv_obj_invalidate(g_dash_cv);
@@ -4535,9 +4624,9 @@ void ui_show_lock(void){
     char sb[48];
     snprintf(sb,sizeof sb,"%s \xC2\xB7 %s %d",
              DASH_DOW_S[ti_wday(now)], CAL_MON[localtime_mon(now)], localtime_mday(now));
-    dash_lbl(6,4,sb,0);
+    dash_lbl_rev(6,0,sb);
     dash_status_text(sb,sizeof sb);
-    g_dash_stat = dash_lbl(0,4,sb,0); lv_obj_align(g_dash_stat,LV_ALIGN_TOP_RIGHT,-6,4);
+    g_dash_stat = dash_lbl_rev(0,0,sb); lv_obj_align(g_dash_stat,LV_ALIGN_TOP_RIGHT,-6,0);
 
     /* ---- AM/PM (positioned beside the hero clock in dash_paint) ---- */
     g_dash_time_ap = dash_lbl(0,0,"",1);
@@ -4563,21 +4652,29 @@ void ui_show_lock(void){
         DASH_DOW_L[ti_wday(now)], month_long(localtime_mon(now)), localtime_mday(now));
       dash_lbl(10,90,db,0); }
 
+    /* ---- the zone headings, sitting on the bars dash_paint() fills ----
+     * Reversed out of the ink. These are the only static furniture labels on
+     * the screen, and their y values must track the DASH_Y_* the bars use. */
+    dash_lbl_rev(DASH_MARGIN+4, DASH_Y_WX,     "CONDITIONS");
+    dash_lbl_rev(DASH_MARGIN+4, DASH_Y_AGENDA, "AHEAD");
+    dash_lbl_rev(DASH_MARGIN+4, DASH_Y_SUN,    "SUN & MOON");
+
     /* ---- weather ---- */
     if(havewx){
         char wl[48];
         /* AQI is a single daily figure, not an hourly series -- it is the one
          * reading here that does NOT step, so it is written once. */
-        g_wx_now_lbl = dash_lbl(10,110,"",1);
-        if(wx.aqi>=0){ snprintf(wl,sizeof wl,"Air %d \xC2\xB7 %s",wx.aqi,aqi_word(wx.aqi)); dash_lbl(10,126,wl,0); }
+        g_wx_now_lbl = dash_lbl(DASH_MARGIN+4,DASH_Y_WXNOW,"",1);
+        if(wx.aqi>=0){ snprintf(wl,sizeof wl,"Air %d \xC2\xB7 %s",wx.aqi,aqi_word(wx.aqi));
+                       dash_lbl(DASH_MARGIN+4,DASH_Y_AIR,wl,0); }
         /* 6-hour strip: temp (top), rain bar (canvas), hour + rain% (bottom).
          * Positions only -- which SIX of the cached twenty-four these are is a
          * question about the current time, so dash_paint() answers it. */
         for(int i=0;i<WX_STRIP;i++){
             int cx = 22 + i*39;
-            g_wx_col_t[i] = dash_lbl(cx-8,146,"",0);
-            g_wx_col_h[i] = dash_lbl(cx-8,196,"",0);
-            g_wx_col_r[i] = dash_lbl(cx-8,208,"",0);
+            g_wx_col_t[i] = dash_lbl(cx-8,DASH_Y_COLT,"",0);
+            g_wx_col_h[i] = dash_lbl(cx-8,DASH_Y_COLH,"",0);
+            g_wx_col_r[i] = dash_lbl(cx-8,DASH_Y_COLR,"",0);
         }
     } else if(loaded){
         /* Say which it is. A blank space where the weather was reads as a fault; a
@@ -4591,30 +4688,38 @@ void ui_show_lock(void){
         o = dash_lbl(0,0,"hidden until the next HotSync",0);
         lv_obj_align(o,LV_ALIGN_TOP_MID,0,170);
     } else {
-        dash_lbl(10,118,"Weather syncs on HotSync",0);
+        dash_lbl(DASH_MARGIN+4,DASH_Y_WXNOW,"Weather syncs on HotSync",0);
     }
 
     /* ---- agenda ---- */
     { char e[64];
-      if(dash_next_event(e,sizeof e)){ char l[80]; snprintf(l,sizeof l,"NEXT  %s",e); dash_lbl(10,226,l,0); }
-      else dash_lbl(10,226,"NEXT  no upcoming events",0);
-      if(dash_next_due(e,sizeof e)){ char l[80]; snprintf(l,sizeof l,"DUE   %s",e); dash_lbl(10,244,l,0); }
-      else dash_lbl(10,244,"DUE   nothing due",0); }
+      /* the two rows share a label column so the values line up under each
+       * other; the zone header already says what the block is, so the row
+       * labels shrink to their job of distinguishing the two. */
+      dash_lbl(DASH_MARGIN+4,238,"NEXT",1);
+      dash_lbl(DASH_MARGIN+4,252,"DUE",1);
+      if(dash_next_event(e,sizeof e)) dash_lbl(DASH_MARGIN+44,238,e,0);
+      else                            dash_lbl(DASH_MARGIN+44,238,"nothing upcoming",0);
+      if(dash_next_due(e,sizeof e))   dash_lbl(DASH_MARGIN+44,252,e,0);
+      else                            dash_lbl(DASH_MARGIN+44,252,"nothing due",0); }
 
     /* ---- sun + moon ---- */
     if(havewx && wx.sunrise_min>=0){
         char sun[24];
         int rh=wx.sunrise_min/60, rm=wx.sunrise_min%60, sh=wx.sunset_min/60, sm=wx.sunset_min%60;
         int rh12=rh%12; if(rh12==0) rh12=12; int sh12=sh%12; if(sh12==0) sh12=12;
-        snprintf(sun,sizeof sun,"Rise  %d:%02d%s",rh12,rm,rh<12?"a":"p"); dash_lbl(10,268,sun,0);
-        snprintf(sun,sizeof sun,"Set   %d:%02d%s",sh12,sm,sh<12?"a":"p"); dash_lbl(10,284,sun,0);
+        /* one line rather than two stacked: the zone is the shortest on the
+         * screen and the moon has to share it. */
+        snprintf(sun,sizeof sun,"%d:%02d%s",rh12,rm,rh<12?"a":"p");
+        dash_lbl(DASH_MARGIN+4,286,"Rise",1); dash_lbl(DASH_MARGIN+36,286,sun,0);
+        snprintf(sun,sizeof sun,"%d:%02d%s",sh12,sm,sh<12?"a":"p");
+        dash_lbl(DASH_MARGIN+80,286,"Set",1); dash_lbl(DASH_MARGIN+106,286,sun,0);
     }
     { int illum=0; const char *nm="";
       dash_moon(now,&illum,NULL,&nm);       /* the disc is drawn on the canvas in dash_paint() */
       char ml[24]; snprintf(ml,sizeof ml,"%s",nm);
-      lv_obj_t*o=dash_lbl(0,266,ml,0); lv_obj_align(o,LV_ALIGN_TOP_RIGHT,-54,266);
       snprintf(ml,sizeof ml,"%d%% lit",illum);
-      o=dash_lbl(0,282,ml,0); lv_obj_align(o,LV_ALIGN_TOP_RIGHT,-54,282); }
+      lv_obj_t*o=dash_lbl(0,286,ml,0); lv_obj_align(o,LV_ALIGN_TOP_RIGHT,-42,286); }
 
     /* ---- unlock hint ---- */
     { lv_obj_t*o=dash_lbl(0,308,"swipe up to unlock",0); lv_obj_align(o,LV_ALIGN_BOTTOM_MID,0,-2); }
