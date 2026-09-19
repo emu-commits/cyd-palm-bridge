@@ -65,12 +65,20 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
 > deployment-branch policy (id 60412682) so a non-main branch could publish. That
 > policy should be removed once this work merges.
 >
-> **Known, pre-existing, NOT from this phase:** `smoke32` logs LVGL image-decode
-> OOM warnings (~42 here, 145 at the P3 baseline) when the launcher is rebuilt
-> after leaving an app — 5 of its 9 icons fail to decode on that frame because
-> `LV_CACHE_DEF_SIZE` is 0 and each A8 icon re-decodes into a fresh ~550-byte
-> buffer. No screenshot has ever caught a visibly missing icon; LVGL recovers on
-> redraw. Worth a look before ship, but it is not a Guru bug.
+> **RESOLVED 2026-09-19 — the icon-decode OOM was a stale gate, not a bug.**
+> `sim/lv_conf.h` claimed "device parity: 24 KB" but the device has been on
+> **32 KB** since the change documented in `sdkconfig.defaults`. `smoke32` was
+> therefore 8 KB tighter than any real board. Measured on hardware via the new
+> boot line in `lvgl_port.c`: `lvgl pool: 31100 bytes total`. At the device's real
+> size both `smoke` and `smoke32` log **zero** OOM warnings. `make -C sim
+> poolparity` now fails if the two files drift apart again.
+>
+> **Still true, not fixed, not urgent:** LVGL allocates + memcpys a fresh buffer
+> for every alpha-only image on *every* draw (for A8 there is no conversion to
+> do — it is a pure copy), and `LV_CACHE_DEF_SIZE` is 0 so nothing is reused. The
+> launcher pays ~10 KB of copying per repaint. There is headroom for it now, so
+> it is waste rather than failure. Enabling the cache is not an obvious win: it
+> would hold ~10 KB of decoded icons permanently in a 32 KB pool.
 >
 > - **P0** — `speaker_say()` + `SPK_*` geometry in `ui.c` is the shared portrait +
 >   bubble; `g_greet_due` (reset in `lock_release_cb`) is the once-per-unlock flag;
