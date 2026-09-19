@@ -203,7 +203,7 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
       row is objects. The launcher's 9 cells are ~27 objects and fit; a 40-task
       list at a row + label each is ~80 and may not. **Measure first** (the
       `heap used=... of 147456` line the smoke prints, plus `smoke32` for the true
-      24 KB pool). If the whole pool will not fit on one screen, the fallback that
+      device-sized pool). If the whole pool will not fit on one screen, the fallback that
       keeps the decision intact is **one category per page**.
       *Resolved 2026-09-19:* the fear was 40 rows x (row + label) = ~80 objects.
       The list is **one `lv_table`** instead — the same trick the record lists
