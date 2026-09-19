@@ -40,10 +40,15 @@ by eye), `[d]` = verified on the glass. The device is on `/dev/ttyUSB0` with
 ESP-IDF at `~/esp/esp-idf`, so `[d]` is reachable in this phase rather than
 deferred. Keep each numbered group to its own commit and branch off `main`.
 
-> ### RESUME HERE — state at 2026-09-19
+> ### RESUME HERE — state at 2026-09-19 (end of session)
 >
-> Branch **`feat/speaker-portraits`**. The device has this build flashed and boots
-> clean. **P0–P4 are done bar their on-glass checks; P5 is next.**
+> Branch **`feat/speaker-portraits`**, pushed, tree clean, **no PR opened**. The
+> device has this build flashed and boots clean. The web emulator is live at
+> https://emu-commits.github.io/cyd-palm-bridge/ and serves this branch.
+>
+> **Every group except P6 is code-complete. What is missing is device testing,
+> not code.** Pick up at either (a) the five `[d]` checks once the user has
+> looked, or (b) P6, the last unbuilt group.
 >
 > - **P4** — 35 habits in `guru.c` as const rodata, five categories, `GuruRec`
 >   frozen at 8 bytes, append-only `guru.log`, `guru.sav` now written. The list is
