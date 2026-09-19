@@ -13,6 +13,7 @@
  * than one), half-up rounding and the floor, day rollover across a negative zone,
  * streak arithmetic and its undo, a backwards clock, and per-day saturation. */
 #include <stdio.h>
+#include <string.h>
 #include "guru.h"
 #include "daycal.h"
 
@@ -199,6 +200,91 @@ int main(void){
         CK(guru_note_check(0, AT(0), 0) == 0,          "a null state cannot be checked off");
         guru_state_init(0);                            /* must simply return */
         CK(1,                                          "initialising a null state is survivable");
+    }
+
+    /* ---------------------------------------------------------------- the pool */
+    {
+        int n = guru_ntasks();
+        CK(n > 20,                                     "the pool is deep enough not to repeat");
+        CK(guru_task(-1) == 0 && guru_task(n) == 0,    "positions outside the pool read as nothing");
+
+        /* Every id must be in range, unique, and non-zero: id-1 is a bit index in
+         * the saved state, so a duplicate would silently tick two rows at once
+         * and an id past the ceiling would tick nobody. */
+        int seen[GU_TASK_MAX + 2];
+        for(int i = 0; i < GU_TASK_MAX + 2; i++) seen[i] = 0;
+        int bad_id = 0, dup = 0, bad_cat = 0, empty = 0, toolong = 0;
+        for(int i = 0; i < n; i++){
+            const GuruTask *t = guru_task(i);
+            if(t->id < 1 || t->id > GU_TASK_MAX){ bad_id++; continue; }
+            if(seen[t->id]++) dup++;
+            if(t->cat >= GU_NCAT) bad_cat++;
+            if(!t->name || !t->name[0] || !t->why || !t->why[0]) empty++;
+            /* the table column is ~194px of a ~6px proportional font; past about
+             * thirty characters a row starts clipping on the device. */
+            if(strlen(t->name) > 30) toolong++;
+        }
+        CK(bad_id  == 0, "every task id is inside the bitmap's ceiling");
+        CK(dup     == 0, "no two tasks share an id");
+        CK(bad_cat == 0, "every task has a real category");
+        CK(empty   == 0, "every task has both a name and a why");
+        CK(toolong == 0, "no task name is too long for the row");
+
+        /* lookup by id is the log's half of the contract */
+        const GuruTask *first = guru_task(0);
+        CK(guru_task_by_id(first->id) == first,        "a task is findable by its stable id");
+        CK(guru_task_by_id(0) == 0,                    "id zero belongs to nobody");
+        CK(guru_task_by_id(GU_TASK_MAX + 1) == 0,      "an id past the ceiling finds nothing");
+
+        /* every category is represented, or the week analysis has a silent hole */
+        int percat[GU_NCAT];
+        for(int c = 0; c < GU_NCAT; c++) percat[c] = 0;
+        for(int i = 0; i < n; i++) percat[guru_task(i)->cat]++;
+        int emptycat = 0;
+        for(int c = 0; c < GU_NCAT; c++){
+            if(percat[c] == 0) emptycat++;
+            if(!guru_cat_name(c)[0]) emptycat++;
+        }
+        CK(emptycat == 0, "every category has a name and at least one task");
+        CK(guru_cat_name(GU_NCAT)[0] == 0, "one past the end names nothing");
+
+        /* the record is frozen: the week analysis reads these back off SD */
+        CK(sizeof(GuruRec) == 8, "a logged check is exactly eight bytes");
+    }
+
+    /* ------------------------------------------------------- ticking a real task */
+    {
+        GuruState s;
+        guru_state_init(&s);
+        int id1 = guru_task(0)->id, id2 = guru_task(1)->id;
+
+        CK(!guru_is_checked(&s, id1, AT(0), 0),        "nothing is ticked on a fresh day");
+        CK(guru_toggle(&s, id1, AT(0), 0) == 1,        "tapping a row ticks it");
+        CK(guru_is_checked(&s, id1, AT(0), 0),         "and it reads back as ticked");
+        CK(!guru_is_checked(&s, id2, AT(0), 0),        "without ticking its neighbour");
+        CK(guru_today_n(&s, AT(0), 0) == 1,            "the day's count followed it");
+
+        CK(guru_toggle(&s, id1, AT(0), 0) == 0,        "tapping again un-ticks it");
+        CK(!guru_is_checked(&s, id1, AT(0), 0),        "and it reads back clear");
+        CK(guru_today_n(&s, AT(0), 0) == 0,            "the count came back down with it");
+
+        guru_toggle(&s, id1, AT(0), 0);
+        guru_toggle(&s, id2, AT(0), 0);
+        CK(guru_today_n(&s, AT(0), 0) == 2,            "two different rows are two checks");
+
+        /* the list is today's, not a running total: tomorrow starts blank even if
+         * nobody has rolled the state yet */
+        CK(!guru_is_checked(&s, id1, AT(1), 0),        "tomorrow's list starts empty");
+        CK(guru_target(&s, AT(1), 0) == 2,             "while yesterday's two set the target");
+        guru_roll(&s, AT(1), 0);
+        CK(!guru_is_checked(&s, id1, AT(1), 0),        "and rolling agrees with the reader");
+        CK(guru_today_n(&s, AT(1), 0) == 0,            "with no checks carried over");
+
+        /* an id nobody has cannot tick anything */
+        CK(guru_toggle(&s, 0, AT(1), 0) == 0,          "id zero cannot be ticked");
+        CK(guru_toggle(&s, GU_TASK_MAX + 1, AT(1), 0) == 0, "nor an id past the ceiling");
+        CK(guru_today_n(&s, AT(1), 0) == 0,            "and neither moved the count");
+        CK(guru_toggle(0, id1, AT(1), 0) == 0,         "a null state cannot be toggled");
     }
 
     printf(fails ? "== guru: %d FAILURE(S) ==\n" : "== guru: all passed ==\n", fails);

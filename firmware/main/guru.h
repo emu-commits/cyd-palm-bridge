@@ -41,6 +41,63 @@
  * turning into a negative average. */
 #define GU_DAY_MAX 200
 
+/* ---- the habit pool -------------------------------------------------------
+ * A fixed table of specific, individually checkable things. "Eat healthy" is not
+ * a task; "one brazil nut" is. The pool is const flash rodata, so its size costs
+ * no RAM and none of the LVGL object pool.
+ *
+ * NOT MEDICAL ADVICE, and the copy must never drift into it. These are widely
+ * discussed consumer wellness practices. Every task is named for the HABIT, never
+ * for an outcome it is supposed to buy -- no "prevents ...", no dosages, no
+ * numbers that read as a prescription. The `why` line is the same discipline: it
+ * says what the practice IS and who does it, not what it will do to you. Guru's
+ * Menu > About carries the one-line disclaimer.
+ *
+ * Categories exist to give the week analysis something to say beyond a total.
+ * They are named for the domain of the habit, not for a disease.
+ * INDICES ARE PERSISTED IN THE LOG: never reorder, only append. */
+enum { GU_CAT_GUT, GU_CAT_METAB, GU_CAT_COGN, GU_CAT_STRUCT, GU_CAT_RECOV, GU_NCAT };
+
+/* One task. `id` is a STABLE NUMBER, not a position: the log stores it, the pool
+ * gets a Menu editor in a later phase, and a log written today has to still mean
+ * the same thing after the user adds or hides one. IDs are assigned once and
+ * never reused; the table may grow and may not be reordered. */
+typedef struct {
+    uint16_t    id;
+    uint8_t     cat;        /* GU_CAT_* */
+    const char *name;       /* the row text -- short enough for the table column */
+    const char *why;        /* one line of context, shown when the row is tapped */
+} GuruTask;
+
+/* The bitmap of what is checked off today is a fixed 64 bits in the saved state,
+ * so this is the ceiling on the pool until that format is revised. Asserted
+ * against the real table in guru_test.c rather than left as a comment. */
+#define GU_TASK_MAX  64
+#define GU_BITS      ((GU_TASK_MAX + 7) / 8)
+
+int              guru_ntasks(void);            /* how many tasks the pool holds  */
+const GuruTask  *guru_task(int i);             /* by POSITION, 0..ntasks-1       */
+const GuruTask  *guru_task_by_id(int id);      /* by stable id; NULL if unknown  */
+const char      *guru_cat_name(int cat);       /* "Gut", "Movement", ...         */
+
+/* ---- one check, appended to /sdcard/guru.log ------------------------------
+ * Exactly 8 bytes, and frozen: the week analysis reads these back.
+ *
+ * `cat` is denormalised out of the task table on purpose. The pool gets an editor
+ * later; if a task is ever recategorised, the week it was logged under should
+ * still analyse the way it was lived, and a log that has to be joined against a
+ * mutable table to mean anything is a log that rots. `flags` bit 0 marks an undo,
+ * which is appended rather than erased -- the file stays append-only, and the
+ * analysis nets them. */
+typedef struct {
+    uint32_t when;          /* epoch the check landed          */
+    uint16_t task;          /* stable task id                  */
+    uint8_t  cat;           /* GU_CAT_* as it was at the time  */
+    uint8_t  flags;         /* bit 0: this undoes an earlier check */
+} GuruRec;
+
+#define GU_F_UNDO 0x01
+
 /* ---- durable app state: /sdcard/guru.sav ----------------------------------
  * The ring is indexed by local day number, so day d lives at d % GU_WIN and no
  * shifting is needed when the day rolls -- advancing just zeroes the slots that
@@ -55,6 +112,7 @@ typedef struct {
     int32_t  last_active;       /* last local day that got at least one check    */
     uint16_t streak, best_streak;
     uint32_t total_n;           /* checks ever, for the lifetime read-out        */
+    uint8_t  today_bits[GU_BITS];   /* WHICH task ids are ticked today           */
 } GuruState;
 
 /* ---- lifecycle ---- */
@@ -72,10 +130,21 @@ void guru_state_init(GuruState *s);
 int guru_roll(GuruState *s, uint32_t now, int tz_off_min);
 
 /* ---- checking things off ---- */
-/* Record (or take back) one check on the local day containing `now`. Both return
- * the resulting count for today. Un-checking never goes below zero. */
+/* Record (or take back) one anonymous check on the local day containing `now`.
+ * Both return the resulting count for today; un-checking never goes below zero.
+ * These are the counting layer -- guru_toggle() below is what the UI calls. */
 int guru_note_check(GuruState *s, uint32_t now, int tz_off_min);
 int guru_note_uncheck(GuruState *s, uint32_t now, int tz_off_min);
+
+/* Is task `id` ticked on the local day containing `now`? A stale state (the day
+ * has rolled since it was written) reads as all-clear without needing a roll. */
+int guru_is_checked(const GuruState *s, int id, uint32_t now, int tz_off_min);
+
+/* Tick or un-tick task `id` for today, keeping the bitmap and the day's count in
+ * step. Returns the NEW checked state (1 ticked, 0 clear), so the caller knows
+ * which way it went and what to append to the log. An unknown or out-of-range id
+ * changes nothing and returns 0. */
+int guru_toggle(GuruState *s, int id, uint32_t now, int tz_off_min);
 
 /* ---- read-outs (all pure, all integer) ---- */
 /* checks completed on the local day containing `now` (0 once the day rolls). */

@@ -313,6 +313,14 @@ static int  g_co_reflect;            /* the reflect -> blocker -> note flow is u
  * the next group, and this is what they will count into. */
 static GuruState g_gu;               /* durable state; mirrors /sdcard/guru.sav  */
 static int  g_gu_loaded;             /* guru.sav has been read this boot         */
+static int  g_gu_open;               /* a Guru screen is the live view (menu)    */
+static lv_obj_t *g_gu_tbl;           /* the habit list (one lv_table, see below) */
+static lv_obj_t *g_gu_cnt;           /* the "N of M today" header, retitled live */
+/* Row -> task id for the list, 0 meaning "this row is a category heading". The
+ * pool is bounded by GU_TASK_MAX, so this is a fixed array and the screen needs
+ * no allocation at all -- unlike the record lists, which malloc per open. */
+static uint8_t g_gu_rowid[GU_TASK_MAX + GU_NCAT];
+static int     g_gu_nrows;
 
 /* 1 while Coach owns the screen and nothing may cover it: a sealed session, or the
  * reflect flow that follows one. The lock screen is suppressed for both -- someone
@@ -331,6 +339,7 @@ static void kill_kb(void){
     graf_char_hook=NULL; graf_capture_hook=NULL;
     g_trainer_open=0; g_kana_open=0; g_ms_active=0; g_sd_active=0; g_zp_active=0;
     g_co_open=0; g_co_view=CO_VIEW_OTHER; g_co_reflect=0;
+    g_gu_open=0;
     free_rowuids();
     free_finds();
     kill_hs();
@@ -2867,13 +2876,27 @@ static void act_about(lv_event_t *e){ (void)e;
     lv_obj_t *body = lv_label_create(panel);
     lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(body, 160);                       /* panel(180) - 2*pad(10) */
-    lv_label_set_text(body, "A pocket PDA that syncs to iCloud.\n"
-                            "Offline by default. HotSync when\n"
-                            "you want to. No feed. No ads.\n\n"
-                            "Memos stay on this device.\n"
-                            "To Dos sync as CalDAV tasks,\n"
-                            "not the Reminders app.\n\n"
-                            "v0.3 - tap to close");
+    /* Inside Guru the About box says what her list is and, more importantly, what
+     * it is not. The habits are widely discussed consumer practice, not medical
+     * advice, and the one place a user goes looking for "says who?" is here. */
+    if(g_gu_open)
+        lv_label_set_text(body, "Guru keeps a fixed list of small\n"
+                                "daily habits and counts the ones\n"
+                                "you did.\n\n"
+                                "Your target is your own average\n"
+                                "over the last week, never less\n"
+                                "than one a day.\n\n"
+                                "These are popular wellness\n"
+                                "habits, not medical advice.\n\n"
+                                "v0.3 - tap to close");
+    else
+        lv_label_set_text(body, "A pocket PDA that syncs to iCloud.\n"
+                                "Offline by default. HotSync when\n"
+                                "you want to. No feed. No ads.\n\n"
+                                "Memos stay on this device.\n"
+                                "To Dos sync as CalDAV tasks,\n"
+                                "not the Reminders app.\n\n"
+                                "v0.3 - tap to close");
     lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 20);
 }
 
@@ -5440,6 +5463,8 @@ static void content_clear(void){
      * the content area, and must survive a content teardown -- that is exactly
      * what keeps a session sealed while the shell changes underneath it. */
     g_co_cv = g_co_time = g_co_sub = g_co_status = g_co_hold_lbl = NULL;
+    /* Guru */
+    g_gu_tbl = g_gu_cnt = NULL;
 }
 static uint32_t  g_zp_seq;                  /* varies the board each New */
 static PlayClock g_zp_clk;                  /* pausable solve timer (playclock.h) */
@@ -6938,13 +6963,41 @@ static void co_week_cb(lv_event_t *e){ (void)e; show_coach_report(); }
  * reads the engine back. The habit pool and its check-off list are the next
  * group, and they are what will finally move these numbers. */
 #define GU_SAV        "/sdcard/guru.sav"
+#define GU_LOG        "/sdcard/guru.log"
 #define GU_SAV_MAGIC  0x47555231u        /* "GUR1" */
+#define GU_LOG_MAGIC  0x47554C31u        /* "GUL1" */
+
+static void gu_save(void){
+    FILE *f = fopen(GU_SAV, "wb"); if(!f) return;
+    g_gu.magic = GU_SAV_MAGIC;
+    fwrite(&g_gu, sizeof g_gu, 1, f);
+    fclose(f);
+}
+
+/* Append one check (or one undo). The log is the record the week analysis reads;
+ * the .sav is the fast path for today's list and the target. Append-only on
+ * purpose -- an undo is a row, not an erasure, so the file never needs rewriting
+ * on a card that could lose power mid-write. */
+static void gu_log_append(int task_id, int cat, int undo){
+    int fresh = 1;
+    FILE *t = fopen(GU_LOG, "rb");
+    if(t){ fresh = 0; fclose(t); }
+    FILE *f = fopen(GU_LOG, "ab");
+    if(!f) return;
+    if(fresh){ uint32_t m = GU_LOG_MAGIC; fwrite(&m, 4, 1, f); }
+    GuruRec r;
+    r.when  = (uint32_t)time(NULL);
+    r.task  = (uint16_t)task_id;
+    r.cat   = (uint8_t)cat;
+    r.flags = (uint8_t)(undo ? GU_F_UNDO : 0);
+    fwrite(&r, sizeof r, 1, f);
+    fclose(f);
+}
 
 /* Read the durable state once per boot, then roll it forward to today. Rolling on
  * load rather than on use means the numbers on screen are right even if the app
  * has not been opened for a week -- the days that passed are already counted as
- * the zeros they were. Nothing writes guru.sav yet: nothing can change it until
- * there is something to check off. */
+ * the zeros they were. */
 static void gu_load(void){
     if(g_gu_loaded) return;
     guru_state_init(&g_gu);
@@ -6963,7 +7016,10 @@ static void gu_load(void){
         fclose(f);
     }
     g_gu_loaded = 1;
-    guru_roll(&g_gu, (uint32_t)time(NULL), ui_tz());
+    /* Rolling is idempotent from the file, so persisting it is not required for
+     * correctness -- but a card that is pulled after midnight should already read
+     * as the new day rather than replaying the roll on the next boot. */
+    if(guru_roll(&g_gu, (uint32_t)time(NULL), ui_tz())) gu_save();
 }
 
 /* Her hellos. Calm, specific, and about the day ahead rather than the record --
@@ -6987,10 +7043,188 @@ static void gu_greet_tap_cb(lv_event_t *e){ (void)e;
     show_guru();
 }
 
+static void gu_build_header(void);
+static void gu_build_list(void);
+static void gu_show_task(int id);
+static void gu_tbl_click_cb(lv_event_t *e);
+
+/* ---- the header: today's score, and where the number came from ------------
+ * Rebuilt in place on every tick rather than by reopening the screen, so the
+ * list does not lose its scroll position when you check something off halfway
+ * down it. That is the whole reason this is its own function. */
+#define GU_HDR_H 20
+
+static void gu_build_header(void){
+    uint32_t now = (uint32_t)time(NULL);
+    int tz     = ui_tz();
+    int today  = guru_today_n(&g_gu, now, tz);
+    int target = guru_target(&g_gu, now, tz);
+    int streak = guru_streak_now(&g_gu, now, tz);
+
+    if(!g_gu_cnt){
+        g_gu_cnt = lv_label_create(content);
+        lv_obj_set_style_text_font(g_gu_cnt, &lv_font_palm_bold, 0);
+        lv_obj_align(g_gu_cnt, LV_ALIGN_TOP_LEFT, 8, 2);
+    }
+    /* "done" rather than "3 of 3" once it is cleared: the target has been met and
+     * the number stops being the thing worth reading. Anything past it still
+     * counts and still shows, because a good day should not look like a mistake. */
+    if(today >= target) lv_label_set_text_fmt(g_gu_cnt, "%d today -- done", today);
+    else                lv_label_set_text_fmt(g_gu_cnt, "%d of %d today", today, target);
+
+    lv_obj_t *stk = lv_label_create(content);
+    lv_obj_align(stk, LV_ALIGN_TOP_RIGHT, -8, 2);
+    if(streak > 1)      lv_label_set_text_fmt(stk, "%d days", streak);
+    else if(streak == 1) lv_label_set_text(stk, "day 1");
+    else                 lv_label_set_text(stk, "--");
+}
+
+/* ---- the list ------------------------------------------------------------
+ * ONE lv_table for the whole pool, not a row object per habit. That is the
+ * difference between this screen fitting in the 24 KB object pool and not: a
+ * table is a single object that paints its cells, so forty habits cost one
+ * object plus their cell strings, where forty containers-and-labels would be
+ * eighty objects and would not fit. The record lists (To Do, Memo) already work
+ * this way; this is the same trick applied to a fixed pool instead of a PDB.
+ *
+ * Column 0 is the tick box and column 1 the name, exactly as To Do lays it out,
+ * so the tap that toggles is in the place a Palm user already aims at. Category
+ * headings are rows with an empty box column. */
+static void gu_build_list(void){
+    if(g_gu_tbl){ lv_obj_del(g_gu_tbl); g_gu_tbl = NULL; }
+
+    uint32_t now = (uint32_t)time(NULL);
+    int tz = ui_tz();
+
+    lv_obj_t *t = lv_table_create(content);
+    g_gu_tbl = t;
+    lv_obj_set_style_radius(t, 0, 0);
+    lv_obj_set_style_border_width(t, 0, 0);
+    lv_obj_set_style_pad_all(t, 4, LV_PART_ITEMS);
+    lv_table_set_column_width(t, 0, 34);
+    lv_table_set_column_width(t, 1, LCD_W - 46);
+    lv_obj_set_size(t, lv_pct(100), lv_pct(100) - GU_HDR_H);
+    lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_add_event_cb(t, gu_tbl_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    int row = 0;
+    for(int c = 0; c < GU_NCAT; c++){
+        int first = 1;
+        for(int i = 0; i < guru_ntasks() && row < (int)sizeof g_gu_rowid; i++){
+            const GuruTask *k = guru_task(i);
+            if(k->cat != c) continue;
+            if(first){                               /* the heading, once per group */
+                lv_table_set_cell_value(t, row, 0, "");
+                lv_table_set_cell_value(t, row, 1, guru_cat_name(c));
+                g_gu_rowid[row++] = 0;
+                first = 0;
+                if(row >= (int)sizeof g_gu_rowid) break;
+            }
+            lv_table_set_cell_value(t, row, 0,
+                                    guru_is_checked(&g_gu, k->id, now, tz) ? "[x]" : "[ ]");
+            lv_table_set_cell_value(t, row, 1, k->name);
+            g_gu_rowid[row++] = (uint8_t)k->id;
+        }
+    }
+    g_gu_nrows = row;
+}
+
+/* One tick, recorded three places: the bitmap (what the list shows), the day's
+ * count (what the target averages) and the log (what the week reads). Only the
+ * one cell is repainted -- rebuilding the list would throw away the scroll
+ * position, and checking something off near the bottom is exactly when that
+ * would be most annoying. */
+static void gu_toggle_row(int row, int id){
+    const GuruTask *k = guru_task_by_id(id);
+    if(!k || !g_gu_tbl) return;
+    int on = guru_toggle(&g_gu, id, (uint32_t)time(NULL), ui_tz());
+    gu_log_append(id, k->cat, !on);
+    gu_save();
+    lv_table_set_cell_value(g_gu_tbl, (uint32_t)row, 0, on ? "[x]" : "[ ]");
+    gu_build_header();
+}
+
+/* Column 0 toggles, column 1 opens the task -- the split To Do already uses, so
+ * the box is the box and the words are a link. See the note by tbl_click_cb on
+ * why this must be VALUE_CHANGED rather than CLICKED. */
+static void gu_tbl_click_cb(lv_event_t *e){
+    lv_obj_t *t = lv_event_get_target(e);
+    uint32_t r = LV_TABLE_CELL_NONE, c = LV_TABLE_CELL_NONE;
+    lv_table_get_selected_cell(t, &r, &c);
+    if(r == LV_TABLE_CELL_NONE || (int)r >= g_gu_nrows) return;
+    int id = g_gu_rowid[r];
+    if(!id) return;                      /* a category heading is not a target */
+    if(c == 0) gu_toggle_row((int)r, id);
+    else       gu_show_task(id);
+}
+
+/* ---- one habit, explained -------------------------------------------------
+ * "One brazil nut" is specific but not self-explanatory, and a list of thirty
+ * cryptic imperatives is a list nobody trusts. The why line is flash rodata, so
+ * this screen costs nothing until it is opened. */
+static int g_gu_detail_id;
+
+static void gu_detail_back_cb(lv_event_t *e){ (void)e; show_guru(); }
+
+static void gu_detail_toggle_cb(lv_event_t *e){ (void)e;
+    const GuruTask *k = guru_task_by_id(g_gu_detail_id);
+    if(!k) return;
+    int on = guru_toggle(&g_gu, k->id, (uint32_t)time(NULL), ui_tz());
+    gu_log_append(k->id, k->cat, !on);
+    gu_save();
+    gu_show_task(g_gu_detail_id);        /* redraw, so the button reads the new state */
+}
+
+static void gu_show_task(int id){
+    const GuruTask *k = guru_task_by_id(id);
+    if(!k){ show_guru(); return; }
+    g_gu_detail_id = id;
+
+    kill_kb();
+    content_clear();
+    g_gu_open = 1;
+    lv_label_set_text(title_lbl, "Guru");
+    update_cat_trigger();
+
+    int on = guru_is_checked(&g_gu, k->id, (uint32_t)time(NULL), ui_tz());
+
+    lv_obj_t *cat = lv_label_create(content);
+    lv_obj_align(cat, LV_ALIGN_TOP_LEFT, 8, 2);
+    lv_label_set_text(cat, guru_cat_name(k->cat));
+
+    lv_obj_t *nm = lv_label_create(content);
+    lv_obj_set_style_text_font(nm, &lv_font_palm_bold, 0);
+    lv_label_set_long_mode(nm, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(nm, LCD_W - 16);
+    lv_obj_align(nm, LV_ALIGN_TOP_LEFT, 8, 22);
+    lv_label_set_text(nm, k->name);
+
+    lv_obj_t *wy = lv_label_create(content);
+    lv_label_set_long_mode(wy, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(wy, LCD_W - 16);
+    lv_obj_align(wy, LV_ALIGN_TOP_LEFT, 8, 46);
+    lv_label_set_text(wy, k->why);
+
+    lv_obj_t *tg = lv_button_create(content);
+    lv_obj_set_size(tg, 150, 34);
+    lv_obj_align(tg, LV_ALIGN_BOTTOM_LEFT, 4, -3);
+    lv_obj_t *tl = lv_label_create(tg);
+    lv_label_set_text(tl, on ? "Undo today" : "Did it today"); lv_obj_center(tl);
+    lv_obj_add_event_cb(tg, gu_detail_toggle_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *bk = lv_button_create(content);
+    lv_obj_set_size(bk, 72, 34);
+    lv_obj_align(bk, LV_ALIGN_BOTTOM_RIGHT, -4, -3);
+    lv_obj_t *bl = lv_label_create(bk);
+    lv_label_set_text(bl, "Back"); lv_obj_center(bl);
+    lv_obj_add_event_cb(bk, gu_detail_back_cb, LV_EVENT_CLICKED, NULL);
+}
+
 static void show_guru(void){
     kill_kb(); cur_app = NULL; cur_uid = 0;
     content_clear();
     gu_load();
+    g_gu_open = 1;
     lv_label_set_text(title_lbl, "Guru");
     update_cat_trigger();
 
@@ -7003,38 +7237,8 @@ static void show_guru(void){
         return;
     }
 
-    uint32_t now = (uint32_t)time(NULL);
-    int tz     = ui_tz();
-    int today  = guru_today_n(&g_gu, now, tz);
-    int target = guru_target(&g_gu, now, tz);
-    int days   = guru_window_days(&g_gu, now, tz);
-    int streak = guru_streak_now(&g_gu, now, tz);
-
-    lv_obj_t *cnt = lv_label_create(content);
-    lv_obj_set_style_text_font(cnt, &lv_font_palm_bold, 0);
-    lv_obj_align(cnt, LV_ALIGN_TOP_LEFT, 10, 2);
-    lv_label_set_text_fmt(cnt, "%d of %d today", today, target);
-
-    lv_obj_t *stk = lv_label_create(content);
-    lv_obj_align(stk, LV_ALIGN_TOP_RIGHT, -10, 2);
-    if(streak > 0) lv_label_set_text_fmt(stk, "%d day%s", streak, streak == 1 ? "" : "s");
-    else           lv_label_set_text(stk, "--");
-
-    /* Where the target came from, in her words. A number the user did not choose
-     * needs to say who did, or it reads as the app being bossy; "your own average"
-     * is the whole pitch. On day one there is no average yet, so it says so. */
-    lv_obj_t *l = lv_label_create(content);
-    lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(l, LCD_W - 24);
-    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
-    if(days > 0)
-        lv_label_set_text_fmt(l, "Today's target is %d --\nyour own average over the\n"
-                                 "last %d day%s.\n\nThe habits themselves are\n"
-                                 "being written.", target, days, days == 1 ? "" : "s");
-    else
-        lv_label_set_text(l, "The target starts at one a day\nand then follows your own\n"
-                             "average.\n\nThe habits themselves are\nbeing written.");
-    lv_obj_center(l);
+    gu_build_header();
+    gu_build_list();
 }
 
 /* His hellos. Light and short, and never about what you failed to do -- the week

@@ -7,6 +7,118 @@
 #include "guru.h"
 #include "daycal.h"
 
+/* ------------------------------------------------------------------ the pool
+ * Specific enough to check off without interpreting. The test for every line was
+ * "could two people disagree about whether I did this today?" -- if yes, it is a
+ * tip, not a task, and it does not belong here.
+ *
+ * Read the NOT MEDICAL ADVICE note in guru.h before editing any of this copy.
+ * Habits, not outcomes; no dosages; no disease named anywhere in a `name` or a
+ * `why`. IDs are assigned once and never reused -- append, never reorder. */
+static const GuruTask GU_POOL[] = {
+ /* --- Gut ------------------------------------------------------------------ */
+ {  1, GU_CAT_GUT,    "One brazil nut",
+    "A single nut is the whole ritual. More is not better here." },
+ {  2, GU_CAT_GUT,    "Black garlic",
+    "Garlic aged until it is sweet and soft. Eaten as-is, a clove at a time." },
+ {  3, GU_CAT_GUT,    "Broccoli or sprouts",
+    "The sprouts are the concentrated version of the same plant." },
+ {  4, GU_CAT_GUT,    "Natto or another ferment",
+    "Fermented soybeans. Kimchi, sauerkraut or miso count for this one." },
+ {  5, GU_CAT_GUT,    "Kefir or live yoghurt",
+    "Live cultures rather than the sweetened, pasteurised sort." },
+ {  6, GU_CAT_GUT,    "A plant you have not had",
+    "Variety is the point -- people who track this aim at thirty a week." },
+ {  7, GU_CAT_GUT,    "Twelve hours between meals",
+    "An overnight gap. Dinner early or breakfast late, whichever you prefer." },
+ /* --- Movement ------------------------------------------------------------- */
+ {  8, GU_CAT_METAB,  "Zone 2, with a 140 burst",
+    "Steady enough to hold a conversation, with one hard push in it." },
+ {  9, GU_CAT_METAB,  "Twelve-second sprints",
+    "All-out and very short, with a long walk back between each one." },
+ { 10, GU_CAT_METAB,  "Walk after the big meal",
+    "Ten minutes on your feet rather than sitting straight down." },
+ { 11, GU_CAT_METAB,  "Sardines or mackerel",
+    "Small oily fish. Tinned counts, and is what most people actually eat." },
+ { 12, GU_CAT_METAB,  "Mineral water, glass bottle",
+    "Volcanic if you can get it; glass because plastic is the part people mind." },
+ { 13, GU_CAT_METAB,  "Protein before bed",
+    "A small savoury something rather than a sweet one." },
+ { 14, GU_CAT_METAB,  "Creatine",
+    "The most boring and most studied supplement on the shelf." },
+ /* --- Mind ----------------------------------------------------------------- */
+ { 15, GU_CAT_COGN,   "Morning sunlight, outdoors",
+    "Outside, without glasses or a window in the way. Early is the point." },
+ { 16, GU_CAT_COGN,   "A slow breath cycle",
+    "Longer out than in, until the hurry goes out of it." },
+ { 17, GU_CAT_COGN,   "Ten minutes of stillness",
+    "Sitting, doing nothing, not listening to anything. Harder than it sounds." },
+ { 18, GU_CAT_COGN,   "Learn something by heart",
+    "A few lines, a phone number, a route. Recall is the exercise." },
+ { 19, GU_CAT_COGN,   "Read on paper",
+    "Long-form and un-scrollable, for as long as it holds you." },
+ { 20, GU_CAT_COGN,   "A real conversation",
+    "Voice or face, not typing. Length matters less than attention." },
+ { 21, GU_CAT_COGN,   "Screens off before bed",
+    "An hour of dimmer, duller things first." },
+ /* --- Strength ------------------------------------------------------------- */
+ { 22, GU_CAT_STRUCT, "One set to real failure",
+    "A single movement taken until the next rep will not happen." },
+ { 23, GU_CAT_STRUCT, "Hang from a bar",
+    "Dead weight, shoulders loose, for as long as your grip lasts." },
+ { 24, GU_CAT_STRUCT, "Sit in a deep squat",
+    "Heels down, all the way at the bottom. Rest there." },
+ { 25, GU_CAT_STRUCT, "Calf raises to burning",
+    "Slow, off a step, until they complain." },
+ { 26, GU_CAT_STRUCT, "Grip work",
+    "Carry something heavy until you have to put it down." },
+ { 27, GU_CAT_STRUCT, "Hip and hamstring stretch",
+    "The two that shorten from sitting. Held, not bounced." },
+ { 28, GU_CAT_STRUCT, "Stand on one leg, eyes shut",
+    "Balance is the one that quietly goes. Both legs, near a wall." },
+ /* --- Recovery ------------------------------------------------------------- */
+ { 29, GU_CAT_RECOV,  "Woke at your usual time",
+    "The same hour as yesterday, weekend included." },
+ { 30, GU_CAT_RECOV,  "Cold finish to the shower",
+    "The last stretch on cold, long enough to change your breathing." },
+ { 31, GU_CAT_RECOV,  "Sauna or a long hot bath",
+    "Heat, until you have properly had enough of it." },
+ { 32, GU_CAT_RECOV,  "No caffeine after noon",
+    "It is still working at bedtime whether you feel it or not." },
+ { 33, GU_CAT_RECOV,  "Bedroom cold and dark",
+    "Colder than feels reasonable, and dark enough to lose your hand." },
+ { 34, GU_CAT_RECOV,  "A day without alcohol",
+    "Simply a day that did not have any in it." },
+ { 35, GU_CAT_RECOV,  "Nose-breathe overnight",
+    "Mouth shut. People who chase this tape it; you do not have to." },
+};
+#define GU_NPOOL ((int)(sizeof(GU_POOL) / sizeof(GU_POOL[0])))
+
+int guru_ntasks(void){ return GU_NPOOL; }
+
+const GuruTask *guru_task(int i){
+    return (i >= 0 && i < GU_NPOOL) ? &GU_POOL[i] : 0;
+}
+
+const GuruTask *guru_task_by_id(int id){
+    for(int i = 0; i < GU_NPOOL; i++) if(GU_POOL[i].id == (uint16_t)id) return &GU_POOL[i];
+    return 0;
+}
+
+/* Category headings as they appear on screen. "Movement" and "Strength" rather
+ * than the internal GU_CAT_METAB / GU_CAT_STRUCT: the enum names are for the log
+ * and must never move, the words are for the user and can be retuned freely. */
+const char *guru_cat_name(int cat){
+    switch(cat){
+        case GU_CAT_GUT:    return "Gut";
+        case GU_CAT_METAB:  return "Movement";
+        case GU_CAT_COGN:   return "Mind";
+        case GU_CAT_STRUCT: return "Strength";
+        case GU_CAT_RECOV:  return "Recovery";
+    }
+    return "";
+}
+
 /* ------------------------------------------------------------------ internals */
 /* How many of the GU_WIN-1 days before `today` are real days -- days the user has
  * actually lived through with the app -- rather than an unused slot of the ring.
@@ -36,6 +148,24 @@ static int32_t gu_today(uint32_t now, int tz_off_min){
     return cal_day_index(now, tz_off_min);
 }
 
+/* Today's tick marks. A task id maps to bit id-1, so id 1 is bit 0 and the
+ * ceiling is GU_TASK_MAX ids -- guru_test.c asserts the real pool stays under it
+ * rather than trusting this comment. An id outside the range is not clamped into
+ * somebody else's bit; it is simply refused. */
+static int gu_bit_ok(int id){ return id >= 1 && id <= GU_TASK_MAX; }
+static int gu_bit_get(const GuruState *s, int id){
+    return (s->today_bits[(id - 1) >> 3] >> ((id - 1) & 7)) & 1;
+}
+static void gu_bit_set(GuruState *s, int id){
+    s->today_bits[(id - 1) >> 3] |= (uint8_t)(1u << ((id - 1) & 7));
+}
+static void gu_bit_clr(GuruState *s, int id){
+    s->today_bits[(id - 1) >> 3] &= (uint8_t)~(1u << ((id - 1) & 7));
+}
+static void gu_bits_clear(GuruState *s){
+    for(int i = 0; i < GU_BITS; i++) s->today_bits[i] = 0;
+}
+
 /* ------------------------------------------------------------------ lifecycle */
 void guru_state_init(GuruState *s){
     if(!s) return;
@@ -50,6 +180,7 @@ int guru_roll(GuruState *s, uint32_t now, int tz_off_min){
 
     if(s->seen_days == 0){                     /* first ever use: start here */
         for(int i = 0; i < GU_WIN; i++) s->day_n[i] = 0;
+        gu_bits_clear(s);
         s->last_day    = today;
         s->last_active = today - 1;            /* no active day yet; see streak */
         s->seen_days   = 1;
@@ -66,6 +197,9 @@ int guru_roll(GuruState *s, uint32_t now, int tz_off_min){
     } else {
         for(int32_t d = s->last_day + 1; d <= today; d++) s->day_n[cal_mod(d, GU_WIN)] = 0;
     }
+
+    /* a new day starts with an empty list -- the ticks belonged to the old one */
+    gu_bits_clear(s);
 
     s->last_day = today;
     long seen = (long)s->seen_days + adv;
@@ -119,6 +253,30 @@ int guru_note_uncheck(GuruState *s, uint32_t now, int tz_off_min){
         }
     }
     return s->day_n[slot];
+}
+
+/* Which tasks are ticked today. Kept in step with the day's count rather than
+ * derived from it: the count is the history the target averages, the bitmap is
+ * only ever about today, and the two have different lifetimes. */
+int guru_is_checked(const GuruState *s, int id, uint32_t now, int tz_off_min){
+    if(!s || !gu_bit_ok(id) || s->seen_days == 0) return 0;
+    /* a state nobody has rolled since yesterday still has yesterday's ticks in
+     * it -- report the fresh day the caller is actually asking about. */
+    if(gu_today(now, tz_off_min) != s->last_day) return 0;
+    return gu_bit_get(s, id);
+}
+
+int guru_toggle(GuruState *s, int id, uint32_t now, int tz_off_min){
+    if(!s || !gu_bit_ok(id)) return 0;
+    guru_roll(s, now, tz_off_min);
+    if(gu_bit_get(s, id)){
+        gu_bit_clr(s, id);
+        guru_note_uncheck(s, now, tz_off_min);
+        return 0;
+    }
+    gu_bit_set(s, id);
+    guru_note_check(s, now, tz_off_min);
+    return 1;
 }
 
 /* -------------------------------------------------------------------- read-outs */

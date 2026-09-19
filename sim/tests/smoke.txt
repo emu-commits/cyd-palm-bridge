@@ -213,12 +213,23 @@ s addr_menu
 c 60 250
 t 400
 s about_box
+# Dismissing the modal CONSUMES the tap, so this one only closes the box and we
+# are still inside Address afterwards. The home tap has to be its own.
 c 120 30
 t 300
 c 18 225
 t 300
-# To Do
-c 200 55
+c 18 225
+t 300
+# PROVE we are back on the launcher before tapping a launcher cell. For several
+# builds we were not: the About box is modal and the tap that dismisses it is
+# CONSUMED by the dismissal, so "close the box" and "go home" are two taps and
+# this sequence only had one. The To Do tap below then landed on the Address list
+# and opened a record, and todo_list.ppm has been a picture of an Address detail
+# ever since -- green the whole time, because the gate reads the exit code.
+s launcher_after_about
+# To Do (launcher row 1 col 3)
+c 195 56
 t 400
 s todo_list
 c 18 225
@@ -776,11 +787,33 @@ t 400
 s guru_greet
 c 120 150
 t 400
-# ...and the tap lands on the home screen. guru_shell must show "0 of 1 today" on
-# a fresh card: nothing has been checked off, and with no history the rolling
-# target sits on its floor of one. A different number here means gu_load() read a
-# stale or mis-clamped guru.sav.
+# ...and the tap lands on the home screen: the habit list, grouped by category,
+# over a header reading "0 of 1 today" on a fresh card -- nothing checked off, and
+# with no history the rolling target sits on its floor of one. A different number
+# means gu_load() read a stale or mis-clamped guru.sav.
+#
+# The WHOLE pool is one lv_table, not a row object per habit. That is what makes
+# it fit the 24 KB pool, so smoke32 is the gate that actually matters here.
 s guru_shell
+# Tick the first habit by its box (column 0). The header must become "1 of 1
+# today -- done" and the box must read [x]; only that one cell repaints, so the
+# list does not jump back to the top.
+c 18 95
+t 300
+s guru_checked
+# Tap a habit's NAME (column 1) instead and you get what it means, with a button
+# to tick it from there. Column 0 toggles, column 1 opens -- the same split To Do
+# uses, so the box is a box and the words are a link.
+c 120 117
+t 400
+s guru_task
+c 79 190
+t 300
+s guru_task_done
+c 200 190
+t 400
+# back on the list, with BOTH habits now ticked and the header counting them
+s guru_back
 c 18 225
 t 300
 # I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.
