@@ -762,13 +762,24 @@ s coach_export_cal
 c 18 225
 t 300
 # Guru (launcher row 3 col 2, between News and Coach -- the bob-and-third-eye icon).
-# The app itself is a shell until its engine lands; what this gates today is that
-# the new launcher slot opens SOMETHING. guru_shell showing the launcher instead
-# would mean the cell is a dead tap.
+# Her engine (guru.c) has landed; her habit list has not, so the home screen is
+# still a shell -- but it now reads the real numbers back out of the engine, so
+# this gates the wiring as well as the launcher cell.
 c 18 225
 t 300
 c 120 160
 t 400
+# Same greeting rule as Coach: the first open since the lock went up is her
+# portrait and one line from her pool, the whole content area being the target.
+# guru_greet showing the home screen instead would mean the per-speaker bit is
+# being cleared by the wrong app (they share one bitmask -- see g_greet_due).
+s guru_greet
+c 120 150
+t 400
+# ...and the tap lands on the home screen. guru_shell must show "0 of 1 today" on
+# a fresh card: nothing has been checked off, and with no history the rolling
+# target sits on its floor of one. A different number here means gu_load() read a
+# stale or mis-clamped guru.sav.
 s guru_shell
 c 18 225
 t 300

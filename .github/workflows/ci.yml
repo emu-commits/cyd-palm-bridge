@@ -80,6 +80,8 @@ jobs:
         run: make -C sim clock
       - name: Coach logic gate (advice rules, streaks, sigil)
         run: make -C sim coach
+      - name: Guru logic gate (rolling daily target, habit streak)
+        run: make -C sim guru
       - name: Lock-screen dashboard gate (weather age + freshness cut)
         run: make -C sim dash
       - name: Build + run the scripted UI tour (real ui.c, screenshots)

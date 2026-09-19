@@ -34,6 +34,7 @@
 #include "zip.h"          /* Games: Zip path-puzzle logic */
 #include "playclock.h"    /* Games: pausable play timer (shared by Mines/Sudoku/Zip) */
 #include "coach.h"        /* Coach: ritual focus timer (pure logic + rule engine) */
+#include "guru.h"         /* Guru: daily longevity habits (pure logic + target)   */
 #include "lvgl.h"
 #include <string.h>
 #include <strings.h>      /* strncasecmp for the Address Look Up filter */
@@ -306,6 +307,12 @@ enum { CO_VIEW_HOME, CO_VIEW_MARKS, CO_VIEW_WEEK, CO_VIEW_OTHER };
 static int  g_co_view;               /* which Coach screen `content` is showing  */
 static lv_obj_t *g_co_seal;          /* the sealed takeover root, or NULL        */
 static int  g_co_reflect;            /* the reflect -> blocker -> note flow is up */
+
+/* ---- Guru (see the implementation block after Coach's) --------------------
+ * Only the durable state so far: the habit pool and its check-off screen land in
+ * the next group, and this is what they will count into. */
+static GuruState g_gu;               /* durable state; mirrors /sdcard/guru.sav  */
+static int  g_gu_loaded;             /* guru.sav has been read this boot         */
 
 /* 1 while Coach owns the screen and nothing may cover it: a sealed session, or the
  * reflect flow that follows one. The lock screen is suppressed for both -- someone
@@ -5786,10 +5793,11 @@ static void show_games(void){
 #define CO_FLASH_N  10                   /* 5 dark + 5 lit = 14 s of asking      */
 
 /* ---- the local timezone offset, in minutes east of UTC ---------------------
- * coach.c takes this as an argument rather than reading TZ itself (that is what
- * makes the whole engine host-testable). Derived from the difference between
- * localtime and gmtime rather than tm_gmtoff, which is not portable. */
-static int co_tz(void){
+ * coach.c and guru.c take this as an argument rather than reading TZ themselves
+ * (that is what makes both engines host-testable), so this is the one place the
+ * real zone is read. Derived from the difference between localtime and gmtime
+ * rather than tm_gmtoff, which is not portable. */
+static int ui_tz(void){
     time_t t = time(NULL);
     struct tm lt, gt;
     localtime_r(&t, &lt);
@@ -5881,7 +5889,7 @@ static int co_fold(CoachAgg *a, uint32_t since){
     if(!f) return 0;
     uint32_t m = 0;
     if(fread(&m, 4, 1, f) != 1 || m != CO_LOG_MAGIC){ fclose(f); return 0; }
-    int tz = co_tz(), n = 0;
+    int tz = ui_tz(), n = 0;
     CoachRec r;
     while(fread(&r, sizeof r, 1, f) == 1){
         if(r.start < since) continue;
@@ -6123,7 +6131,7 @@ static void co_finish(int result, int blocker){
         g_co.streak = 0;
         if(g_co.total_n < 0xFFFF) g_co.total_n++;
     } else {
-        coach_note_completion(&g_co, r.start, co_tz());
+        coach_note_completion(&g_co, r.start, ui_tz());
     }
     g_co.phase = CO_PH_IDLE;
     g_co.start = 0;
@@ -6922,22 +6930,110 @@ static void co_week_cb(lv_event_t *e){ (void)e; show_coach_report(); }
 
 /* ======================================================================= Guru
  * A treadmill of specific longevity habits to check off, with a week analysis in
- * her own voice. The engine lands in guru.c/guru.h next to coach.c; this is the
- * shell, so the launcher slot added alongside her icon is not a dead tap. */
+ * her own voice. guru.c owns the numbers -- the rolling target, the streak, the
+ * local-day rollover -- exactly as coach.c does for Coach; this block owns the
+ * pixels, the copy and the file I/O.
+ *
+ * What is here so far is the shell: her state, her hello, and a home screen that
+ * reads the engine back. The habit pool and its check-off list are the next
+ * group, and they are what will finally move these numbers. */
+#define GU_SAV        "/sdcard/guru.sav"
+#define GU_SAV_MAGIC  0x47555231u        /* "GUR1" */
+
+/* Read the durable state once per boot, then roll it forward to today. Rolling on
+ * load rather than on use means the numbers on screen are right even if the app
+ * has not been opened for a week -- the days that passed are already counted as
+ * the zeros they were. Nothing writes guru.sav yet: nothing can change it until
+ * there is something to check off. */
+static void gu_load(void){
+    if(g_gu_loaded) return;
+    guru_state_init(&g_gu);
+    FILE *f = fopen(GU_SAV, "rb");
+    if(f){
+        GuruState t;
+        if(fread(&t, sizeof t, 1, f) == 1 && t.magic == GU_SAV_MAGIC){
+            g_gu = t;
+            /* clamp anything a truncated or foreign file could have left absurd,
+             * the way co_load() does -- a bad seen_days would index the ring. */
+            if(g_gu.seen_days > GU_WIN) g_gu.seen_days = GU_WIN;
+            for(int i = 0; i < GU_WIN; i++)
+                if(g_gu.day_n[i] > GU_DAY_MAX) g_gu.day_n[i] = GU_DAY_MAX;
+            if(g_gu.streak > g_gu.best_streak) g_gu.best_streak = g_gu.streak;
+        }
+        fclose(f);
+    }
+    g_gu_loaded = 1;
+    guru_roll(&g_gu, (uint32_t)time(NULL), ui_tz());
+}
+
+/* Her hellos. Calm, specific, and about the day ahead rather than the record --
+ * the week screen is where performance gets discussed. No dosages, no claims: she
+ * names the habit, never an outcome it is supposed to buy. Kept under three lines
+ * at the balloon's width so none of them clips. */
+static const char *const GU_GREETINGS[] = {
+    "There you are. Small things, done often, in the order you like them.",
+    "Nothing dramatic today. Sunlight early, something green, something heavy.",
+    "The list is the same as yesterday. That is rather the point of it.",
+    "Start with whichever one is easiest. Momentum is not fussy about order.",
+    "A quiet day counts. Pick one, do it properly, come back tomorrow.",
+    "No catching up to do -- yesterday is closed. Today only asks for today.",
+};
+#define GU_NGREET ((int)(sizeof(GU_GREETINGS) / sizeof(GU_GREETINGS[0])))
+
+/* The tap that dismisses her re-enters the app, which now finds the greeting
+ * spent and builds the home screen -- the same trick as Coach's. */
+static void gu_greet_tap_cb(lv_event_t *e){ (void)e;
+    greet_done(GREET_GURU);
+    show_guru();
+}
+
 static void show_guru(void){
     kill_kb(); cur_app = NULL; cur_uid = 0;
     content_clear();
+    gu_load();
     lv_label_set_text(title_lbl, "Guru");
     update_cat_trigger();
 
+    /* first time in since the lock came up: she says something, and the tap that
+     * clears her lands on the home screen. */
+    if(greet_due(GREET_GURU)){
+        speaker_greet(&guru_face,
+                      greet_pick(GU_GREETINGS, GU_NGREET, &g_greet_last[GREET_GURU]),
+                      gu_greet_tap_cb);
+        return;
+    }
+
+    uint32_t now = (uint32_t)time(NULL);
+    int tz     = ui_tz();
+    int today  = guru_today_n(&g_gu, now, tz);
+    int target = guru_target(&g_gu, now, tz);
+    int days   = guru_window_days(&g_gu, now, tz);
+    int streak = guru_streak_now(&g_gu, now, tz);
+
+    lv_obj_t *cnt = lv_label_create(content);
+    lv_obj_set_style_text_font(cnt, &lv_font_palm_bold, 0);
+    lv_obj_align(cnt, LV_ALIGN_TOP_LEFT, 10, 2);
+    lv_label_set_text_fmt(cnt, "%d of %d today", today, target);
+
+    lv_obj_t *stk = lv_label_create(content);
+    lv_obj_align(stk, LV_ALIGN_TOP_RIGHT, -10, 2);
+    if(streak > 0) lv_label_set_text_fmt(stk, "%d day%s", streak, streak == 1 ? "" : "s");
+    else           lv_label_set_text(stk, "--");
+
+    /* Where the target came from, in her words. A number the user did not choose
+     * needs to say who did, or it reads as the app being bossy; "your own average"
+     * is the whole pitch. On day one there is no average yet, so it says so. */
     lv_obj_t *l = lv_label_create(content);
     lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(l, LCD_W - 24);
     lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(l, "Guru is being built.\n\n"
-                         "A short list of specific daily\n"
-                         "habits, and how you are doing\n"
-                         "at them.");
+    if(days > 0)
+        lv_label_set_text_fmt(l, "Today's target is %d --\nyour own average over the\n"
+                                 "last %d day%s.\n\nThe habits themselves are\n"
+                                 "being written.", target, days, days == 1 ? "" : "s");
+    else
+        lv_label_set_text(l, "The target starts at one a day\nand then follows your own\n"
+                             "average.\n\nThe habits themselves are\nbeing written.");
     lv_obj_center(l);
 }
 
@@ -6987,7 +7083,7 @@ static void show_coach(void){
     g_co_view = CO_VIEW_HOME;
 
     uint32_t now = (uint32_t)time(NULL);
-    int tz = co_tz();
+    int tz = ui_tz();
     int today  = coach_today_now(&g_co, now, tz);
     int streak = coach_streak_now(&g_co, now, tz);
 

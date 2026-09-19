@@ -90,7 +90,7 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
       not be a button — a full-content-area click target.
 - [x] `[s]` Second launch in the same unlock session goes straight to the main
       screen.
-- [ ] `[d]` On glass.
+- [x] `[d]` On glass. *Confirmed by the user 2026-09-18 ("coach looks good").*
 
 ### P2 — launcher reorder + Guru icon
 - [x] **Reorder to:** Date Book, Address, To Do List, Memo Pad, HotSync, Games,
@@ -111,11 +111,20 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
 - [ ] `[d]` On glass.
 
 ### P3 — Guru app shell
-- [ ] `guru.c` / `guru.h` as **pure logic, clock-injected**, mirroring the
+- [x] `guru.c` / `guru.h` as **pure logic, clock-injected**, mirroring the
       `coach.c` split: no LVGL, no ESP-IDF, no stdio; ui.c owns copy and file I/O.
-- [ ] `sim/tests/guru_test.c` + a `make -C sim guru` target, wired into `games:`
-      and CI the way `coach` is.
-- [ ] `[s]` Guru greeting screen (same pattern as P1, her own lines).
+      The local-day arithmetic came out into **`daycal.h`** (header-only, inline)
+      rather than being copied — it is the one piece with a sharp edge (floor
+      division, not `/`, or a 20:00 EDT record files under tomorrow), and a second
+      copy would drift. `coach_day_index()`/`coach_local_hour()` are now thin
+      wrappers over it; coach_test still pins the negative-zone cases.
+- [x] `sim/tests/guru_test.c` + a `make -C sim guru` target, wired into `games:`
+      and CI the way `coach` is. 61 assertions, all green.
+- [x] `[s]` Guru greeting screen (same pattern as P1, her own lines).
+- [x] `[s]` Home shell reads the engine back (`N of M today`, streak, and where
+      the target came from), so the wiring is gated rather than just the cell.
+      `guru.sav` is **read but never written** yet — nothing can change it until
+      there is something to check off (P4 adds the write).
 - [ ] `[d]` On glass.
 
 ### P4 — Guru: the task treadmill
@@ -134,8 +143,17 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
       *for now* but gets a Menu editor in a later phase, and a log written today
       has to still mean the same thing after the user adds one. IDs are assigned
       once and never reused; the const table is allowed to grow, never reorder.
-- [ ] **Daily target = rolling user average, floor of 1/day.** Define the window
-      and the rounding in `guru.h`, and host-test it.
+- [x] **Daily target = rolling user average, floor of 1/day.** *Landed early with
+      P3* — the shell's state is meaningless without it, and it is the number the
+      user is asked to trust. `GU_WIN 7` days, **rounded half UP** (a tie nudges
+      upward), floor `GU_MIN_TARGET 1`; all of it in `guru.h` with the reasoning.
+      Two rules make it fair, and both are pinned in `guru_test.c` because a later
+      edit would break them silently: **today is excluded from its own average**
+      (or the treadmill speeds up while you run on it), and **a skipped day counts
+      as a zero** (so coming back after a lapse meets an achievable number, not
+      the bar you cleared before you stopped). The streak counts days with *any*
+      check, deliberately not days that met target — a target-based streak breaks
+      exactly when someone improves enough to raise their own bar.
 - [ ] **Main screen: the full pool, always visible**, grouped by category, tap to
       check off. *Decided 2026-09-18.*
 - [ ] **⚠ Measure the object cost before building that screen.** The pool has to
