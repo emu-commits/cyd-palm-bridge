@@ -8,6 +8,27 @@ int         hotsync_busy(void);      /* 1 while a sync is in progress */
 const char *hotsync_status(void);    /* latest status/result line */
 int         hotsync_progress(void);  /* coarse 0..100, or -1 when idle */
 
+/* ---- cancelling a run -----------------------------------------------------
+ * Ask the running sync to stop. This is a REQUEST, not a kill: it raises a flag
+ * that the sync task reads at points where stopping is safe, and returns
+ * immediately. The task is never suspended or deleted from outside, because it
+ * can be most of the way through writing a record when the user presses the
+ * button, and a half-written PDB on the card is a worse outcome than a sync that
+ * takes another few seconds to notice.
+ *
+ * Safe points are between collections and between the major stages (news,
+ * weather) -- never inside one collection's merge, and never mid-write. So the
+ * worst case is one collection's latency, not instant.
+ *
+ * A cancelled run finishes tidily: Wi-Fi comes down, the status reads as
+ * cancelled rather than failed, and whatever HAD already synced stays synced.
+ * hotsync_cancelled() reports that the last completed run ended this way, which
+ * is what lets the UI say "Cancelled" instead of leaving the user to wonder
+ * whether it broke. */
+void hotsync_cancel(void);           /* ask a running sync to stop; no-op if idle */
+int  hotsync_cancel_pending(void);   /* 1 once asked, until the run actually ends */
+int  hotsync_cancelled(void);        /* 1 if the LAST finished run was cancelled  */
+
 /* ---- collection discovery (Preferences "Discover collections") -----------
  * Brings Wi-Fi up, walks the iCloud CalDAV + CardDAV homes, and collects the
  * account's calendars / reminders lists / address books so the user can pick

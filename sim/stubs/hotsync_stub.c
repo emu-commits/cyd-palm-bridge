@@ -44,6 +44,16 @@ int         hotsync_busy(void)     { return 0; }
 const char *hotsync_status(void)   { return s_status; }
 int         hotsync_progress(void) { return -1; }
 
+/* Cancel is a no-op here and must stay one. The sim's "sync" is a synchronous
+ * function call that has already finished by the time any button could be
+ * pressed, so there is never a run to stop -- hotsync_busy() is 0, which makes
+ * the UI keep the button as "Sync Now" and never open the confirmation. The
+ * cancel PATH is therefore device-only; what the simulator gates is that the
+ * button still reads "Sync Now" and still syncs when nothing is running. */
+void hotsync_cancel(void)          { }
+int  hotsync_cancel_pending(void)  { return 0; }
+int  hotsync_cancelled(void)       { return 0; }
+
 void hotsync_discover_start(void)  { s_status[0]=0; snprintf(s_status,sizeof s_status,"Discovery is disabled in the simulator"); }
 int  hotsync_discover_busy(void)   { return 0; }
 int  hotsync_discover_done(void)   { return 1; }   /* "finished" with zero results */

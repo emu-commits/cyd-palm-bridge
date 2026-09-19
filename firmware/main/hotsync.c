@@ -57,8 +57,23 @@ static const char *TAG = "hotsync";
  * log, and only from a run that completed. */
 #define HOTSYNC_STACK 32768
 static volatile int s_busy;
+/* Cancellation. Both are plain ints written by one side and read by the other,
+ * which is safe here: 32-bit aligned loads/stores are atomic on this core, and
+ * neither is part of a read-modify-write. s_cancel is raised by the LVGL task
+ * and cleared by the sync task; s_was_cancelled survives the run so the UI can
+ * report how it ended. */
+static volatile int s_cancel;
+static volatile int s_was_cancelled;
 static char s_status[208] = "Ready";
 static void setst(const char *s){ snprintf(s_status, sizeof s_status, "%s", s); }
+
+void hotsync_cancel(void){ if(s_busy) s_cancel = 1; }
+int  hotsync_cancel_pending(void){ return s_busy && s_cancel; }
+int  hotsync_cancelled(void){ return s_was_cancelled; }
+
+/* The one place the sync task asks "should I stop?". Called only where stopping
+ * leaves the card consistent -- between collections and between stages. */
+static int hs_stop(void){ return s_cancel; }
 
 /* ---- Mode B headroom probe -----------------------------------------------
  * BACKLOG: "Measure Mode B headroom with the UI resident". The number that matters
@@ -671,6 +686,11 @@ static void hotsync_task(void *arg){
     setprog(0);
     sync_set_progress(hs_prog_cb, NULL);           /* engine drives the intra-collection bar */
     for(int i=0; dav_ok && i<N_APPS; i++){
+        /* THE safe point. One collection is one merge: records are read, matched
+         * and written as a unit, so stopping between them leaves the card
+         * consistent and everything already synced stays synced. Stopping
+         * inside one would not. */
+        if(hs_stop()) break;
         const SyncApp *t=&s_apps[i];
         const char *coll=app_coll(cfg,i);
         if(!coll || !coll[0]) continue;            /* app not configured -> skip */
@@ -746,8 +766,14 @@ static void hotsync_task(void *arg){
      * explicitly so the feeds start from whatever the heap can actually give back. */
     dav_disconnect();
     hs_heap("pre-news");
-    fetch_news();          /* RSS reader: fetch configured feeds while Wi-Fi is up */
-    fetch_weather(cfg);    /* lock-screen dashboard: the last thing the network is for */
+    /* Two more safe points. News and weather each replace a cache wholesale, so
+     * skipping them on cancel loses nothing that was half-done -- the previous
+     * cache simply stays. Checked separately so a cancel during the account work
+     * does not still sit through ten feed fetches before noticing. */
+    if(!hs_stop()){
+        fetch_news();      /* RSS reader: fetch configured feeds while Wi-Fi is up */
+        fetch_weather(cfg);/* lock-screen dashboard: the last thing the network is for */
+    }
     dav_disconnect();
     setprog(100);
     /* Every internet stage reports its own outcome. The old line asserted "Clock +
@@ -794,6 +820,18 @@ static void hotsync_task(void *arg){
                  (failed||protec)?" (some skipped)":"",
                  s_clock_synced ? "" : " - CLOCK NOT SYNCED",
                  s_news_added ? "" : " - no news");
+    /* A cancelled run is neither a success nor a failure, and must not be dressed
+     * as either: "Done" would claim work that was never attempted, and "failed"
+     * would send someone debugging a network that was fine. Say what happened,
+     * and say what DID land -- the collections that finished before the stop are
+     * genuinely synced and the user should know not to worry about them. */
+    if(hs_stop()){
+        if(did > 0) snprintf(msg,sizeof msg,
+                             "Cancelled - %d collection%s synced before stopping",
+                             did, did==1?"":"s");
+        else        snprintf(msg,sizeof msg,"Cancelled - nothing was synced");
+        s_was_cancelled = 1;
+    }
     ESP_LOGI(TAG,"%s",msg);
     setst(msg);
     hs_heap("sync-done");  /* after sync_free_scratch(), before Wi-Fi goes away */
@@ -810,6 +848,10 @@ static void hotsync_task(void *arg){
     ESP_LOGI(TAG,"stack: %u bytes of %u still free at the end (phase low-water %u)",
              (unsigned)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)),
              (unsigned)HOTSYNC_STACK, s_stack_lo);
+    /* Clear the request BEFORE dropping s_busy: hotsync_cancel_pending() is
+     * (s_busy && s_cancel), and clearing in the other order would leave a
+     * one-instruction window where a new run could be born already cancelled. */
+    s_cancel = 0;
     s_busy = 0;
     vTaskDelete(NULL);
 }
@@ -924,6 +966,8 @@ void hotsync_discover_start(void){
 void hotsync_start(void){
     if(s_busy) return;
     s_busy = 1;
+    s_cancel = 0;              /* a fresh run is never born cancelled */
+    s_was_cancelled = 0;
     setst("Starting...");
     /* 32 KB stack. The task stack is malloc'd from the DRAM heap, so an overflow
      * corrupts adjacent heap metadata -> a later alloc crashes deep in tlsf

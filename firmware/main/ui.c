@@ -263,7 +263,13 @@ static int  g_cal_y, g_cal_m, g_cal_d;
 /* HotSync screen state (status label + polling timer live in `content`) */
 static lv_obj_t *hs_status;
 static lv_timer_t *hs_timer;
-static void kill_hs(void){ if(hs_timer){ lv_timer_delete(hs_timer); hs_timer=NULL; } hs_status=NULL; }
+static lv_obj_t *hs_btn, *hs_btn_lbl;
+static void hs_confirm_close(void);
+/* The confirmation lives on lv_layer_top(), so leaving the screen does NOT take
+ * it with it -- it would hang over whatever came next, still wired to a button
+ * that no longer exists. Drop it here, where "you left HotSync" is known. */
+static void kill_hs(void){ if(hs_timer){ lv_timer_delete(hs_timer); hs_timer=NULL; }
+                           hs_confirm_close(); hs_status=NULL; hs_btn=hs_btn_lbl=NULL; }
 
 /* Discovery screen state (a status label + polling timer, like HotSync) */
 static lv_obj_t *disc_status;
@@ -903,16 +909,111 @@ static void show_edit(uint32_t uid){
  * allocation fails mid-sync and LVGL spins retrying the draw every refresh,
  * starving IDLE0 -> Task WDT -> frozen screen (seen freezing at 66%). A label
  * never allocates a layer, so the percentage is shown as text instead. */
+/* The one button changes job with the sync's state: Sync Now -> Cancel while a
+ * run is going -> "Stopping..." (disabled) once cancel has been asked for but
+ * the task has not yet reached a safe point. That last state matters: a cancel
+ * can take until the end of the current collection, and a button that still
+ * said "Cancel" would invite a second press and read as broken. */
+static void hs_btn_sync(void){
+    int busy = hotsync_busy();
+    int stopping = hotsync_cancel_pending();
+    if(!hs_btn || !hs_btn_lbl) return;
+    lv_label_set_text(hs_btn_lbl, stopping ? "Stopping..." : busy ? "Cancel" : "Sync Now");
+    if(stopping) lv_obj_add_state(hs_btn, LV_STATE_DISABLED);
+    else         lv_obj_remove_state(hs_btn, LV_STATE_DISABLED);
+}
+
 static void hs_tick(lv_timer_t *t){
     (void)t;
     if(!hs_status) return;
+    hs_btn_sync();
     int p = hotsync_progress();              /* -1 idle, else 0..100 */
     if(p >= 0 && p < 100)
         lv_label_set_text_fmt(hs_status, "%s\n%d%%", hotsync_status(), p);
     else
         lv_label_set_text(hs_status, hotsync_status());
 }
-static void hs_sync_cb(lv_event_t *e){ (void)e; hotsync_start(); }
+
+/* ---- the cancel confirmation --------------------------------------------
+ * Worth a modal rather than an instant abort: a sync is minutes of radio and
+ * the press is one tap away from the button that STARTS one, so a mis-tap
+ * should not silently throw the run away. Built from the same plain objects the
+ * About box uses -- no widget here takes a draw layer, which matters more than
+ * usual because this modal appears DURING a sync, exactly when the heap is at
+ * its most fragmented (the reason progress is text and not an lv_bar). */
+static lv_obj_t *g_hs_confirm;
+
+static void hs_confirm_close(void){
+    if(g_hs_confirm){ lv_obj_del(g_hs_confirm); g_hs_confirm = NULL; }
+}
+static void hs_confirm_no_cb(lv_event_t *e){ (void)e; hs_confirm_close(); }
+static void hs_confirm_yes_cb(lv_event_t *e){ (void)e;
+    hotsync_cancel();
+    hs_confirm_close();
+    hs_btn_sync();                            /* reads "Stopping..." immediately */
+}
+
+static void hs_confirm_open(void){
+    if(g_hs_confirm) return;
+    g_hs_confirm = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_hs_confirm, LCD_W, LCD_H);
+    lv_obj_set_pos(g_hs_confirm, 0, 0);
+    lv_obj_set_style_bg_color(g_hs_confirm, COL_LINE, 0);
+    lv_obj_set_style_bg_opa(g_hs_confirm, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(g_hs_confirm, 0, 0);
+    lv_obj_set_style_radius(g_hs_confirm, 0, 0);
+    lv_obj_set_style_pad_all(g_hs_confirm, 0, 0);
+    lv_obj_clear_flag(g_hs_confirm, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(g_hs_confirm, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *panel = lv_obj_create(g_hs_confirm);
+    lv_obj_set_size(panel, 196, 124);
+    lv_obj_center(panel);
+    lv_obj_set_style_bg_color(panel, COL_BODY, 0);
+    lv_obj_set_style_border_width(panel, 1, 0);
+    lv_obj_set_style_border_color(panel, COL_LINE, 0);
+    lv_obj_set_style_radius(panel, 0, 0);
+    lv_obj_set_style_pad_all(panel, 8, 0);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *ttl = lv_label_create(panel);
+    lv_obj_set_style_text_font(ttl, &lv_font_palm_bold, 0);
+    lv_label_set_text(ttl, "Stop syncing?");
+    lv_obj_align(ttl, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    /* Say what survives. The fear a confirmation has to answer is "will this
+     * corrupt what it already did", and the honest answer is no -- it stops
+     * between collections, so finished ones stay finished. */
+    lv_obj_t *body = lv_label_create(panel);
+    lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(body, 180);
+    lv_label_set_text(body, "Anything already synced stays synced. "
+                            "It stops after the current item, so this "
+                            "can take a moment.");
+    lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 18);
+
+    lv_obj_t *no = lv_button_create(panel);
+    lv_obj_set_size(no, 84, 30);
+    lv_obj_align(no, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_t *nl = lv_label_create(no);
+    lv_label_set_text(nl, "Keep going"); lv_obj_center(nl);
+    lv_obj_add_event_cb(no, hs_confirm_no_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *yes = lv_button_create(panel);
+    lv_obj_set_size(yes, 76, 30);
+    lv_obj_align(yes, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_t *yl = lv_label_create(yes);
+    lv_obj_set_style_text_font(yl, &lv_font_palm_bold, 0);
+    lv_label_set_text(yl, "Stop"); lv_obj_center(yl);
+    lv_obj_add_event_cb(yes, hs_confirm_yes_cb, LV_EVENT_CLICKED, NULL);
+}
+
+/* One button, three jobs -- see hs_btn_sync(). */
+static void hs_sync_cb(lv_event_t *e){ (void)e;
+    if(hotsync_cancel_pending()) return;         /* already stopping */
+    if(hotsync_busy()) hs_confirm_open();
+    else               hotsync_start();
+}
 
 static void show_hotsync(void){
     kill_kb();
@@ -939,14 +1040,14 @@ static void show_hotsync(void){
     lv_obj_set_style_text_align(hs_status, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(hs_status, hotsync_status());
 
-    lv_obj_t *btn = lv_button_create(content);
-    lv_obj_set_size(btn, 130, 38);
-    lv_obj_align(btn, LV_ALIGN_BOTTOM_MID, 0, -14);
-    lv_obj_t *bl = lv_label_create(btn);
-    lv_obj_set_style_text_font(bl, &lv_font_palm_bold, 0);
-    lv_label_set_text(bl, "Sync Now");
-    lv_obj_center(bl);
-    lv_obj_add_event_cb(btn, hs_sync_cb, LV_EVENT_CLICKED, NULL);
+    hs_btn = lv_button_create(content);
+    lv_obj_set_size(hs_btn, 130, 38);
+    lv_obj_align(hs_btn, LV_ALIGN_BOTTOM_MID, 0, -14);
+    hs_btn_lbl = lv_label_create(hs_btn);
+    lv_obj_set_style_text_font(hs_btn_lbl, &lv_font_palm_bold, 0);
+    lv_obj_center(hs_btn_lbl);
+    lv_obj_add_event_cb(hs_btn, hs_sync_cb, LV_EVENT_CLICKED, NULL);
+    hs_btn_sync();                    /* opening mid-sync must already say Cancel */
 
     hs_timer = lv_timer_create(hs_tick, 400, NULL);
 }
@@ -5553,7 +5654,7 @@ static void content_clear(void){
     /* record + search tables */
     g_listtbl = NULL; g_findtbl = NULL;
     /* HotSync / discovery status lines */
-    hs_status = NULL; disc_status = NULL;
+    hs_status = NULL; hs_btn = hs_btn_lbl = NULL; disc_status = NULL;
     /* Graffiti + Kana trainers */
     tr_guide = tr_prompt = tr_score = tr_feedback = tr_mode_lbl = NULL;
     ka_kana = ka_prompt = ka_answer = ka_typed = ka_feedback = ka_score = NULL;
