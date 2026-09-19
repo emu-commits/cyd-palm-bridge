@@ -1,0 +1,75 @@
+# Guru habit pool.
+#
+# THIS FILE IS THE SOURCE OF TRUTH. guru_pool.c is generated from it by
+# tools/gen_guru_pool.py -- edit here, then run `make -C sim gurupool`.
+# Copy it to /sdcard/guru.txt to override the built-in pool on the device
+# without a reflash (Guru > Menu > Export pool writes it for you).
+#
+# One habit per line:
+#
+#     id | category | name | why
+#
+#   id        1-64. PERMANENT. The log on the card stores this number, so a
+#             record written today has to still mean the same habit next year.
+#             Assign the next free one for a new habit; never reuse or renumber.
+#   category  gut, metabolic, mind, strength, recovery
+#   name      the row text, up to 30 characters or it clips on the device
+#   why       one or two sentences, shown when the row is tapped
+#
+# Blank lines and lines starting with # are ignored. Order here does not
+# matter -- the list is grouped by category when it is built.
+#
+# ---------------------------------------------------------------------------
+# NOT MEDICAL ADVICE. These are widely discussed consumer wellness practices,
+# not treatment for anything. A `why` line may say what a practice is
+# understood to do and why people do it -- that is what makes a habit worth
+# keeping -- but it must never name a disease, promise to prevent or cure
+# anything, or give a dose. "Builds aerobic base" is fine. "Prevents heart
+# disease" is not. "Take 5 g" is not. Guru > Menu > About carries the
+# disclaimer that ships with this list.
+# ---------------------------------------------------------------------------
+
+# --- Gut ---------------------------------------------------------------------
+1 | gut | One brazil nut | A single nut is the whole ritual. More is not better here.
+2 | gut | Black garlic | Garlic aged until it is sweet and soft. Eaten as-is, a clove at a time.
+3 | gut | Broccoli or sprouts | The sprouts are the concentrated version of the same plant.
+4 | gut | Natto or another ferment | Fermented soybeans. Kimchi, sauerkraut or miso count for this one.
+5 | gut | Kefir or live yoghurt | Live cultures rather than the sweetened, pasteurised sort.
+6 | gut | A plant you have not had | Variety is the point -- people who track this aim at thirty a week.
+7 | gut | Twelve hours between meals | An overnight gap. Dinner early or breakfast late, whichever you prefer.
+
+# --- Movement ----------------------------------------------------------------
+8 | metabolic | Zone 2, with a 140 burst | Steady enough to hold a conversation, with one hard push in it.
+9 | metabolic | Twelve-second sprints | All-out and very short, with a long walk back between each one.
+10 | metabolic | Walk after the big meal | Ten minutes on your feet rather than sitting straight down.
+11 | metabolic | Sardines or mackerel | Small oily fish. Tinned counts, and is what most people actually eat.
+12 | metabolic | Mineral water, glass bottle | Volcanic if you can get it; glass because plastic is the part people mind.
+13 | metabolic | Protein before bed | A small savoury something rather than a sweet one.
+14 | metabolic | Creatine | The most boring and most studied supplement on the shelf.
+
+# --- Mind --------------------------------------------------------------------
+15 | mind | Morning sunlight, outdoors | Outside, without glasses or a window in the way. Early is the point.
+16 | mind | A slow breath cycle | Longer out than in, until the hurry goes out of it.
+17 | mind | Ten minutes of stillness | Sitting, doing nothing, not listening to anything. Harder than it sounds.
+18 | mind | Learn something by heart | A few lines, a phone number, a route. Recall is the exercise.
+19 | mind | Read on paper | Long-form and un-scrollable, for as long as it holds you.
+20 | mind | A real conversation | Voice or face, not typing. Length matters less than attention.
+21 | mind | Screens off before bed | An hour of dimmer, duller things first.
+
+# --- Strength ----------------------------------------------------------------
+22 | strength | One set to real failure | A single movement taken until the next rep will not happen.
+23 | strength | Hang from a bar | Dead weight, shoulders loose, for as long as your grip lasts.
+24 | strength | Sit in a deep squat | Heels down, all the way at the bottom. Rest there.
+25 | strength | Calf raises to burning | Slow, off a step, until they complain.
+26 | strength | Grip work | Carry something heavy until you have to put it down.
+27 | strength | Hip and hamstring stretch | The two that shorten from sitting. Held, not bounced.
+28 | strength | Stand on one leg, eyes shut | Balance is the one that quietly goes. Both legs, near a wall.
+
+# --- Recovery ----------------------------------------------------------------
+29 | recovery | Woke at your usual time | The same hour as yesterday, weekend included.
+30 | recovery | Cold finish to the shower | The last stretch on cold, long enough to change your breathing.
+31 | recovery | Sauna or a long hot bath | Heat, until you have properly had enough of it.
+32 | recovery | No caffeine after noon | It is still working at bedtime whether you feel it or not.
+33 | recovery | Bedroom cold and dark | Colder than feels reasonable, and dark enough to lose your hand.
+34 | recovery | A day without alcohol | Simply a day that did not have any in it.
+35 | recovery | Nose-breathe overnight | Mouth shut. People who chase this tape it; you do not have to.

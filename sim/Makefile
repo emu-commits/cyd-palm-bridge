@@ -30,7 +30,7 @@ CFLAGS := -O2 -g -Wall -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS -DUI_SEED_TESTEVEN
 APP_SRCS := \
     $(FW)/ui.c $(FW)/data.c $(FW)/graffiti.c $(FW)/appcfg.c $(FW)/clock.c \
     $(FW)/lv_font_palm.c $(FW)/lv_font_palm_bold.c $(FW)/lv_font_kana.c $(FW)/palm_icons.c \
-    $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(FW)/dash.c $(FW)/minesweeper.c $(FW)/wordie.c $(FW)/sudoku.c $(FW)/zip.c $(FW)/coach.c $(FW)/guru.c \
+    $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(FW)/dash.c $(FW)/minesweeper.c $(FW)/wordie.c $(FW)/sudoku.c $(FW)/zip.c $(FW)/coach.c $(FW)/guru.c $(FW)/guru_pool.c $(FW)/gurupool.c \
     $(BR)/pdb.c $(BR)/datebook.c $(BR)/address.c $(BR)/todo.c $(BR)/appinfo.c \
     $(BR)/ical.c $(BR)/vcard.c $(BR)/tz.c $(BR)/charset.c \
     $(BR)/find.c $(BR)/calc.c $(BR)/config.c $(BR)/rss.c $(BR)/news.c $(BR)/feeds.c \
@@ -43,7 +43,7 @@ WRAP_LD := -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free
 LVGL_SRCS := $(shell find lvgl/src -name '*.c' 2>/dev/null)
 LVGL_OBJS := $(patsubst lvgl/src/%.c,build/lvgl/%.o,$(LVGL_SRCS))
 
-.PHONY: host wasm smoke smoke32 poolparity graf mines wordie sudoku zip clock coach guru dash games clean lvgl-src
+.PHONY: host wasm smoke smoke32 poolparity graf mines wordie sudoku zip clock coach guru gurupool dash games clean lvgl-src
 
 # LVGL_SRCS is evaluated when make parses this file, so on a clean checkout the
 # source must be fetched BEFORE the build graph is used: the entry points fetch,
@@ -166,9 +166,24 @@ build/coach_test: tests/coach_test.c $(FW)/coach.c $(FW)/coach.h $(FW)/daycal.h
 guru: build/guru_test
 	./build/guru_test
 
-build/guru_test: tests/guru_test.c $(FW)/guru.c $(FW)/guru.h $(FW)/daycal.h
+build/guru_test: tests/guru_test.c $(FW)/guru.c $(FW)/guru_pool.c $(FW)/guru.h $(FW)/daycal.h
 	@mkdir -p build
-	$(CC) -O2 -Wall -I$(FW) tests/guru_test.c $(FW)/guru.c -o $@
+	$(CC) -O2 -Wall -I$(FW) tests/guru_test.c $(FW)/guru.c $(FW)/guru_pool.c -o $@
+
+# ---- gurupool: the habit pool is a text file the user edits, so its parser has
+# to survive anything a text editor can produce. Two gates in one target:
+#   1. the generated guru_pool.c still matches guru_pool.txt (no hand edits), and
+#   2. the runtime parser agrees with the generator on that very file, plus the
+#      malformed-input cases that a hand-edited card WILL eventually contain. ----
+gurupool: build/gurupool_test
+	python3 ../tools/gen_guru_pool.py --check
+	./build/gurupool_test
+
+build/gurupool_test: tests/gurupool_test.c $(FW)/gurupool.c $(FW)/guru.c \
+                     $(FW)/guru_pool.c $(FW)/gurupool.h $(FW)/guru.h
+	@mkdir -p build
+	$(CC) -O2 -Wall -I$(FW) tests/gurupool_test.c $(FW)/gurupool.c $(FW)/guru.c \
+	      $(FW)/guru_pool.c -o $@
 
 # ---- dash: the lock screen's freshness + age rules (needs libm for the moon). ----
 dash: build/dash_test
@@ -179,7 +194,7 @@ build/dash_test: tests/dash_test.c $(FW)/dash.c $(FW)/dash.h
 	$(CC) -O2 -Wall -I$(FW) tests/dash_test.c $(FW)/dash.c -o $@ -lm
 
 # ---- games: every game's logic gate in one go (what CI runs). ----
-games: poolparity mines wordie sudoku zip clock coach guru dash
+games: poolparity mines wordie sudoku zip clock coach guru gurupool dash
 
 # ---- wasm: everything compiled by emcc in one shot (CI build; no local emcc needed).
 # 32-bit wasm => the TRUE device-sized pool applies (see lv_conf.h). main() boots

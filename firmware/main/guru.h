@@ -42,16 +42,24 @@
 #define GU_DAY_MAX 200
 
 /* ---- the habit pool -------------------------------------------------------
- * A fixed table of specific, individually checkable things. "Eat healthy" is not
- * a task; "one brazil nut" is. The pool is const flash rodata, so its size costs
- * no RAM and none of the LVGL object pool.
+ * A table of specific, individually checkable things. "Eat healthy" is not a
+ * task; "one brazil nut" is.
+ *
+ * THE HABITS THEMSELVES ARE NOT IN THE SOURCE. They live in
+ * firmware/main/guru_pool.txt, which tools/gen_guru_pool.py compiles into the
+ * built-in table below, and which can also be dropped on the card as
+ * /sdcard/guru.txt to replace the list without a reflash. Edit the .txt.
+ *
+ * The built-in table is const flash rodata, so it costs no RAM and none of the
+ * LVGL object pool. A pool loaded off the card costs its own text, once.
  *
  * NOT MEDICAL ADVICE, and the copy must never drift into it. These are widely
- * discussed consumer wellness practices. Every task is named for the HABIT, never
- * for an outcome it is supposed to buy -- no "prevents ...", no dosages, no
- * numbers that read as a prescription. The `why` line is the same discipline: it
- * says what the practice IS and who does it, not what it will do to you. Guru's
- * Menu > About carries the one-line disclaimer.
+ * discussed consumer wellness practices, not treatment for anything. A `why`
+ * line MAY say what a practice is understood to do and why people do it -- a
+ * habit with no stated point is one nobody keeps -- but it must never name a
+ * disease, promise to prevent or cure anything, or give a dose. "Builds aerobic
+ * base" is fine; "prevents heart disease" and "take 5 g" are not. Guru's
+ * Menu > About carries the one-line disclaimer that ships with the list.
  *
  * Categories exist to give the week analysis something to say beyond a total.
  * They are named for the domain of the habit, not for a disease.
@@ -75,10 +83,32 @@ typedef struct {
 #define GU_TASK_MAX  64
 #define GU_BITS      ((GU_TASK_MAX + 7) / 8)
 
+/* the table generated from guru_pool.txt; the fallback when the card has none. */
+extern const GuruTask GU_POOL_BUILTIN[];
+extern const int      GU_POOL_BUILTIN_N;
+
 int              guru_ntasks(void);            /* how many tasks the pool holds  */
 const GuruTask  *guru_task(int i);             /* by POSITION, 0..ntasks-1       */
 const GuruTask  *guru_task_by_id(int id);      /* by stable id; NULL if unknown  */
-const char      *guru_cat_name(int cat);       /* "Gut", "Movement", ...         */
+const char      *guru_cat_name(int cat);       /* "Gut", "Metabolic", ... (shown) */
+const char      *guru_cat_key(int cat);        /* "gut", "metabolic", ... (file)  */
+int              guru_cat_from_key(const char *key);  /* -1 if not a category    */
+
+/* ---- replacing the pool at runtime ----------------------------------------
+ * Install a pool parsed from /sdcard/guru.txt in place of the built-in one.
+ * gurupool.c does this at startup; this file stays free of file I/O.
+ *
+ * THE CALLER KEEPS OWNERSHIP. The array and every string in it are borrowed,
+ * not copied, and must outlive the installation -- gurupool.c holds them in a
+ * single arena for the life of the process. Nothing here ever frees them.
+ *
+ * Returns 0 if installed, -1 if the pool was refused, in which case the
+ * previous pool stays in place. A card holding a truncated or malformed
+ * guru.txt must leave the user with the built-in list, never an empty app, so
+ * the checks here repeat the loader's rather than trusting them. */
+int  guru_pool_set(const GuruTask *tasks, int n);
+void guru_pool_reset(void);                    /* back to the built-in table     */
+int  guru_pool_is_custom(void);                /* 1 if a card pool is installed  */
 
 /* ---- one check, appended to /sdcard/guru.log ------------------------------
  * Exactly 8 bytes, and frozen: the week analysis reads these back.

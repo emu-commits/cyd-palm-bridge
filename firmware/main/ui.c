@@ -35,6 +35,7 @@
 #include "playclock.h"    /* Games: pausable play timer (shared by Mines/Sudoku/Zip) */
 #include "coach.h"        /* Coach: ritual focus timer (pure logic + rule engine) */
 #include "guru.h"         /* Guru: daily longevity habits (pure logic + target)   */
+#include "gurupool.h"     /* ...and the editable habit list on the card           */
 #include "lvgl.h"
 #include <string.h>
 #include <strings.h>      /* strncasecmp for the Address Look Up filter */
@@ -2888,6 +2889,20 @@ static void act_co_goal(lv_event_t *e){ (void)e;
 static void act_co_marks(lv_event_t *e){ (void)e; menu_close(); show_coach_marks(); }
 static void act_co_week(lv_event_t *e){ (void)e; menu_close(); show_coach_report(); }
 static void act_gu_week(lv_event_t *e){ (void)e; menu_close(); show_guru_report(); }
+
+/* Put an editable copy of the habit list on the card. Deliberately refuses to
+ * overwrite: once the file exists, it is the user's, and "export" must never be
+ * the gesture that silently discards an evening of editing. The way to start
+ * over is to delete the file yourself, which is a thing you can only do on
+ * purpose. */
+static void act_gu_export(lv_event_t *e){ (void)e; menu_close();
+    if(gurupool_export(GURUPOOL_PATH) == 0)
+        toast_show("Habit list written to guru.txt");
+    else if(gurupool_error()[0])
+        toast_show(gurupool_error());
+    else
+        toast_show("Could not write to the card");
+}
 static void act_co_reset(lv_event_t *e){ (void)e; menu_close();
     /* the counters go, the marks stay -- coach.log/coach.sig are the record of
      * what actually happened and are never rewritten from the UI. */
@@ -2982,16 +2997,34 @@ static void act_about(lv_event_t *e){ (void)e;
     /* Inside Guru the About box says what her list is and, more importantly, what
      * it is not. The habits are widely discussed consumer practice, not medical
      * advice, and the one place a user goes looking for "says who?" is here. */
-    if(g_gu_open)
-        lv_label_set_text(body, "Guru keeps a fixed list of small\n"
-                                "daily habits and counts the ones\n"
-                                "you did.\n\n"
-                                "Your target is your own average\n"
-                                "over the last week, never less\n"
-                                "than one a day.\n\n"
-                                "These are popular wellness\n"
-                                "habits, not medical advice.\n\n"
-                                "v0.3 - tap to close");
+    if(g_gu_open){
+        /* The list is editable now, so About is also where a failed edit has to
+         * surface. A user who changed guru.txt and sees the old habits has no
+         * other way to find out that line 12 named a category that does not
+         * exist -- and silently ignoring their file would be the worst of the
+         * options available. */
+        char gbuf[480], src[200];
+        const char *err = gurupool_error();
+        if(gurupool_from_sd())
+            snprintf(src, sizeof src, "The habits come from\nguru.txt on the card.");
+        else if(err[0])      /* edited, and rejected -- say which line and why */
+            snprintf(src, sizeof src, "Your guru.txt was not used:\n%s", err);
+        else                 /* no file on the card: the ordinary case */
+            snprintf(src, sizeof src, "Menu > Export habit list puts\n"
+                                      "guru.txt on the card to edit.");
+        snprintf(gbuf, sizeof gbuf,
+                 "Guru keeps a list of small daily\n"
+                 "habits and counts the ones you\n"
+                 "did.\n\n"
+                 "Your target is your own average\n"
+                 "over the last week, never less\n"
+                 "than one a day.\n\n"
+                 "%s\n\n"
+                 "These are popular wellness\n"
+                 "habits, not medical advice.\n\n"
+                 "v0.3 - tap to close", src);
+        lv_label_set_text(body, gbuf);
+    }
     else
         lv_label_set_text(body, "A pocket PDA that syncs to iCloud.\n"
                                 "Offline by default. HotSync when\n"
@@ -3237,7 +3270,10 @@ static void menu_open(void){
         menu_item(panel, "Reset progress", act_tr_reset);   /* Graffiti trainer only */
     if(g_kana_open)
         menu_item(panel, "Reset progress", act_ka_reset);   /* Kana trainer only */
-    if(g_gu_open) menu_item(panel, "Her week", act_gu_week);  /* Guru only */
+    if(g_gu_open){                                          /* Guru only */
+        menu_item(panel, "Her week", act_gu_week);
+        menu_item(panel, "Export habit list", act_gu_export);
+    }
     if(g_co_open){                                          /* Coach only */
         menu_header(panel, "Coach");
         static char lenbuf[24], goalbuf[24];
@@ -7209,6 +7245,15 @@ static void gu_log_append(int task_id, int cat, int undo){
  * the zeros they were. */
 static void gu_load(void){
     if(g_gu_loaded) return;
+
+    /* The habit list itself, before any of the counting. A card pool replaces
+     * the built-in one wholesale; anything wrong with it (missing, truncated,
+     * edited into nonsense) leaves the built-in list installed, so this needs no
+     * error path of its own -- the app is correct either way. The reason is kept
+     * in gurupool_error() and shown in the About box, because a user who edited
+     * the file and sees no change deserves to be told which line stopped it. */
+    gurupool_load(GURUPOOL_PATH);
+
     guru_state_init(&g_gu);
     FILE *f = fopen(GU_SAV, "rb");
     if(f){
@@ -7373,6 +7418,13 @@ static void gu_tbl_click_cb(lv_event_t *e){
  * this screen costs nothing until it is opened. */
 static int g_gu_detail_id;
 
+/* The why box: everything between the habit's name and the Did-it button. Kept
+ * as constants because the button is placed from the BOTTOM and the box from the
+ * TOP, so the two only meet correctly if they agree about the 34px button, its
+ * 3px inset and a 4px gap. */
+#define GU_WHY_Y 46
+#define GU_WHY_H ((PDA_H - TITLE_H) - 3 - 34 - 4 - GU_WHY_Y)
+
 static void gu_detail_back_cb(lv_event_t *e){ (void)e; show_guru(); }
 
 static void gu_detail_toggle_cb(lv_event_t *e){ (void)e;
@@ -7408,10 +7460,34 @@ static void gu_show_task(int id){
     lv_obj_align(nm, LV_ALIGN_TOP_LEFT, 8, 22);
     lv_label_set_text(nm, k->name);
 
-    lv_obj_t *wy = lv_label_create(content);
+    /* The why line comes out of guru.txt now, so its length is not something
+     * this screen gets to assume -- a user writing a paragraph about creatine is
+     * a normal thing to do, not a bug. A box that scrolls costs exactly one
+     * LVGL object and makes any length survivable; the alternative is copy that
+     * silently vanishes behind the button, which is the failure you never see
+     * because the screen still looks fine.
+     *
+     * Verified by temporarily moving the pool's longest why (369 chars, the
+     * Zone 2 one) onto a first-screen habit and photographing it. Deliberately
+     * NOT scripted into smoke.txt: reaching a habit further down the list needs
+     * a scroll, LVGL's momentum makes the landing row depend on event count
+     * rather than drag distance, and any tap pinned to a scroll offset would
+     * break the moment someone adds a habit to guru.txt -- which is now the
+     * expected thing to do. A gate that fails for the wrong reason is how gates
+     * stop being believed. */
+    lv_obj_t *wybox = lv_obj_create(content);
+    lv_obj_set_pos(wybox, 0, GU_WHY_Y);
+    lv_obj_set_size(wybox, LCD_W, GU_WHY_H);
+    lv_obj_set_style_bg_opa(wybox, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(wybox, 0, 0);
+    lv_obj_set_style_radius(wybox, 0, 0);
+    lv_obj_set_style_pad_all(wybox, 0, 0);
+    lv_obj_set_scroll_dir(wybox, LV_DIR_VER);
+
+    lv_obj_t *wy = lv_label_create(wybox);
     lv_label_set_long_mode(wy, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(wy, LCD_W - 16);
-    lv_obj_align(wy, LV_ALIGN_TOP_LEFT, 8, 46);
+    lv_obj_set_pos(wy, 8, 0);
     lv_label_set_text(wy, k->why);
 
     lv_obj_t *tg = lv_button_create(content);

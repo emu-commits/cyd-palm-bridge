@@ -827,6 +827,13 @@ t 200
 c 18 205
 t 300
 s guru_six
+# NOT scripted here: scrolling the list to reach a habit further down. The pool
+# is a text file the user edits now, so any tap that depends on a scroll offset
+# would start failing the moment somebody adds a habit -- failing for the wrong
+# reason, which is how a gate stops being believed. The long-why case (the
+# detail screen scrolls its own box rather than hiding copy behind the button)
+# was verified by temporarily moving the longest why onto a first-screen habit;
+# see the note in gu_show_task().
 # Options -> Her week. The menu item only exists while a Guru screen is up.
 c 18 300
 t 400

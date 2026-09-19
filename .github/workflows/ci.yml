@@ -84,6 +84,8 @@ jobs:
         run: make -C sim coach
       - name: Guru logic gate (rolling daily target, habit streak)
         run: make -C sim guru
+      - name: Guru habit-pool gate (guru_pool.c matches guru_pool.txt; card parser)
+        run: make -C sim gurupool
       - name: Lock-screen dashboard gate (weather age + freshness cut)
         run: make -C sim dash
       - name: Build + run the scripted UI tour (real ui.c, screenshots)

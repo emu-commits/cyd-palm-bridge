@@ -8,100 +8,61 @@
 #include "daycal.h"
 
 /* ------------------------------------------------------------------ the pool
- * Specific enough to check off without interpreting. The test for every line was
- * "could two people disagree about whether I did this today?" -- if yes, it is a
- * tip, not a task, and it does not belong here.
+ * The habits themselves live in firmware/main/guru_pool.txt, not here. That file
+ * is compiled into GU_POOL_BUILTIN[] by tools/gen_guru_pool.py, and the same file
+ * can be dropped on the card as /sdcard/guru.txt to replace the list without a
+ * reflash -- gurupool.c parses it and calls guru_pool_set() below.
  *
- * Read the NOT MEDICAL ADVICE note in guru.h before editing any of this copy.
- * Habits, not outcomes; no dosages; no disease named anywhere in a `name` or a
- * `why`. IDs are assigned once and never reused -- append, never reorder. */
-static const GuruTask GU_POOL[] = {
- /* --- Gut ------------------------------------------------------------------ */
- {  1, GU_CAT_GUT,    "One brazil nut",
-    "A single nut is the whole ritual. More is not better here." },
- {  2, GU_CAT_GUT,    "Black garlic",
-    "Garlic aged until it is sweet and soft. Eaten as-is, a clove at a time." },
- {  3, GU_CAT_GUT,    "Broccoli or sprouts",
-    "The sprouts are the concentrated version of the same plant." },
- {  4, GU_CAT_GUT,    "Natto or another ferment",
-    "Fermented soybeans. Kimchi, sauerkraut or miso count for this one." },
- {  5, GU_CAT_GUT,    "Kefir or live yoghurt",
-    "Live cultures rather than the sweetened, pasteurised sort." },
- {  6, GU_CAT_GUT,    "A plant you have not had",
-    "Variety is the point -- people who track this aim at thirty a week." },
- {  7, GU_CAT_GUT,    "Twelve hours between meals",
-    "An overnight gap. Dinner early or breakfast late, whichever you prefer." },
- /* --- Movement ------------------------------------------------------------- */
- {  8, GU_CAT_METAB,  "Zone 2, with a 140 burst",
-    "Steady enough to hold a conversation, with one hard push in it." },
- {  9, GU_CAT_METAB,  "Twelve-second sprints",
-    "All-out and very short, with a long walk back between each one." },
- { 10, GU_CAT_METAB,  "Walk after the big meal",
-    "Ten minutes on your feet rather than sitting straight down." },
- { 11, GU_CAT_METAB,  "Sardines or mackerel",
-    "Small oily fish. Tinned counts, and is what most people actually eat." },
- { 12, GU_CAT_METAB,  "Mineral water, glass bottle",
-    "Volcanic if you can get it; glass because plastic is the part people mind." },
- { 13, GU_CAT_METAB,  "Protein before bed",
-    "A small savoury something rather than a sweet one." },
- { 14, GU_CAT_METAB,  "Creatine",
-    "The most boring and most studied supplement on the shelf." },
- /* --- Mind ----------------------------------------------------------------- */
- { 15, GU_CAT_COGN,   "Morning sunlight, outdoors",
-    "Outside, without glasses or a window in the way. Early is the point." },
- { 16, GU_CAT_COGN,   "A slow breath cycle",
-    "Longer out than in, until the hurry goes out of it." },
- { 17, GU_CAT_COGN,   "Ten minutes of stillness",
-    "Sitting, doing nothing, not listening to anything. Harder than it sounds." },
- { 18, GU_CAT_COGN,   "Learn something by heart",
-    "A few lines, a phone number, a route. Recall is the exercise." },
- { 19, GU_CAT_COGN,   "Read on paper",
-    "Long-form and un-scrollable, for as long as it holds you." },
- { 20, GU_CAT_COGN,   "A real conversation",
-    "Voice or face, not typing. Length matters less than attention." },
- { 21, GU_CAT_COGN,   "Screens off before bed",
-    "An hour of dimmer, duller things first." },
- /* --- Strength ------------------------------------------------------------- */
- { 22, GU_CAT_STRUCT, "One set to real failure",
-    "A single movement taken until the next rep will not happen." },
- { 23, GU_CAT_STRUCT, "Hang from a bar",
-    "Dead weight, shoulders loose, for as long as your grip lasts." },
- { 24, GU_CAT_STRUCT, "Sit in a deep squat",
-    "Heels down, all the way at the bottom. Rest there." },
- { 25, GU_CAT_STRUCT, "Calf raises to burning",
-    "Slow, off a step, until they complain." },
- { 26, GU_CAT_STRUCT, "Grip work",
-    "Carry something heavy until you have to put it down." },
- { 27, GU_CAT_STRUCT, "Hip and hamstring stretch",
-    "The two that shorten from sitting. Held, not bounced." },
- { 28, GU_CAT_STRUCT, "Stand on one leg, eyes shut",
-    "Balance is the one that quietly goes. Both legs, near a wall." },
- /* --- Recovery ------------------------------------------------------------- */
- { 29, GU_CAT_RECOV,  "Woke at your usual time",
-    "The same hour as yesterday, weekend included." },
- { 30, GU_CAT_RECOV,  "Cold finish to the shower",
-    "The last stretch on cold, long enough to change your breathing." },
- { 31, GU_CAT_RECOV,  "Sauna or a long hot bath",
-    "Heat, until you have properly had enough of it." },
- { 32, GU_CAT_RECOV,  "No caffeine after noon",
-    "It is still working at bedtime whether you feel it or not." },
- { 33, GU_CAT_RECOV,  "Bedroom cold and dark",
-    "Colder than feels reasonable, and dark enough to lose your hand." },
- { 34, GU_CAT_RECOV,  "A day without alcohol",
-    "Simply a day that did not have any in it." },
- { 35, GU_CAT_RECOV,  "Nose-breathe overnight",
-    "Mouth shut. People who chase this tape it; you do not have to." },
-};
-#define GU_NPOOL ((int)(sizeof(GU_POOL) / sizeof(GU_POOL[0])))
+ * This file stays pure, so the override is a pointer somebody else hands us. It
+ * is never copied and never freed here: whoever installs a pool owns its memory
+ * for as long as it is installed. That keeps the ownership rule to one sentence
+ * and keeps malloc out of the logic layer.
+ *
+ * Read the NOT MEDICAL ADVICE note in guru.h before editing any of the copy.
+ * IDs are assigned once and never reused -- the log stores them. */
+static const GuruTask *g_pool;      /* 0 means "use the built-in table" */
+static int             g_pool_n;
 
-int guru_ntasks(void){ return GU_NPOOL; }
+static const GuruTask *gu_pool(void){
+    return g_pool ? g_pool : GU_POOL_BUILTIN;
+}
+static int gu_pool_n(void){
+    return g_pool ? g_pool_n : GU_POOL_BUILTIN_N;
+}
+
+int guru_pool_set(const GuruTask *tasks, int n){
+    /* An empty or absurd pool is refused rather than installed: a card holding a
+     * truncated guru.txt should leave the user with the built-in list, not an
+     * app with nothing in it. The caller's own validation is the first line of
+     * defence; this is the one that has to hold when the card is bad. */
+    if(!tasks || n <= 0 || n > GU_TASK_MAX) return -1;
+    for(int i = 0; i < n; i++){
+        const GuruTask *t = &tasks[i];
+        if(t->id < 1 || t->id > GU_TASK_MAX) return -1;
+        if(t->cat >= GU_NCAT)                return -1;
+        if(!t->name || !t->name[0])          return -1;
+        if(!t->why  || !t->why[0])           return -1;
+        for(int j = 0; j < i; j++) if(tasks[j].id == t->id) return -1;
+    }
+    g_pool   = tasks;
+    g_pool_n = n;
+    return 0;
+}
+
+void guru_pool_reset(void){ g_pool = 0; g_pool_n = 0; }
+
+int guru_pool_is_custom(void){ return g_pool != 0; }
+
+int guru_ntasks(void){ return gu_pool_n(); }
 
 const GuruTask *guru_task(int i){
-    return (i >= 0 && i < GU_NPOOL) ? &GU_POOL[i] : 0;
+    return (i >= 0 && i < gu_pool_n()) ? &gu_pool()[i] : 0;
 }
 
 const GuruTask *guru_task_by_id(int id){
-    for(int i = 0; i < GU_NPOOL; i++) if(GU_POOL[i].id == (uint16_t)id) return &GU_POOL[i];
+    const GuruTask *p = gu_pool();
+    int n = gu_pool_n();
+    for(int i = 0; i < n; i++) if(p[i].id == (uint16_t)id) return &p[i];
     return 0;
 }
 
@@ -117,6 +78,32 @@ const char *guru_cat_name(int cat){
         case GU_CAT_RECOV:  return "Recovery";
     }
     return "";
+}
+
+/* The machine-readable half of the same thing: the word used in guru_pool.txt.
+ * Deliberately separate from guru_cat_name() -- the display heading is copy and
+ * may be reworded at any time, but this key is written in the user's own file
+ * and renaming it would silently invalidate their edits. */
+const char *guru_cat_key(int cat){
+    switch(cat){
+        case GU_CAT_GUT:    return "gut";
+        case GU_CAT_METAB:  return "metabolic";
+        case GU_CAT_COGN:   return "mind";
+        case GU_CAT_STRUCT: return "strength";
+        case GU_CAT_RECOV:  return "recovery";
+    }
+    return "";
+}
+
+int guru_cat_from_key(const char *key){
+    if(!key) return -1;
+    for(int c = 0; c < GU_NCAT; c++){
+        const char *k = guru_cat_key(c);
+        int i = 0;
+        while(k[i] && key[i] && k[i] == key[i]) i++;
+        if(!k[i] && !key[i]) return c;
+    }
+    return -1;
 }
 
 /* ------------------------------------------------------------------ internals */
