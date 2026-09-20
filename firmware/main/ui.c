@@ -423,7 +423,6 @@ typedef struct {
     int      done;        /* To Do completed (sorts incomplete first) */
     int      pri;         /* To Do priority 1..5 (1 = highest)         */
     int      due;         /* To Do due date YYYYMMDD (0 = none)         */
-    char     c0[8];       /* col-0 text (To Do checkbox), else empty    */
     char     c1[96];      /* main display text                          */
     char     sort[48];    /* case-folded sort key                       */
 } SRow;
@@ -433,20 +432,17 @@ static void collect_cb(uint32_t uid,const char*primary,const char*secondary,void
     Collect *co = (Collect*)ctx;
     if(!row_keep(primary) || co->n >= co->cap) return;
     SRow *r = &co->rows[co->n++];
-    r->uid=uid; r->done=0; r->pri=99; r->due=0; r->c0[0]=0;
+    r->uid=uid; r->done=0; r->pri=99; r->due=0;
     if(cur_app && cur_app->app==APP_TODO){
         r->done = (primary[0]=='[' && primary[1]=='x');
         const char *txt = (primary[0]=='[') ? primary+4 : primary;
-        snprintf(r->c0, sizeof r->c0, "%s", r->done ? "[x]" : "[ ]");
         if(!secondary || sscanf(secondary,"pri %d due %d",&r->pri,&r->due)<1){ r->pri=99; r->due=0; }
-        /* Palm To Do row: "<pri> description        <due>". Show the due date
-         * (M/D) at the right when set; priority as a leading digit. */
-        if(r->due){
-            int dm=(r->due/100)%100, dd=r->due%100;
-            snprintf(r->c1,sizeof r->c1,"%d %.72s   %d/%d",r->pri,txt,dm,dd);
-        } else {
-            snprintf(r->c1,sizeof r->c1,"%d %.80s",r->pri,txt);
-        }
+        /* Just the words. The priority and the due date are columns of their own
+         * now (build_record_table fills them, list_draw_cb styles them), rather
+         * than a digit and a date run together into the description -- reading
+         * "1 Renew passport 9/20" as one line is what made the list look like a
+         * data dump instead of a list of things to do. */
+        snprintf(r->c1,sizeof r->c1,"%.95s",txt);
         snprintf(r->sort, sizeof r->sort, "%s", txt);
     } else {
         if(secondary && secondary[0]) snprintf(r->c1,sizeof r->c1,"%s  (%s)",primary,secondary);
@@ -473,6 +469,161 @@ static int cmp_todo_due(const void *a,const void *b){
     if(x->pri != y->pri) return x->pri - y->pri;
     return strcasecmp(x->sort, y->sort);
 }
+/* ---- list chrome: what turns a table into a list --------------------------
+ * Every scrolling list in this app is one lv_table, for the pool reason spelled
+ * out above. The price of that trick is how a table looks and what a cell can
+ * hold: the mono theme boxes every cell (four borders, so the list reads as a
+ * spreadsheet) and a cell holds a string and nothing else, so a checkbox had to
+ * be typed out as "[x]".
+ *
+ * Both are fixed here, in one place, and neither costs a byte per row:
+ *   - the cell box becomes a single hairline UNDER the row. That is a style, so
+ *     it is set once per table, not per cell.
+ *   - the checkbox becomes a drawn square, painted in LV_EVENT_DRAW_TASK_ADDED
+ *     from a per-cell flag LVGL already stores in the cell it already has. The
+ *     flag-only cell is SMALLER than the "[x]" string it replaces
+ *     (sizeof(lv_table_cell_t)+1 against +4), so the lists got cheaper, not
+ *     dearer, and no screen gained an object.
+ *
+ * Row state lives on the row's column-0 cell so the callback has one place to
+ * look no matter which column it is painting:
+ *   LIST_BOX   -- this row has a checkbox
+ *   LIST_TICK  -- ...and it is ticked (done / checked / enabled)
+ *   LIST_HEAD  -- a section heading: banded and bold, no box
+ *   LIST_DIM   -- the text is spent (a completed To Do): grey, struck through
+ * CUSTOM_1..4 are LVGL's own per-cell user bits; nothing else in this file uses
+ * them, and they are the reason this needs no parallel array. */
+#define LIST_TICK  LV_TABLE_CELL_CTRL_CUSTOM_1
+#define LIST_BOX   LV_TABLE_CELL_CTRL_CUSTOM_2
+#define LIST_HEAD  LV_TABLE_CELL_CTRL_CUSTOM_3
+#define LIST_DIM   LV_TABLE_CELL_CTRL_CUSTOM_4
+#define COL_RULE   lv_color_hex(0xC8C8C8)  /* hairline between rows   */
+#define COL_DIM    lv_color_hex(0x8C8C8C)  /* spent text (done To Do) */
+#define LIST_BOX_W 13                      /* checkbox side, px       */
+#define LIST_BOX_X 8                       /* ...from the row's left  */
+#define LIST_DUE_W 40                      /* To Do's due-date column */
+
+/* LVGL renamed the "OR these bits into the cell" call between the simulator's
+ * 9.2 and the firmware's 9.5 (add_ -> set_); the bodies are identical, both OR.
+ * One shim here is what keeps sim and device building from the same source --
+ * the device build is the one that catches this, so do not drop it because the
+ * emulator is green. */
+#if LVGL_VERSION_MAJOR > 9 || (LVGL_VERSION_MAJOR == 9 && LVGL_VERSION_MINOR >= 5)
+  #define list_cell_ctrl_set lv_table_set_cell_ctrl
+#else
+  #define list_cell_ctrl_set lv_table_add_cell_ctrl
+#endif
+
+static int list_row_is(lv_obj_t *t, uint32_t row, lv_table_cell_ctrl_t f){
+    return lv_table_has_cell_ctrl(t, row, 0, f);
+}
+
+/* The checkbox, the heading band and the struck-through row, all painted from
+ * flags. Runs per visible cell per frame -- there is no per-row object and no
+ * allocation here, only draw descriptors LVGL is already carrying. */
+static void list_draw_cb(lv_event_t *e){
+    lv_draw_task_t  *task = lv_event_get_draw_task(e);
+    lv_draw_dsc_base_t *b = lv_draw_task_get_draw_dsc(task);
+    if(!b || b->part != LV_PART_ITEMS) return;
+    /* the descriptor names the object being drawn, so there is no guessing about
+     * targets here (see due_cal_cb for what guessing costs) */
+    lv_obj_t *t = b->obj;
+    if(!t) return;
+
+    uint32_t row  = b->id1, col = b->id2;
+    int      head = list_row_is(t, row, LIST_HEAD);
+
+    if(lv_draw_task_get_type(task) == LV_DRAW_TASK_TYPE_FILL){
+        lv_draw_fill_dsc_t *fd = lv_draw_task_get_fill_dsc(task);
+        if(head){                                  /* the section band */
+            if(fd){ fd->color = COL_GRAF; fd->opa = LV_OPA_COVER; }
+            return;
+        }
+        if(col != 0 || !list_row_is(t, row, LIST_BOX)) return;
+
+        /* the box itself: hollow when open, solid black when ticked. Aligned to
+         * the row's left rather than centred in the column, so every box on the
+         * screen sits on one vertical line however wide column 0 is. */
+        lv_area_t cell; lv_draw_task_get_area(task, &cell);
+        lv_area_t box = { 0, 0, LIST_BOX_W - 1, LIST_BOX_W - 1 };
+        lv_area_align(&cell, &box, LV_ALIGN_LEFT_MID, LIST_BOX_X, 0);
+
+        lv_draw_rect_dsc_t d;
+        lv_draw_rect_dsc_init(&d);
+        d.border_color = COL_LINE;
+        d.border_width = 1;
+        d.border_opa   = LV_OPA_COVER;
+        if(list_row_is(t, row, LIST_TICK)){
+            d.bg_color = COL_LINE;
+            d.bg_opa   = LV_OPA_COVER;
+        } else {
+            d.bg_opa   = LV_OPA_TRANSP;
+        }
+        lv_draw_rect(b->layer, &d, &box);
+        return;
+    }
+
+    lv_draw_label_dsc_t *ld = lv_draw_task_get_label_dsc(task);
+    if(!ld) return;
+    if(head){
+        ld->font = &lv_font_palm_bold;             /* the heading reads as one */
+        return;
+    }
+    if(!list_row_is(t, row, LIST_BOX)) return;
+
+    /* Column 1 is what the row is ABOUT; any other column on a checkbox row is
+     * something about it -- To Do's priority (column 0, beside the box) and its
+     * due date (column 2, at the right margin). Those are set quiet and pushed
+     * to their column's right edge, so each forms its own vertical line and the
+     * description is the only thing at full weight. The other lists put no text
+     * in those columns, so this costs them nothing. */
+    if(col != 1){
+        ld->align = LV_TEXT_ALIGN_RIGHT;
+        ld->color = COL_DIM;
+    }
+    if(list_row_is(t, row, LIST_DIM)){
+        ld->color = COL_DIM;
+        /* strike the description only: a struck-through date is just hard to read */
+        if(col == 1) ld->decor = LV_TEXT_DECOR_STRIKETHROUGH;
+    }
+}
+
+/* Everything a scrolling list shares: no frame, no cell boxes, one hairline per
+ * row, and the draw hook above. Call it on every list table so they cannot
+ * drift apart -- a list that skips this is a list that looks like a table. */
+static void list_table_style(lv_obj_t *t){
+    lv_obj_set_style_radius(t, 0, 0);
+    lv_obj_set_style_border_width(t, 0, 0);            /* no frame round the list */
+    lv_obj_set_style_pad_all(t, 4, LV_PART_ITEMS);
+    lv_obj_set_style_pad_left(t, 6, LV_PART_ITEMS);
+    /* an opaque cell background is what guarantees the FILL draw task the
+     * checkbox hook hangs off; a transparent cell would emit no fill at all. */
+    lv_obj_set_style_bg_color(t, COL_BODY, LV_PART_ITEMS);
+    lv_obj_set_style_bg_opa(t, LV_OPA_COVER, LV_PART_ITEMS);
+    lv_obj_set_style_border_color(t, COL_RULE, LV_PART_ITEMS);
+    lv_obj_set_style_border_width(t, 1, LV_PART_ITEMS);
+    lv_obj_set_style_border_side(t, LV_BORDER_SIDE_BOTTOM, LV_PART_ITEMS);
+    lv_obj_add_flag(t, LV_OBJ_FLAG_SEND_DRAW_TASK_EVENTS);
+    lv_obj_add_event_cb(t, list_draw_cb, LV_EVENT_DRAW_TASK_ADDED, NULL);
+}
+
+/* Mark one row's checkbox. `on` ticks it; To Do also dims the text it has
+ * finished with. The flags live on column 0 -- see list_draw_cb. */
+static void list_set_box(lv_obj_t *t, int row, int on, int dim){
+    list_cell_ctrl_set(t, (uint32_t)row, 0, LIST_BOX);
+    if(on) list_cell_ctrl_set  (t, (uint32_t)row, 0, LIST_TICK);
+    else   lv_table_clear_cell_ctrl(t, (uint32_t)row, 0, LIST_TICK);
+    if(dim && on) list_cell_ctrl_set  (t, (uint32_t)row, 0, LIST_DIM);
+    else          lv_table_clear_cell_ctrl(t, (uint32_t)row, 0, LIST_DIM);
+}
+
+/* "(no records)" and friends: one row, spanning the box column when there is
+ * one, so the message reads as a sentence instead of wrapping inside a gutter. */
+static void list_empty_msg(lv_obj_t *t, int wide, const char *msg){
+    lv_table_set_cell_value(t, 0, 0, msg);
+    if(wide) list_cell_ctrl_set(t, 0, 0, LV_TABLE_CELL_CTRL_MERGE_RIGHT);
+}
+
 static void tbl_click_cb(lv_event_t *e){
     lv_obj_t *t = lv_event_get_target(e);
     uint32_t r=LV_TABLE_CELL_NONE, c=LV_TABLE_CELL_NONE;
@@ -505,23 +656,29 @@ static void build_record_table(void){
 
     lv_obj_t *t = lv_table_create(content);
     g_listtbl = t;
-    lv_obj_set_style_radius(t, 0, 0);
-    lv_obj_set_style_border_width(t, 0, 0);
-    lv_obj_set_style_pad_all(t, 4, LV_PART_ITEMS);
-    if(todo){ lv_table_set_column_width(t, 0, 34); lv_table_set_column_width(t, 1, LCD_W-46); }
+    list_table_style(t);
+    /* To Do is three columns: the box (with the priority tucked against its
+     * right edge), the description, and the due date at the right margin. The
+     * widths are set BEFORE any cell is written, because lv_table indexes cells
+     * by row*col_cnt and growing the column count later reshuffles them. */
+    if(todo){ lv_table_set_column_width(t, 0, 34);
+              lv_table_set_column_width(t, 1, LCD_W-46-LIST_DUE_W);
+              lv_table_set_column_width(t, 2, LIST_DUE_W); }
     else    { lv_table_set_column_width(t, 0, LCD_W-8); }
     /* Address reserves the top strip for the Look Up field; others fill content */
     if(addr){ lv_obj_set_size(t, lv_pct(100), lv_pct(84)); lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, 0); }
     else    { lv_obj_set_size(t, lv_pct(100), lv_pct(100)); }
     lv_obj_add_event_cb(t, tbl_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
-    if(n <= 0){ lv_table_set_cell_value(t, 0, 0, "(no records)"); return; }
+    /* An empty list still has To Do's 34px box column, so the message has to be
+     * merged across it or it wraps one word per line inside the gutter. */
+    if(n <= 0){ list_empty_msg(t, todo, "(no records)"); return; }
 
     SRow *rows = calloc(n, sizeof *rows);
     g_rowuids  = calloc(n, sizeof *g_rowuids);
     if(!rows || !g_rowuids){                    /* out of RAM -> degrade, don't crash */
         free(rows); free_rowuids();
-        lv_table_set_cell_value(t, 0, 0, "(low memory)");
+        list_empty_msg(t, todo, "(low memory)");
         return;
     }
     Collect co = { rows, 0, n };
@@ -531,8 +688,19 @@ static void build_record_table(void){
 
     g_rowuid_n = co.n;
     for(int i=0;i<co.n;i++){
-        if(todo){ lv_table_set_cell_value(t, i, 0, rows[i].c0);
-                  lv_table_set_cell_value(t, i, 1, rows[i].c1); }
+        if(todo){
+            lv_table_set_cell_value(t, i, 1, rows[i].c1);
+            if(rows[i].pri >= 1 && rows[i].pri <= 5){      /* 99 = "no priority" */
+                char p[4]; snprintf(p, sizeof p, "%d", rows[i].pri);
+                lv_table_set_cell_value(t, i, 0, p);
+            }
+            if(rows[i].due){
+                char d[12]; snprintf(d, sizeof d, "%d/%d",
+                                     (rows[i].due/100)%100, rows[i].due%100);
+                lv_table_set_cell_value(t, i, 2, d);
+            }
+            list_set_box(t, i, rows[i].done, 1);           /* the box is drawn, not typed */
+        }
         else      lv_table_set_cell_value(t, i, 0, rows[i].c1);
         g_rowuids[i] = rows[i].uid;
     }
@@ -2400,9 +2568,7 @@ static void show_feeds(void){
     lv_obj_t *t = lv_table_create(content);
     lv_obj_set_size(t, LCD_W, PDA_H - TITLE_H - 32);
     lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 32);
-    lv_obj_set_style_radius(t, 0, 0);
-    lv_obj_set_style_border_width(t, 0, 0);
-    lv_obj_set_style_pad_all(t, 4, LV_PART_ITEMS);
+    list_table_style(t);
     lv_table_set_column_width(t, 0, 34);
     lv_table_set_column_width(t, 1, LCD_W - 34 - 4);
     int n = feeds_count();
@@ -2411,9 +2577,9 @@ static void show_feeds(void){
     } else {
         for(int i=0;i<n;i++){
             const Feed *f = feeds_get(i);
-            lv_table_set_cell_value(t, i, 0, f->enabled ? "[x]" : "[ ]");
             char host[FEED_NAME_CAP]; feeds_host_label(f->url, host, sizeof host);
             lv_table_set_cell_value(t, i, 1, f->name[0] ? f->name : host);
+            list_set_box(t, i, f->enabled, 0);
         }
     }
     lv_obj_add_event_cb(t, feeds_tbl_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
@@ -2558,9 +2724,7 @@ static void show_zone_picker(int target){
     lv_obj_t *t = lv_table_create(content);
     lv_obj_set_size(t, lv_pct(100), lv_pct(78));
     lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_radius(t, 0, 0);
-    lv_obj_set_style_border_width(t, 0, 0);
-    lv_obj_set_style_pad_all(t, 4, LV_PART_ITEMS);
+    list_table_style(t);
     lv_table_set_column_width(t, 0, LCD_W - 8);
     int off = (target==ZTGT_TZ) ? 0 : 1, n = clock_zone_count();
     if(off) lv_table_set_cell_value(t, 0, 0, "(off)");
@@ -3336,9 +3500,7 @@ static void build_find_results(void){
     if(g_findtbl){ lv_obj_del(g_findtbl); g_findtbl=NULL; }
     lv_obj_t *t = lv_table_create(content);
     g_findtbl = t;
-    lv_obj_set_style_radius(t, 0, 0);
-    lv_obj_set_style_border_width(t, 0, 0);
-    lv_obj_set_style_pad_all(t, 4, LV_PART_ITEMS);
+    list_table_style(t);
     lv_table_set_column_width(t, 0, LCD_W - 8);
     lv_obj_set_size(t, lv_pct(100), lv_pct(84));
     lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, 0);
@@ -7352,9 +7514,7 @@ static void gu_build_list(void){
 
     lv_obj_t *t = lv_table_create(content);
     g_gu_tbl = t;
-    lv_obj_set_style_radius(t, 0, 0);
-    lv_obj_set_style_border_width(t, 0, 0);
-    lv_obj_set_style_pad_all(t, 4, LV_PART_ITEMS);
+    list_table_style(t);
     lv_table_set_column_width(t, 0, 34);
     lv_table_set_column_width(t, 1, LCD_W - 46);
     lv_obj_set_size(t, lv_pct(100), lv_pct(100) - GU_HDR_H);
@@ -7368,15 +7528,18 @@ static void gu_build_list(void){
             const GuruTask *k = guru_task(i);
             if(k->cat != c) continue;
             if(first){                               /* the heading, once per group */
-                lv_table_set_cell_value(t, row, 0, "");
-                lv_table_set_cell_value(t, row, 1, guru_cat_name(c));
+                /* the heading goes in column 0 and is merged across the box
+                 * column, so the band runs the full width and the word starts
+                 * at the margin rather than indented into the habits' text. */
+                lv_table_set_cell_value(t, row, 0, guru_cat_name(c));
+                list_cell_ctrl_set(t, (uint32_t)row, 0, LV_TABLE_CELL_CTRL_MERGE_RIGHT);
+                list_cell_ctrl_set(t, (uint32_t)row, 0, LIST_HEAD);
                 g_gu_rowid[row++] = 0;
                 first = 0;
                 if(row >= (int)sizeof g_gu_rowid) break;
             }
-            lv_table_set_cell_value(t, row, 0,
-                                    guru_is_checked(&g_gu, k->id, now, tz) ? "[x]" : "[ ]");
             lv_table_set_cell_value(t, row, 1, k->name);
+            list_set_box(t, row, guru_is_checked(&g_gu, k->id, now, tz), 0);
             g_gu_rowid[row++] = (uint8_t)k->id;
         }
     }
@@ -7394,7 +7557,8 @@ static void gu_toggle_row(int row, int id){
     int on = guru_toggle(&g_gu, id, (uint32_t)time(NULL), ui_tz());
     gu_log_append(id, k->cat, !on);
     gu_save();
-    lv_table_set_cell_value(g_gu_tbl, (uint32_t)row, 0, on ? "[x]" : "[ ]");
+    list_set_box(g_gu_tbl, row, on, 0);
+    lv_obj_invalidate(g_gu_tbl);        /* a ctrl flag does not repaint by itself */
     gu_build_header();
 }
 
