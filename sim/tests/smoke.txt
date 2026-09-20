@@ -232,6 +232,29 @@ s launcher_after_about
 c 195 56
 t 400
 s todo_list
+# To Do due-date picker: open the first record -> Edit -> the Due trigger -> pick
+# a day off the calendar. This walk exists because tapping a calendar day used to
+# SEGFAULT here (exit 139, so this gate would have caught it): the calendar's
+# button matrix bubbles VALUE_CHANGED, so lv_event_get_target() handed back the
+# button matrix and lv_calendar_get_pressed_date() cast it to a calendar. The
+# shot is the point -- due_picked must read a real date (9/14/2026, the Monday
+# tapped below), not "No Date" and not a junk one. See due_cal_cb.
+c 120 40
+t 400
+c 200 186
+t 500
+c 120 157
+t 500
+s due_popup
+c 61 218
+t 500
+s due_picked
+# Save it, and land back on the list: due_saved is the shot that proves the To Do
+# row layout end to end -- box, priority digit against the box column's right
+# edge, description, and the due date (9/14) at the right margin.
+c 40 186
+t 1200
+s due_saved
 c 18 225
 t 300
 # Memo Pad (launcher row 2 col 1 after the Graffiti app was added)

@@ -3980,13 +3980,38 @@ static void due_quick_cb(lv_event_t *e){
     due_set_label(); due_close();
 }
 
+/* Days in a month, so a picked date can be checked before it is believed. */
+static int due_month_len(int y, int m){
+    static const uint8_t len[12] = {31,28,31,30,31,30,31,31,30,31,30,31};
+    if(m < 1 || m > 12) return 0;
+    if(m == 2 && ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0)) return 29;
+    return len[m - 1];
+}
+
+/* A day tapped on the calendar.
+ *
+ * MUST be lv_event_get_current_target(): the calendar's button matrix carries
+ * LV_OBJ_FLAG_EVENT_BUBBLE, so the VALUE_CHANGED that arrives here was SENT to
+ * the button matrix and only bubbled up to the calendar. lv_event_get_target()
+ * therefore hands back the BUTTON MATRIX, and lv_calendar_get_pressed_date()
+ * casts whatever it is given straight to lv_calendar_t * -- with
+ * LV_USE_ASSERT_OBJ off (it is off in both builds) nothing catches the wrong
+ * type, so it reads the button matrix's fields at the calendar's offsets and
+ * returns a date assembled from unrelated memory. That is the "bad data": a
+ * junk day, month and year written into the record as if they had been picked.
+ * The Date Book's month view (month_pick_cb) has always used current_target;
+ * this is the same event and wants the same call.
+ *
+ * The range check behind it is not redundant. It is the one thing standing
+ * between a bogus date and the PDB, and it is cheap. */
 static void due_cal_cb(lv_event_t *e){
-    lv_obj_t *cal = (lv_obj_t *)lv_event_get_target(e);
+    lv_obj_t *cal = (lv_obj_t *)lv_event_get_current_target(e);
     lv_calendar_date_t d;
-    if(lv_calendar_get_pressed_date(cal, &d) == LV_RESULT_OK){
-        g_due_has = 1; g_due_y = d.year; g_due_m = d.month; g_due_d = d.day;
-        due_set_label(); due_close();
-    }
+    if(lv_calendar_get_pressed_date(cal, &d) != LV_RESULT_OK) return;
+    if(d.year < 1904 || d.year > 2100) return;      /* 1904 = the Palm epoch */
+    if(d.day < 1 || d.day > due_month_len(d.year, d.month)) return;
+    g_due_has = 1; g_due_y = d.year; g_due_m = d.month; g_due_d = d.day;
+    due_set_label(); due_close();
 }
 
 static void due_quick_btn(lv_obj_t *par, const char *txt, int which){
