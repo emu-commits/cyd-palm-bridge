@@ -29,10 +29,12 @@ mostly away from the bench via the browser simulator).
 
 ## PHASE: the three speakers (ACTIVE — work this top to bottom)
 
-The portraits landed on `feat/speaker-portraits` (`coach_face` 60x67,
-`assistant_face` 60x77, `guru_face` 60x74 — flash rodata, `tools/gen_faces.py`).
-This phase spends them: a greeting for Coach, a whole new **Guru** app, a guided
-**Assistant** onboarding, plus a lock-screen restyle and a HotSync cancel.
+The portraits (`coach_face` 60x67, `assistant_face` 60x77, `guru_face` 60x74 —
+flash rodata, `tools/gen_faces.py`) and everything built on them are **on `main`**
+as of PR #52; the `feat/speaker-portraits` branch is merged. This phase spends
+them: a greeting for Coach, a whole new **Guru** app, a guided **Assistant**
+onboarding, plus a lock-screen restyle and a HotSync cancel. It stays ACTIVE
+because P6 is unbuilt and every `[d]` is still open.
 
 **Working agreement for this phase.** Tick a box only when it is verified, not
 when it is written — `[s]` = sim-verified (`make -C sim smoke` + the shot checked
@@ -40,98 +42,69 @@ by eye), `[d]` = verified on the glass. The device is on `/dev/ttyUSB0` with
 ESP-IDF at `~/esp/esp-idf`, so `[d]` is reachable in this phase rather than
 deferred. Keep each numbered group to its own commit and branch off `main`.
 
-> ### RESUME HERE — state at 2026-09-19 (end of session)
+> ### RESUME HERE — state at 2026-09-20 (end of session)
 >
-> Branch **`feat/speaker-portraits`**, pushed, tree clean, **no PR opened**. The
-> device has this build flashed and boots clean. The web emulator is live at
-> https://emu-commits.github.io/cyd-palm-bridge/ and serves this branch.
+> **The phase is merged.** PR #52 took `feat/speaker-portraits` into `main`
+> (merge `145bdf1`, 26 commits). Tree clean, nothing outstanding locally. The web
+> emulator at https://emu-commits.github.io/cyd-palm-bridge/ is deployed **from
+> `main`** and serves this code — the deployment sha was checked against
+> `git rev-parse origin/main` and `palm.js` / `palm.wasm` confirmed re-uploaded.
+> The `github-pages` branch policy that let the feature branch publish is deleted,
+> so **`main` is the only allowed branch again** (see
+> `web-emulator-deploys-from-ci` for how to add one, and why to remove it).
 >
-> **Every group except P6 is code-complete. What is missing is device testing,
-> not code.** Pick up at either (a) the five `[d]` checks once the user has
-> looked, or (b) P6, the last unbuilt group.
+> **Two things are left in this phase, and only one of them is code:**
 >
-> - **P4** — 35 habits, five categories, `GuruRec` frozen at 8 bytes, append-only
->   `guru.log`, `guru.sav` now written. The list is **one `lv_table`**, which is
->   what made the whole pool fit the object pool; the one-category-per-page
->   fallback is not needed and should not be built. Col 0 ticks, col 1 opens the
->   habit's `why`.
-> - **P4a (2026-09-19)** — **the habits are no longer in the source.**
->   `firmware/main/guru_pool.txt` is the source of truth;
->   `tools/gen_guru_pool.py` compiles it into `guru_pool.c`, and the same file
->   can be dropped on the card as `/sdcard/guru.txt` to replace the list without
->   a reflash (`gurupool.c` parses it, Guru > Menu > Export habit list writes a
->   copy). **Edit the .txt, never the .c** — CI regenerates and diffs.
->   The copy pass that came with it fixed real errors the user caught: the
->   category displayed as "Movement" but the enum has always meant *metabolic*,
->   which is how food and supplements ended up filed under a heading that read as
->   exercise. The display name is now **"Metabolic"**; `Protein before bed`
->   (id 13) moved to Recovery and `Creatine` (id 14) to Mind. **Ids did not
->   change**, so existing `guru.log` records still resolve, and the `cat` stored
->   in each record means the week is still analysed as it was lived.
-> - **P5** — her week screen, `GA_*` advice rules, reached from Options > Her
->   week. Ring for per-day figures, log for the category split.
-> - **P7** — lock screen restyled into three declared zones. Zero new widget
->   classes; the furniture is canvas ink. `DASH_Y_*` constants are shared between
->   `dash_paint()` and `ui_show_lock()` and must stay in step.
-> - **P8** — `hotsync_cancel()` + the confirmation modal. The cancel is a
->   *request* checked at safe points, never a kill.
-> - **P6 is the ONLY group left** — Assistant onboarding (Wi-Fi + CalDAV). It was
->   skipped at the user's direction on 2026-09-19 to take P7 and P8 first. All
->   three entry points are already decided in the item. It is **device-only** to
->   verify: a real Wi-Fi join and a live iCloud account, so the sim cannot gate
->   it, and it will need the user's Apple ID and an app-specific password.
+> 1. **P6 — Assistant onboarding.** The last unbuilt group. All three entry
+>    points are already decided in the item. **Device-only to verify** (a real
+>    Wi-Fi join and a live iCloud account), so the sim cannot gate it, and it
+>    needs the user's Apple ID and an app-specific password.
+> 2. **Seven `[d]` checks, none of them done** — P2, P3, P4, P4a, P5, P7, P8,
+>    plus the list restyle below. Everything else in the phase is `[s]` only, and
+>    it is now on `main` and on the public emulator without ever having been on
+>    the glass. **The user has said they will test later — do not tick those
+>    boxes for them.**
 >
-> **Six device checks are outstanding and none has been done:** P3 (greeting +
-> header), P4 (the list, ticking, the detail view), P5 (her week), P7 (the
-> restyled lock screen), P8 (cancel a real sync — the only way to exercise
-> that path at all) and P4a (Export habit list writes `guru.txt`; edit it on a
-> computer and confirm the edited list comes back). The user has said they will
-> test later — do not tick those boxes without them.
+> **What landed 2026-09-20, after the rest of the phase was already written:**
 >
-> **The web emulator is deployed** at https://emu-commits.github.io/cyd-palm-bridge/
-> — `feat/speaker-portraits` was added to the `github-pages` environment's
-> deployment-branch policy (id 60412682) so a non-main branch could publish. That
-> policy should be removed once this work merges.
+> - **The lists are drawn chrome now, not table furniture.** One shared
+>   `list_table_style()` plus one `LV_EVENT_DRAW_TASK_ADDED` hook in `ui.c`
+>   styles all five lists (To Do, Memo/Address, Guru, News feeds, the zone
+>   picker): a hairline under each row instead of a box around each cell, a
+>   **drawn** checkbox — hollow when open, solid black when ticked — off LVGL's
+>   own per-cell `CUSTOM_*` bits, banded Guru category headings, and completed To
+>   Dos grey and struck through. To Do's row is four aligned columns: box,
+>   priority, description, due date. **It cost nothing per row** — no screen
+>   gained an object, and a flag-only cell is smaller than the `"[x]"` string it
+>   replaced, so the smoke's heap peak *fell* from 2216 to 2120 bytes.
+> - **The To Do due-date picker read its date out of the wrong object.** The
+>   calendar's button matrix carries `LV_OBJ_FLAG_EVENT_BUBBLE`, so
+>   `lv_event_get_target()` returned the *button matrix* and
+>   `lv_calendar_get_pressed_date()` cast it straight to `lv_calendar_t *`; with
+>   `LV_USE_ASSERT_OBJ` off (it is off in both builds) nothing caught the wrong
+>   type. Tapping a day **segfaulted the host sim (exit 139)** and on-device wrote
+>   a junk date into the record. `lv_event_get_current_target()` is the one that
+>   returns the calendar — the Date Book's month view always used it. The smoke
+>   now walks To Do → Edit → Due → pick → Done, so the gate covers that path.
 >
-> **RESOLVED 2026-09-19 — the icon-decode OOM was a stale gate, not a bug.**
-> `sim/lv_conf.h` claimed "device parity: 24 KB" but the device has been on
-> **32 KB** since the change documented in `sdkconfig.defaults`. `smoke32` was
-> therefore 8 KB tighter than any real board. Measured on hardware via the new
-> boot line in `lvgl_port.c`: `lvgl pool: 31100 bytes total`. At the device's real
-> size both `smoke` and `smoke32` log **zero** OOM warnings. `make -C sim
-> poolparity` now fails if the two files drift apart again.
+> **The simulator is LVGL 9.2.2 and the firmware is 9.5 — that is an API split,
+> not a version number.** `lv_table_add_cell_ctrl` was renamed
+> `lv_table_set_cell_ctrl`, and `ui.c` now carries a version shim for it. **A
+> green emulator does not mean the firmware builds:** run `idf.py build` before
+> believing any UI change. That is what caught this one.
 >
-> **Still true, not fixed, not urgent:** LVGL allocates + memcpys a fresh buffer
-> for every alpha-only image on *every* draw (for A8 there is no conversion to
-> do — it is a pure copy), and `LV_CACHE_DEF_SIZE` is 0 so nothing is reused. The
-> launcher pays ~10 KB of copying per repaint. There is headroom for it now, so
-> it is waste rather than failure. Enabling the cache is not an obvious win: it
+> **Standing, not fixed, not urgent:** LVGL allocates and memcpys a fresh buffer
+> for every alpha-only image on *every* draw (for A8 there is nothing to convert —
+> it is a pure copy), and `LV_CACHE_DEF_SIZE` is 0, so nothing is reused. The
+> launcher pays ~10 KB of copying per repaint. There is headroom for it, so it is
+> waste rather than failure, and enabling the cache is not an obvious win: it
 > would hold ~10 KB of decoded icons permanently in a 32 KB pool.
 >
-> - **P0** — `speaker_say()` + `SPK_*` geometry in `ui.c` is the shared portrait +
->   bubble; `g_greet_due` (reset in `lock_release_cb`) is the once-per-unlock flag;
->   `greet_pick()` is the never-repeat line picker.
-> - **P1** — Coach greets on first open after unlock, tap anywhere continues.
->   Confirmed on the glass by the user.
-> - **P2** — launcher is nine apps / three rows / no scrolling; Graffiti moved
->   into the Games folder; Guru icon is her third eye on a Palm-style solid disk
->   with a four-arc aura. User confirmed the icon.
-> - **P3** — `guru.c`/`guru.h` + `daycal.h`, `sim/tests/guru_test.c` (61
->   assertions) wired into `make -C sim guru`, `games:` and CI. Her greeting
->   works like Coach's. `show_guru()` is no longer a placeholder: it reads the
->   engine back ("0 of 1 today"), but the habit list is still P4's job.
->   **Awaiting the user's eyes on the glass** — that is the only open P3 box.
-> - **P4 next** — the habit pool itself, its categories, the stable numeric IDs
->   and the append-only log, then the check-off screen. The rolling target it was
->   going to need **already landed with P3** (`GU_WIN`, half-up, floor 1) — read
->   the P4 item for the rules, they are load-bearing. Note `guru.sav` is read by
->   `gu_load()` and **never written**; P4 adds `gu_save()`.
-> - **⚠ Measure before building the check-off screen** — see the P4 warning. The
->   pool-on-one-screen decision is only safe if the objects fit in 24 KB.
->
-> **Still un-ticked and genuinely not done:** P3's `[d]`, every `[d]` below P2,
-> and all of P4–P8. Two decisions are locked in the items themselves (Guru shows
-> the full pool grouped by category; all three Assistant onboarding entry points).
+> **The pool is 32 KB, not 24** — the device has been since the change in
+> `sdkconfig.defaults`, measured on hardware as `lvgl pool: 31100 bytes total`.
+> `make -C sim poolparity` fails if `sim/lv_conf.h` and the device's sdkconfig
+> drift apart again. Several older notes in this file still say 24 KB; the gate is
+> the authority, not the prose.
 
 > **Health content disclaimer (P4).** The Guru task pool is widely-discussed
 > consumer wellness practice, NOT medical advice, and must not be presented as
@@ -199,8 +172,10 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
 - [ ] `[d]` On glass.
 
 ### P4 — Guru: the task treadmill
-- [x] **The task pool.** 35 tasks, const flash rodata in `guru.c`, each with a
-      one-line `why` (a list of cryptic imperatives is a list nobody trusts). The
+- [x] **The task pool.** 35 tasks, const flash rodata, each with a one-line `why`
+      (a list of cryptic imperatives is a list nobody trusts). *It started in
+      `guru.c`; since P4a the source is `firmware/main/guru_pool.txt` and the
+      table is generated — **edit the .txt, never the .c**.* The
       bar for every line was *"could two people disagree about whether I did this
       today?"* -- if yes it is a tip, not a task, and "eat healthy" is not in it.
       Every example given is in the pool (zone-2 with a 140 burst, one brazil nut,
@@ -211,8 +186,11 @@ deferred. Keep each numbered group to its own commit and branch off `main`.
 - [x] **Categories** — `GU_CAT_GUT / METAB / COGN / STRUCT / RECOV`, seven tasks
       each. *Indices are persisted: never reorder* (same rule as `CO_DOM_*`). The
       enum names are frozen; the words shown to the user come from
-      `guru_cat_name()` ("Gut", "Movement", "Mind", "Strength", "Recovery") and
-      can be retuned freely without touching the log.
+      `guru_cat_name()` ("Gut", **"Metabolic"**, "Mind", "Strength", "Recovery")
+      and can be retuned freely without touching the log. *"Movement" was the
+      original display name and it was wrong* — the enum has always meant
+      metabolic health, and the mismatch is how food and supplements ended up
+      filed under a heading that read as exercise. See P4a.
 - [x] **Record format**, byte-counted and frozen before any UI is written — the
       Coach's 12-byte `CoachRec` is the precedent. Append-only log on SD.
       **A task is a stable numeric ID, not a list position** — the pool is fixed
@@ -332,6 +310,35 @@ All three entry points, *decided 2026-09-18*:
 - [ ] `[d]` **The stop itself is device-only.** The sim's "sync" is a synchronous
       call that finishes before any button could be pressed, so `hotsync_busy()`
       is never 1 there and the confirmation can never open. Needs hardware.
+
+### P9 — the lists stop looking like tables *(added 2026-09-20, merged in #52)*
+Not planned in this phase; prompted by the user looking at Guru and To Do and
+asking whether a table had to look like one. It touches every list, so it is a
+group rather than a tidy-up.
+- [x] **One shared `list_table_style()` + one `LV_EVENT_DRAW_TASK_ADDED` hook**
+      (`list_draw_cb`) for all five lists — To Do, Memo/Address, Guru, News
+      feeds, the zone picker. A list that skips the helper is a list that looks
+      like a table again, so there is one door, not five.
+- [x] **A drawn checkbox** instead of the typed `"[x]"` — hollow when open,
+      solid black when ticked — painted from LVGL's own per-cell `CUSTOM_*` bits.
+      That is what closes **C7** (see Blocked) without touching the font.
+- [x] **Hairline under each row** instead of the mono theme's box around each
+      cell; Guru's category headings banded, bold and merged across the box
+      column; completed To Dos grey and struck through.
+- [x] **To Do's row is four aligned columns** — box, priority, description, due
+      date — rather than `"1 Renew passport   9/20"` run together in one string.
+- [x] **Cheaper, not dearer.** No screen gained an object; a flag-only cell is
+      smaller than the string it replaced. Smoke heap peak 2216 → 2120 bytes,
+      `smoke32` (device-sized pool) green.
+- [x] `[s]` — `smoke` and `smoke32`, shots read by eye, every other sim gate
+      green, `idf.py build` clean.
+- [ ] `[d]` **On glass, and this one genuinely needs it.** The hairline
+      (`COL_RULE` `0xC8C8C8`) and the quiet priority/due text (`COL_DIM`
+      `0x8C8C8C`) are greys chosen in an emulator; a real ILI9341 behind a
+      resistive panel is exactly where near-white and near-black stop being
+      distinguishable. If the hairline vanishes, darken it; if the meta text
+      reads as broken rather than quiet, darken that. Also confirm the 13 px box
+      is a comfortable tap target on the glass, not just the mouse.
 
 ### Parked until this phase lands — the Assistant's other jobs
 Ideas only. **Do not build any of these in this phase** (*decided 2026-09-18:
@@ -470,9 +477,16 @@ starts with a **feasibility check on the base CYD** before committing to a build
 
 ## Blocked — needs a prerequisite
 
-- **`[blocked]` C7 ✓-glyph in To Do.** Show a real checkmark instead of `[x]`.
-  The Palm bitmap font has no checkmark in codepoints 32–255, so this needs a
-  deliberate font regeneration (keeping the GPLv3 PumpkinOS provenance).
+- ~~**`[blocked]` C7 ✓-glyph in To Do.**~~ **DONE 2026-09-20 — and the blocker
+  was never the real constraint.** The item assumed the tick had to be a *glyph*,
+  which the Palm bitmap font has none of in codepoints 32–255, so it sat behind a
+  font regeneration nobody wanted to do. A cell can only hold a string, but the
+  cell is not the only thing that can paint: the checkbox is now **drawn** in an
+  `LV_EVENT_DRAW_TASK_ADDED` hook (`list_draw_cb` in `ui.c`) — hollow when open,
+  solid black when ticked — off a per-cell flag LVGL already stores. No font
+  work, no provenance question, and it applies to every list at once. The font
+  regeneration is still the route if a literal ✓ is ever wanted over a filled
+  box, but nothing is blocked on it.
 - ~~**`[blocked]` M2 — tear down LVGL draw buffers during sync.**~~ **DONE
   2026-08-20**, and it was not optional in the end: with 23 KB free the mbedTLS
   handshake bottomed out at 48 bytes and every HTTPS request in the sync failed.
@@ -919,6 +933,11 @@ starts with a **feasibility check on the base CYD** before committing to a build
   due-date picker against a real HotSync; plus on-glass verification of everything
   built in the sim this cycle (C1 ink, C2 HotSync dialog, C4 forms, I1.2 keyboard,
   brightness stepper, inverted title bar, toasts, Week view).
+  **The picker's own bug is fixed** (2026-09-20, see P9's sibling commit): picking
+  a day used to read the date out of the wrong object and segfault the host sim.
+  What is left here is the *sync* question — that a date picked on glass survives
+  a real HotSync round-trip to iCloud and comes back the same day, which the sim's
+  fake sync cannot answer.
 - **`[device]` heap re-measure.** Re-measure interactive heap headroom after the
   M1 static→heap move.
 
