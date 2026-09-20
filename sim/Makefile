@@ -30,7 +30,7 @@ CFLAGS := -O2 -g -Wall -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS -DUI_SEED_TESTEVEN
 APP_SRCS := \
     $(FW)/ui.c $(FW)/data.c $(FW)/graffiti.c $(FW)/appcfg.c $(FW)/clock.c \
     $(FW)/lv_font_palm.c $(FW)/lv_font_palm_bold.c $(FW)/lv_font_kana.c $(FW)/palm_icons.c \
-    $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(FW)/dash.c $(FW)/minesweeper.c $(FW)/wordie.c $(FW)/sudoku.c $(FW)/zip.c $(FW)/coach.c \
+    $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(FW)/dash.c $(FW)/minesweeper.c $(FW)/wordie.c $(FW)/sudoku.c $(FW)/zip.c $(FW)/coach.c $(FW)/guru.c $(FW)/guru_pool.c $(FW)/gurupool.c \
     $(BR)/pdb.c $(BR)/datebook.c $(BR)/address.c $(BR)/todo.c $(BR)/appinfo.c \
     $(BR)/ical.c $(BR)/vcard.c $(BR)/tz.c $(BR)/charset.c \
     $(BR)/find.c $(BR)/calc.c $(BR)/config.c $(BR)/rss.c $(BR)/news.c $(BR)/feeds.c \
@@ -43,7 +43,7 @@ WRAP_LD := -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free
 LVGL_SRCS := $(shell find lvgl/src -name '*.c' 2>/dev/null)
 LVGL_OBJS := $(patsubst lvgl/src/%.c,build/lvgl/%.o,$(LVGL_SRCS))
 
-.PHONY: host wasm smoke smoke32 graf mines wordie sudoku zip clock coach dash games clean lvgl-src
+.PHONY: host wasm smoke smoke32 poolparity graf mines wordie sudoku zip clock coach guru gurupool dash games clean lvgl-src
 
 # LVGL_SRCS is evaluated when make parses this file, so on a clean checkout the
 # source must be fetched BEFORE the build graph is used: the entry points fetch,
@@ -79,7 +79,8 @@ smoke: host
 	@echo "sim smoke: OK"
 
 # ---- smoke32: the SAME scripted smoke built 32-bit, so the LVGL object pool is the
-# TRUE 24 KB (like the wasm build) instead of the 64-bit host's 48 KB. This catches
+# device's TRUE size (like the wasm build) instead of the 64-bit host's doubled
+# one -- see the note in lv_conf.h, and keep it tracking sdkconfig.defaults. This catches
 # object-pool exhaustion -- e.g. a screen with too many widgets fails to boot on the
 # device/wasm but not on the 64-bit native sim. Needs gcc-multilib + libc6-dev-i386.
 # (CI only *compiles* wasm; this actually RUNS the UI under the device-sized pool.) ----
@@ -89,7 +90,13 @@ smoke32: lvgl-src
 	rm -rf build/shots && mkdir -p build/shots
 	./build/sim_host build/shots < tests/smoke.txt
 	@ls build/shots/*.ppm >/dev/null
-	@echo "sim smoke32 (true 24 KB pool): OK"
+	@echo "sim smoke32 (true device-sized pool): OK"
+
+# ---- poolparity: assert sim/lv_conf.h still matches the device's configured
+# LVGL pool. This drifted once (the sim sat at 24 KB for months after the device
+# moved to 32) and nothing noticed, because nothing compared the two files. ----
+poolparity:
+	@python3 tools/check_pool_parity.py
 
 # ---- graf: offline Graffiti recognizer accuracy gate (no LVGL/display needed).
 # Synthesizes noisy strokes from the real templates and asserts recognition
@@ -149,9 +156,34 @@ build/clock_test: tests/clock_test.c $(FW)/playclock.h $(FW)/clock.c $(FW)/clock
 coach: build/coach_test
 	./build/coach_test
 
-build/coach_test: tests/coach_test.c $(FW)/coach.c $(FW)/coach.h
+build/coach_test: tests/coach_test.c $(FW)/coach.c $(FW)/coach.h $(FW)/daycal.h
 	@mkdir -p build
 	$(CC) -O2 -Wall -I$(FW) tests/coach_test.c $(FW)/coach.c -o $@
+
+# ---- guru: host gate for the pure Guru logic (the rolling daily target, the
+# habit streak and its undo, local-day rollover). Clock- and zone-injected, so it
+# needs no LVGL and no sleeping. ----
+guru: build/guru_test
+	./build/guru_test
+
+build/guru_test: tests/guru_test.c $(FW)/guru.c $(FW)/guru_pool.c $(FW)/guru.h $(FW)/daycal.h
+	@mkdir -p build
+	$(CC) -O2 -Wall -I$(FW) tests/guru_test.c $(FW)/guru.c $(FW)/guru_pool.c -o $@
+
+# ---- gurupool: the habit pool is a text file the user edits, so its parser has
+# to survive anything a text editor can produce. Two gates in one target:
+#   1. the generated guru_pool.c still matches guru_pool.txt (no hand edits), and
+#   2. the runtime parser agrees with the generator on that very file, plus the
+#      malformed-input cases that a hand-edited card WILL eventually contain. ----
+gurupool: build/gurupool_test
+	python3 ../tools/gen_guru_pool.py --check
+	./build/gurupool_test
+
+build/gurupool_test: tests/gurupool_test.c $(FW)/gurupool.c $(FW)/guru.c \
+                     $(FW)/guru_pool.c $(FW)/gurupool.h $(FW)/guru.h
+	@mkdir -p build
+	$(CC) -O2 -Wall -I$(FW) tests/gurupool_test.c $(FW)/gurupool.c $(FW)/guru.c \
+	      $(FW)/guru_pool.c -o $@
 
 # ---- dash: the lock screen's freshness + age rules (needs libm for the moon). ----
 dash: build/dash_test
@@ -162,10 +194,10 @@ build/dash_test: tests/dash_test.c $(FW)/dash.c $(FW)/dash.h
 	$(CC) -O2 -Wall -I$(FW) tests/dash_test.c $(FW)/dash.c -o $@ -lm
 
 # ---- games: every game's logic gate in one go (what CI runs). ----
-games: mines wordie sudoku zip clock coach dash
+games: poolparity mines wordie sudoku zip clock coach guru gurupool dash
 
 # ---- wasm: everything compiled by emcc in one shot (CI build; no local emcc needed).
-# 32-bit wasm => the TRUE 24 KB device pool applies (see lv_conf.h). main() boots
+# 32-bit wasm => the TRUE device-sized pool applies (see lv_conf.h). main() boots
 # the Palm at module init; JS drives frames and blits the exported framebuffer. ----
 WASM_CFLAGS := $(filter-out -g,$(CFLAGS)) -g0
 

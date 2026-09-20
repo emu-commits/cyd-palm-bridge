@@ -12,10 +12,16 @@ extern const lv_image_dsc_t icon_wordie;    /* Wordie (Games sub-launcher) */
 extern const lv_image_dsc_t icon_sudoku;    /* Sudoku (Games sub-launcher) */
 extern const lv_image_dsc_t icon_zip;       /* Zip path puzzle (Games sub-launcher) */
 extern const lv_image_dsc_t icon_coach;     /* Coach focus timer (ritual Pomodoro) */
-/* Coach's portrait, 60x65 -- the weekly report's speaker, beside the stats and
- * attached to the advice bubble. Regenerate with tools/gen_coach_face.py. Flash
- * rodata like every icon here, so the 24 KB LVGL object pool never holds it. */
-extern const lv_image_dsc_t coach_face;
+extern const lv_image_dsc_t icon_guru;      /* Guru longevity habits (gen_guru_icon.py) */
+/* The speakers: a portrait stands in the right-hand margin of a screen that has
+ * something to say, beside the content and attached to a speech bubble. Coach's
+ * is on the weekly report; the Assistant and the Guru are for the screens that
+ * come after it. All 60 wide, heights differing with the art -- read them off
+ * the descriptor rather than restating them. Regenerate with tools/gen_faces.py.
+ * Flash rodata like every icon here, so the 24 KB LVGL pool never holds one. */
+extern const lv_image_dsc_t coach_face;        /* 60x67, 4020 bytes */
+extern const lv_image_dsc_t assistant_face;    /* 60x77, 4620 bytes */
+extern const lv_image_dsc_t guru_face;         /* 60x74, 4440 bytes */
 /* silkscreen buttons (flank the Graffiti area) */
 extern const lv_image_dsc_t silk_home, silk_menu, silk_find, silk_calc;
 #endif

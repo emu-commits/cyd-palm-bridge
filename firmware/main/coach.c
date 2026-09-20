@@ -5,6 +5,7 @@
  * the file I/O. Every wall-clock input is injected, so sim/tests/coach_test.c pins
  * every branch on the host in any locale. */
 #include "coach.h"
+#include "daycal.h"
 
 /* a bucket needs this many sessions before its rate is worth comparing -- below it,
  * one bad afternoon reads as a 100% failure rate and the advice becomes noise. */
@@ -12,29 +13,16 @@
 /* the rule engine stays silent until it has seen this many sessions (R0). */
 #define CO_MIN_ADVISE 5
 
-/* ---------------------------------------------------------------- time helpers */
-/* Local seconds since the epoch. tz_off_min is minutes east of UTC, so a negative
- * offset (the Americas) can push a just-after-midnight UTC time into the previous
- * local day -- hence the floor division below rather than a plain divide, which
- * truncates toward zero and would put that moment on the wrong day. */
-static int64_t co_local_secs(uint32_t epoch, int tz_off_min){
-    return (int64_t)epoch + (int64_t)tz_off_min * 60;
-}
-static int64_t co_floordiv(int64_t a, int64_t b){
-    int64_t q = a / b;
-    if((a % b) != 0 && ((a < 0) != (b < 0))) q--;
-    return q;
-}
-
+/* ---------------------------------------------------------------- time helpers
+ * The calendar arithmetic itself lives in daycal.h, shared with guru.c -- see the
+ * note there about why this is floor division and not a plain divide. These stay
+ * as Coach's own names so callers and tests are unchanged. */
 int32_t coach_day_index(uint32_t epoch, int tz_off_min){
-    return (int32_t)co_floordiv(co_local_secs(epoch, tz_off_min), 86400);
+    return cal_day_index(epoch, tz_off_min);
 }
 
 int coach_local_hour(uint32_t epoch, int tz_off_min){
-    int64_t s = co_local_secs(epoch, tz_off_min);
-    int64_t day = co_floordiv(s, 86400);
-    int64_t rem = s - day * 86400;            /* always 0..86399 */
-    return (int)(rem / 3600);
+    return cal_local_hour(epoch, tz_off_min);
 }
 
 int coach_slot(uint32_t epoch, int tz_off_min){

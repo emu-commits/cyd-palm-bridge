@@ -162,6 +162,22 @@ void lvgl_port_init(void){
     lv_display_set_theme(disp, lv_theme_mono_init(disp, false, &lv_font_palm));
 
     ESP_LOGI(TAG, "LVGL up: %dx%d, %u-byte partial buffer", LCD_W, LCD_H, (unsigned)buf_bytes);
+
+    /* Report the object pool's REAL size, measured rather than assumed.
+     *
+     * Worth a line of boot log because the number is load-bearing and is set two
+     * indirections away from where it matters: sdkconfig's
+     * CONFIG_LV_MEM_SIZE_KILOBYTES is mapped to CONFIG_LV_MEM_SIZE by LVGL's
+     * lv_conf_kconfig.h, and only then to LV_MEM_SIZE. LVGL 9.6 broke exactly
+     * that mapping (it deprecates the KILOBYTES form and silently prefers a
+     * 64 KB default), which is why firmware/main/idf_component.yml pins the
+     * version. If that pin is ever raised, this line is the check: it must still
+     * say 32768, and a pool that has quietly become 64 KB will not fit DRAM. */
+    lv_mem_monitor_t mon;
+    lv_mem_monitor(&mon);
+    ESP_LOGI(TAG, "lvgl pool: %u bytes total, %u free (largest block %u)",
+             (unsigned)mon.total_size, (unsigned)mon.free_size,
+             (unsigned)mon.free_biggest_size);
 }
 
 void lvgl_port_run(void){

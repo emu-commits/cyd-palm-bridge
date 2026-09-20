@@ -66,6 +66,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Create /sdcard (the firmware data layer's SD root)
         run: sudo mkdir -p /sdcard && sudo chmod 777 /sdcard
+      - name: LVGL pool parity (sim/lv_conf.h vs the device's sdkconfig)
+        run: make -C sim poolparity
       - name: Graffiti recognizer accuracy gate
         run: make -C sim graf
       - name: Minesweeper board-logic gate
@@ -80,6 +82,10 @@ jobs:
         run: make -C sim clock
       - name: Coach logic gate (advice rules, streaks, sigil)
         run: make -C sim coach
+      - name: Guru logic gate (rolling daily target, habit streak)
+        run: make -C sim guru
+      - name: Guru habit-pool gate (guru_pool.c matches guru_pool.txt; card parser)
+        run: make -C sim gurupool
       - name: Lock-screen dashboard gate (weather age + freshness cut)
         run: make -C sim dash
       - name: Build + run the scripted UI tour (real ui.c, screenshots)
@@ -91,9 +97,9 @@ jobs:
         with:
           name: sim-screenshots
           path: sim/build/shots/*.png
-      - name: Install 32-bit toolchain (device-sized 24 KB LVGL pool)
+      - name: Install 32-bit toolchain (device-sized LVGL pool)
         run: sudo apt-get update && sudo apt-get install -y gcc-multilib libc6-dev-i386
-      - name: 32-bit pool smoke (true 24 KB pool, like wasm/device)
+      - name: 32-bit pool smoke (true device-sized pool, like wasm/device)
         run: make -C sim smoke32
 
   simulator-wasm:

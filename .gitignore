@@ -47,3 +47,4 @@
 /sim/build/
 /break_test
 /toobig
+__pycache__/

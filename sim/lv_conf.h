@@ -53,14 +53,28 @@
 
 #if LV_USE_STDLIB_MALLOC == LV_STDLIB_BUILTIN
     /*Size of the memory available for `lv_malloc()` in bytes (>= 2kB)*/
-    /* Device parity: CONFIG_LV_MEM_SIZE_KILOBYTES=24 on the 32-bit ESP32, so the
-     * object-pool-exhaustion class reproduces here. On an LP64 host every LVGL
-     * object roughly doubles (8-byte pointers), so 48 KB approximates the same
-     * OBJECT capacity; the wasm build is 32-bit and uses the true 24 KB. */
+    /* Device parity. THIS MUST TRACK firmware/sdkconfig.defaults --
+     * CONFIG_LV_MEM_SIZE_KILOBYTES -- and today that is 32.
+     *
+     * It said 24 until 2026-09-19, which was the value from BEFORE the device
+     * was raised to 32 (see the long note in sdkconfig.defaults on why 24 KB
+     * live-locks the dashboard). The sim was therefore gating against a
+     * configuration that no longer exists, 8 KB tighter than any real device,
+     * and `make smoke32` had been logging ~42 image-decode failures a run that
+     * hardware never sees. A gate that cries wolf is a gate people stop reading.
+     *
+     * Verified on hardware rather than inferred from the config: the boot log
+     * line in lvgl_port.c prints the pool LVGL actually built, and it reads
+     * "lvgl pool: 31100 bytes total" -- 32 KB less LVGL's own bookkeeping.
+     *
+     * On an LP64 host every LVGL object roughly doubles (8-byte pointers), so
+     * the 64-bit figure is 2x the device's to approximate the same OBJECT
+     * capacity. The wasm build is 32-bit and gets the true device value, which
+     * is what makes the browser emulator faithful about pool exhaustion. */
     #if defined(__LP64__) || defined(_WIN64)
-        #define LV_MEM_SIZE (48 * 1024U)   /*[bytes]*/
+        #define LV_MEM_SIZE (64 * 1024U)   /*[bytes]*/
     #else
-        #define LV_MEM_SIZE (24 * 1024U)   /*[bytes]*/
+        #define LV_MEM_SIZE (32 * 1024U)   /*[bytes]*/
     #endif
 
     /*Size of the memory expand for `lv_malloc()` in bytes*/

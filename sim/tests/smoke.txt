@@ -16,12 +16,18 @@ t 30
 u
 t 400
 s launcher
-# Graffiti Trainer (roadmap #2): launcher app (Graffiti icon, row 2 col 3) opens
+# Graffiti Trainer (roadmap #2): now inside the Games folder -- it opens
 # the drill (target letter + a stroke guide on an I1 canvas + a graded score). On a
 # fresh box file the first target is 'm'; draw it -> "Nice! NN%" + advance. Then tap
 # the Train toggle and draw once -> captures a per-device template ("saved your..").
 # Pool-safe (labels + one canvas); a regression here would HANG or misdraw.
-c 200 110
+# Graffiti moved into the Games folder: open Games (row 2 col 3) first, then
+# Graffiti. It shares the folder's second row with Zip, and that row is
+# SPACE_EVENLY across the full width -- so Graffiti is at x=169, not x=120.
+c 195 110
+t 400
+s games_folder_graf
+c 169 108
 t 400
 s trainer
 d 45 300
@@ -69,13 +75,19 @@ s news_reader_next
 c 18 225
 t 300
 # Kana trainer (roadmap #3, Tier 1): NOW folded under Graffiti -- open the Graffiti
-# app (row 2 col 3) and tap the compact "あ" button (top row, left of Drill/Train).
+# app from the Games folder and tap the compact "あ" button (top row, left of Drill/Train).
 # Shows a kana (first target: hiragana 'a') rendered with the lv_font_kana bitmap
 # subset + its romaji note, and you answer the SOUND by drawing romaji letters in
 # the Graffiti strip (reusing the Latin recognizer, untouched). Draw a caret '^'
 # (= 'a') to answer -> "Correct!" + deterministic advance to the next kana.
 # Pool-safe (labels only; a regression here would HANG or misrender the kana).
-c 200 110
+# Graffiti moved into the Games folder: open Games (row 2 col 3) first, then
+# Graffiti. It shares the folder's second row with Zip, and that row is
+# SPACE_EVENLY across the full width -- so Graffiti is at x=169, not x=120.
+c 195 110
+t 400
+s games_folder_graf
+c 169 108
 t 400
 c 161 38
 t 400
@@ -201,14 +213,48 @@ s addr_menu
 c 60 250
 t 400
 s about_box
+# Dismissing the modal CONSUMES the tap, so this one only closes the box and we
+# are still inside Address afterwards. The home tap has to be its own.
 c 120 30
 t 300
 c 18 225
 t 300
-# To Do
-c 200 55
+c 18 225
+t 300
+# PROVE we are back on the launcher before tapping a launcher cell. For several
+# builds we were not: the About box is modal and the tap that dismisses it is
+# CONSUMED by the dismissal, so "close the box" and "go home" are two taps and
+# this sequence only had one. The To Do tap below then landed on the Address list
+# and opened a record, and todo_list.ppm has been a picture of an Address detail
+# ever since -- green the whole time, because the gate reads the exit code.
+s launcher_after_about
+# To Do (launcher row 1 col 3)
+c 195 56
 t 400
 s todo_list
+# To Do due-date picker: open the first record -> Edit -> the Due trigger -> pick
+# a day off the calendar. This walk exists because tapping a calendar day used to
+# SEGFAULT here (exit 139, so this gate would have caught it): the calendar's
+# button matrix bubbles VALUE_CHANGED, so lv_event_get_target() handed back the
+# button matrix and lv_calendar_get_pressed_date() cast it to a calendar. The
+# shot is the point -- due_picked must read a real date (9/14/2026, the Monday
+# tapped below), not "No Date" and not a junk one. See due_cal_cb.
+c 120 40
+t 400
+c 200 186
+t 500
+c 120 157
+t 500
+s due_popup
+c 61 218
+t 500
+s due_picked
+# Save it, and land back on the list: due_saved is the shot that proves the To Do
+# row layout end to end -- box, priority digit against the box column's right
+# edge, description, and the due date (9/14) at the right margin.
+c 40 186
+t 1200
+s due_saved
 c 18 225
 t 300
 # Memo Pad (launcher row 2 col 1 after the Graffiti app was added)
@@ -217,7 +263,7 @@ t 400
 s memo_list
 c 18 225
 t 300
-# HotSync (C2: logo + status + Sync Now) -- launcher row 2 col 2
+# HotSync -- launcher row 2 col 2, back in the middle where it is findable
 c 120 110
 t 400
 s hotsync
@@ -335,6 +381,9 @@ t 300
 c 120 110
 t 400
 s hotsync_prefetch
+# Sync Now. It is BOTTOM_MID -14 of content, so y=175 -- which is within a pixel
+# of where the scrolled launcher puts the HotSync cell. Two different screens
+# that happen to agree, not a shared constant.
 c 120 175
 t 500
 s hotsync_news
@@ -393,7 +442,7 @@ t 300
 # Tap the Minesweeper mine icon (left) to open it. Minesweeper draws its 9x9 board on a
 # 1-bpp canvas; the first tap is always safe and floods open; then switch to Flag mode and
 # flag a cell. The board takes taps via PRESSED (resistive-panel robust). Pool-safe.
-c 120 160
+c 195 110
 t 300
 s games_menu
 c 40 55
@@ -416,7 +465,7 @@ t 300
 # Persistence: leave to the launcher, reopen Games -> Mines, and the dug board is
 # restored exactly (saved to /sdcard after every move). mines_persist must match
 # mines_dug, not a fresh board.
-c 120 160
+c 195 110
 t 300
 c 40 55
 t 400
@@ -430,7 +479,7 @@ t 300
 # The row scores with mono state tiles: filled=correct, double-border=present, slashed=absent;
 # used keys pick up the same states. Grid + keyboard are ONE pool-cheap I1 canvas; taps
 # hit-test via PRESSED. (The physical Graffiti strip also types letters on the device.)
-c 120 160
+c 195 110
 t 300
 c 120 55
 t 400
@@ -454,7 +503,7 @@ t 300
 # Persistence: leave to the launcher, reopen Games -> Wordie, and the scored guess
 # grid + keyboard states are restored (saved to /sdcard after every keystroke).
 # wordie_persist must match wordie_scored, not a fresh daily.
-c 120 160
+c 195 110
 t 300
 c 120 55
 t 400
@@ -466,7 +515,7 @@ t 300
 # tab, the first blank is pre-selected (thick border). Tap a number-pad digit to fill
 # it (the physical Graffiti strip also enters digits on the device), then reopen from
 # the folder to confirm the in-progress board persists (saved to /sdcard).
-c 120 160
+c 195 110
 t 300
 c 198 55
 t 400
@@ -476,14 +525,16 @@ t 300
 s sudoku_entered
 c 18 225
 t 300
-c 120 160
+c 195 110
 t 300
 c 198 55
 t 400
 s sudoku_persist
 c 18 225
 t 300
-# Zip: the fourth game, on the folder's SECOND row (row 2 col 1, the snake icon).
+# Zip: on the folder's SECOND row, which now holds Zip AND Graffiti. The row is
+# SPACE_EVENLY like every other, so adding Graffiti pushed Zip off centre: it is
+# at x=68 now, not the x=120 it sat at while it had the row to itself.
 # A 6x6 one-line path puzzle: start on 1, hit the numbers in ascending order, cover
 # every cell. Board + Undo/Clear are ONE pool-cheap I1 canvas; input is a DRAG
 # (PRESSED starts it, PRESSING continues it -- never CLICKED, see Mines).
@@ -493,9 +544,9 @@ t 300
 # is correctly refused, and from the moment the pen crosses it the path draws along
 # the sweep until a number would come out of turn. That exercises the whole drag
 # path on ANY board. Cell centres are (60+24c, 56+24r).
-c 120 160
+c 195 110
 t 300
-c 120 108
+c 68 108
 t 400
 s zip_open
 d 60 56
@@ -548,9 +599,9 @@ s zip_clock_running
 c 18 225
 t 300
 w 3000
-c 120 160
+c 195 110
 t 300
-c 120 108
+c 68 108
 t 400
 s zip_clock_resumed
 # Undo pops one cell; Clear rewinds to the '1'. Both live on the canvas button row
@@ -564,9 +615,9 @@ s zip_cleared
 c 18 225
 t 300
 # Persistence: reopen from the folder -- the cleared board comes back, not a new one.
-c 120 160
+c 195 110
 t 300
-c 120 108
+c 68 108
 t 400
 s zip_persist
 c 18 225
@@ -577,6 +628,13 @@ t 300
 # on the way out. Every screen here is labels, buttons and one button-matrix; the
 # only canvas is the sigil, which reuses game_cv_buf.
 c 194 160
+t 400
+# The FIRST open since the lock went up greets you: his portrait, a line from his
+# pool, and the whole content area as the tap target. coach_greet must show the
+# face and a bubble -- if it ever shows the Today screen instead, the greeting is
+# firing on the wrong window (it is scoped to the unlock, not to boot).
+s coach_greet
+c 120 150
 t 400
 s coach_today
 # Start -> Energy? -> High. Every ritual step now carries a line of explanatory
@@ -735,6 +793,85 @@ t 300
 c 40 55
 t 500
 s coach_export_cal
+c 18 225
+t 300
+# Guru (launcher row 3 col 2, between News and Coach -- the bob-and-third-eye icon).
+# Her engine (guru.c) has landed; her habit list has not, so the home screen is
+# still a shell -- but it now reads the real numbers back out of the engine, so
+# this gates the wiring as well as the launcher cell.
+c 18 225
+t 300
+c 120 160
+t 400
+# Same greeting rule as Coach: the first open since the lock went up is her
+# portrait and one line from her pool, the whole content area being the target.
+# guru_greet showing the home screen instead would mean the per-speaker bit is
+# being cleared by the wrong app (they share one bitmask -- see g_greet_due).
+s guru_greet
+c 120 150
+t 400
+# ...and the tap lands on the home screen: the habit list, grouped by category,
+# over a header reading "0 of 1 today" on a fresh card -- nothing checked off, and
+# with no history the rolling target sits on its floor of one. A different number
+# means gu_load() read a stale or mis-clamped guru.sav.
+#
+# The WHOLE pool is one lv_table, not a row object per habit. That is what makes
+# it fit the 24 KB pool, so smoke32 is the gate that actually matters here.
+s guru_shell
+# Tick the first habit by its box (column 0). The header must become "1 of 1
+# today -- done" and the box must read [x]; only that one cell repaints, so the
+# list does not jump back to the top.
+c 18 95
+t 300
+s guru_checked
+# Tap a habit's NAME (column 1) instead and you get what it means, with a button
+# to tick it from there. Column 0 toggles, column 1 opens -- the same split To Do
+# uses, so the box is a box and the words are a link.
+c 120 117
+t 400
+s guru_task
+c 79 190
+t 300
+s guru_task_done
+c 200 190
+t 400
+# back on the list, with BOTH habits now ticked and the header counting them
+s guru_back
+# Tick four more, all of them in Gut, so the week has enough in it for the rule
+# engine to say something AND to be lopsided enough to be worth saying: six
+# checks, all one category, is GA_NARROW. Under five she declines to analyse at
+# all (GA_NONE), which would make this shot prove nothing.
+c 18 139
+t 200
+c 18 161
+t 200
+c 18 183
+t 200
+c 18 205
+t 300
+s guru_six
+# NOT scripted here: scrolling the list to reach a habit further down. The pool
+# is a text file the user edits now, so any tap that depends on a scroll offset
+# would start failing the moment somebody adds a habit -- failing for the wrong
+# reason, which is how a gate stops being believed. The long-why case (the
+# detail screen scrolls its own box rather than hiding copy behind the button)
+# was verified by temporarily moving the longest why onto a first-screen habit;
+# see the note in gu_show_task().
+# Options -> Her week. The menu item only exists while a Guru screen is up.
+c 18 300
+t 400
+s guru_menu
+# "Her week" is the third row (Preferences / Power / Her week). Her portrait and
+# a balloon over a stats column, mirroring Coach's report -- the per-day figures
+# come from the saved ring, the category rows from the log. With six checks all
+# in Gut this MUST read as the narrow-week verdict, not the "not enough yet" one.
+c 70 118
+t 500
+s guru_week
+# back returns to her list, not to the launcher
+c 30 200
+t 400
+s guru_week_back
 c 18 225
 t 300
 # I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.

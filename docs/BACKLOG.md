@@ -27,6 +27,325 @@ mostly away from the bench via the browser simulator).
 
 ---
 
+## PHASE: the three speakers (ACTIVE — work this top to bottom)
+
+The portraits landed on `feat/speaker-portraits` (`coach_face` 60x67,
+`assistant_face` 60x77, `guru_face` 60x74 — flash rodata, `tools/gen_faces.py`).
+This phase spends them: a greeting for Coach, a whole new **Guru** app, a guided
+**Assistant** onboarding, plus a lock-screen restyle and a HotSync cancel.
+
+**Working agreement for this phase.** Tick a box only when it is verified, not
+when it is written — `[s]` = sim-verified (`make -C sim smoke` + the shot checked
+by eye), `[d]` = verified on the glass. The device is on `/dev/ttyUSB0` with
+ESP-IDF at `~/esp/esp-idf`, so `[d]` is reachable in this phase rather than
+deferred. Keep each numbered group to its own commit and branch off `main`.
+
+> ### RESUME HERE — state at 2026-09-19 (end of session)
+>
+> Branch **`feat/speaker-portraits`**, pushed, tree clean, **no PR opened**. The
+> device has this build flashed and boots clean. The web emulator is live at
+> https://emu-commits.github.io/cyd-palm-bridge/ and serves this branch.
+>
+> **Every group except P6 is code-complete. What is missing is device testing,
+> not code.** Pick up at either (a) the five `[d]` checks once the user has
+> looked, or (b) P6, the last unbuilt group.
+>
+> - **P4** — 35 habits, five categories, `GuruRec` frozen at 8 bytes, append-only
+>   `guru.log`, `guru.sav` now written. The list is **one `lv_table`**, which is
+>   what made the whole pool fit the object pool; the one-category-per-page
+>   fallback is not needed and should not be built. Col 0 ticks, col 1 opens the
+>   habit's `why`.
+> - **P4a (2026-09-19)** — **the habits are no longer in the source.**
+>   `firmware/main/guru_pool.txt` is the source of truth;
+>   `tools/gen_guru_pool.py` compiles it into `guru_pool.c`, and the same file
+>   can be dropped on the card as `/sdcard/guru.txt` to replace the list without
+>   a reflash (`gurupool.c` parses it, Guru > Menu > Export habit list writes a
+>   copy). **Edit the .txt, never the .c** — CI regenerates and diffs.
+>   The copy pass that came with it fixed real errors the user caught: the
+>   category displayed as "Movement" but the enum has always meant *metabolic*,
+>   which is how food and supplements ended up filed under a heading that read as
+>   exercise. The display name is now **"Metabolic"**; `Protein before bed`
+>   (id 13) moved to Recovery and `Creatine` (id 14) to Mind. **Ids did not
+>   change**, so existing `guru.log` records still resolve, and the `cat` stored
+>   in each record means the week is still analysed as it was lived.
+> - **P5** — her week screen, `GA_*` advice rules, reached from Options > Her
+>   week. Ring for per-day figures, log for the category split.
+> - **P7** — lock screen restyled into three declared zones. Zero new widget
+>   classes; the furniture is canvas ink. `DASH_Y_*` constants are shared between
+>   `dash_paint()` and `ui_show_lock()` and must stay in step.
+> - **P8** — `hotsync_cancel()` + the confirmation modal. The cancel is a
+>   *request* checked at safe points, never a kill.
+> - **P6 is the ONLY group left** — Assistant onboarding (Wi-Fi + CalDAV). It was
+>   skipped at the user's direction on 2026-09-19 to take P7 and P8 first. All
+>   three entry points are already decided in the item. It is **device-only** to
+>   verify: a real Wi-Fi join and a live iCloud account, so the sim cannot gate
+>   it, and it will need the user's Apple ID and an app-specific password.
+>
+> **Six device checks are outstanding and none has been done:** P3 (greeting +
+> header), P4 (the list, ticking, the detail view), P5 (her week), P7 (the
+> restyled lock screen), P8 (cancel a real sync — the only way to exercise
+> that path at all) and P4a (Export habit list writes `guru.txt`; edit it on a
+> computer and confirm the edited list comes back). The user has said they will
+> test later — do not tick those boxes without them.
+>
+> **The web emulator is deployed** at https://emu-commits.github.io/cyd-palm-bridge/
+> — `feat/speaker-portraits` was added to the `github-pages` environment's
+> deployment-branch policy (id 60412682) so a non-main branch could publish. That
+> policy should be removed once this work merges.
+>
+> **RESOLVED 2026-09-19 — the icon-decode OOM was a stale gate, not a bug.**
+> `sim/lv_conf.h` claimed "device parity: 24 KB" but the device has been on
+> **32 KB** since the change documented in `sdkconfig.defaults`. `smoke32` was
+> therefore 8 KB tighter than any real board. Measured on hardware via the new
+> boot line in `lvgl_port.c`: `lvgl pool: 31100 bytes total`. At the device's real
+> size both `smoke` and `smoke32` log **zero** OOM warnings. `make -C sim
+> poolparity` now fails if the two files drift apart again.
+>
+> **Still true, not fixed, not urgent:** LVGL allocates + memcpys a fresh buffer
+> for every alpha-only image on *every* draw (for A8 there is no conversion to
+> do — it is a pure copy), and `LV_CACHE_DEF_SIZE` is 0 so nothing is reused. The
+> launcher pays ~10 KB of copying per repaint. There is headroom for it now, so
+> it is waste rather than failure. Enabling the cache is not an obvious win: it
+> would hold ~10 KB of decoded icons permanently in a 32 KB pool.
+>
+> - **P0** — `speaker_say()` + `SPK_*` geometry in `ui.c` is the shared portrait +
+>   bubble; `g_greet_due` (reset in `lock_release_cb`) is the once-per-unlock flag;
+>   `greet_pick()` is the never-repeat line picker.
+> - **P1** — Coach greets on first open after unlock, tap anywhere continues.
+>   Confirmed on the glass by the user.
+> - **P2** — launcher is nine apps / three rows / no scrolling; Graffiti moved
+>   into the Games folder; Guru icon is her third eye on a Palm-style solid disk
+>   with a four-arc aura. User confirmed the icon.
+> - **P3** — `guru.c`/`guru.h` + `daycal.h`, `sim/tests/guru_test.c` (61
+>   assertions) wired into `make -C sim guru`, `games:` and CI. Her greeting
+>   works like Coach's. `show_guru()` is no longer a placeholder: it reads the
+>   engine back ("0 of 1 today"), but the habit list is still P4's job.
+>   **Awaiting the user's eyes on the glass** — that is the only open P3 box.
+> - **P4 next** — the habit pool itself, its categories, the stable numeric IDs
+>   and the append-only log, then the check-off screen. The rolling target it was
+>   going to need **already landed with P3** (`GU_WIN`, half-up, floor 1) — read
+>   the P4 item for the rules, they are load-bearing. Note `guru.sav` is read by
+>   `gu_load()` and **never written**; P4 adds `gu_save()`.
+> - **⚠ Measure before building the check-off screen** — see the P4 warning. The
+>   pool-on-one-screen decision is only safe if the objects fit in 24 KB.
+>
+> **Still un-ticked and genuinely not done:** P3's `[d]`, every `[d]` below P2,
+> and all of P4–P8. Two decisions are locked in the items themselves (Guru shows
+> the full pool grouped by category; all three Assistant onboarding entry points).
+
+> **Health content disclaimer (P4).** The Guru task pool is widely-discussed
+> consumer wellness practice, NOT medical advice, and must not be presented as
+> it. No dosages, no disease claims, no "prevents cancer" phrasing in user-facing
+> copy — the categories are named for the *habit*, not for an outcome. A one-line
+> disclaimer ships in the Guru app's Menu > About.
+
+### P0 — groundwork (do first; everything else leans on it)
+- [x] **Lift the speech bubble out of Coach.** `co_tail_paint`, `co_tail_buf` and
+      the `CO_BUB_*`/`CO_TAIL_*`/`CO_FACE_*` constants are Coach-local, and
+      `show_coach_report` hardcodes `coach_face`. Three speakers need one shared
+      `speaker_say(portrait, text, y)` helper. Pool cost must not rise: the tail
+      is one static I1 canvas buffer and must stay exactly one.
+- [x] **A "first open since unlock" flag.** The greeting screens key off it.
+      `lock_release_cb` (ui.c ~4317) is the one place the lock goes up; set a
+      `g_since_unlock` bitmask there, clear the per-app bit when its greeting has
+      shown. Note the lock re-raises over a running app on sleep, so "first open"
+      must mean *since the last unlock*, not *since boot*.
+- [x] **Greeting-line pools + a non-repeating picker.** Cycling "several things"
+      needs to not repeat the last one; a stored last-index per speaker is enough
+      and costs one byte each in the app's saved state.
+
+### P1 — Coach greeting
+- [x] `[s]` Coach greeting screen on first launch after unlock: portrait +
+      bubble, light and encouraging, cycling.
+- [x] `[s]` Tap **anywhere** advances into the normal Pomodoro main screen. Must
+      not be a button — a full-content-area click target.
+- [x] `[s]` Second launch in the same unlock session goes straight to the main
+      screen.
+- [x] `[d]` On glass. *Confirmed by the user 2026-09-18 ("coach looks good").*
+
+### P2 — launcher reorder + Guru icon
+- [x] **Reorder to:** Date Book, Address, To Do List, Memo Pad, HotSync, Games,
+      News, Guru, Coach — nine apps, three rows, nothing below the fold.
+      *Settled 2026-09-18 after two wrong turns:* a fourth row for HotSync was
+      built twice, once by shrinking every cell to fit it and once by leaving it
+      below the fold behind a swipe. The first made the whole launcher pay for one
+      button; the second hid the sync button from anyone who did not already know
+      to swipe. **Graffiti moved into the Games folder** (Kana travels with it —
+      the "あ" button inside Graffiti was always the only way in).
+- [x] **Guru app icon**, PalmOS-style, matching the existing PumpkinOS `tAIB`
+      icons (A8, ~18x16, 1-bit feel). Same `palm_icons.c` pipeline.
+- [x] `[s]` Smoke script touches launcher cells by coordinate — **the reorder
+      moves every tap target below the change**. `tests/smoke.txt` already carries
+      a scar from exactly this (see its note at line ~387: adding Coach as the 9th
+      app silently redirected an old tap). Re-point every launcher tap and check
+      the shots, not the exit code.
+- [ ] `[d]` On glass.
+
+### P3 — Guru app shell
+- [x] `guru.c` / `guru.h` as **pure logic, clock-injected**, mirroring the
+      `coach.c` split: no LVGL, no ESP-IDF, no stdio; ui.c owns copy and file I/O.
+      The local-day arithmetic came out into **`daycal.h`** (header-only, inline)
+      rather than being copied — it is the one piece with a sharp edge (floor
+      division, not `/`, or a 20:00 EDT record files under tomorrow), and a second
+      copy would drift. `coach_day_index()`/`coach_local_hour()` are now thin
+      wrappers over it; coach_test still pins the negative-zone cases.
+- [x] `sim/tests/guru_test.c` + a `make -C sim guru` target, wired into `games:`
+      and CI the way `coach` is. 61 assertions, all green.
+- [x] `[s]` Guru greeting screen (same pattern as P1, her own lines).
+- [x] `[s]` Home shell reads the engine back (`N of M today`, streak, and where
+      the target came from), so the wiring is gated rather than just the cell.
+      `guru.sav` is **read but never written** yet — nothing can change it until
+      there is something to check off (P4 adds the write).
+- [ ] `[d]` On glass.
+
+### P4 — Guru: the task treadmill
+- [x] **The task pool.** 35 tasks, const flash rodata in `guru.c`, each with a
+      one-line `why` (a list of cryptic imperatives is a list nobody trusts). The
+      bar for every line was *"could two people disagree about whether I did this
+      today?"* -- if yes it is a tip, not a task, and "eat healthy" is not in it.
+      Every example given is in the pool (zone-2 with a 140 burst, one brazil nut,
+      black garlic, broccoli, natto, mineral water from glass, micro-strength to
+      failure, breath cycle, morning sunlight, targeted stretch, creatine, protein
+      before bed, 12-second sprints, sardines/mackerel) plus twenty-one more, so
+      no category is thin enough to feel repetitive.
+- [x] **Categories** — `GU_CAT_GUT / METAB / COGN / STRUCT / RECOV`, seven tasks
+      each. *Indices are persisted: never reorder* (same rule as `CO_DOM_*`). The
+      enum names are frozen; the words shown to the user come from
+      `guru_cat_name()` ("Gut", "Movement", "Mind", "Strength", "Recovery") and
+      can be retuned freely without touching the log.
+- [x] **Record format**, byte-counted and frozen before any UI is written — the
+      Coach's 12-byte `CoachRec` is the precedent. Append-only log on SD.
+      **A task is a stable numeric ID, not a list position** — the pool is fixed
+      *for now* but gets a Menu editor in a later phase, and a log written today
+      has to still mean the same thing after the user adds one. IDs are assigned
+      once and never reused; the const table is allowed to grow, never reorder.
+- [x] **Daily target = rolling user average, floor of 1/day.** *Landed early with
+      P3* — the shell's state is meaningless without it, and it is the number the
+      user is asked to trust. `GU_WIN 7` days, **rounded half UP** (a tie nudges
+      upward), floor `GU_MIN_TARGET 1`; all of it in `guru.h` with the reasoning.
+      Two rules make it fair, and both are pinned in `guru_test.c` because a later
+      edit would break them silently: **today is excluded from its own average**
+      (or the treadmill speeds up while you run on it), and **a skipped day counts
+      as a zero** (so coming back after a lapse meets an achievable number, not
+      the bar you cleared before you stopped). The streak counts days with *any*
+      check, deliberately not days that met target — a target-based streak breaks
+      exactly when someone improves enough to raise their own bar.
+- [x] **Main screen: the full pool, always visible**, grouped by category, tap to
+      check off. *Decided 2026-09-18.* Column 0 ticks, column 1 opens the habit
+      and its `why` — the same split To Do uses. Only the tapped cell repaints, so
+      ticking something near the bottom keeps the scroll position.
+- [x] **⚠ Measured, and it fits — no pagination needed.** The pool has to
+      be deep enough not to feel repetitive, but the LVGL pool is 24 KB and every
+      row is objects. The launcher's 9 cells are ~27 objects and fit; a 40-task
+      list at a row + label each is ~80 and may not. **Measure first** (the
+      `heap used=... of 147456` line the smoke prints, plus `smoke32` for the true
+      device-sized pool). If the whole pool will not fit on one screen, the fallback that
+      keeps the decision intact is **one category per page**.
+      *Resolved 2026-09-19:* the fear was 40 rows x (row + label) = ~80 objects.
+      The list is **one `lv_table`** instead — the same trick the record lists
+      already use — so the whole pool costs ONE object plus its cell strings.
+      `smoke32` renders it pixel-identically to the 64-bit sim. The fallback is
+      not needed and should not be built.
+- [x] **Streak / success tracking**, daily. `guru_streak_now()` + the header's
+      "N of M today" / "N today -- done". The weekly read-out is P5's screen.
+- [x] `[s]` — list, tick, detail view and its Did-it/Undo button all photographed
+      and checked by eye, under `smoke` and `smoke32` both.
+- [ ] `[d]` On glass.
+
+### P5 — Guru week analysis
+- [x] Week screen mirroring Coach's: stats column + `guru_face` + bubble, reached
+      from **Options > Her week** while a Guru screen is up.
+      *The numbers come from two places on purpose:* per-day figures (total, days
+      of seven, best day) from the saved **ring**, which already holds a week of
+      counts; the **log** supplies only the per-category split, which the ring
+      cannot. Recomputing days from the log would be a second implementation of
+      the same arithmetic and the two would drift apart.
+- [x] Per-category analysis, advice codes `GA_*` in `guru.h` mapped to copy in
+      ui.c. Fixed priority, first match wins:
+      **NEGLECTED** (a category got nothing — named, and ahead of NARROW because
+      naming the empty one is more actionable than naming the crowded one) >
+      **NARROW** (≥60% in one category) > **SPOTTY** (volume, but on ≤ half the
+      days) > **STEADY** (6–7 days) > **KEEPGOING**. Silent under 5 checks, and
+      will not call a category neglected under 8.
+      An undo nets out of the fold and **clamps at zero**, so a truncated log
+      cannot wrap a uint16 into an extraordinary week.
+- [x] `[s]` — the tour ticks six habits in one category so it photographs a real
+      verdict rather than the "not enough yet" default. `smoke` and `smoke32`
+      render it identically.
+- [ ] `[d]` On glass.
+
+### P6 — Assistant onboarding (Wi-Fi + CalDAV)
+All three entry points, *decided 2026-09-18*:
+- [ ] **Sync Now with no credentials** starts the guided flow instead of failing.
+      The primary trigger — it is where the user already is when they want it.
+- [ ] **Menu > Setup Assistant**, permanent, so it is re-runnable after a wrong
+      password without clearing config by hand.
+- [ ] **The launcher's demo-data hint becomes a button** into the flow.
+- [ ] Assistant portrait + bubble guides each step; keyboard/Graffiti entry for
+      SSID, password, Apple ID, app-specific password.
+- [ ] Hands off to the existing **Discover collections** flow
+      (`hotsync_discover_*`) rather than asking for UUID paths.
+- [ ] Replaces the current dead-end hint on the launcher ("edit config.ini on the
+      card, or tap Menu > Preferences").
+- [ ] `[d]` **device-only** — real Wi-Fi join and a live iCloud account.
+
+### P7 — lock screen restyle
+- [x] Japanese-weather-channel aesthetic. Three declared zones —
+      **CONDITIONS / AHEAD / SUN & MOON** — each a reversed header strip with
+      shoulders and a closing rule, plus a reversed status strip along the top.
+      The six rain bars now grow to **one shared baseline**, which is the only
+      rule on the screen doing real work: a common baseline is what lets six
+      columns be compared at a glance.
+- [x] **Constraint honoured:** zero new widget classes. The furniture is ink on
+      the I1 canvas that was already there; the only new objects are three
+      heading labels recoloured to the background. Nothing takes a draw layer.
+- [x] The vertical budget is `DASH_Y_*` / `DASH_H_*` constants instead of
+      literals in two functions. *This split is load-bearing:* the furniture is
+      painted in `dash_paint()` (must survive the per-tick clear), the labels on
+      it are built in `ui_show_lock()` (must not) — they have to agree, and only
+      a shared constant makes that checkable.
+- [x] `[s]` — `smoke` **and** `smoke32`, both 0 OOM, rendering identically.
+      *Reversed labels sit at the bar's own y, not y+1:* the Palm font already
+      carries a pixel of leading above its caps, so y+1 put white glyphs on the
+      bar's bottom edge. Caught by the user on review of the first cut.
+- [ ] `[d]` On glass.
+
+### P8 — HotSync cancel
+- [x] One button, **three** jobs: Sync Now → Cancel while running → **"Stopping…"**
+      (disabled) once asked. The third state earns its keep — a cancel can take
+      until the end of the current collection, and a button still reading
+      "Cancel" would invite a second press and read as broken.
+- [x] Confirmation modal, because the press is one tap from the button that
+      *starts* a sync. It answers the question a confirmation actually has to:
+      **what survives**. Plain objects only (it appears mid-sync, when the heap
+      is at its most fragmented); on `lv_layer_top()`, dropped by `kill_hs()`.
+- [x] **`hotsync_cancel()` is a request, not a kill.** It raises a flag and
+      returns; the task is never suspended from outside, because it can be
+      mid-write when the button is pressed and a half-written PDB is worse than
+      a few seconds' delay. Safe points: the top of the collection loop (one
+      collection is one merge) and before news/weather (each replaces a cache
+      wholesale). A cancelled run reads as **cancelled** — never "Done" (claims
+      work never attempted) nor "failed" (sends you debugging a fine network) —
+      and names what did land.
+- [x] `[s]` — the sim gates that the button still reads "Sync Now" and still
+      syncs.
+- [ ] `[d]` **The stop itself is device-only.** The sim's "sync" is a synchronous
+      call that finishes before any button could be pressed, so `hotsync_busy()`
+      is never 1 there and the confirmation can never open. Needs hardware.
+
+### Parked until this phase lands — the Assistant's other jobs
+Ideas only. **Do not build any of these in this phase** (*decided 2026-09-18:
+document now, choose after*). Cheapest first:
+- **Sync failure explainer.** After repeated failures she reads the actual error
+  and says what to do. Probably the highest value of the five — sync errors are
+  raw status text today.
+- **First-boot welcome.** "Here's what this device is", before anything is set up.
+- **Preferences that still expect pasted paths.** Collection and feed settings
+  that want a UUID or URL typed in.
+- **SD card missing or corrupt.** An explanation and a next step instead of a
+  failure state.
+- **Time zone / clock drift setup.** The drift machinery exists and is opaque.
+
 ## Next up when we resume (priority order)
 
 The sim-testable charm/intuitiveness backlog is done, and so is the **Games app**
