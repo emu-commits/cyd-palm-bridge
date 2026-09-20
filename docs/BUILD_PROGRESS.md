@@ -1,1051 +1,667 @@
-# Build history — changelog + hard-won lessons
+# Build history — what was built, and the lessons that cost time to learn
 
-What was built, and the non-obvious things that cost time to learn. This is the
-**historical record**; for **what's left to do see `BACKLOG.md`**.
+Three things live here: a **changelog** of completed work, the **hardware/RAM
+reference**, and the **hard-won lessons**. The last two are not history — they are
+load-bearing facts you cannot re-derive from the code, and they are why this file is
+longer than a changelog needs to be.
 
-> The full blow-by-blow (every step log, raw serial captures, dead-end diagnoses)
-> lives in git history — this file was compacted on 2026-07-17. `git log --follow
-> docs/BUILD_PROGRESS.md` recovers the long-form entries if a detail is needed.
+> **For what's LEFT to do, see `BACKLOG.md`**, which carries the consolidated list for
+> all three docs.
+>
+> The blow-by-blow (step logs, raw serial captures, dead-end diagnoses) is in git
+> history — this file was compacted on 2026-07-17 and again on 2026-09-20.
+> `git log --follow docs/BUILD_PROGRESS.md` recovers the long-form entries.
 
 ---
 
-## Milestone changelog (newest first)
+## Changelog (newest first)
+
+### 2026-09-20 — The lists stop looking like tables (PR #52 → `main`, merge `145bdf1`)
+- **One shared `list_table_style()` + one `LV_EVENT_DRAW_TASK_ADDED` hook**
+  (`list_draw_cb`) styles all five lists — To Do, Memo/Address, Guru, News feeds, the
+  zone picker. One door, not five.
+- **A drawn checkbox** instead of the typed `"[x]"` — hollow when open, solid black
+  when ticked — painted off LVGL's own per-cell `CUSTOM_*` bits. This is what closed
+  **C7** without touching the font.
+- Hairline under each row instead of a box around each cell; Guru's category headings
+  banded and merged across the box column; completed To Dos grey and struck through;
+  To Do's row is four aligned columns (box, priority, description, due date).
+- **Cheaper, not dearer:** no screen gained an object and a flag-only cell is smaller
+  than the string it replaced. Smoke heap peak 2216 → 2120 B.
+- **Bug: the To Do due-date picker read its date out of the wrong object.** The
+  calendar's button matrix carries `LV_OBJ_FLAG_EVENT_BUBBLE`, so
+  `lv_event_get_target()` returned the *matrix* and `lv_calendar_get_pressed_date()`
+  cast it straight to `lv_calendar_t *`. With `LV_USE_ASSERT_OBJ` off (it is off in
+  both builds) nothing caught the wrong type: tapping a day **segfaulted the host sim**
+  and on-device wrote a junk date. `lv_event_get_current_target()` is the one that
+  returns the calendar. The smoke now walks To Do → Edit → Due → pick → Done.
+
+### 2026-09-18/19 — The three speakers: Coach greeting, the Guru app, lock restyle, HotSync cancel
+- **`speaker_say(portrait, text, y)`** lifted out of Coach so three speakers share one
+  bubble; the tail is still exactly one static I1 canvas buffer.
+- **Coach greeting** on first launch after unlock, keyed off a since-unlock bitmask
+  (the lock re-raises over a running app on sleep, so "first open" means *since the
+  last unlock*, not since boot). Confirmed on glass by the user.
+- **Launcher reordered** to nine apps in three rows with nothing below the fold, after
+  two wrong turns: a fourth row for HotSync was built twice, once by shrinking every
+  cell to fit it and once by hiding it behind a swipe. Graffiti moved into Games.
+- **The Guru app** — `guru.c`/`guru.h` pure and clock-injected, mirroring `coach.c`;
+  the local-day arithmetic came out into **`daycal.h`** rather than being copied (floor
+  division, not `/`, or a 20:00 EDT record files under tomorrow). 35 habits, five
+  frozen category indices, an append-only log keyed by **stable numeric ID, not list
+  position**, and a daily target = rolling 7-day user average, floor 1, rounded half
+  up. Two fairness rules are pinned in `guru_test.c` because an edit would break them
+  silently: **today is excluded from its own average**, and **a skipped day counts as
+  a zero**. The streak counts days with *any* check, deliberately not days that met
+  target — a target-based streak breaks exactly when someone improves enough to raise
+  their own bar.
+- **The whole pool fits on one screen.** The fear was 40 rows × (row + label) ≈ 80
+  objects against the pool. The list is **one `lv_table`** instead, so it costs one
+  object plus its cell strings, and `smoke32` renders it pixel-identically. The
+  one-category-per-page fallback is not needed and should not be built.
+- **Lock screen restyle** — three declared zones (CONDITIONS / AHEAD / SUN & MOON),
+  six rain bars grown to **one shared baseline** (the only rule on the screen doing
+  real work: a common baseline is what lets six columns be compared at a glance),
+  **zero new widget classes**. The vertical budget is `DASH_Y_*`/`DASH_H_*` constants,
+  and that split is load-bearing: the furniture is painted in `dash_paint()` (must
+  survive the per-tick clear), the labels on it are built in `ui_show_lock()` (must
+  not) — only a shared constant makes their agreement checkable.
+- **HotSync cancel** — one button, three states (Sync Now → Cancel → "Stopping…"
+  disabled). The third earns its keep: a cancel can take until the end of the current
+  collection, and a button still reading "Cancel" invites a second press and reads as
+  broken. **`hotsync_cancel()` is a request, not a kill** — it raises a flag and
+  returns, because the task can be mid-write and a half-written PDB is worse than a few
+  seconds' delay. A cancelled run reads as **cancelled**, never "Done" (claims work
+  never attempted) nor "failed" (sends you debugging a fine network).
+- **Content pools belong in data files.** `guru_pool.txt` is the source and
+  `guru_pool.c` is generated — one grammar, two parsers, diffed in CI. Edit the `.txt`.
 
 ### 2026-09-18 — Two more speakers, and the Coach grows a neck
-
-The Coach was the only portrait, and the generator was built around that one face.
-Two more avatars — the Assistant and the Guru — are converted for the screens that
-will speak through them, so `gen_coach_face.py` is now `gen_faces.py` and holds all
-three. `coach_face` keeps its symbol; `assistant_face` and `guru_face` join it.
-
-- **50% ink coverage is a recipe for solid-ink art, not for outlines.** The Coach is
-  drawn as filled shapes and reduces cleanly at a 50% threshold. The two new sources
-  are thin-outline drawings: at 15:1 a source line covers roughly 7% of a target
-  pixel, so 50% erased every outline and left a hollow face with a broken jaw. They
-  come down at 25% instead, which is why the threshold is an argument to
-  `--from-image` rather than a constant in the filter.
-- **The crop is the framing, not a margin trim.** `--from-image` used to crop to the
-  ink bbox, which for a figure with shoulders puts the whole body in 60 px and leaves
-  a head half the Coach's size. It takes a crop that frames the head and lets the
-  shoulders run off the sides, the way the Coach's hair already did; the ink bbox
-  still stands in when no crop is given.
-- **The art is the artwork; the sources are not kept.** All three were finished by
-  hand after their reduction, so re-deriving one from its source image would throw
-  away a drawn neck, a rebuilt lens rim, a mirrored eye. There is nothing to
-  regenerate and no recipe worth recording per face — `--from-image` is the importer
-  for the *next* portrait, `--from-exact` is the door back into these. Keeping a table
-  of source paths would only have promised a reproducibility that does not exist.
-- **Features three pixels apart get redrawn, not rescued.** The Assistant's hair
-  strand, ear and cheek sit inside six pixels and reduced to speckle either side of a
-  doubled, dotted jaw; the jaw is drawn as one line and the ear as its outer arc plus
-  one mark for the curl. The Guru's left eye came down a row taller than her right and
-  merged with the bridge of her nose — her right eye is mirrored across the axis the
-  third eye and mouth already share. Her pearls are light grey and reduce to nothing,
-  so they are drawn back on their arc at every other pixel: solid, they read as a
-  neckline rather than as beads.
-- **Measure the neck off the artwork; don't invent one.** The Guru's and the Coach's
-  necks are drawn — hers is in the source but fell through the filter as thin
-  verticals, and his artwork stops at his chin. The first attempt splayed the sides
-  outward and ran the shoulders nearly flat to the frame edges, and all three read as
-  a yoke rather than a body. Laying the target pixel grid over the Guru's source gives
-  the actual idiom: **vertical** sides, a sharp corner, and a shoulder falling ten
-  columns over six rows that leaves through the *bottom* of the frame, not the side.
-  The Assistant needed no neck drawn at all once her crop reached low enough to take
-  the collar whole — cut above it, the collar stops mid-stroke and invites invention.
-  The Coach's was then hand-finished: a neck built from the same call as the Guru's
-  still sat wrong, because their chins are not at the same height — hers is at row 65
-  with hair covering the jaw down to it, so only two rows of neck ever show, while his
-  is at row 60 with nothing beside it and six rows hanging in open white.
+Portraits for the Assistant and the Guru; `gen_coach_face.py` became `gen_faces.py`.
+- **50% ink coverage is a recipe for solid-ink art, not outlines.** The Coach is filled
+  shapes and reduces cleanly at 50%. The two new sources are thin-outline drawings: at
+  15:1 a source line covers ~7% of a target pixel, so 50% erased every outline and left
+  a hollow face with a broken jaw. They come down at 25% — which is why the threshold
+  is an argument, not a constant.
+- **The crop is the framing, not a margin trim.** Cropping to the ink bbox puts a whole
+  body in 60 px and leaves a head half the Coach's size. Take a crop that frames the
+  head and let the shoulders run off the sides.
+- **The art is the artwork; the sources are not kept.** All three were finished by hand
+  after reduction, so re-deriving one would throw away a drawn neck, a rebuilt lens
+  rim, a mirrored eye. `--from-image` is the importer for the *next* portrait;
+  `--from-exact` is the door back into these. A table of source paths would only
+  promise a reproducibility that does not exist.
+- **Features three pixels apart get redrawn, not rescued.** The Guru's pearls are light
+  grey and reduce to nothing, so they are drawn back on their arc at every other pixel;
+  solid, they read as a neckline rather than beads.
 - **Trailing blank rows are not free.** `ui.c` hangs the bubble off the portrait's
-  bottom *edge*, not off its last inked row, so five transparent rows at the bottom of
-  the Coach's canvas put a five-pixel phantom gap between his shoulders and the tail
-  (and 300 bytes of nothing in flash). His art is trimmed to its last inked row. The heights
-  differ (67/77/74) and `ui.c` reads height off the descriptor, so the layout code
-  itself was not touched.
-- **The round trip is the safety net.** `--preview NAME f.png 1` and `--from-exact
-  NAME` still go out and come back pixel for pixel; all three were verified identical
-  through it after the retouching.
+  bottom *edge*, not its last inked row, so five transparent rows put a five-pixel
+  phantom gap between shoulders and tail (and 300 bytes of nothing in flash).
+- **The round trip is the safety net.** `--preview NAME f.png 1` out and
+  `--from-exact NAME` back, pixel for pixel, verified after every retouch.
 
 ### 2026-08-27 — The forecast steps through the day, and the gauge stops lying under load
+- **The weather was frozen at sync time.** The cache now holds **24 hourly rows**
+  (`WX_HOURS`) with a per-hour WMO code, and the dashboard walks it on the 15 s tick, so
+  the strip advances on the hour with no network in between.
+- **Hour-of-day cannot index a 24-row cache, and `dash_test` caught it.** Matching
+  `hr[i].hour24` against the current hour works for six rows and is silently wrong for
+  twenty-four, because at that size every hour is present, so a clock a day and a half
+  past the fetch matches a row from the wrong day and reads as current. The cache now
+  carries `hr0_epoch` and the index is arithmetic, bounds-checked, `-1` past the end.
+  Computing that epoch needs the **feed's** UTC offset, not the device's — read from
+  the CSV's own header block; no offset means no anchor, and it refuses rather than
+  guessing.
+- **The gauge was reporting sag as depletion.** Reported drain was 6% per HotSync and
+  ~1%/minute of use. Neither survives arithmetic: 6% of 1100 mAh is 66 mAh over a
+  65–85 s radio window, which demands ~2800 mA. The cause is IR drop — a small pouch
+  cell is 200–400 mΩ, idle→sync is a ~200 mA step, so ~60 mV, and near the top of the
+  curve 60 mV *is* six percent. **A real sync costs nearer half a percent.**
+  The reported percentage is now refreshed only from samples taken with the screen
+  blanked, the radio down, and the load settled 30 s — "as of the last rest", the only
+  number a voltage gauge can honestly report. The instantaneous value is still logged
+  with a `load` column, and the Power screen names it ("rested 4210 mV (-58 sag)").
+- **Field results:** idle on a 1100 mAh cell is **well over 24 h** (under 46 mA
+  average), and clock drift on battery is **under a minute a day**. Those two numbers
+  closed the RTC-for-timekeeping question and redirected the power work to screen-on
+  time. See `BACKLOG.md` §Stubbed.
 
-**The weather was frozen at sync time.** The snapshot held six hourly rows
-starting from the fetch, and the reading beside the clock was whatever was
-current when the sync ran. Sync once a morning — which is the intended rhythm —
-and the lock screen showed the morning's temperature until the next sync.
-
-The cache now holds **24 hourly rows** (`WX_HOURS`), carries a **per-hour WMO
-code** as well as a temperature, and the dashboard walks it: `dash_paint()` picks
-the row covering `now` for the headline reading and starts the six-column strip
-there. The columns are live labels refreshed on the 15 s dash tick, not text
-baked in when the lock went up, so the strip advances on the hour with no network
-in between.
-
-**Hour-of-day cannot index a 24-row cache, and the gate caught it.** The first
-implementation matched `hr[i].hour24` against the current hour — which works for
-six rows and is silently wrong for twenty-four, because at that size *every* hour
-of the day is present, so a clock a day and a half past the fetch matches a row
-from the wrong day and reads as current. `dash_test` failed on exactly that case.
-The cache now carries `hr0_epoch`, the Unix time of row 0, and the index is
-arithmetic: `(now - hr0_epoch)/3600`, bounds-checked, `-1` past the end.
-
-Computing that epoch needs the FEED's UTC offset, not the device's: `mktime()`
-would apply the device zone to a timestamp that is in the forecast's zone. The
-offset is read from the CSV's own header block (`utc_offset_seconds`) and the
-civil-date arithmetic is done inline (days-from-civil, integer, no zone
-database). No offset in the response means no anchor, and `dash_wx_index_at()`
-refuses rather than guessing.
-
-The hourly block also gained `weather_code` — which is what the parser previously
-used to tell the *current* block from the *hourly* one. That discriminator is now
-`precipitation_probability`, asked for only in the hourly block. `WX_MAGIC` bumped
-to `WX02`; a `WX01` file on the card is ignored and reseeded.
-
-**The gauge was reporting sag as depletion.** Reported drain: 6% per HotSync, and
-~1%/minute of use. Neither survives arithmetic. 6% of 1100 mAh is 66 mAh, and the
-radio is only up for **65–85 s** per sync (measured, `wifi:state assoc->run` to
-`run->init` in `bulk.log`) — which would demand **~2800 mA**, an order of
-magnitude past anything this board can draw. 1%/minute is 660 mA sustained,
-likewise impossible. The idle figure (>24 h → <46 mA average) is the only one that
-is physically consistent, and it is the one taken with the load quiet.
-
-The cause is IR drop. A small pouch cell is 200–400 mΩ; idle→sync is a ~200 mA
-step, so ~60 mV — and near the top of the discharge curve 60 mV *is* six percent.
-The reading was the artifact, not the drain. A real sync costs nearer **half a
-percent**.
-
-So the reported percentage is now only refreshed from samples taken with the
-screen blanked, the radio down, and the load settled 30 s (`power_busy()` is
-paired with `wifi_up`/`wifi_down`, so no exit path can leave it armed). It is
-held between rests — "as of the last rest", which is the only number a voltage
-gauge can honestly report. The instantaneous value is still sampled and still
-logged, with a `load` column, because the sag itself is worth seeing; the Power
-screen names it outright ("rested 4210 mV (-58 sag)").
-
-
-### 2026-08-22 (2) — Charge on the home screen, and the rig for the power experiment
-
-**The launcher shows the level.** Title bar, hard right: `72%` and a 13x8 battery
-glyph built from four plain objects (label, outline, fill, nub) so the fill can
-track the percentage. Shown on the launcher only -- inside an app that corner is
-the category picker's seat, and two things cannot own it.
-
-**They are built and torn down with the launcher, not parked on the title bar.**
-Parking them cost ~1 KB of the 24 KB LVGL pool on *every* screen, and the screen
-that pays is the Address edit form -- ten fields, already the tightest view in the
-build. `make -C sim smoke32` (the true-24 KB-pool gate) segfaulted opening it.
-`content_clear()` destroys them, `show_launcher()` rebuilds them last, after the
-app grid, so if the pool ever does run short the thing lost is the readout and not
-an app icon.
-
-**A gate can pass while the picture is wrong.** Inserting "Power" into the Options
-menu shifted every tap below it in `sim/tests/smoke.txt`, which drives the UI by
-absolute coordinates: the About tap landed on "Remove demo data", the demo seed the
-rest of the tour depends on was deleted early -- and the smoke still reported OK,
-because it asserts the exit code and the existence of `.ppm` files, not their
-contents. Coordinates re-measured off a screenshot (`s addr_menu`) rather than
-guessed; the rule is now written down in the file itself.
-
-**The drain log (`/sdcard/power.log`).** The experiment this is for cannot be run
-over serial, because **attaching USB is what ends it** -- the TP4054 holds the rail
-at charge voltage and the discharge stops. So it goes to the card, and is readable
-on-device at Menu > Options > Power.
-
-A voltage series alone would not answer the question either. A sample that dropped
-40 mV says nothing unless you know whether the screen was lit for that interval, so
-every line carries the **residency** of the interval it covers:
-
-```
-# epoch,iso,mv,pct,uptime_s,lit_s,dark_s,syncs,note
-1755900000,2026-08-22T20:15:00,4240,100,312,120,192,0,boot
-```
-
-`lit_s`/`dark_s` are banked on each backlight transition rather than sampled, so a
-screen lit for 40 s between two 5-minute samples is 40 s and not a coin flip.
-`power_note_sync()` is called *before* the radio comes up, so a sync that fails at
-Wi-Fi still explains why its interval cost more than the one before it.
-"Mark log" on the Power screen names a moment ("unplugged") so a step in the series
-reads as a cause instead of a mystery.
-
-**The Power screen never invents a rate.** Under 10 minutes of uptime it says
-"measuring". With no drop it says so and names the reason (the charger) instead of
-reporting 0%/hour, which would render as "lasts indefinitely". A projected runtime
-appears only once a real drop has been measured.
-
-First on-device reading after the flash: `4240 mV -> 100%`, up from `4176 mV` at
-the previous boot -- the cell topping off over USB, which is the gauge tracking
-something real rather than reading a constant.
-
-
-### 2026-08-22 — The battery gauge (U8), now that there is a cell to read
-
-A cell on the `JP2` seat, so `power_battery_pct()` stopped returning -1. ADC1
-channel 6 (GPIO34) through the board's 2:1 divider, read in `power.c`. First
-reading on the bench: **4176 mV -> 97%**, `2088 mV at IO34, cali=eFuse`.
-
-Three things stood between a raw read and an honest percentage, and skipping any
-one of them produces a number that looks fine and is wrong:
-
-- **The 12 dB attenuator is not linear.** `raw * 3300 / 4095` is off by more than
-  100 mV near the top of the range. We go through `esp_adc`'s line-fitting
-  scheme; this part has calibration burnt (`cali=eFuse`), so the boot line says
-  which one is in force and therefore what the error bar is. A part without it
-  logs a warning and falls back to nominal Vref.
-- **The rail is noisy** — backlight PWM and Wi-Fi bursts move it tens of mV. A
-  burst of 15 samples, **median** not mean (one spike cannot drag a median), then
-  a 3:1 smoothing across reads. Re-samples at most every 5 s.
-- **Li-ion voltage is not linear in charge.** A discharge curve maps mV to
-  percent. The cells sit near 3.8 V for most of their life: 3.84 V to 3.80 V is a
-  tenth of the pack, which a linear map renders as 1%.
-
-**Implausible readings report -1, not a number.** Outside 2600..4600 mV there is
-no cell on the seat (GPIO34 is input-only with no pull, so an unpopulated divider
-floats) and the dashboard says "USB". A floating pin reading as "31%" is worse
-than admitting we cannot tell.
-
-**Known limit — a plugged-in device always reads full.** The TP4054 holds the rail
-at charge voltage while USB is attached, and no `CHRG` status line is broken out
-to a GPIO, so charging is indistinguishable from a full cell. The gauge only
-means something on battery.
-
-The lock screen's top-right status line moved into `dash_status_text()` and is now
-refreshed by the dash tick. It used to be built once in `ui_show_lock()` — fine
-when the lock went up on demand, wrong since the lock started going up the moment
-the screen sleeps, because the charge shown was the charge from hours ago.
-
-`BAT_TRIM_PERMILLE` in `power.c` is the calibration knob for the divider's
-resistor tolerance. Left at unity: there is no bench measurement to justify a
-correction yet, and an invented one is worse than none.
-
+### 2026-08-22 — The battery gauge (U8) and the rig for the power experiment
+- A cell on `JP2`, read on ADC1 ch6 (GPIO34) through the board's 2:1 divider. Three
+  things stand between a raw read and an honest percentage, and skipping any one
+  produces a number that looks fine and is wrong: **the 12 dB attenuator is not
+  linear** (go through `esp_adc` line fitting; this part has `cali=eFuse` burnt, and
+  the boot line says which is in force); **the rail is noisy** (15 samples, **median**
+  not mean, then 3:1 smoothing); and **Li-ion voltage is not linear in charge** (a
+  discharge curve — the cells sit near 3.8 V for most of their life, where a linear map
+  renders a tenth of the pack as 1%).
+- **Implausible readings report -1, not a number.** Outside 2600..4600 mV there is no
+  cell (GPIO34 is input-only with no pull, so an unpopulated divider floats) and the
+  dashboard says "USB". A floating pin reading "31%" is worse than admitting we can't
+  tell. **A plugged-in device always reads full** — the TP4054 holds the rail and no
+  `CHRG` line is broken out, so charging is indistinguishable from full.
+- **Charge on the launcher title bar**, built and torn down *with* the launcher rather
+  than parked on the title bar — parking cost ~1 KB of pool on *every* screen, and the
+  screen that pays is the ten-field Address edit form, which `smoke32` segfaulted on.
+- **The drain log (`/sdcard/power.log`).** The experiment can't be run over serial,
+  because **attaching USB is what ends it**. A voltage series alone wouldn't answer it
+  either, so every line carries the **residency** of its interval (`lit_s`/`dark_s`,
+  banked on each backlight transition, not sampled). `power_note_sync()` is called
+  *before* the radio comes up, so a sync that fails at Wi-Fi still explains its cost.
+  The Power screen never invents a rate: under 10 minutes it says "measuring", and with
+  no drop it names the charger instead of reporting 0%/hour.
 
 ### 2026-08-20 — The sync stops lying, and the heap is the reason nothing worked
-
 A run of "successful" HotSyncs that set no clock, fetched no news, and blamed the
-password for it. Every symptom traced to two root causes, neither of them where
-the error messages pointed.
+password. Two root causes, neither where the errors pointed.
+- **The clock.** `clock_ok()` returned success if the year was ≥ 2024 — and the NVS
+  checkpoint restored at boot is ALWAYS ≥ 2024. A device whose SNTP never answered
+  reported a good sync while showing a two-day-old clock. *Plausible* and *synced* are
+  now separate answers. SNTP also gets three servers, since one name that won't resolve
+  was indistinguishable from a clock that was already right.
+- **The heap — the real story.** Nothing was wrong with the password, feeds, parser or
+  network: there was not enough RAM to complete a TLS handshake. `min_ever` bottomed out
+  at **880 bytes**, then **48**. Four claims were released, costliest first:
 
-**The clock.** `clock_ok()` returned success if the year was >= 2024 — and the NVS
-checkpoint restored at boot is ALWAYS >= 2024. So a device whose SNTP never
-answered reported a good sync while showing a two-day-old clock (measured:
-restored `2026-08-18 03:24`, real time `2026-08-20 19:52`, SNTP correction
-`+245361 s`). *Plausible* and *synced* are now separate answers and the status
-line carries the difference. SNTP also gets three servers instead of one
-(`LWIP_SNTP_MAX_SERVERS=3`); a single name that will not resolve was
-indistinguishable from a clock that was already right.
+  | where | free | min_ever | largest8 |
+  |---|---|---|---|
+  | first run, wifi-up | 23180 | 20460 | 21504 |
+  | first run, post-tls | 22324 | **880** | 8192 |
+  | first run, sync-done | 21860 | **48** | 7424 |
+  | **after fixes, wifi-up** | **44888** | 28304 | 27648 |
 
-**The heap — the real story.** Nothing was wrong with the password, the feeds, the
-parser, or the network. There was not enough RAM to complete a TLS handshake:
+  - **hotsync task stack 32 KB → 20 KB.** A task stack IS heap, and this one held a
+    third of what was free. It could shrink because `rss.c`'s `emit_item` no longer
+    parks 8.7 KB on it. The task logs its own high-water mark (11060 of 20480).
+  - **The LVGL draw buffer, lent for the duration of a sync** — 19 KB DMA-capable,
+    shrunk to 6 rows while `hotsync_busy()` (`BUF_ROWS_SYNC`). Safe because `flush_cb`
+    is synchronous, so no flush is in flight across the swap, and a failed allocation
+    keeps the buffer it has. **This is item M2, built as a shrink rather than the
+    teardown that was promised.**
+  - **Wi-Fi pools halved again** (static RX 4→3, dynamic RX/TX 16→8, AMPDU off). Wi-Fi
+    accounted for 26 KB.
+  - **The news store's file handles.** Each open file costs a 4 KB FatFs sector cache,
+    so `news.idx` + `news.dat` + the spool was 12 KB held across every handshake.
+    `news_suspend()`/`news_resume()` close and reopen-at-append around each fetch.
+- **Messages that sent us the wrong way**, worth remembering as a class of bug:
+  `login failed (HTTP 0)` invented an auth failure out of a connection failure (HTTP 0
+  means no response at all); `contacts host resolve failed (HTTP 207)` called a
+  Multi-Status *success* a failure.
+- **`config.ini` inline comments.** `#` only started a comment at the start of a line,
+  but the shipped example has six `key = value   # note` lines. The comment became part
+  of the value: `timezone` matched no zone and fell back to UTC silently, and the same
+  shape on `dav_pass` appended a comment to the password. A `#` after whitespace now
+  ends the value; one with no space before it stays literal, so a password may contain
+  it. **Timezone resolution** no longer falls back to UTC in silence and accepts what
+  people type — a bare `EST` used to pass through as a POSIX TZ, which newlib reads as
+  UTC: a silent five-hour error.
+- **News, on first contact with live feeds.** The bold headline WRAPS and the story
+  didn't know it (body pinned at y=44, room for one line). `lv_font_palm` covers
+  U+0020..U+00FF, so curly quotes and dashes drew as hollow boxes — and feeds send a
+  curly quote as raw `E2 80 99` far more often than as `&rsquo;`, so the entity path
+  alone would have fixed almost nothing; `rss_html_to_text` needed a real UTF-8
+  decoder. Caps went 30/15 → 240/40 with each item carrying a parsed publication date.
+  **Undated items are KEPT** — a date format we failed to parse must never silently
+  delete a whole feed.
+- **Weather exists now.** Every temperature the device had ever shown was
+  `dash_weather_seed_sample()`. Open-Meteo with `&format=csv`, ~1.5 KB read a line at a
+  time, so no JSON parser and no new dependency. `bridge/wxfetch.c` identifies each CSV
+  block by its **HEADER row, never its position**, so a reordered field cannot shift a
+  column into the wrong slot; `tests/wx_test.c` runs against verbatim live responses,
+  because the device cannot tell a moved column from a plausible temperature.
 
-| where | free | min_ever | largest8 |
-|---|---|---|---|
-| first run, wifi-up | 23180 | 20460 | 21504 |
-| first run, post-tls | 22324 | **880** | 8192 |
-| first run, sync-done | 21860 | **48** | 7424 |
-| after fixes, wifi-up | 44888 | 28304 | 27648 |
+### 2026-08-19 — Wake straight into the lock screen, and the drift meter
+- **The lock screen is raised when the screen SLEEPS, not when it wakes.** It used to
+  be built on the wake tap, so the backlight came up on whatever app was open and the
+  dashboard slid in a frame later. Blanking first and building behind a dark panel costs
+  nothing (nobody is looking) and makes the wake instant; the wake tap refreshes it
+  while still dark and defers the backlight one render pass.
+- **Which meant the lock was ticking behind a dark screen** — `dash_tick` repaints the
+  whole canvas every 15 s, which empties a battery quietly. It now skips while
+  `power_screen_off()`.
+- **Coach's exemption had to grow.** A session that ENDS face-down unseals itself and
+  puts "how did it go" up, and the old code answered the next tap with the dashboard,
+  whose `content_clear()` would delete that screen on the way past. The guard is now
+  `co_owns_screen()`.
+- **The end-of-session flash** got its own timer (1.4 s × 10 phases at 100%, ending
+  early on any touch) instead of riding the 1 Hz tick for six ticks at desk brightness.
+  **The flash and the idle timer read the same clock in opposite directions:** the port
+  layer stands down while `ui_owns_backlight()`, but unlike the HotSync guard beside it
+  must NOT call `lv_display_trigger_activity()` — that is the timer the flash reads to
+  decide whether it has been noticed, and resetting it stopped every flash after one
+  phase.
+- **A day-old temperature is not a late number, it is the wrong one.** Everything off
+  the synced snapshot is gated on `dash_weather_fresh(&wx, WX_STALE_MIN)`, 24 h. What
+  stays is what is still true offline: clocks, date, agenda (the user's own records) and
+  the moon, which is arithmetic. **Say which kind of empty it is** — a blank band reads
+  as a fault, so it says "Weather is 3d old / hidden until the next HotSync", centred in
+  the band the readings vacated. Gate: `make -C sim dash`.
+- **The drift meter.** Every HotSync is a free reading of how far the clock wandered:
+  `clock_sync_begin/end` logs the SNTP correction, the interval, and the implied ppm to
+  `/sdcard/drift.log` (the experiment runs on battery, so a serial-only reading would
+  never be read). Samples whose interval contains a power loss are reported but not
+  counted — that correction is the outage, not drift.
 
-Every HTTPS request in the run died with `ESP_ERR_HTTP_CONNECT` — iCloud's login
-probe and all ten feeds alike. Four claims on that heap were released, in the
-order they cost the most:
-
-- **hotsync task stack 32 KB -> 20 KB.** A task stack IS heap, and this one held a
-  third of what was free. It could shrink because `rss.c`'s `emit_item` no longer
-  parks 8.7 KB of buffers on it. The task now logs its own high-water mark every
-  run (measured: 11060 used of 20480), so the number stays honest.
-- **The LVGL draw buffer, lent for the duration of a sync.** 19 KB DMA-capable,
-  the largest contiguous block the UI holds, and a sync is the one time nothing
-  needs drawing fast. Shrinks to 6 rows while `hotsync_busy()`, restores after.
-  Safe because `flush_cb` is synchronous, so no flush is in flight across the
-  swap, and any allocation failure keeps the buffer it already has.
-- **Wi-Fi pools halved again** (static RX 4->3, dynamic RX/TX 16->8, AMPDU off).
-  Wi-Fi accounted for 26 KB: free went 23 KB -> 50 KB the moment it came down.
-- **The news store's file handles.** On device each open file costs a 4 KB FatFs
-  sector cache (`SECTOR_4096` + `PER_FILE_CACHE`), so `news.idx` + `news.dat` +
-  the feed spool was 12 KB held across every handshake. `news_suspend()` /
-  `news_resume()` close and reopen-at-append around each fetch.
-
-**Messages that sent us the wrong way** — worth remembering as a class of bug:
-`login failed (HTTP 0)` invented an auth failure out of a connection failure
-(HTTP 0 means no response at all); `contacts host resolve failed (HTTP 207)`
-called a Multi-Status success a failure. Both now say what happened.
-
-**config.ini inline comments.** `#` only started a comment at the START of a line,
-but `config.ini.example` ships six lines shaped `key = value   # note`. The
-comment became part of the value: `timezone` matched no zone and fell back to UTC
-silently, and the same shape on `dav_pass` appended a comment to the password. A
-`#` that follows whitespace now ends the value; one with no space before it stays
-literal, so a password may contain it.
-
-**Timezone resolution** no longer falls back to UTC in silence, and accepts what
-people actually type (case, spaces for underscores, the city alone, the
-abbreviation). A bare `EST` used to pass through as a POSIX TZ, which newlib
-reads as UTC — a silent five-hour error.
-
-**News, on first real contact with live feeds:**
-
-- The bold headline WRAPS and the story did not know it — title at y=16, body
-  pinned at y=44, which is room for one line. The body now flows under the
-  headline's measured height.
-- `lv_font_palm` covers U+0020..U+00FF, so curly quotes, en/em dashes and
-  ellipses drew as hollow boxes. `rss.c` folds them to ASCII. The half that
-  mattered: feeds send a curly quote as raw `E2 80 99` far more often than as
-  `&rsquo;`, so the entity path alone would have fixed almost nothing —
-  `rss_html_to_text` needed a real UTF-8 decoder.
-- 30 articles across 15 per feed meant most of ten sources never got a look in.
-  Now 240 / 40, with each item carrying a parsed publication date (RFC 822
-  `pubDate`, ISO 8601 `published`/`updated`, RDF `dc:date`) so the fetch keeps
-  today's news. "Today" = local calendar date OR the last 24 h, because a strict
-  test empties the app at 6am. **Undated items are KEPT** — a date format we
-  failed to parse must never silently delete a whole feed.
-
-**Weather exists now.** Every temperature the device had ever shown was
-`dash_weather_seed_sample()`; nothing had written `weather.dat`. Open-Meteo,
-free and keyless, will return `&format=csv` — ~1.5 KB read a line at a time, so
-no JSON parser and no new dependency. `bridge/wxfetch.c` identifies each CSV
-block by its HEADER row, never its position, so a reordered field cannot shift a
-column into the wrong `WxCache` slot. `tests/wx_test.c` runs against verbatim
-live responses in `tests/data/` — the device cannot tell a moved column from a
-plausible temperature, so CI has to.
-
-### 2026-08-19 — Wake straight into the lock screen, and four notes' worth of polish
-Round-two notes off the glass. The theme is that three of the four were the device
-telling the truth about its own state a beat too late.
-- **The lock screen is now raised when the screen SLEEPS, not when it wakes.** It was
-  built on the wake tap, so the backlight came up on whatever app had been left open
-  and the dashboard slid in over it a frame or two later. Blanking first and building
-  the dashboard behind a dark panel costs nothing (nobody is looking) and makes the
-  wake instant. The wake tap now refreshes it while still dark and defers the
-  backlight by one render pass — `g_wake_pending` in `lvgl_port.c` — so the first
-  thing lit is a current dashboard, not a dashboard showing the time it was when the
-  device went to sleep.
-- **Which meant the lock was suddenly up and ticking behind a dark screen.**
-  `dash_tick` repaints the whole 240x320 canvas and flushes it every 15 s; doing that
-  forever into a screen nobody is looking at is the kind of thing that empties a
-  battery quietly. It now skips while `power_screen_off()`.
-- **Coach is exempt, and the exemption had to grow.** `ui_show_lock()` already no-oped
-  during a sealed session. But a session that ENDS while the device is face-down
-  unseals itself and puts "how did it go" up — and the old code would then answer the
-  next tap with the dashboard, whose `content_clear()` would have deleted that screen
-  on the way past. The guard is now `co_owns_screen()`: sealed, or `CO_PH_REFLECT`, or
-  the reflect -> blocker -> note flow (`g_co_reflect`, cleared by `kill_kb()`, which is
-  the one call every other screen build already goes through).
-- **The end-of-session flash was two blinks and a shrug.** It rode the 1 Hz `co_tick`
-  for six ticks at desk brightness, which is easy to miss from the other side of the
-  room — the one place you need it from. It has its own timer now: 1.4 s phases, ten
-  of them, and the lit phases run at 100% rather than the configured brightness so the
-  swing is the panel's whole range. Any touch since the previous phase ends it early —
-  a strobe at someone trying to read "how did it go" is just a strobe.
-- **The flash and the idle timer read the same clock, in opposite directions.** The
-  port layer stands down while `ui_owns_backlight()` (otherwise a tap during a dark
-  phase reads as a wake and the two fight over the same LEDC duty) — but unlike the
-  HotSync guard beside it, it must NOT call `lv_display_trigger_activity()`, because
-  that is exactly the timer the flash reads to decide whether it has been noticed.
-  Resetting it there stopped every flash after one phase. The flash restarts the
-  countdown itself when it ends, which also hands someone who walked back to a
-  finished session a full `backlight_sec` to answer instead of an instant blank.
-- **A day-old temperature is not a late number, it is the wrong one.** The dashboard
-  is read in a second, on the way past, and believed. Everything that comes off the
-  synced snapshot — current conditions, AQI, the six-hour strip, the rain bars, the
-  sun times — is now gated on `dash_weather_fresh(&wx, WX_STALE_MIN)`, 24 hours. What
-  stays is what is still true offline: the clocks, the date, the agenda (those are the
-  user's own records, not a reading of the outside world), and the moon, which is
-  arithmetic. The status strip still reports the real age, so the screen never goes
-  quiet about why. `sim/tests/dash_test.c` pins the cut, the boundary, and the
-  clock-ran-backwards case; `make -C sim dash` is a CI gate.
-- **Say which kind of empty it is.** A blank band where the weather was reads as a
-  fault. "Weather is 3d old / hidden until the next HotSync", centred in the band the
-  readings vacated rather than pinned to the top of it, reads as a decision and points
-  at the fix.
-
-### 2026-08-19 — Coach: the coach appears on the weekly report
-"Coach says" was a text row like any other; the app had no coach in it. The weekly
-report now stands the supplied portrait in the right-hand margin and hangs the advice
-off his chin in a speech bubble.
-- **The portrait is flash, not pool.** 60x65 A8 rodata (3,900 bytes) generated by
-  `tools/gen_faces.py` (then `gen_coach_face.py`) and recolored to `COL_LINE` the way
-  the launcher icons are.
-  The source art is pixel art on a ~9 px block grid; it was binarised at 50% grey,
-  cropped to the ink bbox and box-filtered down with a 50% ink-coverage threshold. The
-  reduced art is checked into the generator as text, so it reviews as a diff and the
-  normal path is stdlib-only; `--from-image` reruns the recipe for a new source or size.
-  **Retouching needs a different door than importing.** `--from-image` crops to the ink
-  bbox and box-filters, so one pixel added at an edge reframes and resamples the whole
-  face — fine for new artwork, useless for a touch-up. `--preview f.png 1` now writes the
-  art at 1:1 (or any integer zoom) and `--from-exact` reads it back pixel for pixel, no
-  crop, no rescale, decoding grey/RGB/RGBA/palette PNGs with the standard library. The
-  first pass through it was verified byte-identical before any edit was made, which is
-  the only reason a 27-pixel diff could be trusted as a 27-pixel diff.
-- **The bubble is a rectangle and the tail is 94 bytes.** A bordered, radiused `lv_obj`
-  for the balloon — border and corners are drawn straight into the frame buffer, unlike
-  the indicator widgets that take a draw layer and live-lock this pool. The one shape
-  that is neither rectangle nor glyph is the tail: a 24x26 I1 canvas over a static
-  buffer, written through the shared `i1_px` helpers with **exactly one**
-  `lv_obj_invalidate()`, so it cannot reintroduce the `set_px` storm that cost every
-  game a second of tap latency. The canvas is opaque and its bottom row *is* the
-  bubble's top border — drawn black outside the wedge, left white between its edges,
-  which is what makes the tail read as an opening into the balloon rather than a sticker
-  on it.
-- **The balloon is sized to the worst thing the coach can say.** All six
-  `co_advice_text()` strings were measured with `lv_text_get_size` against
-  `lv_font_palm`: every one wraps to at most three lines (42 px) at any width from 150
-  to 222 px, because the longest is word-bound at three. So the bubble is a fixed
-  height and short advice is centred in it — no relayout, no growth into the stats.
-- **The stat column was measured, not eyeballed.** The portrait takes 60 px of the 240,
-  so every row was checked against the 164 px that remain. Two did not fit and were
-  changed rather than left to wrap: the domain histogram caps at 6 cells instead of 12
-  (`Relationships` + twelve `#` is 205 px) and the energy line reads `Energy Hi 86% Lo
-  31%` instead of `High 86% / Low 31%` (183 px). Everything else already fitted.
-- **One page, one scrollbar.** The first cut gave the stats their own scrolling panel
-  inside fixed furniture, which put a scrollbar down the middle of the screen right
-  beside the portrait. The report is now a single scrolling page: stats, coach, bubble
-  and `back` move together and the only scrollbar is the page's own, at the far right
-  edge and clear of the art. A quiet week fits with no scrollbar at all.
-- **The coach travels with his bubble.** Because the page scrolls as one piece, the
-  bubble sits below the stats — so on a heavy week it would slide away from a portrait
-  pinned to the top, stretching the tail into a wire. The portrait is positioned from
-  the bubble instead (`face_y = bub_y - tail - gap - height`), so the tail is always the
-  same short hop. He is beside the stat column either way; on a long week it is the
-  lower half of it.
-- **The smoke script was tapping thin air.** `back` moved below the fold, so the old
-  fixed `c 19 194` landed on the bubble and `coach_week_back` sat on the wrong screen —
-  and because the smoke gates on exit code rather than pixels, it passed anyway. This is
-  the second time that trap has bitten (see the Coach/Games column note). The script now
-  scrolls the page first and screenshots `coach_week_scrolled` as the evidence.
-
-Verified: `sim smoke`, **`sim smoke32` (the true 24 KB pool)**, `sim coach`, and the
-other six sim gates plus `make test`. The report renders identically under the 24 KB
-pool as under the host's 48 KB, which is the check that matters for a new screen.
-
-### 2026-08-18 — Coach: first on-glass notes pass
-Six changes from the first real round of use on the device, plus one bug those notes
-led to. Nothing here changed the session model or the on-disk formats.
-- **The launcher icon is a stopwatch, not an hourglass.** The hourglass read as
-  "waiting"; Coach is about working. Tried and rejected a runner silhouette in front of
-  the dial — at 24x22 with 2 px limbs it collapses into a blob, both as line art and as
-  a knockout on a solid dial. The stopwatch (crown, two side nubs, hands) is the only
-  version that survives the size, and it matches the line weight of the Palm icons
-  beside it. Generated from `scratchpad/mkicon.py`-style code, not hand-poked.
-- **Marks and This-week were dead ends.** Both are reachable from the home screen and
-  from the menu, but neither had a way back to Coach — you had to leave the app through
-  the silkscreen. Both now carry the same bottom-left `back` affordance the ritual steps
-  use; `co_link()` is the shared builder, `co_back_link()` walks back one ritual step and
-  `co_home_link()` returns to the app home.
-- **Length and Day goal no longer dismiss the menu.** They are the only menu rows that
-  *change a value* rather than navigate, so closing the sheet on tap hid the very thing
-  the tap did — you had to reopen the menu to see what you had set. They now restate
-  themselves in place (`co_menu_restate()`) and repaint the home screen underneath.
-  Safe because the sheet lives on `lv_layer_top()`: rebuilding `content` leaves it up.
-  `g_co_view` tracks which Coach screen is behind the sheet so only the home screen is
-  rebuilt, and `menu_close()` nulls the two label pointers that lived on it.
-- **The app explains itself.** The home screen was a bare Start button — you were asked
-  to commit to something unnamed, and because a session seals the display that is a
-  bigger commitment than it looks. It now carries a line about what Coach *is*, the
-  Start button names the length ("Start 25 min"), and each ritual step has a plain
-  sentence under its question. The home copy deliberately does **not** narrate the next
-  screens ("pick a domain, draw a mark") — that is meaningless before you have seen them
-  and redundant after.
-- **Six domains, not four.** Family and Relationships joined Career / Health / Learning /
-  Creative. The domain is what the weekly report hands back to you, so leaving them out
-  meant time spent on the people in your life scored as nothing at all. `domain` is a
-  whole byte on disk, so **appending leaves every existing `coach.log` readable** — the
-  gate pins that, along with every index naming itself. The ritual grid became 2x3 and
-  the weekly report now prints only the domains actually used (six rows of mostly zeros
-  pushed the advice line, the point of the screen, off the bottom).
-- **The sigil is drawn to fit its control** — see the lesson below; this was the real
-  bug behind "the mark is scaled beyond the space of the display control".
-- Marks wall went from 24 marks to 18 (3 rows of 6). The back link took a strip off the
-  foot, and the choice was 24 at 26 px or 18 at 30 px; at this size a mark is already
-  near the edge of legible, so the count gave way.
-- Coach's static RAM: **194 B -> 226 B** (measured off the ELF). The 32 B is the box
-  geometry, the two live menu labels and `g_co_view`.
-- Gates: `make -C sim coach` (now also covers the grown domain list), `make -C sim smoke`
-  and `smoke32` — the tour was re-coordinated for the new layouts and extended with
-  `coach_marks_back`, `coach_week_back` and the three `coach_menu*` shots.
-
-### 2026-08-17 — Coach: the ritual focus timer (sigil + sealed mode)
-The centrepiece app from `docs/COACH_DESIGN.md`. Six taps and one stroke per session,
-no typing: three auto-advancing ritual selectors (energy / domain / intention — there
-is no Next button anywhere, which is what makes it a ritual rather than a form), one
-Graffiti stroke, then a sealed 25-minute session, then two taps to record how it went.
+### 2026-08-17/18/19 — Coach: the ritual focus timer, then two notes passes
+The centrepiece app, and the first built from a written design spec
+(`COACH_DESIGN.md`) rather than straight into `ui.c`.
 - **The sigil — the stroke you draw IS the progress bar.** Captured through
   `graf_capture_hook` on pen-up, which runs *before* recognition and consumes the
-  stroke, so the mark is never fed to the recognizer and never has to resemble a
-  letter. `graffiti_raw_stroke()` (already built for the Kana trainer) hands back the
-  polyline; `coach_sigil_from_raw()` normalises it to a 0..100 box with aspect
-  preserved, decimating strokes past 39 points while keeping both endpoints. **80
-  bytes per session.**
-  - **The fill is a parity test, not a second buffer.** The mark draws as a thick band
-    that is solid below the fill line and **50% stippled above it** — `if(y >= fill_y
-    || ((x ^ y) & 1) == 0)` in the plot function. "Half inked" therefore needs no alpha,
-    no second canvas, and no compositing, which is exactly the Palm mono idiom. The
-    fill advances **once a minute** (25 repaints across a 25-minute session); only the
-    `MM:SS` label ticks at 1 Hz.
-  - Finished marks are kept in `coach.sig` and tiled on a Marks wall. Abandoned
-    sessions keep their mark but render **hollow** (stippled throughout), so the wall
-    stays honest.
-- **Sealed mode — the session cannot be escaped by the obvious control.** The running
-  screen is a full-screen takeover on `lv_layer_top()`, which covers the Graffiti strip
-  and the silkscreen row, so Home/Menu/Find/Calc are unreachable **because they are
-  underneath, not because they were disabled** — there is no re-enable path to forget.
-  `ui_show_lock()` early-returns while sealed, so the port layer's wake-and-raise shows
-  your mark instead of the dashboard. Giving up costs a **five-second press-and-hold**
-  and breaks the streak.
-  - **The seal pays for its own buffer.** Because you cannot open a game mid-session,
-    the sigil canvas reuses `game_cv_buf` outright — Coach adds **no canvas storage at
-    all**. This is the same mutual-exclusion argument that collapsed the four game
-    buffers into one, applied one step further.
-  - Verified **byte-for-byte** in the smoke: the tour taps silkscreen Home mid-session
-    and screenshots again; `coach_sealed.ppm` and `coach_sealed_home.ppm` are identical
-    files.
-- **`coach.c` / `coach.h` — pure, no stdio, no LVGL.** Same split as `minesweeper.c`:
-  `ui.c` owns the pixels, the file I/O, and every user-facing string; `coach.c` owns the
-  arithmetic. **Every wall-clock input is injected** (`coach_day_index(epoch,
-  tz_off_min)`, never a `time()` or TZ read inside), which is what makes the advice
-  testable on any host in any locale — `make -C sim coach`, **68 assertions**.
-  - `coach_advise()` runs six rules in fixed priority, first match wins, all integer
-    math. **R0 stays silent under five sessions**, which is what protects the
-    credibility of the other five. Each rule in the gate is paired with a **near-miss
-    that must NOT fire**: bad *mornings* must not say "shift earlier", full-length
-    struggles must not say "try shorter", a session length already in motion must not
-    say "increase".
-  - **Local-day arithmetic floors, it does not truncate.** `a / b` toward zero puts a
-    22:00 EDT session on the wrong local day (the negative-offset case); the streak
-    counts in local days, so this is load-bearing.
-  - `coach_streak_now()` decays a stored streak on its own — a stale save cannot show a
-    nine-day streak from last month. A **backwards clock** (no RTC; SNTP corrects the
-    epoch mid-week) resets the streak rather than inflating it.
-- **Exports: the data leaves the device.** A finished session writes a Date Book block
-  via `data_save_cal()` and, if you wrote one, the note as a Memo via
-  `data_save_memo()` — both ride the next HotSync to iCloud. Verified in the sim: the
-  block lands on today's day view.
-- **Storage.** `coach.sav` (state, written on phase change — six writes per session,
-  not per second), `coach.log` (12 B/session, append-only), `coach.sig` (80 B/session,
-  index-aligned to the log so the wall pairs them by position with no key). ~552 B/day
-  at six sessions; both logs are **streamed on read**, never fully buffered.
-  **There is no SPIFFS partition on this device** — `partitions.csv` is `nvs` +
-  `phy_init` + a 3 MB `factory` app, and that is all of the 4 MB. SD via FatFs, like
-  every other app.
-- **RAM — measured off the ELF, not estimated.** `194 B` of static `.bss` at this
-  build, `226 B` after the 2026-08-18 notes round
-  (`g_co_sig` 80 + `g_co` 44 + the rest in pointers/flags), **336 B** total DRAM delta
-  (37,328 → 36,992 free), **+12,141 B** flash. Confirmed on hardware: free heap at boot
-  went 155,412 → **155,076**, exactly the 336 B. The spec had estimated ~148 B; the gap
-  was the widget pointers, waved at rather than counted.
-- Gates: `make -C sim coach`, `smoke` (16 new Coach screenshots), **`smoke32`** (the
-  whole tour at the device-sized pool, peak 2,236 B of a 147,456 B budget), and a clean
-  ESP-IDF v5.5 build. Flashed and boot-verified on the bench at 115200.
+  stroke, so the mark never has to resemble a letter. **80 bytes per session.**
+  **The fill is a parity test, not a second buffer:** solid below the fill line, 50%
+  stippled above (`if(y >= fill_y || ((x ^ y) & 1) == 0)`). "Half inked" therefore needs
+  no alpha, no second canvas and no compositing. The fill advances once a minute; only
+  the `MM:SS` label ticks at 1 Hz. Abandoned sessions keep their mark but render hollow,
+  so the wall stays honest.
+- **Sealed mode.** The running screen is a full-screen takeover on `lv_layer_top()`, so
+  Home/Menu/Find/Calc are unreachable **because they are underneath, not because they
+  were disabled** — there is no re-enable path to forget. Giving up costs a five-second
+  hold. **The seal pays for its own buffer:** because you cannot open a game
+  mid-session, the sigil canvas reuses `game_cv_buf` outright. Verified byte-for-byte
+  in the smoke — the tour taps Home mid-session and the two screenshots are identical
+  files.
+- **`coach.c` is pure — no stdio, no LVGL, every wall-clock input injected**, which is
+  what makes the advice testable on any host in any locale (68 assertions).
+  `coach_advise()` runs six rules in fixed priority, first match wins, integer math.
+  **R0 stays silent under five sessions**, which protects the credibility of the other
+  five, and each rule in the gate is paired with a **near-miss that must NOT fire**.
+  `coach_streak_now()` decays a stored streak on its own, and a **backwards clock**
+  (SNTP correcting mid-week) resets it rather than inflating it.
+- **Exports:** a finished session writes a Date Book block and, if you wrote one, the
+  note as a Memo — both ride the next HotSync to iCloud.
+- **Storage:** `coach.sav` (written on phase change — six writes per session, not per
+  second), `coach.log` (12 B/session), `coach.sig` (80 B/session, index-aligned to the
+  log so the wall pairs them by position with no key). Both logs are streamed on read.
+  **There is no SPIFFS partition** — `partitions.csv` is nvs + phy_init + a 3 MB
+  factory app, and that is all of the 4 MB. SD via FatFs, like every other app.
+- **RAM, measured off the ELF, not estimated:** 226 B static, 336 B total DRAM delta,
+  +12,141 B flash. Confirmed on hardware — free heap at boot went 155,412 → 155,076,
+  exactly the 336 B. The spec had estimated ~148 B; the gap was widget pointers, waved
+  at rather than counted.
+- **Notes round 1 (on glass):** the launcher icon became a stopwatch, not an hourglass
+  ("waiting" vs "working"); Marks and This-week got `back` links (both were dead ends);
+  Length and Day goal stopped dismissing the menu, because they are the only rows that
+  *change a value* rather than navigate; the app explains itself on the home screen
+  (you were being asked to commit to something unnamed, and a session seals the
+  display); **six domains, not four** — Family and Relationships joined, and because
+  `domain` is a whole byte on disk, appending leaves every existing log readable.
+- **The weekly report grew a coach.** The portrait stands in the right-hand margin with
+  the advice in a speech bubble. **The portrait is flash, not pool** (60×65 A8 rodata,
+  3,900 bytes, recoloured like the launcher icons). **The bubble is a rectangle and the
+  tail is 94 bytes** — a bordered radiused `lv_obj` for the balloon, and one 24×26 I1
+  canvas for the one shape that is neither rectangle nor glyph, written with **exactly
+  one** `lv_obj_invalidate()`. **The balloon is sized to the worst thing the coach can
+  say** — all six strings measured with `lv_text_get_size`, every one wrapping to at
+  most three lines at any width from 150 to 222 px. **The coach travels with his
+  bubble** (positioned from it, `face_y = bub_y - tail - gap - height`), because the
+  page scrolls as one piece and a portrait pinned to the top would stretch the tail into
+  a wire.
 
-### 2026-07-24 — Zip (the fourth and final game) + pausable play clocks
+### 2026-07-24 — Zip (the fourth game) + pausable play clocks
 - **The game timers pause when the game is off screen.** Mines and Sudoku each stored
-  one "started at" epoch and rendered `now - start`, so the clock kept running while the
-  app was closed (a puzzle resumed after lunch read 47:00). Replaced with
-  **`firmware/main/playclock.h`** — a `PlayClock` banks seconds into `accum` on pause and
-  opens a fresh `run` segment on resume, so only on-screen time counts. Every entry point
-  takes `now` as an argument rather than calling `time()`, which makes the state machine
-  deterministic and host-testable: **`make -C sim clock`** (25 assertions, no sleeping).
-  Wired into `ui.c` at `kill_kb()` (via `games_pause_clocks()` — the one path every
-  screen teardown already takes, `ui_show_lock` included, so locking pauses too) and
-  resumed in each `show_*()`. **Saves store a `pc_snapshot()`, which is always paused**,
-  so a reboot or a flat battery can't charge for time the device was off. Magics bumped
-  `MSG2`→`MSG3`, `SDK2`→`SDK3`.
-- **`w <ms>` in the sim harness** — a REAL wall-clock wait that keeps pumping LVGL. `t`
-  advances only LVGL's simulated tick, under which anything reading `time(NULL)` stands
-  still, so the pause fix was untestable end to end without it. The smoke script now
-  proves the fix visually: `zip_clock_running` → 3 s elsewhere → `zip_clock_resumed`
-  gains ~1 s (the on-screen tail), not 3.
-- **Zip** — `firmware/main/zip.c/.h`, pure C + host gate (`make -C sim zip`, 40
-  assertions including an independent reference solver). A 6x6 one-line path puzzle:
-  start on **1**, hit the numbers in ascending order, cover **every** cell with one
-  unbroken path (a Hamiltonian path with ordered waypoints).
-  - **Generator, inverted.** Dropping N waypoints evenly along a random Hamiltonian path
-    makes *bad* puzzles — measured, 10 evenly spaced numbers still left **2–41**
-    solutions. Instead it does what `sudoku.c` does: number **every** cell of the
-    reference path (trivially unique, the numbers spell out the answer) and then *remove*
-    numbers in a seeded random order, keeping a removal only while **exactly one**
-    solution survives. Result: minimal boards, **5–12 numbers (centred 7–9)** over 2000
-    seeds, **2.4 ms** each on the host.
-  - **Affordable because of the connectivity prune** — after each step every unvisited
-    cell must still be reachable through unvisited cells, which collapses an exhaustive
-    count on 36 cells to a few *thousand* nodes. A New game is ~35 of those counts. All
-    searches also carry a node budget, so no seed can spin the watchdog.
-  - **Drag input, deliberately forgiving.** `PRESSED` starts, `PRESSING` continues
-    (never `CLICKED` — the Mines lesson). `zp_touch()` retraces when you touch a cell
-    already on the path (a wrong turn needs no button) and **bridges through a shared
-    free neighbour** when the touch lands two cells away — which is what makes a fast or
-    diagonal fingertip sweep work on a resistive panel. Out-of-order numbers are refused
-    as you draw, so `zp_solved()` reduces to "all 36 cells covered".
-  - **View:** one I1 canvas in Sudoku's grammar — filled discs with knockout digits
-    (readable under the path), a 7 px path band, a dotted grid so the band leads the eye.
-    Canvas-drawn Undo/Clear below the grid (PRESSED-only, so a drag over them is inert),
-    Graffiti backspace = undo, `New` reseeds, state in `zip.sav` (`ZIP1`). `icon_zip`
-    generated by `tools/gen_zip_icon.py`.
-  - **RAM:** `ZpGame` 116 B, module statics ~330 B, worst-case stack ~3.2 KB (measured
-    with `-fstack-usage`; the neighbour table exists to keep the 36-deep DFS frames small
-    on a 12 KB-stack task).
+  one "started at" epoch, so a puzzle resumed after lunch read 47:00. Replaced with
+  `playclock.h` — bank seconds into `accum` on pause, open a fresh `run` on resume.
+  Every entry point takes `now` as an argument rather than calling `time()`, which makes
+  it deterministic and host-testable (25 assertions, no sleeping). Wired in at
+  `kill_kb()`, the one path every screen teardown already takes. **Saves store a paused
+  snapshot**, so a flat battery can't charge for time the device was off.
+- **Zip** — a 6×6 one-line path puzzle (start on 1, hit the numbers in order, cover
+  every cell). **The generator is inverted:** dropping N waypoints along a random
+  Hamiltonian path makes *bad* puzzles (10 evenly spaced still left 2–41 solutions), so
+  it numbers **every** cell and then *removes* numbers while exactly one solution
+  survives — the `sudoku.c` hole-digging pattern. Minimal boards of 5–12 numbers in
+  **2.4 ms**. Affordable because of the **connectivity prune**: every unvisited cell must
+  still be reachable through unvisited cells, which collapses an exhaustive count on 36
+  cells to a few thousand nodes. **Drag input, deliberately forgiving** — `PRESSED`
+  starts, `PRESSING` continues (never `CLICKED` — the Mines lesson), retrace to rewind,
+  and **bridge through a shared free neighbour** when the touch lands two cells away,
+  which is what makes a fast diagonal fingertip sweep work on a resistive panel.
 - **One canvas buffer for all four games — 12.5 KB of BSS back.** The game screens are
-  mutually exclusive (`show_*()` → `kill_kb()` + `lv_obj_clean(content)` destroys the old
-  canvas before the new one exists), so four private I1 buffers were waste: **17.5 KB**.
-  They now share one `game_cv_buf` sized to the largest board (240x164 = **4.9 KB**);
-  Mines and Wordie just use less of it.
-- Gates: `make -C sim games` (mines/wordie/sudoku/zip/clock), `smoke`, and **`smoke32`**
-  (true 24 KB pool, peak 612 B) green; `ui.c` + `zip.c` clean under
-  `-Wall -Wextra -Werror -Wshadow` (`zip.c` also under `-Wconversion`).
+  mutually exclusive, so four private I1 buffers were 17.5 KB of waste. They now share
+  one `game_cv_buf` sized to the largest board; Mines and Wordie just use less of it.
 
-### 2026-07 — RSS reader (roadmap #4) stage C: the HotSync fetch (device)
-- `config.ini` gains **`news_feed1..3`** (Config + `config.c` parse/save/defaults).
-- **`dav_fetch_url(url, path)`** (device-only, in `dav_esp.c`): streams a public
-  https body straight to an SD file, reusing the existing `esp_http_client`/mbedTLS
-  handle + the spool-to-SD pattern (`dav_list` does the same for PROPFIND). A
-  no-user `DavCtx` means no `Authorization` header (`basic_auth` now returns empty
-  for an empty user); declared in `dav.h`, unimplemented on the host (nothing there
-  fetches feeds).
-- **`fetch_news()`** in `hotsync.c` runs after the PIM sync while Wi-Fi is still up
-  (and after `sync_free_scratch()` returns the ~20 KB): for each configured feed,
-  `dav_fetch_url` → `rss_parse_file` (sliding window) → `news_add`, capped per-feed
-  (15) and overall (30), then `news_commit` + `dav_disconnect`. Bounded RAM — the
-  fetch spools to SD, the parser holds one item, `news_add` writes to SD.
-- **Compile-verified only** (the ESP-IDF CI build compiles `hotsync.c`/`dav_esp.c`);
-  the sim uses the HotSync stub, so the live fetch is runtime-verified on hardware.
-  Host gates + sim smoke still green (shared `config.c`/`rss.c`/`news.c`).
+### 2026-07 — The RSS reader, in four stages
+- **A — the parser.** `bridge/rss.c`, a streaming RSS 2.0 / Atom parser: a byte-driven
+  state machine accumulates only the current item into a bounded buffer, then extracts
+  the title and the richest body. `rss_html_to_text` strips tags and decodes entities in
+  one pass, crucially treating `&lt;`/`&gt;` as tag delimiters so it handles both CDATA
+  raw-HTML and the entity-escaped HTML that `<description>` usually carries.
+  Host-gated, plus a sanitized `rss_asan` in `ftest` — it eats untrusted network bytes.
+- **B — the reader app.** `bridge/news.c` is an on-SD store (`news.idx` fixed records +
+  `news.dat` bodies concatenated), so browsing is O(1) RAM regardless of store size. The
+  **News** app shows one article per screen and navigates by **vertical swipe**,
+  detected manually from press-Y vs last-PRESSING-Y — the headless host doesn't
+  reliably synthesize LVGL's velocity-based gesture, and neither does a real resistive
+  panel.
+- **C — the HotSync fetch.** `dav_fetch_url()` streams a public HTTPS body straight to
+  SD, reusing the existing `esp_http_client`/mbedTLS handle; `fetch_news()` runs after
+  the PIM sync while Wi-Fi is still up. Bounded RAM throughout. **Only the live network
+  GET is unexercised off-glass.**
+- **D — feed management.** `bridge/feeds.c` keeps the source list on SD (`feeds.txt`,
+  ~4 KB fixed table, no heap) with **10 reputable world-English feeds** pre-seeded.
+  **Preferences > News feeds** is a pool-safe `lv_table` with a checkbox column and a
+  URL editor on the tap keyboard. *Replaces the earlier `config.ini news_feed1..3`.*
+- **E — the sim HotSync populates News**, so the whole loop (add a feed → HotSync →
+  swipe the reader) demos in the browser. The sim has no network, so it rebuilds the
+  store from the enabled feeds with sample items.
 
-### 2026-07 — RSS reader (roadmap #4) stage B: the reader app
-- **`bridge/news.c`** — the on-SD article store: `news.idx` (a header + fixed
-  172-byte records: feed, title, blob offset+len, time) + `news.dat` (bodies
-  concatenated). The reader seeks one record + one body span per article, so
-  browsing is O(1) RAM regardless of store size; the writer streams articles in
-  with `news_begin`/`news_add`/`news_commit`. Host-gated (`tests/news_test.c`:
-  write, reopen, read back meta + bodies, truncation, rewrite) in `make test`.
-- **"News" launcher app** (`show_news`, its own newspaper icon) — one article per
-  screen: feed · `n/N` · **bold title** · body (clipped feed-card style). Navigates
-  by **vertical swipe**: since the headless host doesn't reliably synthesize LVGL's
-  velocity-based gesture, swipe is detected manually from the press Y vs. the last
-  PRESSING Y (the RELEASED event's indev point is already reset to 0) — which also
-  works on the real resistive panel. Seeded with sample articles until a real fetch
-  runs. Pool-safe (labels + content swap on one clickable surface; sim heap peak 0).
-- The launcher is now **seven apps → three rows**; the I1.1 onboarding hint moved
-  into the grid's flex flow (a full-width row after the icons) so it no longer
-  overlaps row 3. `news.c` + `rss.c` compile into both the sim and firmware builds.
-  Smoke-gated (launch News → swipe up → next article).
+### 2026-07 — Graffiti: accuracy harness, template fixes, and the SRS trainer
+- **An offline accuracy harness as a CI gate** (`sim/tests/graf_test.c`). It synthesizes
+  hand-drawn-like strokes from each template (densified polyline + deterministic
+  Gaussian jitter at a realistic pixel scale), runs them through the real recognizer,
+  and reports per-glyph accuracy + top confusions across **all three sets** — letters,
+  digits and punctuation (the two-step punct-shift arm is simulated).
+- **Template separation guided by the harness**, letters **97.5% → 99.7%** mean at 3 px
+  jitter, no glyph below 92%; digits and punctuation 100%. Then a second pass from
+  on-glass feedback: **`G`** went from an inward-crossbar capital (which stayed
+  loop-like and read as `O` on-device) to a wide-open C with a full-width mid-bar;
+  **`S`** to a proportional two-lobe that survives a fast hand; **`X`** to the real
+  single continuous stroke (first diagonal, a bridge up the right edge, then the
+  second) rather than a two-stroke cross; **`?`** gained the straight downward tail the
+  stroke naturally ends on, without which a natural flick read as `)`. The trainer's
+  guides draw straight from these templates, so they updated for free.
+- **The Graffiti trainer app** — two modes. **Drill** shows a target glyph and its
+  stroke guide (drawn on an I1 canvas from the recognizer's own template, start dot for
+  direction), scored by the real recognizer with a graded % from the $1 match distance.
+  The schedule is a **deterministic, never-random SRS**: level 1–5 and a due tick;
+  correct promotes and past level 5 **burns**; wrong demotes and reschedules
+  immediately; the next glyph is always the non-burned one with the smallest due tick.
+  **Train** records *your own* stroke as a **per-device template** (~3.3 KB, persisted,
+  loaded at boot), and recognition prefers it when it is a closer match — calibrating to
+  this hand and this resistive panel.
 
-### 2026-07 — RSS reader (roadmap #4) stage A: the feed parser
-- Feasibility settled (GO): fetch **streams to SD** with bounded per-item RAM (the
-  DAV sliding-window pattern), sync stays short with a feed/item cap + conditional
-  GET, and the reader holds only the current article + a small index in RAM — no
-  whole-feed or all-articles buffer. The live HTTPS fetch is device-only (stubbed
-  in the sim), but the parsing is portable and host-gated.
-- **`bridge/rss.c`** — a streaming RSS 2.0 / Atom parser: a byte-driven state
-  machine accumulates only the current `<item>`/`<entry>` into a bounded buffer,
-  then extracts `<title>` and the richest body (content:encoded → description →
-  content → summary). `rss_html_to_text` strips tags + decodes entities in one
-  pass, crucially treating `&lt;`/`&gt;` as tag delimiters so it handles both CDATA
-  raw-HTML and the entity-escaped HTML that RSS `<description>` usually carries.
-  Numeric + named entities → UTF-8. Host-gated (`tests/rss_test.c`: RSS + Atom,
-  CDATA vs escaped, body preference, item cap, file vs buffer) in `make test`, plus
-  a sanitized `rss_asan` in `ftest` (it eats untrusted network bytes).
+### 2026-07 — The Japanese trainer (frozen at Tier 2)
+- **Tier 1 (kana → sound):** the `Kana` app shows a kana in the `lv_font_kana` bitmap
+  subset; you answer the SOUND by drawing romaji in the Graffiti strip (the Latin
+  recognizer is untouched). Deterministic SRS per kana.
+- **Tier 2 (write the kana):** a Sound/Write toggle; Write shows the numbered KanjiVG
+  stroke model and matches each drawn stroke against the expected *next* one, enforcing
+  official order. Stroke data ~28 KB from `tools/gen_kana_strokes.py` (CC BY-SA).
+  Emulator-verified end to end. **Tiers 3–5 are not planned** — see `PRODUCT_PLAN.md`.
 
-### 2026-07 — Graffiti trainer: finish item #2 (training mode, graded score, icon)
-- **Training mode.** A Drill/Train toggle. Train mode records the user's *own* stroke
-  for each letter as a **per-device template** — `graffiti_capture_user()` grabs the
-  raw stroke (via a new pre-recognition `graf_capture_hook` so the buffer is intact),
-  downsampled to ≤32 points, ~3.3 KB in BSS, persisted to `/sdcard/graf_user.dat` and
-  loaded at boot in `ui_init`. `graffiti_recognize` now also matches user templates
-  (`match_user`) and prefers one when it's a closer fit than the built-in — calibrating
-  recognition to the user's hand + this resistive panel.
-- **Graded score.** `graffiti_last_distance()` exposes the $1 match distance; Drill mode
-  shows a quality `%` (0 = perfect, LET_THRESH = just-accepted): "Nice! 81%".
-- **Launcher app.** Promoted from a menu item to a first-class launcher app with its
-  own 25×22 icon (`icon_graffiti`, a bold "A"); the Options-menu shortcut was removed.
-  The launcher reflowed to 2×3, so the smoke's Memo/HotSync taps moved with it.
-- Smoke-gated: launch via icon → Drill graded score → Train toggle → capture
-  ("saved your 'a'", recorded 1/26). `make -C sim smoke` + `graf` gate green.
-
-### 2026-07 — Graffiti SRS trainer (roadmap #2, v1)
-- New **Graffiti Trainer** app (Menu → "Graffiti Trainer", `show_trainer`): shows a
-  target letter + its **stroke guide** — drawn on a 96×96 I1 canvas from the
-  recognizer's own template (`graffiti_letter_template`) with a filled start dot for
-  direction. You write in the Graffiti strip; a new `graf_char_hook` in `graf_up_cb`
-  routes the recognized char to the trainer instead of a textarea (the hook is
-  cleared by `kill_kb`, so it can't outlive the screen). Scoring uses the real
-  recognizer; a **per-letter Leitner box** (0..4) schedules the next glyph (weight
-  5−box, weak letters resurface more) and persists to `/sdcard/graf_train.dat`.
-  Correct → "Nice!" + advance + streak; wrong → shows what it read, same target.
-- **Feasibility (roadmap's explicit ask) proven by construction:** pool-safe
-  (labels + one canvas, no layer widget; sim heap peak 0), and stroke capture reuses
-  the proven text-entry pipeline. Smoke-gated (`trainer` / `trainer_scored`: draw
-  the fresh-state first target 'm' → "Nice!"). Remaining: a training mode that
-  captures the user's own strokes as per-device templates, a launcher icon, graded
-  scoring.
-
-### 2026-07 — Graffiti recognizer polish
-- **Accuracy harness + CI gate** (`sim/tests/graf_test.c`, `make -C sim graf`).
-  Synthesizes hand-drawn-like strokes from each template (polyline densified +
-  deterministic Gaussian jitter at a realistic pixel scale), runs them through the
-  real `graffiti_recognize()`, and reports per-glyph accuracy + top confusions;
-  fails CI if accuracy drops below the gate (letters/digits, mean ≥95%, every
-  glyph ≥80%). Test-only accessors (`graf_test_*`, `#ifdef GRAF_TEST_HOOKS`) expose
-  the templates without duplicating the tables.
-- **Template separation fixes** guided by the harness: `h` (rounded n-hump, was
-  colliding with `k`), `g` (circle + hooked descender, was `o`/`q`), `p` (long
-  stem + compact top bowl, was `d`). Letters **97.5% → 99.6%** mean at 3 px jitter
-  (worst glyph 72% → 92%); digits stay 100%. The synthetic model is a proxy —
-  final thresholds still want real on-device `graf` telemetry.
-- **Punctuation coverage** added to the harness (arming the punct-shift with a tap,
-  then the stroke). All 8 punct glyphs (`@ , / - ' ( ) ?`) recognize at 100% — the
-  set was already well-separated (orientation distinguishes the straight lines), so
-  no punct template edits were needed; the gate now locks all three sets.
-
-### 2026-07 — review cycle: charm + intuitiveness in the simulator
-- **I4 config-save feedback** — the Preferences field editor (silent) and the
-  "Save to config.ini" row (modal alert) now show the same transient "Saved" toast
-  as record save/delete, so config edits close the feedback loop consistently. A
-  *write failure* stays a modal alert (the user must notice the card didn't take).
-- **C4 event Alarm + Repeat** — the Date Book Details sheet gained an Alarm on/off
-  toggle and a Repeat cycle (None/Daily/Weekly/Monthly/Yearly), both plain buttons
-  that relabel in place. The `Appt` struct + `ApptPack`/`ical_emit` already carried
-  `hasAlarm`/`hasRepeat` (VALARM/RRULE), so this was UI-only: `g_ev_*` init from the
-  loaded event in the edit-form builder, applied in `save_cb`. Round-trip verified
-  in the sim (set On/Weekly -> save -> reopen shows On/Weekly). Smoke-gated.
-- **C4 Address edit form** — expanded from 5 to 10 scrollable fields (Last, First,
-  Title, Company, Phone, Address, City, State, Zip, Note). The `form_field` builder
-  order and `save_cb`'s `fv()` indices move in lock-step; fields the form still
-  doesn't expose (phone2-5 labels, country, custom1-4) are preserved from the old
-  record on save. Smoke-gated (scroll to reveal the lower fields).
-- **C4 Edit Categories** — the category picker's tail row ("Edit Categories") opens
-  a pool-safe editor: a list of the app's categories (Unfiled reserved/hidden), a
-  **New** button, and per-category **rename** via the I1.2 tap keyboard (one
-  textarea + one button-matrix). `data_set_categories` writes the new AppInfo back
-  with `pdb_write_ai`, preserving every record (a record's category nibble is
-  untouched, so a rename retags its whole category). Delete is deferred (needs
-  recategorising affected records to Unfiled). Smoke-gated.
-- **I3** — Date Book **Week view**; Day/Week/Month zoom hierarchy (centre label
-  zooms out, day tap zooms in).
-- **I4** — transient save/delete **toasts** (were silent-success). **C6** — About
-  states the Memo (device-only) / To Do (CalDAV tasks, not Reminders) truths.
-- **I2** — demo seed is manifest-tracked; **"Remove demo data"** deletes exactly
-  the seeded rows (uniqueID 1..nr, one rewrite per app) before a first HotSync can
-  push them to the real iCloud. **I1.1** — launcher onboarding hint until an
-  account is configured.
-- **C7** — authentic **inverted (white-on-black) Palm title bar**; whole-`ui.c`
-  sweep confirmed no draw-layer widget remains.
-- **Brightness freeze fixed** — the Preferences brightness row was an `lv_slider`
-  (== an `lv_bar` == a draw-layer alloc that live-locks the 24 KB pool → WDT).
-  Replaced with a pool-safe `[-] NN% [+]` stepper. See lessons below.
-- **S4 charm sprint (sim)** — C1 Graffiti ink trail + char echo, C2 HotSync
-  dialog, C4 Palm form contract (Done/Details/Delete bottom bar), I1.2 Preferences
-  on-screen keyboard, C5 devtools gating. All in the real `ui.c`, smoke-gated.
-- **The simulator (S0–S3)** — the real `firmware/main/ui.c` builds to a **native
+### 2026-07 — The simulator, the review cycle, and product hygiene
+- **The simulator (S0–S3).** The real `firmware/main/ui.c` builds to a **native
   headless** host (scripted input + PPM/PNG screenshots, a CI smoke gate) and to
-  **WASM** for the phone browser, live on GitHub Pages
-  (https://emu-commits.github.io/cyd-palm-bridge/). A device-like general-heap
-  ceiling (linker-wrapped malloc) + IDBFS `/sdcard` persistence + credential
-  scrubbing round it out. (Plan doc `SIMULATOR_PLAN.md` retired once built.)
+  **WASM** for the browser, live on GitHub Pages. A device-like general-heap ceiling
+  (linker-wrapped malloc) + IDBFS `/sdcard` persistence + credential scrubbing.
+- **The charm/intuitiveness batch:** C1 Graffiti ink trail + char echo, C2 HotSync
+  dialog, the full C4 form contract (Done/Details/Delete bottom bar, Edit Categories,
+  Address 10 fields, event Alarm/Repeat), C5 devtools gating, C6 About honesty (the
+  Memo device-only / To Do CalDAV-not-Reminders truths), **C7 inverted white-on-black
+  Palm title bar**, I1.1 onboarding hint, I1.2 on-screen keyboard, I2 manifest-tracked
+  demo seed + "Remove demo data" (so a first HotSync can't push seeds to real iCloud),
+  I3 Date Book **Week view** + Day/Week/Month zoom, I4 save/delete/config toasts.
+- **The brightness freeze.** The Preferences brightness row was an `lv_slider` — an
+  `lv_bar` — a draw-layer alloc that live-locks the pool and fires the WDT. Replaced
+  with a pool-safe `[-] NN% [+]` stepper.
+- **Product hygiene:** the GPLv3/MIT split + NOTICE (PumpkinOS provenance, Palm
+  trademark), CI (host codec/fuzz gates, Radicale sync gates, `idf.py build`, then the
+  simulator smoke + wasm + Pages deploy), a newcomer-facing README, and **M1** — sync
+  scratch buffers BSS → sync-lifetime heap, returning ~20 KB to interactive mode.
 
-### 2026-07-15 — product-hygiene sprint + CI + whole-repo review
-- Legal: **GPLv3/MIT split + NOTICE** (PumpkinOS provenance, Palm trademark).
-- **CI** (GitHub Actions): host codec/fuzz gates, Radicale sync gates, ESP-IDF
-  `idf.py build`, and later the simulator smoke + wasm jobs + Pages deploy.
-- Newcomer-facing **README**; **M1** sync scratch buffers BSS → sync-lifetime heap
-  (~20 KB returns to interactive mode); host `[sync]` telemetry behind `SYNC_DEBUG`;
-  M4 discovery cap + O6 detail buffer micro-fixes. The review itself is
-  the retired `REVIEW_2026-07-15.md` (source of the C#/I#/M# item IDs; in git history).
-
-### 2026-07-10 — sync robustness + on-device UX
-- **iCloud modern Reminders are walled off from CalDAV** (Apple, since iOS 13 /
-  Catalina) — unfixable by any CalDAV client. **Decision:** To Do stays on the
-  iCloud **CalDAV VTODO lane** (still cloud-backed; view on iPhone by adding iCloud
-  as an external CalDAV account).
-- **Drift self-heal** — incremental sync could orphan a record whose first pull
-  failed (the RFC 6578 sync-token advanced past it). Device now **always
-  full-enumerates and never persists a sync-token** — a full reconcile every sync
-  self-heals. Host keeps the incremental fast path.
-- **Streaming enumeration** — the 8 KB response buffer truncated a ~42 KB REPORT →
-  collection skipped. `dav_sync_report`/`dav_list` now spool to SD + sliding-window
-  parse; enumeration RAM is O(1) in record count. 8 KB cap **gone** (verified on
-  device, 64-event Date Book). Gate: `tests/streamparse.c`.
-- **TLS keep-alive** — reuse one `esp_http_client` connection per origin
-  (handshake was per-request → ~2N handshakes to pull N records).
-- On device: **light-sleep disabled** (it flashes this CYD's display), screen
-  **stays awake during sync**, To Do **due-date picker**, live **brightness slider**
-  (later found to freeze — see the 2026-07-16 fix), U8 **PWM backlight**, finer
-  per-record sync progress (text), To Do due-date sort, **relocation idempotency**
-  (defer unresolvable objects, suppress that round's deletes; gate
-  `tests/idempotent.c`), Preferences persistence bug (FATFS `rename`), record
-  sorting, **Find UI**, top-bar clock, **TZ picker + DST**, `lv_table`
-  virtualization (the `LIST_MAX` cap is gone), Address Look Up / To Do checkbox
-  column / Memo first-line list.
-
-### 2026-07-09 — sync correctness + on-device config
-- **Sync is correct end-to-end on device**: map frozen by FATFS `rename` (→
-  `remove`+`rename`); push keeps/maps only on 2xx; 412 duplicate-UID conflicts
-  resolved; the OOM-wipes-DateBook data-loss guard (`sync_collection` refuses to
-  overwrite non-empty local with empty).
-- **UID-based identity** (iCal/vCard UID hash, not href-derived) — kills the
-  relocation / dup-UID class. Gate `tests/uidmatch.c`. **Streaming reconcile** —
-  disk-backed 3-way merge-join, O(1) RAM, `MAXR` cap gone. Gate `tests/bigsync.c`.
-- **On-device `config.ini`** — runtime load (`appcfg.[ch]`), Preferences editor UI,
-  and Discover (walk iCloud CalDAV + CardDAV homes, assign collections to roles).
-- **Graffiti punctuation** — PalmOS shift (a tap arms "PUNC", next stroke matched
-  against `PTMPL`; period = two taps).
-
-### 2026-07-05 → earlier — first device sync, then the whole PDA
-- **First on-device iCloud push confirmed** (3 events, no crash) after the no-PSRAM
-  RAM fight (see lessons). Hardware-less sessions added Find, Calculator, parser
-  hardening, engine streaming, multi-app HotSync.
-- The PalmOS UI, built step by step on hardware: **U1** display (ILI9341 portrait),
-  **U2** touch (XPT2046, calibrated, NVS), **U3/U3a** LVGL app shell + Palm
-  fonts/icons/theme, **U4** data views, **U5** detail + edit, **F1–F4** menus /
-  categories / Memo+apps / Details, **U6** Graffiti (full a–z/0–9 recognizer),
-  **U7** HotSync (bidirectional iCloud), per-record Delete + confirm, Calculator.
-- **U0** — sync working set static BSS → heap (`d7031ed`), the prerequisite that
-  freed the RAM for everything above.
-- **Phase A/B** (retired `ROADMAP.md`, done): CardDAV contact sync, then the ESP32
-  firmware port of the exact codec + sync engine.
+### 2026-07-05 → 2026-07-15 — Sync correctness, then the whole PDA
+- **Sync is correct end-to-end on device.** Map frozen by FATFS `rename` (→ `remove` +
+  `rename`); push keeps/maps only on 2xx; 412 duplicate-UID conflicts resolved; and the
+  OOM-wipes-DateBook data-loss guard (`sync_collection` refuses to overwrite a non-empty
+  local with an empty remote).
+- **UID-based identity** (iCal/vCard UID hash, not href-derived) killed the
+  relocation/dup-UID class. **Streaming reconcile** — a disk-backed 3-way merge-join,
+  O(1) RAM, `MAXR` cap gone.
+- **Drift self-heal.** Incremental sync could orphan a record whose first pull failed
+  (the RFC 6578 sync-token advanced past it). The device now **always full-enumerates
+  and never persists a sync-token**; the host keeps the incremental fast path.
+- **Streaming enumeration.** An 8 KB response buffer truncated a ~42 KB REPORT and the
+  collection was skipped. `dav_sync_report`/`dav_list` now spool to SD and
+  sliding-window parse. **TLS keep-alive** — one connection per origin, since the
+  handshake was per-request (~2N handshakes to pull N records).
+- **iCloud modern Reminders are walled off from CalDAV** (Apple, since iOS 13) and this
+  is unfixable by any CalDAV client. **Decision:** To Do stays on the iCloud CalDAV
+  VTODO lane, still cloud-backed; view it on iPhone by adding iCloud as an external
+  CalDAV account.
+- **On-device `config.ini`** — runtime load, a Preferences editor, and Discover (walk
+  the CalDAV + CardDAV homes, assign collections to roles).
+- **The PalmOS UI, built step by step on hardware:** display (ILI9341 portrait), touch
+  (XPT2046, calibrated, NVS), the LVGL app shell + Palm fonts/icons/theme, data views,
+  detail + edit, menus/categories/Details, **Graffiti** (full a–z/0–9 + punctuation
+  shift), **HotSync**, Calculator, Find, the top-bar clock, a TZ picker + DST, and
+  `lv_table` virtualization. **U0** — moving the sync working set from static BSS to
+  heap — was the prerequisite that freed the RAM for all of it.
 
 ---
 
-## Hardware + RAM reference (salvaged from the retired `UI_ROADMAP.md`)
+## Hardware + RAM reference
 
-The design analyses that proved this device could work (`UI_ROADMAP.md`,
-`ROADMAP.md`, `SIMULATOR_PLAN.md`, `REVIEW_2026-07-15.md`) were retired once every
-one of them was built — they are in git history if the reasoning is ever needed
-(`git log --diff-filter=D -- docs/`). These are the load-bearing FACTS from them,
-the things you cannot re-derive from the code.
+The load-bearing facts, salvaged from the retired design analyses (`UI_ROADMAP.md`,
+`ROADMAP.md`, `SIMULATOR_PLAN.md`, `REVIEW_2026-07-15.md` — in git history via
+`git log --diff-filter=D -- docs/`). These are the things you cannot re-derive from the
+code.
 
-### The board
-- **ESP32-D0WD-V3**, 520 KB SRAM (~320 KB DRAM for data, rest is IRAM), 4 MB flash
-  (3 MB app partition), **no PSRAM**. Measured free heap: **129 KB at boot**, **78 KB
-  during a TLS sync** (headless).
-- **Display**: 2.8" 320x240 ILI9341 (some CYD units ST7789), SPI — SCLK 14, MOSI 13,
-  MISO 12, DC 2, CS 15, BL 21.
-- **Touch**: XPT2046 resistive, single-touch, on its OWN pins — CLK 25, MOSI 32,
-  MISO 39, CS 33, IRQ 36.
-- **SD**: a THIRD set — SCLK 18, MOSI 23, MISO 19, CS 5.
-  (TFT, touch and SD are three separate SPI arrangements and don't contend.)
-- **Battery**: JST header + divider on **GPIO34** for voltage sense.
-- **No battery-backed RTC** — time persists to NVS and re-anchors on each sync
-  (`clock.c`), so anything time-critical should say "as of last sync".
-- **And no 32.768 kHz crystal either**, which is the part people miss. The WROOM-32
-  leaves those pins as **GPIO32/33** — and our touch panel uses both (MOSI 32, CS 33),
-  so the module demonstrably has no 32K fitted. Consequence: RTC_SLOW_CLK is the
-  internal ~150 kHz RC oscillator, calibrated at boot but temperature-dependent, so
-  **timekeeping across sleep drifts on the order of a percent** (minutes/day). Sleeping
-  the SoC is therefore *not* a fix for the missing RTC — see the BACKLOG item. While
-  awake the clock runs off the 40 MHz XTAL and is fine (seconds/day).
-- **`CONFIG_PM_ENABLE` and tickless idle are commented out** (`sdkconfig.defaults`):
+### The board (this CYD, ESP32-2432S028R)
+- **ESP32-D0WD-V3**, 520 KB SRAM (~320 KB DRAM for data), **4 MB flash / 3 MB app
+  partition**, **no PSRAM**. Measured free heap: **129 KB at boot**.
+- **Display** ILI9341 (some units ST7789), **portrait 240×320**, SPI3 @ **20 MHz** —
+  pins route via the GPIO matrix on SPI3, cap ~26.7 MHz, and **40 MHz crashes init**.
+  SCLK 14, MOSI 13, MISO 12, DC 2, CS 15, BL 21, MADCTL 0x48. Layout: PDA area 240×208
+  top, Graffiti strip 240×112 bottom.
+- **Touch** XPT2046 resistive, single-touch, **bit-banged on its own pins** — CLK 25,
+  MOSI 32, MISO 39, CS 33; **IRQ 36 unused, detect via pressure z1**. 3-point affine
+  calibration (axis swap/flip/skew in one solve), stored in NVS, re-cal by holding at
+  boot. **Pressure threshold 110** — resistive panels read weak near the edges, and a
+  300 threshold created a right-edge dead zone.
+- **SD** is a THIRD SPI arrangement — SCLK 18, MOSI 23, MISO 19, CS 5. TFT, touch and
+  SD don't contend.
+- **Battery**: JST header + 2:1 divider on **GPIO34**. The TP4054's `CHRG` status pin
+  is **not broken out**, so charging cannot be distinguished from full.
+- **No battery-backed RTC**, and **no 32.768 kHz crystal either** — which is the part
+  people miss. The WROOM-32 leaves those pins as **GPIO32/33**, and our touch panel uses
+  both, so the module demonstrably has no 32K fitted. RTC_SLOW_CLK is therefore the
+  internal ~150 kHz RC, calibrated at boot but temperature-dependent. While *awake* the
+  clock runs off the 40 MHz XTAL and is fine. **Measured drift on battery: under a
+  minute a day** (2026-08-27), which is why no RTC part is needed for timekeeping.
+- **`CONFIG_PM_ENABLE` and tickless idle are commented out** in `sdkconfig.defaults`:
   automatic light-sleep gated APB between LVGL frames and the display flashed. So
-  `power.c`'s `esp_pm_configure` block compiles out entirely — the power story is the
-  PWM backlight plus idle screen-off, and "asleep" means a full-speed SoC in the dark.
+  "asleep" means a full-speed SoC in the dark — accurate clock, thirsty. Note that what
+  failed was *automatic light-sleep*; pure frequency scaling has never been tried.
+- **The board is the E32R28T** (LCDWIKI, ESP32-WROOM-32E + ILI9341 + XPT2046); its IO
+  table in `5_Schematic/` matches our pin map exactly, so it is authoritative. **`IO22`
+  is the red RGB LED and is not brought out at all.** The three 4-pin 1.25 mm seats:
+
+  | seat | pin 1 | pin 2 | pin 3 | pin 4 |
+  |---|---|---|---|---|
+  | **P2** Serial | +5V | GND | TXD0 (IO1) | RXD0 (IO3) |
+  | **P3** SPI Peripheral | MOSI (IO23) | MISO (IO19) | CLK (IO18) | **CS (IO27)** |
+  | **P4** Expand Pin | VCC3V3 | **IO35** | *(n/c)* | GND |
+
+  **The pin census forces most hardware answers.** Reachable without soldering: `IO27`
+  (the only free *bidirectional* GPIO), `IO35` (**input only**, but `RTC_GPIO5` and a
+  valid `ext0` wake source), `IO1`/`IO3` (UART0), and the SD bus. **I2C needs two
+  bidirectional lines and there is exactly one**, so an I2C part must take a UART0 pin —
+  and `RXD0` is driven by the CH340 whenever USB is connected while `TXD0` carries the
+  ROM bootloader's output. **I2C is off the table on this board without soldering.**
+  `IO34`–`IO39` have no internal pull-ups.
 
 ### Why it fits: two mutually exclusive modes
-The rule the whole architecture rests on: **never hold LVGL's draw buffers and the
-TLS handshake at the same time.**
+The rule the whole architecture rests on: **never hold LVGL's draw buffers and the TLS
+handshake at the same time.**
 
 | | Mode A — interactive (Wi-Fi OFF) | Mode B — sync (Wi-Fi + TLS) |
 |---|---|---|
 | IDF + FreeRTOS baseline + stacks | ~55 KB | ~55 KB |
-| LVGL partial draw buffer (1 x 240x40x2) | ~19 KB | ~19 KB — **NOT torn down** |
+| LVGL partial draw buffer | ~19 KB | **~3 KB** — shrunk to 6 rows for the sync |
 | LVGL core + view tree | ~30 KB | ~30 KB — still resident |
 | Wi-Fi driver + lwIP | (deinit'd) | ~50 KB |
 | mbedTLS handshake peak | — | ~40 KB |
-| Sync working set (heap, freed after) | — | ~55 KB |
-| Progress screen / record + Graffiti buffers | ~8 KB | ~4 KB |
-| **Free of ~275 KB usable** | **~160 KB** (est.) | **~20 KB** (est., UNMEASURED) |
+| Sync working set (heap, freed after) | — | ~23.5 KB |
+| **Free** | **~160 KB** (est.) | **44.9 KB measured at `wifi-up`** |
 
-**Read the Mode B column carefully — an earlier version of this table was flattering
-it.** Two corrections landed 2026-08-06, both from reading the code rather than the
-doc:
+**Read the Mode B column carefully — earlier versions of this table were wrong twice.**
+First it claimed the draw buffer was two allocations totalling ~40 KB; it is a single
+`heap_caps_malloc(240 × 40 × 2, DMA)` with `NULL` as the second buffer. Then it showed
+LVGL as "(torn down)", describing a contingency at `hotsync.c:8` that had never been
+implemented — so Mode B was really ~20 KB, not the ~70 KB claimed, and **the 78 KB
+figure that seemed to confirm ~70 KB was measured headless**, validating only the no-UI
+case. The 2026-08-20 work then built the teardown as a **shrink** and released three
+other claims, taking measured free at `wifi-up` to **44.9 KB**.
 
-1. **The draw buffer is one ~19 KB allocation, not two totalling ~40 KB.**
-   `lvgl_port.c:88-91` does a single `heap_caps_malloc(LCD_W(240) x 40 x 2, DMA)` and
-   passes **`NULL`** as the second buffer. Good news for Mode A: ~160 KB free, not ~140.
-2. **Nothing ever tears LVGL down.** `hotsync.c:8` says "if it's tight, tear down the
-   LVGL draw buffer first" — that is a *contingency that was never implemented*. There
-   is no `heap_caps_free` of the buffer and no `lv_deinit` anywhere. So during a real
-   on-device HotSync, the draw buffer **and** the whole view tree stay resident, and the
-   old table's "(torn down)" / "—" cells were describing a plan, not the binary.
+**What is still unmeasured: the handshake peak with the UI resident.** Read it as the
+drop in `min_ever` between `pre-tls` and `post-tls` in `hs_heap()` — but `min_ever` is
+since *boot*, so an unmoved value means the run was inconclusive, not that the handshake
+was cheap.
 
-Netting those: on-device Mode B has roughly **~20 KB** free, not ~70 KB. **The 78 KB
-figure that seemed to confirm ~70 KB was measured *headless*** — no LVGL at all — so it
-only ever validated the no-UI case (55+50+40+55 = ~200 KB used, ~75 KB free: that
-matches, but it is a different configuration from the shipping one). **The with-UI Mode
-B number has never actually been measured on glass.** Treat ~20 KB as an estimate and a
-warning, not a fact — and measure it during the games ship-gate flash.
+**Practical consequence: be sceptical of anything that adds to Mode B.** A
+full-framebuffer double-buffered GUI would need ~300 KB of buffers; we render in partial
+strips instead.
 
-Practical consequence: **do not add anything to Mode B**, and be sceptical of any plan
-that brings Wi-Fi up while LVGL is resident. If Mode B does prove that tight on glass,
-implementing the never-built draw-buffer teardown is the ~19 KB in reserve.
+`sim/sim_heap.h` still budgets from the old ~140 KB figure. **Leave it** — the simulator
+being *stricter* than the device is the safe direction for a guard.
 
-`sim/sim_heap.h` still budgets from the old ~140 KB. Leave it: the simulator being
-*stricter* than the device is the safe direction for a guard, and loosening it to
-~160 KB would only let a design through the sim that the device might refuse.
+---
 
-What would be blocked, and why we never do it: a full-framebuffer double-buffered
-GUI needs ~300 KB of buffers — we render in partial strips instead.
+## Hard-won lessons — re-read before touching these areas
 
-## Hard-won lessons (durable — re-read before touching these areas)
+### LVGL on a 32 KB object pool
+*(`CONFIG_LV_MEM_SIZE_KILOBYTES=32`, measured on hardware as `lvgl pool: 31100 bytes
+total`. `make -C sim poolparity` fails if `sim/lv_conf.h` and the device's sdkconfig
+drift apart — the gate is the authority, not prose.)*
 
-### Simulator gotchas that cost real time
+- **Never use a widget that allocates a draw LAYER.** `lv_bar` (and its subclass
+  `lv_slider`), `lv_arc` and `lv_meter` composite their indicator through a layer
+  buffer from the fixed pool. The alloc fails, LVGL retries every refresh, IDLE0
+  starves, the Task WDT fires → **frozen screen**. This bit us three times: the sync
+  progress bar at 66%, a To Do inline `lv_checkbox` behind the menu overlay, and the
+  Preferences brightness slider. **Use plain buttons / button-matrix / lists / labels.**
+  Progress and steppers are **text**, not bars.
+- **`bg_opa`/`bg_color` does NOT force a layer.** Only object `opa`, transforms, or
+  blend modes do. `LV_OPA_30` backdrops and a tinted "today" row are safe.
+- **A picture belongs in flash, not in the pool.** Anything that never changes: emit it
+  as a const `lv_image_dsc_t` (A8, `image_recolor` to the ink colour) the way
+  `palm_icons.c` does, and `lv_image` draws it straight from rodata. Coach's face costs
+  3,900 bytes of a 3 MB partition and zero pool. Reach for a canvas only for shapes that
+  are actually computed — the bubble tail, 94 bytes.
+- **You can draw into a cell without allocating anything.** A `LV_EVENT_DRAW_TASK_ADDED`
+  hook plus LVGL's per-cell `CUSTOM_*` flag bits paints checkboxes, hairlines and
+  strike-through on a plain `lv_table` for free — a flag-only cell is *smaller* than the
+  `"[x]"` string it replaces. This is what closed C7 after it had sat blocked behind a
+  font regeneration for months.
+- **`lv_canvas` is an `lv_image`, so shrinking the OBJECT centre-crops the buffer** —
+  not "clips from the top", it takes a band off **both** ends. Coach drew its sigil into
+  a 240×164 buffer and called `lv_obj_set_height()` to fit the control, which quietly ate
+  ~23 px off the top and bottom of every mark. Hand the height you want to
+  **`lv_canvas_set_buffer()`** and never resize the object.
+- **LVGL 9.2 `lv_table` tap** clears the selected cell on RELEASED *before*
+  `LV_EVENT_CLICKED` fires — read the cell on `LV_EVENT_VALUE_CHANGED` instead.
+- **`lv_event_get_target()` is not the widget when events bubble.** A calendar's button
+  matrix carries `LV_OBJ_FLAG_EVENT_BUBBLE`, so `get_target()` returns the *matrix* and
+  casting it to `lv_calendar_t *` is a silent wrong-type read with `LV_USE_ASSERT_OBJ`
+  off (it is off in both builds). **Use `lv_event_get_current_target()`.**
+- **Size a fixed container to the WORST string it can hold, and measure it** with
+  `lv_text_get_size()` against the real font, over every string the code can produce.
+  Guessing yields either a clipped balloon or one that resizes per verdict.
+- **Scroll the page, not a panel inside it.** A scrolling sub-panel with fixed furniture
+  around it puts a scrollbar down the middle of a 240 px screen. Put the whole screen on
+  one scrollable child of `content` (never on `content` itself — it is shared and
+  `content_clear()` does not reset its flags). Anything anchored to a scrolling page
+  must be positioned from the flow: `LV_ALIGN_BOTTOM_LEFT` pins to the *viewport*, so a
+  `back` button placed that way scrolls away from its own page.
+- **Keep big buffers off the task stack.** A per-record 8 KB stack frame overflowed the
+  hotsync task and corrupted the heap.
+
+### The simulator, and gates that pass while the picture is wrong
+- **The smoke script navigates by absolute pixel coordinates, and it will NOT tell you
+  when they go stale.** The gate asserts **exit code + "screenshots exist"**, never
+  pixels. When Coach became the 9th launcher app, row 3 went from two icons to three,
+  `SPACE_EVENLY` re-centred it, and nine taps meant for Games opened Coach — a green run
+  touring the wrong app through nine sections. Inserting "Power" into a menu shifted
+  every tap below it, so an About tap landed on "Remove demo data" and deleted the seed
+  the rest of the tour depended on; still green. **After changing `APPS[]`, `GAMES[]` or
+  any menu, re-derive the affected coordinates and eyeball the shots.** Grid centres are
+  computable: content 240 wide, `pad_all 6`, 68 px cells, `SPACE_EVENLY` → columns at
+  **x = 46 / 120 / 194**, rows at **y = 56 / 108 / 160**. Measure off a screenshot
+  rather than guessing.
+- **The same trap fires *inside* a screen.** Making the weekly report scroll pushed its
+  `back` button below the fold, so a fixed tap landed on the speech bubble and the
+  screenshot showed the wrong screen. If a change can move a control off-frame, the
+  script has to scroll to it and take a shot proving it got there.
+- **A green emulator does not mean the firmware builds.** The simulator is LVGL 9.2.2
+  and the firmware is 9.5 — an **API split**, not just a version number
+  (`lv_table_add_cell_ctrl` → `lv_table_set_cell_ctrl`, for which `ui.c` carries a
+  shim). **Run `idf.py build` before believing any UI change.**
+- **Pool scaling is pointer-width sensitive.** The 64-bit native sim needs ~2× the pool
+  for the same object capacity, so a screen with too many widgets can pass the native
+  smoke and still fail on wasm/device. `make -C sim smoke32` is the guard (**named for
+  32-*bit*, not 32 KB**) and runs in CI; it needs `gcc-multilib libc6-dev-i386`.
+  **Trust wasm over the native host** for memory-limit reproduction.
 - **`smoke32` leaves 32-bit objects behind.** It runs `make clean` and rebuilds
-  everything `-m32`, so the next plain `make -C sim host`/`smoke` fails to link
-  against the 32-bit `liblvgl.a`. Always `make -C sim clean` after a `smoke32` run.
-- **The sim's `/sdcard` persists between runs.** The smoke appends to real files
-  (`coach.log`, `coach.sig`, the PDBs), so a second run starts with the first run's data
-  and screenshots stop matching what the script just did — a Marks wall reading "Last 2
-  marks" after one session sent me hunting a rendering bug that was not there. CI is
-  always fresh; locally, wipe the SD root before trusting a screenshot.
-- **THE 24 KB POOL TRAP.** The 64-bit native sim gets a **48 KB** LVGL pool (LP64
-  objects are ~2x bigger); the wasm build and the device get the **true 24 KB**. A
-  screen with too many widgets can pass the native smoke and still **fail to boot on
-  wasm/device** (pool exhaustion -> NULL alloc -> crash/freeze), and CI only
-  *compiles* wasm. `make -C sim smoke32` is the guard and runs in CI (needs
-  `gcc-multilib libc6-dev-i386`). The lock screen keeps its footprint down by not
-  coexisting with other screens: it clears the content area and defers the launcher,
-  so the pool only ever holds the chrome + one screen.
-- **`lv_canvas` is an `lv_image`, so shrinking the OBJECT centre-crops the buffer.**
-  Not "clips from the top" — it takes a band off **both** ends. Coach drew its sigil into
-  a 240x164 buffer and then called `lv_obj_set_height()` to fit the control, which
-  quietly ate ~23 px off the top and bottom of every mark; on the Marks wall it left only
-  the bottom tips of the strokes showing. The fix is to hand the height you want to
-  **`lv_canvas_set_buffer()`** and never resize the object — `game_cv_buf` is allocated
-  for the full 240x164, so a shorter canvas simply uses fewer rows of it. Anything that
-  draws into a shared canvas buffer at less than full height needs this.
-- **The smoke script navigates by pixel coordinates**, so launcher/folder grid
-  geometry matters — adding an app or a game reflows a row and moves every tap after
-  it. The Games folder now wraps to a second row (Zip sits there).
-- **...and the smoke will NOT tell you when that happens.** This bit us for real when
-  Coach became the 9th launcher app: row 3 went from two icons to three, `SPACE_EVENLY`
-  re-centred it, and the **nine** `c 169 160` taps meant for Games started opening
-  Coach. The gate asserts **exit code + "screenshots exist"**, never pixels — so the
-  run stayed green while touring the wrong app through nine sections. The screenshots
-  were the only evidence, and only if someone looked. **After changing `APPS[]` or
-  `GAMES[]`, re-derive the affected coordinates and eyeball the shots.** Grid centres
-  are computable: content 240 wide, `pad_all 6`, 68 px cells, `SPACE_EVENLY` → three
-  columns at **x = 46 / 120 / 194**, rows at **y = 56 / 108 / 160**.
-  The same trap fires **inside** a screen, not just on the launcher: making the weekly
-  report scroll pushed its `back` button below the fold, so the fixed `c 19 194` landed
-  on the speech bubble and `coach_week_back` screenshotted the report instead of Coach's
-  home — green run, wrong screen. If a change can move a control off-frame, the script
-  has to scroll to it and take a shot proving it got there.
-- **A gate that CI does not name does not run.** `sim/Makefile` has a `games`
-  aggregate, but `.github/workflows/ci.yml` lists each logic gate as its own step —
-  so adding `coach` to `games` was not enough and its 68 assertions never executed in
-  CI. Caught only by reading the job's step list. **Add the step to `ci.yml` too.**
-- **A game board seeded from `time()` differs on every run**, so screenshots of
-  Mines/Sudoku/Zip are not byte-comparable across runs by design; assert on behaviour
-  (status text, persistence matching within a run), not on exact pixels.
+  everything `-m32`, so the next plain `make -C sim host`/`smoke` fails to link against
+  the 32-bit `liblvgl.a`. **Always `make -C sim clean` after a `smoke32` run.**
+- **The sim's `/sdcard` persists between runs.** The smoke appends to real files, so a
+  second run starts with the first run's data and screenshots stop matching what the
+  script just did. CI is always fresh; locally, wipe the SD root before trusting a
+  screenshot.
+- **A gate that CI does not name does not run.** `sim/Makefile` has a `games` aggregate,
+  but `ci.yml` lists each logic gate as its own step — so adding `coach` to `games` was
+  not enough and its 68 assertions never executed. **Add the step to `ci.yml` too.**
+- **A board seeded from `time()` differs every run**, so Mines/Sudoku/Zip screenshots
+  are not byte-comparable by design. Assert on behaviour, not exact pixels.
+- **General malloc is capped too** (`sim_heap.h` + `heap_budget.c`, linker-wrapped) so
+  the browser's unlimited memory doesn't mask the device budget.
+- **Credentials are never persisted to browser storage** — `sim_scrub_config()` blanks
+  the password fields before every IDBFS write.
 
-### Timers that measure *play* time, not wall time
-- A game clock stored as one "started at" epoch keeps counting while the game is closed.
-  Bank the elapsed segment on teardown and open a new one on open
-  (`firmware/main/playclock.h`); `kill_kb()` is the reliable "you left" hook because
-  every screen teardown already calls it.
+### Time, clocks and timers
+- **A game clock stored as one "started at" epoch keeps counting while the game is
+  closed.** Bank the elapsed segment on teardown and open a new one on open
+  (`playclock.h`); `kill_kb()` is the reliable "you left" hook, because every screen
+  teardown already calls it.
 - **Persist a paused snapshot, never a live epoch.** A stored `run` timestamp is stale
   the moment the device powers off, and resuming from it charges the player for the
-  downtime. Store the total; let the screen restart the clock.
+  downtime.
 - **Make the clock injectable.** Passing `now` into every call instead of calling
   `time()` turned an untestable behaviour into a 25-assertion host gate that needs no
   sleeping. Anything time-dependent in this codebase should follow that shape.
-- **The sim's `t <ms>` is simulated time.** It moves LVGL's tick only; `time(NULL)` does
-  not budge, so timer behaviour is invisible under it. `w <ms>` (real wall-clock wait) is
-  the harness command for that, and it costs real CI seconds — use it sparingly.
+- **The sim's `t <ms>` is simulated time** — it moves LVGL's tick only, so `time(NULL)`
+  does not budge and timer behaviour is invisible under it. `w <ms>` is a real
+  wall-clock wait, and it costs real CI seconds; use it sparingly.
+- **Local-day arithmetic floors, it does not truncate.** `a / b` toward zero puts a
+  22:00 EDT record on the wrong local day. `daycal.h` is the one implementation; a
+  second copy would drift.
 
 ### Generating puzzles with a unique solution
-- Both `sudoku.c` and `zip.c` land on the same shape, and it is the counter-intuitive
-  direction: **start from a fully-constrained board and remove** while a solution
-  counter capped at 2 still says "1". Placing a fixed number of clues/waypoints and
-  hoping for uniqueness does not work — 10 evenly spaced Zip waypoints still left 2–41
-  solutions.
-- A **strong prune makes exhaustive counting cheap enough to run per removal.** Zip's
-  reachability check (every unvisited cell must still be reachable through unvisited
-  cells) turns a 36-cell Hamiltonian count into a few thousand nodes, so ~35 exhaustive
-  counts fit inside a button press.
-- Always give a search a **node budget**. Exhausting it means "not proven unique", which
+- **Start from a fully-constrained board and remove** while a solution counter capped at
+  2 still says "1". Placing a fixed number of clues and hoping for uniqueness does not
+  work — 10 evenly spaced Zip waypoints still left 2–41 solutions. Both `sudoku.c` and
+  `zip.c` land on this same counter-intuitive shape.
+- **A strong prune makes exhaustive counting cheap enough to run per removal.**
+- **Always give a search a node budget.** Exhausting it means "not proven unique", which
   the generator can act on safely — far better than a watchdog reset on an unlucky seed.
-- Keep recursion frames small on this platform: static scratch buffers and a shared
-  neighbour table instead of per-frame arrays (`-fstack-usage` is how you check). LVGL
-  runs on a 12 KB stack.
-
-### LVGL on a 24 KB object pool (`CONFIG_LV_MEM_SIZE_KILOBYTES=24`)
-- **Never use a widget that allocates a draw LAYER.** `lv_bar` (and its subclass
-  `lv_slider`), `lv_arc`, `lv_meter` composite their indicator through a layer
-  buffer allocated from the fixed pool. On this pool the alloc fails, LVGL retries
-  every refresh, IDLE0 starves, the Task WDT fires → **frozen screen**. This bit us
-  three times (sync progress bar at 66%, To Do inline `lv_checkbox` behind the menu
-  overlay, Preferences brightness slider). **Use plain buttons / button-matrix /
-  lists / labels** — the Calculator + keyboard + list pattern never allocates a
-  layer. Progress and steppers are **text**, not bars.
-- **`bg_opa`/`bg_color` (a background fill) does NOT force a layer.** Only object
-  `opa`, transforms, or blend modes do. So `LV_OPA_30` popup backdrops and a
-  tinted "today" row are safe.
-- **LVGL 9.2 `lv_table` tap** clears the selected cell on RELEASED *before*
-  `LV_EVENT_CLICKED` fires — read the cell on `LV_EVENT_VALUE_CHANGED` instead.
-- **Keep big buffers off the task stack.** A per-record 8 KB stack frame overflowed
-  the hotsync task and corrupted the heap; emit buffers moved to one shared `g_body`.
-- **A picture belongs in flash, not in the pool.** A portrait, a logo, anything that
-  never changes: emit it as a const `lv_image_dsc_t` (A8, `image_recolor` to the ink
-  colour) the way `palm_icons.c` does, and `lv_image` will draw it straight from rodata.
-  Coach's 60x65 face costs 3,900 bytes of a 3 MB app partition and zero pool. Reach for
-  a canvas only for shapes that are actually computed — Coach's bubble tail, 94 bytes.
-- **Size a fixed container to the WORST string it can hold, and measure it.**
-  `lv_text_get_size()` against the real font, over every string the code can produce,
-  before choosing the height. Coach's advice bubble is fixed at three lines because all
-  six `co_advice_text()` strings word-wrap to at most three at any width from 150 to
-  222 px. Guessing here yields either a clipped balloon or one that resizes per verdict.
-- **Scroll the page, not a panel inside it.** A scrolling sub-panel with fixed furniture
-  around it puts a scrollbar in the middle of a 240 px screen, wherever that panel's
-  right edge happens to be — next to the artwork, in Coach's case. Put the whole screen
-  on one scrollable child of `content` (never on `content` itself: it is shared and
-  `content_clear()` does not reset its flags) so there is one scrollbar, at the right
-  edge. Anything anchored to a scrolling page must be positioned from the flow, not
-  aligned to the frame — `LV_ALIGN_BOTTOM_LEFT` pins to the viewport, not to the end of
-  the content, so a `back` button placed that way scrolls away from its own page.
+- **Keep recursion frames small:** static scratch and a shared neighbour table instead
+  of per-frame arrays (`-fstack-usage` is how you check). LVGL runs on a 12 KB stack.
 
 ### The no-PSRAM RAM fight (don't undo `sdkconfig.defaults` / `sync.c` sizing)
-- TLS + Wi-Fi + LVGL + the sync working set must coexist in ~85 KB. What makes it
-  fit: `LV_MEM_SIZE=24 KB`, `MBEDTLS_DYNAMIC_BUFFER` + free-CA-after-handshake,
-  trimmed Wi-Fi buffers, and the sync set kept small (`MAXR=24`, `ARENA_CAP=8 KB` —
-  `S` + `Out` + `nodes[]` + `Sink` all scale with `MAXR` and must coexist with the
-  mbedTLS handshake). Result: ~86 KB free after Wi-Fi up, sync peak ~75 KB.
-- **Time-multiplex, don't sum:** rich UI and TLS never run at the same instant.
-  Wi-Fi is down during interactive use; the screen shows only a status line during
-  a sync. `dav_disconnect()` frees the TLS working set before every heap-heavy sort.
-- **Stream everything.** PDB I/O is one record at a time; DAV enumeration + reconcile
+- What makes TLS + Wi-Fi + LVGL + the sync working set coexist: the capped LVGL pool,
+  `MBEDTLS_DYNAMIC_BUFFER` + free-CA-after-handshake, trimmed Wi-Fi buffers, and a small
+  sync set (`MAXR=24`, `ARENA_CAP=8 KB` — `S` + `Out` + `nodes[]` + `Sink` all scale with
+  `MAXR` and must coexist with the handshake).
+- **Time-multiplex, don't sum.** Rich UI and TLS never run at the same instant. Wi-Fi is
+  down during interactive use; the screen shows only a status line during a sync.
+  `dav_disconnect()` frees the TLS working set before every heap-heavy sort.
+- **Stream everything.** PDB I/O is one record at a time; DAV enumeration and reconcile
   are disk-backed sliding-window / merge-join. Watch the **window-boundary bug**: a
-  `<response>` straddling the parse window must keep its tail, or a record is dropped
-  (`dav_parse_*_stream`).
+  `<response>` straddling the parse window must keep its tail, or a record is dropped.
+- **A task stack IS heap.** The hotsync task held a third of the free heap at 32 KB.
 
 ### Sync / iCloud specifics
 - **iCloud CardDAV is on a different host** than CalDAV (`contacts.icloud.com`, not
   `caldav.icloud.com`) — contact discovery must start there.
-- **iCloud namespaces every XML element** `xmlns="DAV:"`; the parser is prefix-tolerant
-  (`xml_open`/`xml_text`).
-- Auth is an **app-specific password** (with dashes). Never commit/echo/log the
-  password fields (`secrets.h` is gitignored; `appcfg.h` marks Config SENSITIVE).
+- **iCloud namespaces every XML element** `xmlns="DAV:"`; the parser is prefix-tolerant.
+- Auth is an **app-specific password** (with dashes). Never commit, echo or log the
+  password fields — `secrets.h` is gitignored and `appcfg.h` marks Config SENSITIVE.
 - **No RTC** → **SNTP on Wi-Fi connect** before any HTTPS, or TLS cert validity fails.
-
-### Hardware (this CYD, ESP32-2432S028R, no PSRAM)
-- **Display** ILI9341 (some units ST7789), **portrait 240×320**, SPI3 @ **20 MHz**
-  (pins route via the GPIO matrix on SPI3, cap ~26.7 MHz — 40 MHz crashes init);
-  pins SCLK14 MOSI13 DC2 CS15 BL21, MADCTL 0x48. Layout: PDA area 240×208 top,
-  Graffiti strip 240×112 bottom.
-- **Touch** XPT2046, **bit-banged** on its own pins (CLK25 MOSI32 MISO39 CS33; IRQ36
-  unused — detect via **pressure z1**, not IRQ). 3-point **affine** calibration
-  (handles axis swap/flip/skew in one solve), stored in NVS ("touch"), re-cal by
-  holding at boot. Pressure threshold **110** (resistive panels read weak pressure
-  near edges — a 300 threshold created a right-edge "dead zone").
-- **Light-sleep flashes the display** on this board (APB clock gates between LVGL
-  frames) — disabled; PWM backlight + idle screen-off are the power story instead.
-
-### Simulator
-- **Pool scaling is pointer-width sensitive.** 24 KB assumes 32-bit pointers; an
-  LP64 native host needs ~48 KB for the same object capacity. The **wasm build is
-  32-bit** → true 24 KB parity with the device (trust wasm over the native host for
-  memory-limit reproduction).
-- **General malloc is capped too** (`sim_heap.h` + `heap_budget.c`, linker-wrapped)
-  so the browser's unlimited memory doesn't mask the device budget.
-- **Credentials are never persisted to browser storage** — `sim_scrub_config()`
-  blanks the password fields before every IDBFS write (sync is stubbed; stored
-  creds would be pure risk). The public page tells users not to enter real creds.
-- **`data_delete()` returns 1 on success** (`rewrite() >= 0`), not 0 — batch
-  deletes must count `>= 1`, and per-record rewrites are O(n²) SD churn (batch them).
+- **`data_delete()` returns 1 on success** (`rewrite() >= 0`), not 0 — batch deletes
+  must count `>= 1`, and per-record rewrites are O(n²) SD churn, so batch them.
+- **Distinguish "no response" from "refused".** `login failed (HTTP 0)` invented an auth
+  failure out of a connection failure, and a 207 Multi-Status was reported as an error.
+  Both sent us debugging the wrong subsystem for a day.
 
 ---
 
@@ -1057,22 +673,24 @@ GUI needs ~300 KB of buffers — we render in partial strips instead.
 # secrets in firmware/main/secrets.h (GITIGNORED: Wi-Fi + Apple app password)
 
 # host gates
-make roundtrip incremental synctoken category   # codec + sync
-./tests/run_gates.sh                             # full suite from a clean state (Radicale)
+make test                                        # codec / find / calc / config / streamparse
+make ftest                                       # fuzz (ASan + UBSan)
+./tests/run_gates.sh                             # full suite from clean (Radicale)
 
 # simulator
-make -C sim smoke     # native headless + screenshots (CI gate)
-make -C sim smoke32   # the SAME tour under the TRUE 24 KB device pool -- then `clean`!
-make -C sim games     # every logic gate: mines wordie sudoku zip clock coach
-make -C sim coach     # Coach: advice rules, streaks, sigil normalisation
-make -C sim graf      # Graffiti recognizer accuracy gate
-make -C sim wasm      # browser build
-make -C sim clean     # REQUIRED after smoke32 (it leaves 32-bit objects behind)
+make -C sim smoke       # native headless + screenshots (CI gate)
+make -C sim smoke32     # the SAME tour at 32-bit pointer width -- then `clean`!
+make -C sim poolparity  # sim/lv_conf.h vs the device's sdkconfig
+make -C sim games       # every logic gate: poolparity mines wordie sudoku zip
+                        #                   clock coach guru gurupool dash
+make -C sim graf        # Graffiti recognizer accuracy gate
+make -C sim wasm        # browser build
+make -C sim clean       # REQUIRED after smoke32 (it leaves 32-bit objects behind)
 ```
 
 - **Graffiti stroke chart** (rendered from the templates):
   https://claude.ai/code/artifact/d8042fdf-06e2-4cb2-8b8b-1fea75fa45e9
-- **Asset converters:** `scratchpad/{palmfont.py, palmicon.py}`; PumpkinOS clone at
-  `scratchpad/PumpkinOS`.
-- Known Graffiti gap: **X is a 2-stroke exception** single-stroke capture can't do
-  yet (backlog).
+- **Asset converters:** `scratchpad/{palmfont.py, palmicon.py}`; `tools/gen_faces.py`
+  (portraits), `tools/gen_kana_strokes.py`; PumpkinOS clone at `scratchpad/PumpkinOS`.
+- **The web emulator** deploys from CI, `main` only:
+  https://emu-commits.github.io/cyd-palm-bridge/
