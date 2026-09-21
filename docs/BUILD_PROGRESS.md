@@ -16,6 +16,30 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-21 — Hello happens on the week screen, and the page is the button
+- **New Coach and Guru portraits**, revised at 1:1 and taken back through
+  `--from-exact` — brows on both, a moustache that reads as hair rather than a second
+  mouth, and the Guru's third eye dropped a row to sit between the brows. No reduction
+  was involved: these arrived as 60 px art, which is the round trip working as designed.
+- **The greeting is no longer a screen of its own.** Coach and Guru now say hello
+  standing on their own *week* screen — same stat column, same portrait, the hello in
+  the balloon where the verdict goes (`co_week_page()` / `gu_week_page()`, shared by
+  both callers so the two cannot drift into layouts that merely resemble each other).
+  Hello used to be an empty frame to get through; it now spends the one moment you are
+  certain to be looking at the speaker showing you the numbers they are there for.
+- **`tap_anywhere(page, cb)` replaced the "back" button** on both week screens. The old
+  button sat below the fold on a two-domain week, so leaving the report *required*
+  scrolling to find it — the smoke had to drag before it could tap. A label says what
+  the screen does instead.
+- **The re-learned lesson: trailing blank rows are not free.** The incoming `coach.png`
+  carried six of them and the Guru one at the top. Left in, the descriptor's bottom edge
+  is no longer the chin, so the tail hangs off a phantom shoulder six pixels low. The
+  importer now trims top and bottom; the 60 px width is a frame and is never trimmed.
+- **A scroll must not also be a tap.** The whole risk in a tap-anywhere page is LVGL
+  following a drag with a `CLICKED`, which would throw you off the report the moment you
+  tried to read the bottom of it. It does not, and `coach_week_scrolled` is now the gate
+  that says so — reaching that shot at all proves the drag was not taken as a tap.
+
 ### 2026-09-20 — The lists stop looking like tables (PR #52 → `main`, merge `145bdf1`)
 - **One shared `list_table_style()` + one `LV_EVENT_DRAW_TASK_ADDED` hook**
   (`list_draw_cb`) styles all five lists — To Do, Memo/Address, Guru, News feeds, the
