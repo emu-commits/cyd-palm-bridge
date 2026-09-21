@@ -17,14 +17,17 @@ mostly away from the bench via the browser simulator).
 
 ---
 
-## RESUME HERE — state at 2026-09-20
+## RESUME HERE — state at 2026-09-21
 
-**`main` @ `81a8ded` is built and flashed to the bench device.** Boot verified clean
-(SD mounted, 19/19/4 records, LVGL up, battery 100%). The web emulator deploys from
-`main` and serves this code.
+**The bench device is one commit behind.** It holds `81a8ded`; `main` has since
+taken the docs consolidation (`4048806`, no code) and **P10** (new portraits, the
+greeting moved onto the week screen, tap-anywhere). P10 changes pixels, so the
+device wants a reflash before any `[d]` box is looked at. The last flash booted
+clean (SD mounted, 19/19/4 records, LVGL up, battery 100%). The web emulator
+deploys from `main` and serves this code.
 
 **The device is holding the newest code and almost none of it has been looked at.**
-Eight `[d]` boxes are open and every one of them is now flashable-and-checkable in a
+Nine `[d]` boxes are open and every one of them is now flashable-and-checkable in a
 single sitting. **The user has said they will test later — do not tick those boxes
 for them.**
 
@@ -37,9 +40,11 @@ The only unbuilt code in the active phase is **P6, the Assistant onboarding**.
 Concise index. Detail for each is below, or in the named doc.
 
 ### A. On the glass now (the device is flashed; these only need eyes)
-1. **The eight open `[d]` checks** — P2 launcher, P3 Guru shell, P4 Guru treadmill,
-   P5 Guru week, P7 lock restyle, P8 HotSync cancel, P9 list restyle, plus Kana
-   Tier 2's `KW_THRESH` feel. §P-checks.
+1. **The nine open `[d]` checks** — P2 launcher, P3 Guru shell, P4 Guru treadmill,
+   P5 Guru week, P7 lock restyle, P8 HotSync cancel, P9 list restyle, P10 the new
+   portraits + tap-anywhere under a thumb, plus Kana Tier 2's `KW_THRESH` feel.
+   §P-checks. **P10 supersedes P1's 2026-09-18 confirmation** — that was the old
+   greeting layout.
 2. **Coach on glass, round 2** — session dim, hollow marks, give-up hold. §Device.
 3. **Wake + lock-screen notes, round 2** — flash length, wake cleanliness, the
    indefinite reflect hold. §Device.
@@ -118,7 +123,9 @@ off `main`.
 - **P0** — `speaker_say()` lifted out of Coach; the since-unlock flag; non-repeating
   greeting-line pools.
 - **P1 — Coach greeting.** Portrait + bubble on first launch after unlock, tap
-  anywhere to advance. **`[d]` confirmed by the user 2026-09-18.**
+  anywhere to advance. **`[d]` confirmed by the user 2026-09-18** — but that
+  confirmation is of the *old* layout, which **P10** has since replaced. It does
+  not carry over; see P10's box.
 - **P2 — launcher reorder + Guru icon.** Nine apps, three rows, nothing below the
   fold; Graffiti moved into Games.
 - **P3 — Guru app shell.** `guru.c`/`guru.h` pure and clock-injected; `daycal.h`
@@ -138,8 +145,14 @@ off `main`.
   what closed **C7** without touching the font); hairlines, banded Guru headings,
   struck-through completed To Dos, four aligned To Do columns. Heap peak *fell*
   2216 → 2120 B.
+- **P10 — hello on the week screen, and the page is the button.** New Coach and
+  Guru portraits (1:1, back in through `--from-exact`). Both greetings now stand
+  on the speaker's own week screen — shared `co_week_page()`/`gu_week_page()`, so
+  hello and the report cannot drift apart. `tap_anywhere()` replaced the "back"
+  button on both week screens; the old one sat below the fold, so *leaving* the
+  report required scrolling to find it.
 
-### P-checks — the eight open `[d]` boxes
+### P-checks — the nine open `[d]` boxes
 - [ ] **P2** on glass.
 - [ ] **P3** on glass.
 - [ ] **P4** on glass.
@@ -156,6 +169,13 @@ off `main`.
       comfortable tap target for a finger, not just a mouse.
 - [ ] **Kana Tier 2** — tune the per-stroke accept threshold `KW_THRESH` on the real
       resistive panel and confirm the feel.
+- [ ] **P10** — the two new portraits at 1:1 on a real ILI9341 (they are ink-on-
+      transparent outlines, and a thin outline is exactly what a resistive panel's
+      diffusion softens), and **tap-anywhere with a finger**: confirm that scrolling
+      a long week does *not* dump you back to the home screen. That is the one
+      failure the sim cannot rehearse — a mouse drag is clean, a thumb drag is not,
+      and if LVGL's scroll-vs-click threshold is wrong for a finger the report
+      becomes unreadable rather than merely awkward.
 
 ### P6 — Assistant onboarding (Wi-Fi + CalDAV) — THE LAST UNBUILT GROUP
 All three entry points decided 2026-09-18:

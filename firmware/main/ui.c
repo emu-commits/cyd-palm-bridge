@@ -6721,11 +6721,10 @@ static lv_obj_t *co_link(lv_obj_t *par, lv_event_cb_t cb){
 }
 static void co_back_link(lv_obj_t *par){ co_link(par, co_back_cb); }
 static void co_home_link(lv_obj_t *par){ co_link(par, co_home_cb); }
-/* ...and the same link on a scrolling page, where "the bottom" is wherever the
- * content ends rather than the bottom of the visible frame. */
-static void co_home_link_at(lv_obj_t *par, int y){
-    lv_obj_align(co_link(par, co_home_cb), LV_ALIGN_TOP_LEFT, 4, y);
-}
+/* The week screen used to carry one of these too, placed down the page rather
+ * than at the bottom of the frame. It does not any more: a speaker screen is a
+ * single tap target now (tap_anywhere), so the button it needed scrolling to
+ * reach is gone and the whole page takes you back. */
 
 /* Each step carries a line of plain English under the question. A bare "Energy?"
  * over three buttons tells a first-time user nothing about what is being asked or
@@ -7222,6 +7221,36 @@ static int speaker_say(lv_obj_t *page, const lv_image_dsc_t *face,
     return bub_y + bub_h;
 }
 
+/* Make the whole page one tap target, and hand every tap on it to `cb`.
+ *
+ * "Anywhere" has to mean anywhere. An lv_obj is clickable by default, so the
+ * balloon and the stat column -- between them most of the screen, and the
+ * obvious places to aim -- would swallow the tap and never let it reach the
+ * page. Dropping the flag on every child is what makes the whole area one
+ * target. Call this LAST: it only sees the children that already exist.
+ *
+ * A scrolling page keeps working. LVGL does not follow a scroll with a CLICKED,
+ * so the drag that reaches the bottom of a heavy week is not also the gesture
+ * that leaves the screen -- which is the thing that would make a tap-anywhere
+ * page unusable rather than merely surprising. */
+static void tap_anywhere(lv_obj_t *page, lv_event_cb_t cb){
+    lv_obj_add_flag(page, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(page, cb, LV_EVENT_CLICKED, NULL);
+    for(uint32_t i = 0; i < lv_obj_get_child_count(page); i++)
+        lv_obj_clear_flag(lv_obj_get_child(page, i), LV_OBJ_FLAG_CLICKABLE);
+}
+
+/* What a speaker screen says instead of showing a "back" button, standing where
+ * that button used to: on the page, under the balloon, scrolling with the rest
+ * of it. A label rather than a control, because there is nothing left to aim at
+ * -- it describes the screen's behaviour instead of being the screen's only way
+ * out. */
+static void speaker_hint(lv_obj_t *page, const char *text, int y){
+    lv_obj_t *h = lv_label_create(page);
+    lv_label_set_text(h, text);
+    lv_obj_align(h, LV_ALIGN_TOP_MID, 0, y);
+}
+
 /* ==== greetings: what a speaker says when you walk in ======================
  * Coach and Guru open on their portrait the first time you reach them after an
  * unlock, say something light, and step aside on a tap. Two rules keep that
@@ -7251,37 +7280,24 @@ static const char *greet_pick(const char *const *lines, int n, uint8_t *last){
 
 #define SPK_GREET_BUB_H 58          /* 3 * 14 text + pad + border, as the report */
 
-/* The greeting screen: the speaker centred, saying one line, and a hint. The
- * WHOLE content area is the tap target -- a button would be a smaller thing to
- * hit and would read as a step to complete rather than a moment to pass through.
+/* The greeting: the speaker's OWN WEEK SCREEN, with a hello in the balloon where
+ * the verdict normally goes. `page` is that screen already built -- stat column
+ * and all -- and `bub_y` is where it wants the balloon; the caller builds it
+ * through co_week_page() / gu_week_page() so hello and the report cannot drift
+ * apart into two different layouts.
+ *
+ * Standing the speaker alone in an empty frame made hello a screen of its own to
+ * be got through, and it threw away the one moment you are certain to be looking
+ * at them. On the week, the numbers they are talking about are already in front
+ * of you while they talk, and the tap that dismisses the greeting is the same
+ * tap that leaves the week -- one gesture, learned once.
+ *
  * `on_tap` is responsible for clearing the greeting bit and showing what's next. */
-static void speaker_greet(const lv_image_dsc_t *face, const char *line,
-                          lv_event_cb_t on_tap){
-    content_clear();
-
-    lv_obj_t *page = lv_obj_create(content);
-    lv_obj_set_size(page, lv_pct(100), lv_pct(100));
-    lv_obj_set_style_radius(page, 0, 0);
-    lv_obj_set_style_border_width(page, 0, 0);
-    lv_obj_set_style_bg_color(page, COL_BODY, 0);
-    lv_obj_set_style_pad_all(page, 0, 0);
-    lv_obj_clear_flag(page, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(page, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(page, on_tap, LV_EVENT_CLICKED, NULL);
-
-    speaker_say(page, face, line, SPK_BUB_MIN(face), SPK_GREET_BUB_H);
-
-    lv_obj_t *hint = lv_label_create(page);
-    lv_label_set_text(hint, "tap anywhere to continue");
-    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -4);
-
-    /* "anywhere" has to mean anywhere. The balloon is an lv_obj and those are
-     * clickable by default, so a tap on the speech bubble -- which is most of the
-     * screen, and the obvious place to aim -- would be swallowed by it and never
-     * reach the page. Drop the flag on every child so the whole area is one
-     * target. */
-    for(uint32_t i = 0; i < lv_obj_get_child_count(page); i++)
-        lv_obj_clear_flag(lv_obj_get_child(page, i), LV_OBJ_FLAG_CLICKABLE);
+static void speaker_greet(lv_obj_t *page, const lv_image_dsc_t *face,
+                          const char *line, int bub_y, lv_event_cb_t on_tap){
+    int after = speaker_say(page, face, line, bub_y, SPK_GREET_BUB_H);
+    speaker_hint(page, "tap anywhere to continue", after + 4);
+    tap_anywhere(page, on_tap);
 }
 
 /* ---- the weekly report's own geometry ----
@@ -7293,17 +7309,20 @@ static void speaker_greet(const lv_image_dsc_t *face, const char *line,
 #define CO_STAT_W   168                          /* stats column, clear of the face */
 #define CO_STAT_ROW 164                          /* every row fits without wrapping */
 
-static void show_coach_report(void){
-    kill_kb(); cur_app = NULL; cur_uid = 0;
-    content_clear();
-    g_co_open = 1; g_co_view = CO_VIEW_WEEK;
-    lv_label_set_text(title_lbl, "This week");
-    update_cat_trigger();
-
+/* The week screen's furniture: the scrolling page, the stat column standing on
+ * it, and the y the balloon wants underneath. The report and the greeting are
+ * the same screen with a different line in the balloon, so both are built from
+ * here -- which is what stops them drifting into two layouts that only look
+ * alike. `a` comes back out for the caller that has to reach a verdict from it;
+ * the greeting has nothing to say about it and ignores it.
+ *
+ * The caller owns content_clear(), the title and the app-state flags: what those
+ * should say differs between walking in (still "Coach") and asking for the
+ * report ("This week"), and guessing here would get one of them wrong. */
+static lv_obj_t *co_week_page(CoachAgg *a, int *bub_y){
     uint32_t now = (uint32_t)time(NULL);
     uint32_t since = now > 7u * 86400u ? now - 7u * 86400u : 0;
-    CoachAgg a;
-    co_fold(&a, since);
+    co_fold(a, since);
 
     /* the page: everything below lives on this, so a heavy week scrolls as one
      * piece. `content` itself is left alone -- it is shared with every other
@@ -7336,31 +7355,31 @@ static void show_coach_report(void){
                             lv_obj_set_width(l_, CO_STAT_ROW); \
                             lv_label_set_text_fmt(l_, __VA_ARGS__); }while(0)
 
-    CO_ROW("Pomodoros   %d", (int)a.n);
+    CO_ROW("Pomodoros   %d", (int)a->n);
     CO_ROW("Focus time  %uh %02um",
-           (unsigned)(a.focus_min / 60), (unsigned)(a.focus_min % 60));
+           (unsigned)(a->focus_min / 60), (unsigned)(a->focus_min % 60));
 
     /* only the domains that were actually used. With six of them, printing the
      * empty ones pushed the advice -- the point of the screen -- off the bottom.
      * The bar caps at 6 rather than 12: "Relationships" plus twelve '#' is 205 px
      * and no longer fits the narrowed column, and six cells still rank the week. */
     for(int d = 0; d < CO_NDOM; d++){
-        if(!a.dom[d]) continue;
+        if(!a->dom[d]) continue;
         char bar[7];
-        int nb = a.dom[d] > 6 ? 6 : a.dom[d];
+        int nb = a->dom[d] > 6 ? 6 : a->dom[d];
         for(int i = 0; i < nb; i++) bar[i] = '#';
         bar[nb] = 0;
-        CO_ROW("%-13s %-6s %d", coach_domain_name(d), bar, (int)a.dom[d]);
+        CO_ROW("%-13s %-6s %d", coach_domain_name(d), bar, (int)a->dom[d]);
     }
 
-    int bs = coach_best_slot(&a);
+    int bs = coach_best_slot(a);
     if(bs >= 0) CO_ROW("Best time   %s, %d%%", coach_slot_name(bs),
-                       coach_slot_ok_pct(&a, bs));
-    int tb = coach_top_blocker(&a);
+                       coach_slot_ok_pct(a, bs));
+    int tb = coach_top_blocker(a);
     if(tb != CO_BLK_NONE) CO_ROW("Top blocker %s (%d)", coach_blocker_name(tb),
-                                 (int)a.blk[tb]);
-    int hi = coach_energy_great_pct(&a, CO_ENERGY_HIGH);
-    int lo = coach_energy_great_pct(&a, CO_ENERGY_LOW);
+                                 (int)a->blk[tb]);
+    int hi = coach_energy_great_pct(a, CO_ENERGY_HIGH);
+    int lo = coach_energy_great_pct(a, CO_ENERGY_LOW);
     /* "High .. / Low .." is 183 px and would wrap in the narrowed column */
     if(hi >= 0 && lo >= 0) CO_ROW("Energy      Hi %d%% Lo %d%%", hi, lo);
     #undef CO_ROW
@@ -7372,12 +7391,27 @@ static void show_coach_report(void){
      * balloon instead of stretching into a wire. He is beside the stat column
      * either way; on a heavy week it is the lower half of it. */
     lv_obj_update_layout(box);
-    int bub_y = lv_obj_get_height(box) + 6;
-    if(bub_y < SPK_BUB_MIN(&coach_face)) bub_y = SPK_BUB_MIN(&coach_face);
+    int y = lv_obj_get_height(box) + 6;
+    if(y < SPK_BUB_MIN(&coach_face)) y = SPK_BUB_MIN(&coach_face);
+    *bub_y = y;
+    return page;
+}
+
+static void show_coach_report(void){
+    kill_kb(); cur_app = NULL; cur_uid = 0;
+    content_clear();
+    g_co_open = 1; g_co_view = CO_VIEW_WEEK;
+    lv_label_set_text(title_lbl, "This week");
+    update_cat_trigger();
+
+    CoachAgg a;
+    int bub_y;
+    lv_obj_t *page = co_week_page(&a, &bub_y);
 
     int after = speaker_say(page, &coach_face, co_advice_text(coach_advise(&a)),
                             bub_y, CO_BUB_H);
-    co_home_link_at(page, after + 4);
+    speaker_hint(page, "tap anywhere to go back", after + 4);
+    tap_anywhere(page, co_home_cb);
 }
 
 /* ------------------------------------------------------------------ the home */
@@ -7762,20 +7796,17 @@ static void gu_advice_text(char *buf, size_t n, int code, const GuruAgg *a){
 
 static void gu_week_back_cb(lv_event_t *e){ (void)e; show_guru(); }
 
-static void show_guru_report(void){
-    kill_kb(); cur_app = NULL; cur_uid = 0;
-    content_clear();
-    gu_load();
-    g_gu_open = 1;
-    lv_label_set_text(title_lbl, "Her week");
-    update_cat_trigger();
-
+/* Her half of co_week_page(), and shared for the same reason: her hello stands
+ * on this screen too, so there is one layout and one set of numbers rather than
+ * two that merely resemble each other. `a` and `days` come back out because the
+ * verdict needs both; the greeting wants neither. The caller owns gu_load(), the
+ * title and the flags. */
+static lv_obj_t *gu_week_page(GuruAgg *a, int *days_out, int *bub_y){
     uint32_t now   = (uint32_t)time(NULL);
     int      tz    = ui_tz();
     uint32_t since = now > (uint32_t)GU_WIN * 86400u ? now - (uint32_t)GU_WIN * 86400u : 0;
 
-    GuruAgg a;
-    gu_fold(&a, since);
+    gu_fold(a, since);
 
     int total  = guru_window_total(&g_gu, now, tz);
     int days   = guru_window_days_active(&g_gu, now, tz);
@@ -7817,29 +7848,41 @@ static void show_guru_report(void){
      * lesson Coach's domain list learned. The empty one gets named in the bubble
      * instead, where it reads as advice rather than as a row of zero. */
     for(int c = 0; c < GU_NCAT; c++){
-        if(!a.cat[c]) continue;
+        if(!a->cat[c]) continue;
         char bar[7];
-        int nb = a.cat[c] > 6 ? 6 : a.cat[c];
+        int nb = a->cat[c] > 6 ? 6 : a->cat[c];
         for(int i = 0; i < nb; i++) bar[i] = '#';
         bar[nb] = 0;
-        GU_ROW("%-9s %-6s %d", guru_cat_name(c), bar, (int)a.cat[c]);
+        GU_ROW("%-9s %-6s %d", guru_cat_name(c), bar, (int)a->cat[c]);
     }
     #undef GU_ROW
 
     lv_obj_update_layout(box);
-    int bub_y = lv_obj_get_height(box) + 6;
-    if(bub_y < SPK_BUB_MIN(&guru_face)) bub_y = SPK_BUB_MIN(&guru_face);
+    int y = lv_obj_get_height(box) + 6;
+    if(y < SPK_BUB_MIN(&guru_face)) y = SPK_BUB_MIN(&guru_face);
+
+    *days_out = days;
+    *bub_y    = y;
+    return page;
+}
+
+static void show_guru_report(void){
+    kill_kb(); cur_app = NULL; cur_uid = 0;
+    content_clear();
+    gu_load();
+    g_gu_open = 1;
+    lv_label_set_text(title_lbl, "Her week");
+    update_cat_trigger();
+
+    GuruAgg a;
+    int days, bub_y;
+    lv_obj_t *page = gu_week_page(&a, &days, &bub_y);
 
     char say[160];
     gu_advice_text(say, sizeof say, guru_advise(&a, days, GU_WIN), &a);
     int after = speaker_say(page, &guru_face, say, bub_y, GU_BUB_H);
-
-    lv_obj_t *b = lv_button_create(page);
-    lv_obj_set_style_pad_all(b, 4, 0);
-    lv_obj_align(b, LV_ALIGN_TOP_LEFT, 4, after + 4);
-    lv_obj_t *l = lv_label_create(b);
-    lv_label_set_text(l, "back");
-    lv_obj_add_event_cb(b, gu_week_back_cb, LV_EVENT_CLICKED, NULL);
+    speaker_hint(page, "tap anywhere to go back", after + 4);
+    tap_anywhere(page, gu_week_back_cb);
 }
 
 static void show_guru(void){
@@ -7850,12 +7893,15 @@ static void show_guru(void){
     lv_label_set_text(title_lbl, "Guru");
     update_cat_trigger();
 
-    /* first time in since the lock came up: she says something, and the tap that
-     * clears her lands on the home screen. */
+    /* first time in since the lock came up: she says something over her own week,
+     * and the tap that clears her lands on the home screen. */
     if(greet_due(GREET_GURU)){
-        speaker_greet(&guru_face,
+        GuruAgg a;
+        int days, bub_y;
+        lv_obj_t *page = gu_week_page(&a, &days, &bub_y);
+        speaker_greet(page, &guru_face,
                       greet_pick(GU_GREETINGS, GU_NGREET, &g_greet_last[GREET_GURU]),
-                      gu_greet_tap_cb);
+                      bub_y, gu_greet_tap_cb);
         return;
     }
 
@@ -7898,12 +7944,15 @@ static void show_coach(void){
     if(g_co.phase == CO_PH_RUNNING){ co_seal(); return; }
     if(g_co.phase == CO_PH_REFLECT){ co_show_reflect(); return; }
 
-    /* first time in since the lock came up: he says something, and the tap that
-     * clears him lands on the home screen. */
+    /* first time in since the lock came up: he says something over his own week,
+     * and the tap that clears him lands on the home screen. */
     if(greet_due(GREET_COACH)){
-        speaker_greet(&coach_face,
+        CoachAgg a;
+        int bub_y;
+        lv_obj_t *page = co_week_page(&a, &bub_y);
+        speaker_greet(page, &coach_face,
                       greet_pick(CO_GREETINGS, CO_NGREET, &g_greet_last[GREET_COACH]),
-                      co_greet_tap_cb);
+                      bub_y, co_greet_tap_cb);
         return;
     }
     g_co_view = CO_VIEW_HOME;
