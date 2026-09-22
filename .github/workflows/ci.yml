@@ -68,6 +68,13 @@ jobs:
         run: sudo mkdir -p /sdcard && sudo chmod 777 /sdcard
       - name: LVGL pool parity (sim/lv_conf.h vs the device's sdkconfig)
         run: make -C sim poolparity
+      # Passes trivially here -- secrets.h is gitignored, so CI has no
+      # credentials to leak and never did. It is in CI to keep the build flag
+      # that does the real work from being dropped; it EARNS its keep on the
+      # developer machines that do have a secrets.h, where it is the only thing
+      # watching. Reports field names and lengths, never values.
+      - name: No compile-time credentials in a simulator build
+        run: make -C sim nosecrets
       - name: Graffiti recognizer accuracy gate
         run: make -C sim graf
       - name: Minesweeper board-logic gate

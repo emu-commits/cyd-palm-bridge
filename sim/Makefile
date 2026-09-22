@@ -19,12 +19,29 @@ EMCC  ?= emcc
 FW := ../firmware/main
 BR := ../bridge
 
-# sim/include FIRST: shields the build from a real (gitignored) secrets.h and
-# provides the esp_log/nvs/esp_timer shims that let real firmware sources compile.
+# sim/include provides the esp_log/nvs/esp_timer shims that let real firmware
+# sources compile here.
+#
+# It used to claim it also "shields the build from a real (gitignored)
+# secrets.h" by sitting first in the include path. IT NEVER DID, and could not:
+# appcfg.c lives in firmware/main and includes "secrets.h" in QUOTES, and a
+# quoted include is resolved relative to the INCLUDING FILE'S OWN DIRECTORY
+# before any -I path is consulted. firmware/main/secrets.h therefore won every
+# time, and on any machine with real credentials the simulator binary was built
+# with the Wi-Fi password and the Apple app-specific password inside it. The
+# shield is now -DSIM_NO_SECRETS below, which appcfg.c honours directly; an
+# include-order trick cannot beat the language's own lookup rule.
 INC    := -I. -Iinclude -Ilvgl -I$(FW) -I$(BR)
 # UI_DEVTOOLS: keep the "Add test events" dev menu item in sim builds (used to
 # mass-generate records against the heap/pool ceilings). Release firmware drops it.
-CFLAGS := -O2 -g -Wall -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS -DUI_SEED_TESTEVENTS $(INC)
+# SIM_NO_SECRETS: never seed credentials into a simulator build. Gated by
+# `make -C sim nosecrets`.
+#
+# Defined ONCE, here, because smoke32 rebuilds CFLAGS from scratch and a second
+# hand-copied list is exactly how a build flag silently stops applying to half
+# the gates.
+SIMDEF := -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS -DUI_SEED_TESTEVENTS -DSIM_NO_SECRETS
+CFLAGS := -O2 -g -Wall $(SIMDEF) $(INC)
 
 # the REAL firmware UI + data layer + portable modules, unchanged
 APP_SRCS := \
@@ -86,7 +103,7 @@ smoke: host
 # (CI only *compiles* wasm; this actually RUNS the UI under the device-sized pool.) ----
 smoke32: lvgl-src
 	$(MAKE) clean
-	$(MAKE) build/sim_host CFLAGS="-O2 -g -Wall -m32 -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS -DUI_SEED_TESTEVENTS $(INC)"
+	$(MAKE) build/sim_host CFLAGS="-O2 -g -Wall -m32 $(SIMDEF) $(INC)"
 	rm -rf build/shots && mkdir -p build/shots
 	./build/sim_host build/shots < tests/smoke.txt
 	@ls build/shots/*.ppm >/dev/null
@@ -97,6 +114,21 @@ smoke32: lvgl-src
 # moved to 32) and nothing noticed, because nothing compared the two files. ----
 poolparity:
 	@python3 tools/check_pool_parity.py
+
+# ---- nosecrets: a simulator build must carry NO compile-time credentials.
+# CFG_PATH is pointed at a file that cannot exist, so config.ini can't overlay
+# the seed and any non-empty credential field can only have come from a
+# compile-time secrets.h. Passes trivially where there is no secrets.h (CI),
+# and fails loudly on the developer machines that actually have one -- which is
+# the whole point, because that is where the leak lived and where CI is blind.
+# Reports field names and lengths, never values. ----
+nosecrets: build/nosecrets
+	./build/nosecrets
+
+build/nosecrets: tests/nosecrets.c $(FW)/appcfg.c $(BR)/config.c $(FW)/appcfg.h $(BR)/config.h
+	@mkdir -p build
+	$(CC) -O2 -Wall $(SIMDEF) -DCFG_PATH='"/nonexistent/cyd-nosecrets.ini"' $(INC) \
+	    tests/nosecrets.c $(FW)/appcfg.c $(BR)/config.c -o $@
 
 # ---- graf: offline Graffiti recognizer accuracy gate (no LVGL/display needed).
 # Synthesizes noisy strokes from the real templates and asserts recognition
