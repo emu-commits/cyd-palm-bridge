@@ -235,6 +235,7 @@ static void list_view(const AppDef *ad);
 static void show_detail(uint32_t uid);
 static void show_edit(uint32_t uid);
 static void show_prefs(void);
+static void show_settings(void);        /* W1: Menu > Settings, the nine tiles */
 static void show_dash_settings(void);                          /* Lock Screen settings sub-screen */
 static void world_tag(const char *zone, char *out, int cap);   /* 3-letter world-clock tag */
 static lv_obj_t *pf_add(lv_obj_t *list, const char *text, lv_event_cb_t cb, int ud);
@@ -2144,7 +2145,7 @@ static void news_render(void){
         if(g_news_feed)  lv_label_set_text(g_news_feed, "");
         if(g_news_title) lv_label_set_text(g_news_title, "No news yet");
         if(g_news_body)  lv_label_set_text(g_news_body, "HotSync fetches your feeds.\n"
-                                           "Add feed URLs in Preferences.");
+                                           "Add feed URLs in Settings > News.");
         if(g_news_hint)  lv_label_set_text(g_news_hint, "");
         return;
     }
@@ -2323,7 +2324,7 @@ static void show_launcher(void){
         lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
         lv_label_set_text(hint, "Demo data shown. To sync your own:\n"
                                 "edit config.ini on the card, or tap\n"
-                                "Menu > Preferences.");
+                                "Menu > Settings > Accounts.");
     }
 
     /* LAST, so the app grid gets the pool first. If there is not enough left for
@@ -2410,14 +2411,24 @@ static void toast_show(const char *msg){
  * location was to pull the SD card and edit config.ini on a computer. */
 enum { PF_SSID, PF_WPASS, PF_USER, PF_PASS, PF_CALB, PF_CARDB,
        PF_CAL, PF_TODO, PF_CARD, PF_TZ, PF_N,
-       PF_LAT = PF_N, PF_LON, PF_MAX };
+       PF_LAT = PF_N, PF_LON, PF_OWNER, PF_MAX };
 static const char *PF_LABELS[PF_MAX] = {
     "Wi-Fi SSID", "Wi-Fi pass", "Apple ID", "App pass", "CalDAV host",
     "CardDAV host", "Calendar coll", "Reminders coll", "Address coll", "Time zone",
-    "Latitude", "Longitude",
+    "Latitude", "Longitude", "Owner name",
 };
-/* which screen an edit returns to */
-static int pf_is_dash_field(int i){ return i==PF_LAT || i==PF_LON; }
+/* Which screen an edit returns to.
+ *
+ * This used to be derived from the FIELD (`pf_is_dash_field`: latitude and
+ * longitude came from the Lock Screen panel, everything else from the
+ * Preferences list). W1 broke that: the same field editor is now reachable
+ * from a third place -- a Settings tile -- and latitude is reachable from
+ * both the Lock Screen panel and the Location tile, so the field no longer
+ * says where the user came from. Only the caller knows, so the caller sets it
+ * on the way IN and `set_return()` reads it on the way out. */
+enum { RET_PREFS = -1, RET_DASH = -2 };    /* >= 0 is a Settings tile index */
+static int g_set_ret = RET_PREFS;
+static void set_return(void);
 static const char *pol_name(int p){
     return p==CFG_POL_LOCAL ? "device wins"
          : p==CFG_POL_BOTH  ? "keep both"
@@ -2438,6 +2449,7 @@ static char *pf_buf(Config *c, int i, int *cap){
         case PF_TZ:    *cap=sizeof c->timezone;      return c->timezone;
         case PF_LAT:   *cap=sizeof c->latitude;      return c->latitude;
         case PF_LON:   *cap=sizeof c->longitude;     return c->longitude;
+        case PF_OWNER: *cap=sizeof c->owner;         return c->owner;
     }
     *cap=0; return NULL;
 }
@@ -2445,9 +2457,7 @@ static char *pf_buf(Config *c, int i, int *cap){
 /* ---- single-field editor (one textarea at a time) ---- */
 static int pf_edit_idx;
 static void show_dash_settings(void);
-static void pf_edit_back(void){
-    if(pf_is_dash_field(pf_edit_idx)) show_dash_settings(); else show_prefs();
-}
+static void pf_edit_back(void){ set_return(); }
 static void pf_edit_cancel_cb(lv_event_t *e){ (void)e; pf_edit_back(); }
 static void pf_edit_save_cb(lv_event_t *e){ (void)e;
     int cap=0; char *dst = pf_buf(appcfg_mut(), pf_edit_idx, &cap);
@@ -2670,11 +2680,11 @@ static char *zone_target_buf(Config *c, int *cap){
         default:      *cap=sizeof c->timezone; return c->timezone;
     }
 }
-/* the picker returns to Preferences for the system zone, or to the Lock Screen
- * sub-screen for a world clock. */
-static void zone_picker_return(void){
-    if(g_zone_target==ZTGT_TZ) show_prefs(); else show_dash_settings();
-}
+/* The picker goes back wherever it was opened from -- same reasoning as the
+ * field editor above. It used to decide from the TARGET (system zone -> the
+ * Preferences list, world clock -> the Lock Screen panel), which stopped being
+ * true when the Date & Time tile started opening all three. */
+static void zone_picker_return(void){ set_return(); }
 static void tz_cancel_cb(lv_event_t *e){ (void)e; zone_picker_return(); }
 static void tz_tbl_click_cb(lv_event_t *e){
     lv_obj_t *t = lv_event_get_target(e);
@@ -2738,10 +2748,11 @@ static void show_zone_picker(int target){
  * row toggles in place. */
 static void ds_back_cb(lv_event_t *e){ (void)e; show_prefs(); }
 static void show_pref_edit(int i);
-static void ds_lat_cb(lv_event_t *e){ (void)e; show_pref_edit(PF_LAT); }
-static void ds_lon_cb(lv_event_t *e){ (void)e; show_pref_edit(PF_LON); }
-static void ds_world1_cb(lv_event_t *e){ (void)e; show_zone_picker(ZTGT_W1); }
-static void ds_world2_cb(lv_event_t *e){ (void)e; show_zone_picker(ZTGT_W2); }
+/* the Lock Screen panel's rows: everything they open comes back HERE */
+static void ds_lat_cb(lv_event_t *e){ (void)e; g_set_ret = RET_DASH; show_pref_edit(PF_LAT); }
+static void ds_lon_cb(lv_event_t *e){ (void)e; g_set_ret = RET_DASH; show_pref_edit(PF_LON); }
+static void ds_world1_cb(lv_event_t *e){ (void)e; g_set_ret = RET_DASH; show_zone_picker(ZTGT_W1); }
+static void ds_world2_cb(lv_event_t *e){ (void)e; g_set_ret = RET_DASH; show_zone_picker(ZTGT_W2); }
 static void ds_fmt_cb(lv_event_t *e){ (void)e;
     Config *c = appcfg_mut(); c->clock24 = !c->clock24; appcfg_save(); show_dash_settings();
 }
@@ -2786,6 +2797,7 @@ static void show_dash_settings(void){
 static lv_obj_t *g_pf_bright_btn;   /* the "Brightness: NN%" row, refreshed on stepper close */
 static void pf_row_open_cb(lv_event_t *e){
     int i = (int)(intptr_t)lv_event_get_user_data(e);
+    g_set_ret = RET_PREFS;                                 /* came from the old list */
     if(i == PF_TZ){ show_zone_picker(ZTGT_TZ); return; }   /* zone -> picker, not text entry */
     show_pref_edit(i);
 }
@@ -2852,6 +2864,214 @@ static void show_prefs(void){
      * to allocate its draw buffer and crashed on the device-sized 32-bit build). */
     pf_add(list, "Lock screen...", pf_dash_row_cb, 0);
     pf_add(list, "Save to config.ini", pf_saverow_cb, 0);
+}
+
+/* ============ W1: Settings -- nine tiles instead of one long list ============
+ *
+ * Menu > Preferences is now Menu > Settings, and it opens an icon grid rather
+ * than a fourteen-row list. Two reasons, and the second is the real one:
+ *
+ *   * The list had outgrown the screen. Fourteen rows in a 184px content area
+ *     is a scroll, and scrolling is the interaction this hardware is worst at
+ *     (a resistive panel plus LVGL's drag threshold). Nine tiles fit outright.
+ *   * A flat list of "Calendar coll" and "CardDAV host" asks the user to know
+ *     what those ARE. Grouping them behind Accounts and Sync means a wizard can
+ *     later ask a question instead of naming a field -- which is what W5..W9
+ *     are for. The grid is the seam that makes that replacement one tile at a
+ *     time instead of one big rewrite.
+ *
+ * The grid is show_launcher()'s geometry deliberately: same 68x52 cells, same
+ * ROW_WRAP flex, same SPACE_EVENLY. Nine tiles land on the same centres as the
+ * nine apps, which is why a Settings tile can be tapped at the coordinates the
+ * smoke script already uses for a launcher cell. It also means Settings LOOKS
+ * like the launcher, which is the point -- on Palm, Prefs was an app.
+ *
+ * Home exits, as it does everywhere else. There is no Back button: P10 settled
+ * that argument (a Back button below the fold makes leaving the hardest thing
+ * on the screen), and the silkscreen Home is always on glass.
+ *
+ * The old show_prefs() list is NOT deleted. Every field it holds is reachable
+ * from a tile, but it stays reachable from Settings > About while the wizards
+ * are still lists -- it is the one screen that can show every setting at once,
+ * which is worth something when a config.ini is wrong and you need to see why. */
+enum { SET_WIFI, SET_ACCT, SET_NEWS, SET_TIME, SET_DISP,
+       SET_LOC, SET_SYNC, SET_OWNER, SET_ABOUT, SET_N };
+static const char *SET_NAMES[SET_N] = {
+    "Wi-Fi", "Accounts", "News", "Date & Time", "Display",
+    "Location", "Sync", "Owner", "About",
+};
+static const lv_image_dsc_t *SET_ICONS[SET_N] = {
+    &icon_set_wifi, &icon_set_accounts, &icon_set_news, &icon_set_datetime,
+    &icon_set_display, &icon_set_location, &icon_set_sync, &icon_set_owner,
+    &icon_set_about,
+};
+static void show_settings(void);
+static void show_set_panel(int tile);
+
+/* go back to whoever opened the editor/picker (see g_set_ret) */
+static void set_return(void){
+    if(g_set_ret == RET_DASH)   { show_dash_settings(); return; }
+    if(g_set_ret >= 0 && g_set_ret < SET_N){ show_set_panel(g_set_ret); return; }
+    show_prefs();
+}
+
+/* A tile panel's rows open the SAME editors the Preferences list opens; only
+ * the return address differs. user_data packs (tile<<8)|field so one callback
+ * serves all nine panels -- the alternative is nine near-identical callbacks,
+ * which is how two of them end up with the wrong return address. */
+static void sp_field_cb(lv_event_t *e){
+    intptr_t v = (intptr_t)lv_event_get_user_data(e);
+    g_set_ret = (int)(v >> 8);
+    show_pref_edit((int)(v & 0xff));
+}
+static void sp_zone_cb(lv_event_t *e){
+    intptr_t v = (intptr_t)lv_event_get_user_data(e);
+    g_set_ret = (int)(v >> 8);
+    show_zone_picker((int)(v & 0xff));
+}
+static void sp_fmt_cb(lv_event_t *e){ (void)e;
+    Config *c = appcfg_mut(); c->clock24 = !c->clock24; appcfg_save();
+    show_set_panel(SET_TIME);
+}
+static void sp_pol_cb(lv_event_t *e){ (void)e;
+    Config *c = appcfg_mut(); c->policy = (c->policy + 1) % 3; appcfg_save();
+    show_set_panel(SET_SYNC);
+}
+static void sp_prefs_cb(lv_event_t *e){ (void)e; show_prefs(); }
+static void sp_tile_cb(lv_event_t *e){
+    show_set_panel((int)(intptr_t)lv_event_get_user_data(e));
+}
+
+/* one row per field, value shown inline, passwords masked (never the value) */
+static void sp_field_row(lv_obj_t *list, int tile, int f){
+    const Config *c = appcfg();
+    int cap = 0; const char *v = pf_buf((Config *)c, f, &cap);
+    char shown[28], row[80];
+    if(f == PF_WPASS || f == PF_PASS)
+        snprintf(shown, sizeof shown, "%s", (v && v[0]) ? "********" : "(unset)");
+    else if(v && v[0])
+        snprintf(shown, sizeof shown, "%.20s%s", v, strlen(v) > 20 ? "..." : "");
+    else
+        snprintf(shown, sizeof shown, "(unset)");
+    snprintf(row, sizeof row, "%s: %s", PF_LABELS[f], shown);
+    pf_add(list, row, sp_field_cb, (tile << 8) | f);
+}
+
+static void show_set_panel(int tile){
+    if(tile < 0 || tile >= SET_N) return;
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    content_clear();
+    lv_label_set_text(title_lbl, SET_NAMES[tile]);
+    update_cat_trigger();
+
+    lv_obj_t *list = lv_list_create(content);
+    lv_obj_set_size(list, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_radius(list, 0, 0);
+    lv_obj_set_style_border_width(list, 0, 0);
+    lv_obj_set_style_pad_all(list, 0, 0);
+
+    const Config *c = appcfg();
+    char row[80], tag[8];
+    switch(tile){
+    case SET_WIFI:                      /* W5 makes this four networks */
+        sp_field_row(list, tile, PF_SSID);
+        sp_field_row(list, tile, PF_WPASS);
+        break;
+    case SET_ACCT:
+        sp_field_row(list, tile, PF_USER);
+        sp_field_row(list, tile, PF_PASS);
+        sp_field_row(list, tile, PF_CALB);
+        sp_field_row(list, tile, PF_CARDB);
+        break;
+    case SET_NEWS:
+        snprintf(row, sizeof row, "News feeds... (%d on)", feeds_enabled_count());
+        pf_add(list, row, pf_feeds_row_cb, 0);
+        break;
+    case SET_TIME:
+        snprintf(row, sizeof row, "Time zone: %s",
+                 c->timezone[0] ? c->timezone : "(floating)");
+        pf_add(list, row, sp_zone_cb, (tile << 8) | ZTGT_TZ);
+        if(c->world1[0]){ world_tag(c->world1, tag, sizeof tag);
+            snprintf(row, sizeof row, "World clock 1: %s (%s)", tag, c->world1); }
+        else snprintf(row, sizeof row, "World clock 1: (off)");
+        pf_add(list, row, sp_zone_cb, (tile << 8) | ZTGT_W1);
+        if(c->world2[0]){ world_tag(c->world2, tag, sizeof tag);
+            snprintf(row, sizeof row, "World clock 2: %s (%s)", tag, c->world2); }
+        else snprintf(row, sizeof row, "World clock 2: (off)");
+        pf_add(list, row, sp_zone_cb, (tile << 8) | ZTGT_W2);
+        snprintf(row, sizeof row, "Clock format: %s", c->clock24 ? "24-hour" : "12-hour");
+        pf_add(list, row, sp_fmt_cb, 0);
+        break;
+    case SET_DISP:
+        snprintf(row, sizeof row, "Brightness: %d%%", c->brightness);
+        g_pf_bright_btn = pf_add(list, row, pf_bright_row_cb, 0);
+        break;
+    case SET_LOC:
+        sp_field_row(list, tile, PF_LAT);
+        sp_field_row(list, tile, PF_LON);
+        break;
+    case SET_SYNC:
+        snprintf(row, sizeof row, "Conflicts: %s", pol_name(c->policy));
+        pf_add(list, row, sp_pol_cb, 0);
+        sp_field_row(list, tile, PF_CAL);
+        sp_field_row(list, tile, PF_TODO);
+        sp_field_row(list, tile, PF_CARD);
+        pf_add(list, "Discover collections...", pf_disc_row_cb, 0);
+        /* Most edits persist as they are made (the editor saves on Save), but
+         * Discover writes straight into the in-memory config, so this row is
+         * still the one that commits its results to the card. */
+        pf_add(list, "Save to config.ini", pf_saverow_cb, 0);
+        break;
+    case SET_OWNER:
+        sp_field_row(list, tile, PF_OWNER);
+        break;
+    case SET_ABOUT:
+        pf_add(list, "All settings (one list)", sp_prefs_cb, 0);
+        break;
+    }
+}
+
+static void show_settings(void){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    content_clear();
+    lv_label_set_text(title_lbl, "Settings");
+    update_cat_trigger();   /* hides the category picker (no data app) */
+
+    lv_obj_t *grid = lv_obj_create(content);
+    lv_obj_set_size(grid, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_radius(grid, 0, 0);
+    lv_obj_set_style_border_width(grid, 0, 0);
+    lv_obj_set_style_bg_color(grid, COL_BODY, 0);
+    lv_obj_set_style_pad_all(grid, 6, 0);
+    lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_START);
+
+    for(int i = 0; i < SET_N; i++){
+        lv_obj_t *cell = lv_obj_create(grid);
+        lv_obj_set_size(cell, 68, 52);
+        lv_obj_set_style_radius(cell, 0, 0);
+        lv_obj_set_style_border_width(cell, 0, 0);
+        lv_obj_set_style_bg_opa(cell, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_pad_all(cell, 2, 0);
+        lv_obj_set_style_pad_row(cell, 3, 0);
+        lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_CENTER);
+        lv_obj_add_flag(cell, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(cell, sp_tile_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+
+        lv_obj_t *img = lv_image_create(cell);
+        lv_image_set_src(img, SET_ICONS[i]);                 /* 1x (crisp) */
+        lv_obj_set_style_image_recolor(img, COL_LINE, 0);    /* A8 mask -> black */
+        lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);
+
+        lv_obj_t *lbl = lv_label_create(cell);
+        lv_label_set_text(lbl, SET_NAMES[i]);
+        lv_obj_set_style_text_font(lbl, &lv_font_palm, 0);
+    }
 }
 
 /* ---- collection discovery screen (chunk 3) ----
@@ -3016,7 +3236,7 @@ static void act_delete(lv_event_t *e){ (void)e;
     if(u) ask_delete(u);   /* shared confirm dialog */
 }
 static void act_categories(lv_event_t *e){ (void)e; menu_close(); cat_trigger_cb(NULL); }
-static void act_prefs(lv_event_t *e){ (void)e; menu_close(); show_prefs(); }
+static void act_prefs(lv_event_t *e){ (void)e; menu_close(); show_settings(); }
 static void act_tr_reset(lv_event_t *e){ (void)e; menu_close(); tr_reset_progress(); show_trainer(); }
 /* Coach: the session length cycles through the four lengths people actually use,
  * so setting it costs one tap and needs no picker screen.
@@ -3428,7 +3648,7 @@ static void menu_open(void){
         menu_item(panel, g_todo_show_done ? "Hide Completed" : "Show Completed", act_toggle_done);
         menu_item(panel, g_todo_sort_due ? "Sort by Priority" : "Sort by Due Date", act_toggle_sort);
     }
-    menu_item(panel, "Preferences", act_prefs);
+    menu_item(panel, "Settings", act_prefs);
     menu_item(panel, "Power", act_power);
     if(g_trainer_open)
         menu_item(panel, "Reset progress", act_tr_reset);   /* Graffiti trainer only */

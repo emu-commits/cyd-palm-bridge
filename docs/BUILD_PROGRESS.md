@@ -16,6 +16,37 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-21 — Preferences becomes Settings, and it is a launcher (W1)
+- **Menu ▸ Preferences is now Menu ▸ Settings**, opening a nine-tile icon grid instead
+  of a fourteen-row list. The grid is `show_launcher()`'s geometry *deliberately* —
+  same 68×52 cells, same `ROW_WRAP`, same `SPACE_EVENLY` — so the tiles land on the
+  same centres as the nine apps, and Settings looks like what it was on Palm: an app.
+- **Every tile opens a real panel; none falls through.** The plan allowed stubs, but
+  the nine tiles between them cover every field the old list held, so each got a small
+  filtered list. `W5`–`W9` now *replace* those with tap-first wizards rather than
+  building them from nothing — the grid is the seam that makes that one tile at a time
+  instead of one rewrite.
+- **A screen's return address is the caller's business, not the field's.** The field
+  editor used to infer where "back" went from *which field* was open (lat/long → the
+  Lock Screen panel, everything else → the Preferences list). W1 broke that: latitude
+  is now reachable from both the Lock Screen panel and the Location tile, so the field
+  no longer knows. `g_set_ret` is set on the way in and read on the way out. The zone
+  picker had the identical bug for the identical reason.
+- **The smoke gate lied again, and louder this time.** Every old Preferences tap still
+  landed on *something* after the grid arrived, so the run still exited 0 — while the
+  screenshots quietly became pictures of the Apple ID editor with the brightness drags
+  typing junk into it. **The brightness stepper, whose regression HANGS the run, was
+  not being exercised at all, and nothing said so.** Re-pointed, with `settings_grid`,
+  `settings_accounts`, `settings_display`, `settings_about` and `prefs_list` added.
+  Second time in one day: *the exit code is not the gate, the pixels are.*
+- **A tap at y=45 is not row two.** List rows start at y=37 and are 28px apart, so
+  y=45 is still inside row one — it opened the system Time Zone picker instead of the
+  World Clock one, which in a thumbnail looks close enough to pass unnoticed.
+- **The old one-list view is kept, behind Settings ▸ About.** It is the only screen
+  that shows every setting at once, which is what you want when a `config.ini` is
+  wrong and you need to see why. It stays gated (`prefs_list`) rather than drifting
+  into untested code.
+
 ### 2026-09-21 — The simulator was compiling real credentials in, and CI could never have caught it
 - **`sim/Makefile` claimed `sim/include` "shields the build from a real (gitignored)
   `secrets.h`" by sitting first on the include path. It cannot, and never did.**

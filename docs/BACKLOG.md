@@ -19,6 +19,18 @@ mostly away from the bench via the browser simulator).
 
 ## RESUME HERE — state at 2026-09-21
 
+**W1 and W2 are done and on `main`.** Settings is a nine-tile grid with its own
+icons, every tile opens a real panel, and the smoke walks it. **W3 is next** —
+the Assistant greeting Settings — and it should be cheap: `speaker_greet()`,
+`tap_anywhere()` and the since-unlock flag all already exist and are shared,
+and `assistant_face` is the one portrait still unused.
+
+**A credential leak was found and fixed on the way** (`nosecrets`, 2026-09-21).
+Simulator builds were compiling a developer's real `secrets.h` in, because an
+include-order "shield" cannot beat C's rule that a quoted include resolves
+relative to the including file's own directory. CI was never affected and could
+never have caught it — which is the lesson worth keeping.
+
 **A big new body of work arrived and is now written down.** Seventeen items,
 grouped into two new phases: **W — Settings and its nine wizards** (the whole
 Preferences surface is being rebuilt as a launcher-style icon screen with the
@@ -291,13 +303,18 @@ almost everyone.
 | **About** | version, GPLv3/PumpkinOS provenance | the existing About panel |
 
 ### The groups — one commit each, branch off `main`
-- [ ] **W1 — Settings replaces Preferences `[s]`.** Rename the menu entry; build
+- [x] **W1 — Settings replaces Preferences `[s]`.** DONE 2026-09-21. Rename the menu entry; build
       the nine-icon screen on `show_launcher()`'s pattern (a flex `ROW_WRAP` grid
       of 68×52 cells, which is already proven to seat nine icons in three rows
-      with nothing below the fold). Home exits. Tiles with no wizard yet fall
-      through to the matching Preferences field, so the screen is never a
-      dead end. **Smoke-gate the grid before any wizard exists.**
-- [ ] **W2 — nine icons in early-Palm-OS style `[s]`.** ~24×22 A8, generated the
+      with nothing below the fold). Home exits. **Every tile opens a real panel
+      — none falls through**, which went further than planned: the nine tiles
+      between them cover every field the old list held, so each one got a small
+      filtered list rather than a stub. `W5`–`W9` now *replace* those lists with
+      tap-first wizards instead of building them from nothing.
+      Gated by `settings_grid`, `settings_accounts`, `settings_display`,
+      `settings_about` and `prefs_list`.
+- [x] **W2 — nine icons in early-Palm-OS style `[s]`.** DONE 2026-09-21, ticked
+      once `settings_grid` put them on screen. ~24×22 A8, generated the
       way `gen_guru_icon.py` and `gen_zip_icon.py` generate theirs — **one
       `tools/gen_settings_icons.py` for all nine**, not nine scripts. Follow the
       house idiom that `gen_guru_icon.py` documents: the Palm icons are a **solid
@@ -331,8 +348,11 @@ almost everyone.
       clocks. The zone picker already exists (`ui.c:2673`). Time-of-day set by
       picking, not typing.
 - [ ] **W9 — the five small panels `[s]`.** Display, Location, Sync, Owner,
-      About. Small enough to share one commit; **Owner needs a new `Config`
-      field** and a lock-screen render for it.
+      About. All five now EXIST as lists (W1); what is left is the tap-first
+      treatment. **`Config.owner` was added early, by W1** — leaving it out
+      would have made Owner the one tile with nothing behind it. What still
+      belongs here is **rendering the owner's name on the lock screen**, which
+      is the only reason to collect it.
 - [ ] **W10 — HotSync works without iCloud `[s]`+`[d]`.** Item 17, and the one
       that changes existing behaviour rather than adding a screen. With no
       account configured, a sync must still do **clock and RSS** and report what

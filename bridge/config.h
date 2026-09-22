@@ -36,6 +36,7 @@ typedef struct {
      * (see PRODUCT_PLAN: lat/lon in config for v1, IP geolocation later). */
     char latitude[24];
     char longitude[24];
+    char owner[32];            /* owner's name, shown on the lock screen   */
     char world1[48];           /* lock-screen world clock 1 (IANA zone, "" = off) */
     char world2[48];           /* lock-screen world clock 2 (IANA zone, "" = off) */
     int  brightness;           /* backlight, 0..100                      */

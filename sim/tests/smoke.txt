@@ -285,12 +285,28 @@ t 400
 s power_screen
 c 18 225
 t 300
-# Preferences field editor with the I1.2 tap keyboard; type one key, then Save ->
-# I4 transient "Saved" toast (config edits close the feedback loop like records do)
+# W1: Menu > Settings is now a NINE-TILE GRID, not a fourteen-row list. The grid
+# reuses show_launcher()'s geometry exactly, so its tiles sit on the same centres
+# as the launcher's apps: x = 46 / 120 / 195, y = 56 / 110 / 160.
+#
+# THIS WHOLE SECTION WAS RE-POINTED WHEN THE GRID LANDED, and it is the reason to
+# look at the PNGs rather than the exit code. Every tap below used to walk the old
+# list; after the grid they still landed on SOMETHING, the run still exited 0, and
+# the shots quietly became pictures of the Apple ID editor with the brightness
+# drags typing junk into it. The stepper -- the one widget whose regression HANGS
+# this run -- was not being exercised at all, and nothing said so.
 c 18 300
 t 300
 c 75 66
 t 400
+s settings_grid
+# Accounts (row 1, col 2) -> the Apple ID field -> the I1.2 tap keyboard; type one
+# key, then Save -> I4 transient "Saved" toast, and the editor returns to the
+# ACCOUNTS panel rather than to the old list. That return address is the W1 change
+# most likely to regress silently: the editor used to infer it from the field.
+c 120 56
+t 400
+s settings_accounts
 c 120 37
 t 400
 s prefs_kb
@@ -301,34 +317,21 @@ c 208 40
 t 200
 s prefs_field_saved
 t 300
-# Brightness stepper (must NOT be an lv_slider: a bar/slider draw-layer alloc
-# live-locks LVGL on the 24 KB pool -> WDT freeze). Scroll to the Brightness row,
-# open the [-] NN% [+] popup, step it, close. A regression here HANGS this run.
-d 120 190
-t 30
-m 120 100
-t 30
-m 120 50
-t 30
-u
+# Home, then Settings > Display (row 2, col 2) -> the brightness stepper. It must
+# NOT be an lv_slider: a bar/slider draw-layer alloc live-locks LVGL on the 32 KB
+# pool -> WDT freeze. Open the [-] NN% [+] popup, step it, close. A regression
+# here HANGS this run. The Display panel is ONE row, so unlike the old list this
+# needs no scrolling to reach -- which is the whole point of the grid.
+c 18 225
 t 300
-d 120 190
-t 30
-m 120 100
-t 30
-m 120 50
-t 30
-u
+c 18 300
+t 300
+c 75 66
 t 400
-d 120 190
-t 30
-m 120 100
-t 30
-m 120 50
-t 30
-u
+c 120 110
 t 400
-c 120 90
+s settings_display
+c 120 37
 t 400
 s prefs_brightness
 c 52 175
@@ -338,22 +341,44 @@ t 300
 s prefs_brightness_stepped
 c 120 30
 t 400
-# Dashboard settings (new): with the prefs list scrolled to the tail, "Lock
-# screen..." sits second from bottom. Open it -> the Lock Screen sub-screen (two
-# world clocks + 12/24h), screenshot, then tap "World clock 1" -> the shared zone
-# picker (lv_table, pool-safe like the timezone picker; a regression HANGS or
-# exhausts the 24 KB pool). Cancel back (no write, so config/dashboard stay at
-# defaults), then Prefs -> home.
-c 120 178
+# Settings > Date & Time (row 2, col 1): the tile that absorbed the old "Lock
+# screen..." sub-screen -- system zone, two world clocks, 12/24h, all on one
+# non-scrolling panel. Tap "World clock 1" -> the shared zone picker (lv_table,
+# pool-safe like the timezone picker; a regression HANGS or exhausts the pool).
+# Cancel back (no write, so config and the dashboard stay at defaults) -> home.
+c 18 225
+t 300
+c 18 300
+t 300
+c 75 66
+t 400
+c 46 110
 t 400
 s dash_settings
-c 120 45
+# List rows start at y=37 and are 28px apart, so World clock 1 is the SECOND row
+# at y=65 -- y=45 is still inside row one and opened the system Time Zone picker
+# instead, which looks close enough in a thumbnail to pass unnoticed.
+c 120 65
 t 400
 s world_picker
-c 32 16
+c 38 38
+t 400
+c 18 225
 t 300
-c 30 15
+# The old one-list Preferences view is NOT deleted -- it is the only screen that
+# shows every setting at once, which is what you want when a config.ini is wrong.
+# It now hangs off Settings > About, and this walk is the only thing keeping it
+# gated while the wizards are still lists.
+c 18 300
 t 300
+c 75 66
+t 400
+c 195 160
+t 400
+s settings_about
+c 120 37
+t 400
+s prefs_list
 c 18 225
 t 300
 # Graffiti with the C1 ink trail: screenshot MID-stroke, then after recognition
