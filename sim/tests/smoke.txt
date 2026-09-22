@@ -480,6 +480,16 @@ s w9_city_pick
 c 120 65
 t 400
 s w9_location_set
+# ...and the panel says what KIND of location it is holding. A city off a list
+# of two dozen is a guess -- "that is the nearest one you offered me" -- so it
+# reads "Updates: when you sync" and a sync is allowed to sharpen it. Typing a
+# coordinate instead pins it. Without this row the behaviour is invisible: two
+# devices showing the same place would behave differently on the next sync.
+c 120 65
+t 400
+s w9_location_pinned
+c 120 65
+t 400
 c 18 225
 t 300
 # W9: Sync conflicts (row 3, col 1) -- a cycling row replaced by the same pick

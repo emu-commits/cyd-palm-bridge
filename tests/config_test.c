@@ -108,6 +108,32 @@ int main(void){
     CK(config_load("state/does_not_exist.ini",&g)==-1,"missing file -> -1");
     CK(g.brightness==80,"defaults intact after failed load");
 
+    /* The location's provenance flag, and the DIRECTION OF ITS DEFAULT, which is
+     * the part that protects people: a config.ini written before the flag
+     * existed has hand-entered coordinates and no `loc_auto` key, and the safe
+     * reading of that silence is "a human put these here" -- so silence must
+     * mean PINNED, never "help yourself". */
+    Config lz; config_defaults(&lz);
+    CK(lz.loc_auto == 0, "a fresh config defaults to a pinned location");
+    f=fopen(PATH,"w");
+    fprintf(f, "latitude = 51.5074\nlongitude = -0.1278\n");   /* a pre-flag card */
+    fclose(f);
+    Config lo; config_defaults(&lo);
+    CK(config_load(PATH,&lo)==0,"a pre-flag card loads");
+    CK(!strcmp(lo.latitude,"51.5074"),"...with its coordinates");
+    CK(lo.loc_auto == 0, "...and they are treated as pinned, not as fair game");
+
+    Config la; config_defaults(&la);
+    la.loc_auto = 1;
+    snprintf(la.loc_name,sizeof la.loc_name,"Washington, D.C.");
+    snprintf(la.latitude,sizeof la.latitude,"38.9072");
+    snprintf(la.longitude,sizeof la.longitude,"-77.0369");
+    CK(config_save(PATH,&la)==0,"save an automatic location");
+    Config lb; config_defaults(&lb);
+    CK(config_load(PATH,&lb)==0,"reload it");
+    CK(lb.loc_auto == 1, "loc_auto round-trips");
+    CK(!strcmp(lb.loc_name,"Washington, D.C."),"a place name with a comma round-trips");
+
     /* W5: FOUR networks.
      *
      * The back-compat case is the one that matters on a device that is already

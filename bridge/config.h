@@ -50,6 +50,24 @@ typedef struct {
      * (see PRODUCT_PLAN: lat/lon in config for v1, IP geolocation later). */
     char latitude[24];
     char longitude[24];
+    /* Where the coordinates CAME FROM, which decides whether a sync may improve
+     * them. Picking a city off a list of two dozen is not "I am in New York", it
+     * is "New York is the nearest one you offered me" -- so a location that was
+     * derived (from the zone, from the city list, from a previous IP lookup)
+     * stays open to refinement, and only coordinates somebody actually typed are
+     * left alone.
+     *
+     * DEFAULTS TO 0 = PINNED, and that direction is deliberate: a config.ini
+     * written before this field existed has hand-entered coordinates and no
+     * `loc_auto` key, and the safe reading of silence is "a human put these here".
+     * Everything that fills the location automatically sets it to 1 on the way. */
+    int  loc_auto;
+    /* What to call the place, for the Location panel. Coordinates are unreadable
+     * and the refined ones will not match any city in the built-in table, so
+     * without this the panel goes from "Detroit" to "42.33, -83.05" the moment it
+     * gets MORE accurate -- which reads as a regression. Empty = show the
+     * numbers, which is the honest display for a value that was typed. */
+    char loc_name[32];
     char owner[32];            /* owner's name, shown on the lock screen   */
     char world1[48];           /* lock-screen world clock 1 (IANA zone, "" = off) */
     char world2[48];           /* lock-screen world clock 2 (IANA zone, "" = off) */

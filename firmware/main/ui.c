@@ -62,6 +62,11 @@ static void spk_pane_close(void);   /* a speaker's overlay: it is on lv_layer_to
                                        take it down when the screen changes */
 static void assistant_greet(void);  /* W3: her hello, over the Settings grid */
 static void assist_say(const char *text);  /* W4: her, explaining this screen */
+/* "America/New_York" is a zone identifier; this is the city out of it. Declared
+ * here because the zone picker (which places the device) sits above the Location
+ * panel (which names the place), and both want the same two lines of string
+ * work. */
+static void city_name(const char *iana, char *out, int cap);
 static lv_obj_t *title_lbl;
 static lv_obj_t *clock_lbl;    /* live clock in the title bar (Palm) */
 
@@ -2535,8 +2540,18 @@ static void show_dash_settings(void);
 static void pf_edit_back(void){ set_return(); }
 static void pf_edit_cancel_cb(lv_event_t *e){ (void)e; pf_edit_back(); }
 static void pf_edit_save_cb(lv_event_t *e){ (void)e;
-    int cap=0; char *dst = pf_buf(appcfg_mut(), pf_edit_idx, &cap);
+    Config *cfg = appcfg_mut();
+    int cap=0; char *dst = pf_buf(cfg, pf_edit_idx, &cap);
     if(dst && cap) snprintf(dst, cap, "%s", lv_textarea_get_text(g_fields[0]));
+    /* TYPING A COORDINATE PINS IT. Everything else that fills the location is a
+     * guess of some kind -- the zone, the city list, the IP lookup -- and a sync
+     * is allowed to improve a guess. Numbers somebody entered by hand are the one
+     * answer nothing is allowed to touch, and the name goes with them because a
+     * name copied from a previous guess would be a label for the wrong place. */
+    if(pf_edit_idx == PF_LAT || pf_edit_idx == PF_LON){
+        cfg->loc_auto = 0;
+        cfg->loc_name[0] = 0;
+    }
     appcfg_save();            /* persist to SD now -> survives reboot */
     pf_edit_back();
     toast_show("Saved");      /* I4: same transient feedback as record save/delete */
@@ -2809,6 +2824,8 @@ static void tz_tbl_click_cb(lv_event_t *e){
             if(!cfg->latitude[0] && !cfg->longitude[0] && clock_zone_latlon(zi, &lat, &lon)){
                 snprintf(cfg->latitude,  sizeof cfg->latitude,  "%s", lat);
                 snprintf(cfg->longitude, sizeof cfg->longitude, "%s", lon);
+                city_name(z, cfg->loc_name, sizeof cfg->loc_name);
+                cfg->loc_auto = 1;          /* the coarsest guess of all: refine it */
                 toast_show("Weather location set too");
             }
         }
@@ -3035,8 +3052,8 @@ static const char *SET_BLURB[SET_N] = {
                     "lock screen.",
     /* Display   */ "How bright the screen is, and how long it stays lit. The "
                     "backlight is most of the battery.",
-    /* Location  */ "Where you are, so the lock screen can show your weather. "
-                    "Without it, weather stays blank.",
+    /* Location  */ "Where you are, so the lock screen can show your weather. A "
+                    "sync sharpens this unless you have set it yourself.",
     /* Sync      */ "Which calendar and address book HotSync uses, and who wins "
                     "when both sides changed.",
     /* Owner     */ "Your name, on the lock screen, so a device found on a desk "
@@ -3081,6 +3098,14 @@ static void sp_fmt_cb(lv_event_t *e){ (void)e;
 }
 static void sp_prefs_cb(lv_event_t *e){ (void)e; show_prefs(); }
 static void sp_advanced_cb(lv_event_t *e){ (void)e; show_set_panel(SET_ADVANCED); }
+/* Two states, so this is a toggle rather than a pick screen -- the pick screen
+ * exists to show you options you are not on, and with two there is only one. */
+static void sp_locauto_cb(lv_event_t *e){ (void)e;
+    Config *c = appcfg_mut();
+    c->loc_auto = !c->loc_auto;
+    appcfg_save();
+    show_set_panel(SET_LOC);
+}
 /* Discovery, opened from a tile: the tile records itself as the way back. */
 static void sp_disc_cb(lv_event_t *e){
     g_set_ret = (int)(intptr_t)lv_event_get_user_data(e);
@@ -3380,6 +3405,11 @@ static void loc_done(int i){
         Config *c = appcfg_mut();
         snprintf(c->latitude,  sizeof c->latitude,  "%s", lat);
         snprintf(c->longitude, sizeof c->longitude, "%s", lon);
+        city_name(clock_zone_name(i), c->loc_name, sizeof c->loc_name);
+        /* Still a guess: the list holds two dozen cities and what a tap on it
+         * means is "that is the nearest one you offered me". So a sync may
+         * improve it -- which is the whole reason this flag exists. */
+        c->loc_auto = 1;
         appcfg_save();
         toast_show("Location set");
     }
@@ -3423,6 +3453,11 @@ static void sp_loc_cb(lv_event_t *e){ (void)e;
 static const char *loc_city_name(const Config *c){
     static char buf[24];
     if(!c->latitude[0]) return NULL;
+    /* The name the location came with, if it has one. A coordinate refined by a
+     * sync matches no city in the table -- being more accurate than any of them
+     * is the point -- so without this the panel would fall back to raw numbers
+     * at the exact moment it got better. */
+    if(c->loc_name[0]) return c->loc_name;
     for(int i = 0; i < clock_zone_count(); i++){
         const char *lat = NULL, *lon = NULL;
         if(!clock_zone_latlon(i, &lat, &lon)) continue;
@@ -3730,6 +3765,14 @@ static void show_set_panel(int tile){
         else if(c->latitude[0]) snprintf(row, sizeof row, "Place: %s, %s", c->latitude, c->longitude);
         else                    snprintf(row, sizeof row, "Place: (not set)");
         pf_add(list, row, sp_loc_cb, 0);
+        /* Whether a sync may improve this, said out loud. Without the row the
+         * behaviour is invisible: two devices showing "Place: New York" would
+         * behave differently on the next sync and nothing on screen would say
+         * why. It is also the off switch, for anyone who wants the forecast
+         * somewhere other than where the device is. */
+        snprintf(row, sizeof row, "Updates: %s",
+                 c->loc_auto ? "when you sync" : "kept as set");
+        pf_add(list, row, sp_locauto_cb, 0);
         /* the two numbers stay reachable, for anyone not near one of the cities */
         sp_field_row(list, tile, PF_LAT);
         sp_field_row(list, tile, PF_LON);

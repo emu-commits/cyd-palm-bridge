@@ -16,6 +16,41 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-22 — a location can be approximate, and a sync may improve it
+
+Same day, caught by the user: pick "New York" off the city list and a sync would
+never refine it. The rule as first written was "never overwrite a location the
+user chose" — but **choosing a city from a list of two dozen is not choosing New
+York, it is choosing the nearest one on offer.** Somebody in Boston taps New
+York, and the code then treats that coarse guess as sacred. The one user who
+most needs the IP refinement was the one it refused to run for.
+
+So a location now carries where it CAME FROM (`loc_auto`):
+
+- **Approximate** — from the zone, the city list, or a previous lookup. A sync
+  re-derives it, which also means the weather follows a device that travels.
+- **Pinned** — coordinates somebody typed. Never touched.
+
+**The default is PINNED, and that direction is the part that protects people.** A
+`config.ini` written before the flag existed has hand-entered coordinates and no
+`loc_auto` key, and the safe reading of that silence is "a human put these here".
+Everything that fills the location automatically sets the flag on its way past,
+so silence can never mean "help yourself". `config_test` gates the direction, not
+just the round-trip.
+
+**The panel says which kind it is holding** ("Updates: when you sync" / "kept as
+set"), because otherwise the behaviour is invisible: two devices showing the same
+place would behave differently on the next sync with nothing on screen to say
+why. It doubles as the off switch for anyone who wants the forecast somewhere
+other than where the device is.
+
+**A refined coordinate matches no city in the built-in table** — being better
+than all of them is the point — so the reply now carries the place name too, and
+`loc_name` is what the panel shows. Without it the display would fall back to raw
+numbers at the exact moment it got more accurate, which reads as a regression.
+The name is the LAST field in the CSV on purpose: a place name may contain a
+comma ("Washington, D.C.") and a field read to end-of-line cannot be cut by one.
+
 ### 2026-09-22 — the location stops being two numbers you type
 
 Latitude and longitude were the last values in Settings that could only be

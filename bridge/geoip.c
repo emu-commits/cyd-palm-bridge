@@ -11,7 +11,11 @@
  * man-in-the-middle's worst outcome is the wrong town's weather. Paying the TLS
  * handshake's ~30 KB of heap for that would cost more than it buys -- on this
  * device that handshake is the single largest allocation a sync makes. */
-#define GEOIP_URL "http://ip-api.com/csv/?fields=status,lat,lon,timezone"
+/* CITY IS LAST ON PURPOSE. The reply is positional CSV and a place name may
+ * legitimately contain a comma; as the final field it is read to end-of-line, so
+ * the comma problem cannot arise. Anything appended after it later would
+ * reintroduce it. */
+#define GEOIP_URL "http://ip-api.com/csv/?fields=status,lat,lon,timezone,city"
 
 const char *geoip_url(void){ return GEOIP_URL; }
 
@@ -55,13 +59,39 @@ static int field(const char *csv, int n, char *out, int cap){
     return 1;
 }
 
+/* The LAST field: everything from it to the end of the line, trimmed. A place
+ * name may contain a comma ("Washington, D.C.") and field() would cut it there;
+ * read-to-end cannot, which is why city is last in the query string. */
+static int tail_field(const char *csv, int n, char *out, int cap){
+    if(!csv || !out || cap <= 0) return 0;
+    out[0] = 0;
+    const char *p = csv;
+    for(int i = 0; i < n; i++){
+        p = strchr(p, ',');
+        if(!p) return 0;
+        p++;
+    }
+    while(*p == ' ' || *p == '\t') p++;
+    int j = 0;
+    while(p[j] && p[j] != '\n' && p[j] != '\r'){
+        if(j < cap - 1) out[j] = p[j];
+        j++;
+    }
+    int end = j < cap - 1 ? j : cap - 1;
+    while(end > 0 && (out[end-1] == ' ' || out[end-1] == '\t')) end--;
+    out[end] = 0;
+    return 1;
+}
+
 int geoip_parse(const char *csv,
                 char *lat, int latcap,
                 char *lon, int loncap,
-                char *tz,  int tzcap){
+                char *tz,  int tzcap,
+                char *city, int citycap){
     if(lat && latcap > 0) lat[0] = 0;
     if(lon && loncap > 0) lon[0] = 0;
     if(tz  && tzcap  > 0) tz[0]  = 0;
+    if(city && citycap > 0) city[0] = 0;
     if(!csv || !csv[0]) return 0;
 
     /* Field 0 is the service's own verdict. A refusal is a normal answer here --
@@ -87,6 +117,10 @@ int geoip_parse(const char *csv,
          * zone is still a win, and the clock has its own way to be set. */
         if(field(csv, 3, z, sizeof z) && z[0] && !strchr(z, ' '))
             snprintf(tz, tzcap, "%s", z);
+    }
+    if(city && citycap > 0){
+        char t[64];
+        if(tail_field(csv, 4, t, sizeof t) && t[0]) snprintf(city, citycap, "%s", t);
     }
     return 1;
 }

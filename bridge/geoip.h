@@ -38,6 +38,11 @@ const char *geoip_url(void);
  * rounded through a float, because config.ini stores them as text and a value
  * that round-trips unchanged is one a human can compare against a map.
  *
+ * `city` receives the place name, which is not decoration: a refined coordinate
+ * matches no city in the built-in table, so without a name the Location panel
+ * would go from "Detroit" to "42.33, -83.05" at the exact moment it became MORE
+ * accurate, and read as a regression.
+ *
  * `tz` receives the IANA zone the service reports, which is a bonus worth having:
  * a device that has never been configured has no zone either, and this is the one
  * moment it can learn both. Any of the outputs may be NULL.
@@ -50,6 +55,7 @@ const char *geoip_url(void);
 int geoip_parse(const char *csv,
                 char *lat, int latcap,
                 char *lon, int loncap,
-                char *tz,  int tzcap);
+                char *tz,  int tzcap,
+                char *city, int citycap);
 
 #endif

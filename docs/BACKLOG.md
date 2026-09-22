@@ -551,12 +551,13 @@ don't-scroll instructions were given for the whole request, not just for Setting
   from the harness.
 
 ### Live-network verifies
-- **IP geolocation, first sync `[d]`.** `locate_by_ip()` runs only while the
-  location is unset. Wipe `latitude`/`longitude` from `config.ini`, sync, and
-  confirm the `geoip:` log line names the right town — then confirm the SECOND
-  sync does not call it again. Two known ways it legitimately fails, both of
-  which must leave the location unset rather than half-set: a carrier NAT
-  (`fail,private range`) and a captive portal returning HTML. The parser is
+- **IP geolocation `[d]`.** `locate_by_ip()` runs while the location is
+  APPROXIMATE (`loc_auto`) — unset, or derived from the zone or the city list. Wipe `latitude`/`longitude` from `config.ini`, sync, and
+  confirm the `geoip:` log line names the right town. Two known ways it legitimately fails, both of
+  which must leave the location unchanged rather than half-set: a carrier NAT
+  (`fail,private range`) and a captive portal returning HTML. **Also confirm a
+  PINNED location is never touched** — type a coordinate, sync twice, check it
+  survives. The parser is
   host-gated (`make geoip_test`); what needs the bench is the live GET and
   whether plain HTTP survives the network the device is actually on.
 - **RSS fetch.** The whole reader is feature-complete and host-gated; only the live

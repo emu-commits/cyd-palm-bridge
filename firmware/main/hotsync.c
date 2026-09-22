@@ -553,7 +553,14 @@ static int  s_wx_ok;
  * tomorrow. See bridge/geoip.h for why this is IP-based and not Wi-Fi-based, and
  * why it is plain HTTP. */
 static void locate_by_ip(Config *cfg){
-    if(cfg->latitude[0] && cfg->longitude[0]) return;      /* already placed */
+    /* THE TEST IS "IS THIS LOCATION APPROXIMATE", not "is it missing", and the
+     * difference is the whole point. Picking a city off a list of two dozen is
+     * not "I am in New York", it is "New York is the nearest one you offered
+     * me" -- so the person most in need of a refined coordinate was exactly the
+     * person the first version refused to refine, having decided their tap made
+     * it sacred. An approximate location is re-derived every sync, which also
+     * means the weather follows a device that travels; a typed one never is. */
+    if(!cfg->loc_auto && cfg->latitude[0] && cfg->longitude[0]) return;
     setst("Finding your area...");
 
     int st = dav_fetch_url(geoip_url(), GEO_TMP);
@@ -567,13 +574,20 @@ static void locate_by_ip(Config *cfg){
     if(f){ size_t n = fread(body, 1, sizeof body - 1, f); body[n] = 0; fclose(f); }
     remove(GEO_TMP);
 
-    char lat[sizeof cfg->latitude], lon[sizeof cfg->longitude], tz[sizeof cfg->timezone];
-    if(!geoip_parse(body, lat, sizeof lat, lon, sizeof lon, tz, sizeof tz)){
-        ESP_LOGW(TAG,"geoip: reply not usable (location still unset)");
+    char lat[sizeof cfg->latitude], lon[sizeof cfg->longitude];
+    char tz[sizeof cfg->timezone], city[sizeof cfg->loc_name];
+    if(!geoip_parse(body, lat, sizeof lat, lon, sizeof lon, tz, sizeof tz, city, sizeof city)){
+        /* Whatever was there stays there: a zone-derived coordinate is a worse
+         * answer than this one would have been, and a far better answer than
+         * none. Two ways this legitimately happens -- a carrier NAT answering
+         * "fail,private range", and a captive portal answering HTML. */
+        ESP_LOGW(TAG,"geoip: reply not usable (location unchanged)");
         return;
     }
     snprintf(cfg->latitude,  sizeof cfg->latitude,  "%s", lat);
     snprintf(cfg->longitude, sizeof cfg->longitude, "%s", lon);
+    snprintf(cfg->loc_name,  sizeof cfg->loc_name,  "%s", city);
+    cfg->loc_auto = 1;             /* still approximate: keep improving it */
     /* The zone is a bonus, and it is taken on the same terms: a device that has
      * never been configured has no zone either, and this is the one moment it
      * can learn both. A zone the user picked is left alone. */
@@ -586,7 +600,8 @@ static void locate_by_ip(Config *cfg){
     appcfg_save();
     /* Coordinates are not secret and this line is the only way to tell a wrong
      * placement from a failed one, which is the whole reason weather is blank. */
-    ESP_LOGI(TAG,"geoip: located at %s,%s%s%s", cfg->latitude, cfg->longitude,
+    ESP_LOGI(TAG,"geoip: located at %s,%s (%s)%s%s", cfg->latitude, cfg->longitude,
+             cfg->loc_name[0] ? cfg->loc_name : "unnamed",
              took_tz ? " tz=" : "", took_tz ? cfg->timezone : "");
 }
 

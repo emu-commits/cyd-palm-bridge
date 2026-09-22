@@ -95,6 +95,8 @@ static void apply(Config *c, const char *key, const char *val){
     else if(!strcasecmp(key,"todo_coll")) setstr(c->todo_coll,     sizeof c->todo_coll, val);
     else if(!strcasecmp(key,"card_coll")) setstr(c->card_coll,     sizeof c->card_coll, val);
     else if(!strcasecmp(key,"timezone"))  setstr(c->timezone,      sizeof c->timezone, val);
+    else if(!strcasecmp(key,"loc_auto"))      c->loc_auto      = clampi(atoi(val),0,1);
+    else if(!strcasecmp(key,"loc_name"))  setstr(c->loc_name,      sizeof c->loc_name, val);
     else if(!strcasecmp(key,"latitude"))  setstr(c->latitude,      sizeof c->latitude, val);
     else if(!strcasecmp(key,"longitude")) setstr(c->longitude,     sizeof c->longitude, val);
     else if(!strcasecmp(key,"owner"))     setstr(c->owner,         sizeof c->owner, val);
@@ -149,6 +151,8 @@ int config_save(const char *path, const Config *c){
     fprintf(f,"todo_coll = %s\n",     c->todo_coll);
     fprintf(f,"card_coll = %s\n",     c->card_coll);
     fprintf(f,"timezone = %s\n",      c->timezone);
+    fprintf(f,"loc_auto = %d\n",      c->loc_auto);
+    fprintf(f,"loc_name = %s\n",      c->loc_name);
     fprintf(f,"latitude = %s\n",      c->latitude);
     fprintf(f,"longitude = %s\n",     c->longitude);
     fprintf(f,"owner = %s\n",         c->owner);
