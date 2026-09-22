@@ -552,6 +552,13 @@ static int  s_wx_ok;
  * the alternative is telling somebody their brand new device will have weather
  * tomorrow. See bridge/geoip.h for why this is IP-based and not Wi-Fi-based, and
  * why it is plain HTTP. */
+/* What the location lookup did, for the status line. The first version of this
+ * reported only to the serial log, and the first thing that went wrong on a real
+ * device was a lookup that never ran -- which looked, on the glass, exactly like
+ * a lookup that ran and changed nothing. A sync that silently declines to do a
+ * thing has to say so where the person tapping Sync can read it. */
+static char s_geo_why[40];
+
 static void locate_by_ip(Config *cfg){
     /* THE TEST IS "IS THIS LOCATION APPROXIMATE", not "is it missing", and the
      * difference is the whole point. Picking a city off a list of two dozen is
@@ -560,12 +567,18 @@ static void locate_by_ip(Config *cfg){
      * person the first version refused to refine, having decided their tap made
      * it sacred. An approximate location is re-derived every sync, which also
      * means the weather follows a device that travels; a typed one never is. */
-    if(!cfg->loc_auto && cfg->latitude[0] && cfg->longitude[0]) return;
+    s_geo_why[0] = 0;
+    if(!cfg->loc_auto && cfg->latitude[0] && cfg->longitude[0]){
+        snprintf(s_geo_why, sizeof s_geo_why, "location kept as set");
+        return;
+    }
     setst("Finding your area...");
 
     int st = dav_fetch_url(geoip_url(), GEO_TMP);
     if(st < 200 || st >= 300){
-        ESP_LOGW(TAG,"geoip: GET st=%d (location still unset)", st);
+        snprintf(s_geo_why, sizeof s_geo_why, st < 0 ? "no location (unreachable)"
+                                                     : "no location (HTTP %d)", st);
+        ESP_LOGW(TAG,"geoip: GET st=%d (location unchanged)", st);
         remove(GEO_TMP);
         return;
     }
@@ -581,6 +594,7 @@ static void locate_by_ip(Config *cfg){
          * answer than this one would have been, and a far better answer than
          * none. Two ways this legitimately happens -- a carrier NAT answering
          * "fail,private range", and a captive portal answering HTML. */
+        snprintf(s_geo_why, sizeof s_geo_why, "no location (reply not understood)");
         ESP_LOGW(TAG,"geoip: reply not usable (location unchanged)");
         return;
     }
@@ -600,6 +614,8 @@ static void locate_by_ip(Config *cfg){
     appcfg_save();
     /* Coordinates are not secret and this line is the only way to tell a wrong
      * placement from a failed one, which is the whole reason weather is blank. */
+    snprintf(s_geo_why, sizeof s_geo_why, "located %.24s",
+             cfg->loc_name[0] ? cfg->loc_name : cfg->latitude);
     ESP_LOGI(TAG,"geoip: located at %s,%s (%s)%s%s", cfg->latitude, cfg->longitude,
              cfg->loc_name[0] ? cfg->loc_name : "unnamed",
              took_tz ? " tz=" : "", took_tz ? cfg->timezone : "");
@@ -900,17 +916,19 @@ static void hotsync_task(void *arg){
     /* Every internet stage reports its own outcome. The old line asserted "Clock +
      * news done" whether or not either had happened, so a run that set nothing and
      * fetched nothing still read as a success with a credentials footnote. */
-    char clk[24], nws[64], wxs[40];
+    char clk[24], nws[64], wxs[40], geo[48];
     snprintf(wxs,sizeof wxs, s_wx_ok ? "; weather" : "; no weather (%.24s)",
              s_wx_why[0] ? s_wx_why : "failed");
     snprintf(clk,sizeof clk,"%s", s_clock_synced ? "Clock set" : "CLOCK NOT SYNCED");
+    snprintf(geo,sizeof geo, s_geo_why[0] ? "; %.40s" : "%s", s_geo_why[0] ? s_geo_why : "");
     if(s_news_added > 0)
         snprintf(nws,sizeof nws,"%d articles", s_news_added);
     else
         snprintf(nws,sizeof nws,"no news (%.47s)", s_news_why[0] ? s_news_why : "all feeds failed");
 
     if(!dav_ok)
-        snprintf(msg,sizeof msg,"%.23s; %.63s%.39s; no records - %.39s",clk,nws,wxs,dav_why);
+        snprintf(msg,sizeof msg,"%.23s; %.63s%.39s%.47s; no records - %.39s",
+                 clk,nws,wxs,geo,dav_why);
     else if(did==0 && failed>0){
         /* This used to say "low memory" for every failure, heap reading attached,
          * which is an assertion the code was in no position to make -- an SD card
@@ -936,11 +954,12 @@ static void hotsync_task(void *arg){
                      oomed, diskerr, netdown);
     }
     else
-        snprintf(msg,sizeof msg,"Done: +%d~%d-%d up +%d~%d-%d down%.16s%.20s%.10s",
+        snprintf(msg,sizeof msg,"Done: +%d~%d-%d up +%d~%d-%d down%.16s%.20s%.10s%.47s",
                  tot.pushNew,tot.pushMod,tot.pushDel, tot.pullNew,tot.pullMod,tot.pullDel,
                  (failed||protec)?" (some skipped)":"",
                  s_clock_synced ? "" : " - CLOCK NOT SYNCED",
-                 s_news_added ? "" : " - no news");
+                 s_news_added ? "" : " - no news",
+                 geo);   /* what the location lookup did, or why it did not */
     /* A cancelled run is neither a success nor a failure, and must not be dressed
      * as either: "Done" would claim work that was never attempted, and "failed"
      * would send someone debugging a network that was fine. Say what happened,

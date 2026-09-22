@@ -57,10 +57,19 @@ typedef struct {
      * stays open to refinement, and only coordinates somebody actually typed are
      * left alone.
      *
-     * DEFAULTS TO 0 = PINNED, and that direction is deliberate: a config.ini
-     * written before this field existed has hand-entered coordinates and no
-     * `loc_auto` key, and the safe reading of silence is "a human put these here".
-     * Everything that fills the location automatically sets it to 1 on the way. */
+     * THREE states, because two were not enough. 1 = approximate, 0 = pinned,
+     * and **-1 = the file did not say**, which is what every card written before
+     * this field existed looks like. Defaulting that silence to "pinned" was the
+     * first attempt and it was wrong in the common case: nearly every such card
+     * holds coordinates the CITY LIST put there, so the rule froze exactly the
+     * devices the refinement was built for, while protecting a hand-edited
+     * minority. Defaulting it to "approximate" would have the opposite fault and
+     * a worse one -- silently overwriting numbers somebody typed.
+     *
+     * So -1 is resolved once, by the only code that can tell the two apart:
+     * appcfg_load() asks whether the coordinates are EXACTLY a built-in city's,
+     * which is a thing only the pickers write. config_save() always writes 0 or
+     * 1, so a card is asked this question at most once. */
     int  loc_auto;
     /* What to call the place, for the Location panel. Coordinates are unreadable
      * and the refined ones will not match any city in the built-in table, so

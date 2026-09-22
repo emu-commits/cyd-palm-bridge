@@ -25,6 +25,7 @@ void config_defaults(Config *c){
     c->backlight_sec = 30;     /* dim after 30 s idle */
     c->clock24       = 0;      /* 12-hour by default */
     c->policy        = CFG_POL_SERVER;
+    c->loc_auto      = -1;     /* "the file has not said"; see config.h */
 }
 
 int config_policy_from_str(const char *s){
@@ -151,7 +152,8 @@ int config_save(const char *path, const Config *c){
     fprintf(f,"todo_coll = %s\n",     c->todo_coll);
     fprintf(f,"card_coll = %s\n",     c->card_coll);
     fprintf(f,"timezone = %s\n",      c->timezone);
-    fprintf(f,"loc_auto = %d\n",      c->loc_auto);
+    /* never -1: writing the file is what settles the question for good */
+    fprintf(f,"loc_auto = %d\n",      c->loc_auto > 0 ? 1 : 0);
     fprintf(f,"loc_name = %s\n",      c->loc_name);
     fprintf(f,"latitude = %s\n",      c->latitude);
     fprintf(f,"longitude = %s\n",     c->longitude);

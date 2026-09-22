@@ -114,14 +114,14 @@ int main(void){
      * reading of that silence is "a human put these here" -- so silence must
      * mean PINNED, never "help yourself". */
     Config lz; config_defaults(&lz);
-    CK(lz.loc_auto == 0, "a fresh config defaults to a pinned location");
+    CK(lz.loc_auto == -1, "a fresh config has not been told either way");
     f=fopen(PATH,"w");
     fprintf(f, "latitude = 51.5074\nlongitude = -0.1278\n");   /* a pre-flag card */
     fclose(f);
     Config lo; config_defaults(&lo);
     CK(config_load(PATH,&lo)==0,"a pre-flag card loads");
     CK(!strcmp(lo.latitude,"51.5074"),"...with its coordinates");
-    CK(lo.loc_auto == 0, "...and they are treated as pinned, not as fair game");
+    CK(lo.loc_auto == -1, "...and the question stays open for appcfg to settle");
 
     Config la; config_defaults(&la);
     la.loc_auto = 1;
@@ -132,6 +132,16 @@ int main(void){
     Config lb; config_defaults(&lb);
     CK(config_load(PATH,&lb)==0,"reload it");
     CK(lb.loc_auto == 1, "loc_auto round-trips");
+
+    /* -1 must never reach the file: writing it is what settles the question, and
+     * a card that kept saying "I have not been told" would be asked forever. */
+    Config lu; config_defaults(&lu);
+    snprintf(lu.latitude,sizeof lu.latitude,"1.0");
+    CK(lu.loc_auto == -1, "unsettled before save");
+    CK(config_save(PATH,&lu)==0,"save an unsettled config");
+    Config lv; config_defaults(&lv);
+    CK(config_load(PATH,&lv)==0,"reload it");
+    CK(lv.loc_auto == 0, "an unsettled flag is written as pinned, never as -1");
     CK(!strcmp(lb.loc_name,"Washington, D.C."),"a place name with a comma round-trips");
 
     /* W5: FOUR networks.

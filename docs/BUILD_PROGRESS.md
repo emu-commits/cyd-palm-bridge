@@ -16,6 +16,35 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-22 — the flag that froze every device already in the field
+
+Reported from the bench: a sync still did not move the coordinates. The cause was
+the DEFAULT chosen an hour earlier, not the mechanism.
+
+`loc_auto` had two states, and a card written before it existed has no such key.
+Reading that silence as "pinned" protected hand-edited cards — and froze **every
+device whose location came from the city list**, which is every device that had
+used W9. The rule protected a minority and broke the majority it was built for.
+The opposite default would have been worse: silently overwriting numbers a person
+typed.
+
+So the flag has THREE states, and `-1` means "the file has not said". It is
+settled once, at load, by the only evidence that exists: **the pickers can only
+ever write a built-in city's coordinates, verbatim.** An exact match against the
+table means a picker put them there (refine it); anything else means a person
+chose those digits (leave them). `config_save` always writes 0 or 1, so a card is
+asked at most once. The one case it gets wrong is someone who typed, by hand, a
+coordinate matching a built-in city to the digit — and they get refined to the
+same town they typed, which is the harmless direction to be wrong in.
+
+**The deeper fault was that the device said nothing.** A lookup that never ran
+looked, on the glass, exactly like a lookup that ran and changed nothing — and
+the only explanation went to the serial log, where a person holding the device
+cannot read it. The sync's status line now carries what the location lookup did
+or why it declined: `located Boston`, `location kept as set`, `no location
+(unreachable)`, `no location (reply not understood)`. **A sync that silently
+declines to do a thing has to say so where the person tapping Sync can read it.**
+
 ### 2026-09-22 — a location can be approximate, and a sync may improve it
 
 Same day, caught by the user: pick "New York" off the city list and a sync would
