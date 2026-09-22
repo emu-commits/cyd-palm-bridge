@@ -433,28 +433,34 @@ Items 9–16 of the same request. Independent of W, mostly small, each its own
 commit. Design rules 1–4 above apply here too — item 4's tap-don't-type and
 don't-scroll instructions were given for the whole request, not just for Settings.
 
-- [ ] **Q1 — Date Book day view gets a `New` button `[s]`.** At the bottom of the
-      day's list, opening the new-event screen. Today a new event is reachable
-      only through Menu ▸ New (`act_new`, `ui.c:3013`), which is exactly the kind
-      of thing nobody finds.
-- [ ] **Q2 — new event: pick the date on a calendar `[s]`.** **Most of this is
-      already built.** `due_open()` (`ui.c:4030`) is a working calendar popup with
-      Today / Tomorrow / 1 Week quick buttons, and it carries a hard-won fix —
-      `lv_event_get_current_target()`, because the bubbled `VALUE_CHANGED` hands
-      back the button matrix and `lv_calendar_get_pressed_date()` will happily
-      cast it and return a date assembled from unrelated memory. **Reuse it; do
-      not write a second one.**
-- [ ] **Q3 — new event: pick the time from a list `[s]`.** Every 30 minutes from
-      8:00 AM to 9:00 PM — 27 rows — with typing as the fallback for anything
-      outside that window. A 27-row `lv_list` is one object and scrolls as a list,
-      not as a page (rule 2). **OPEN:** does this cover the end time as well, and
-      should end default to start + 1 hour?
-- [ ] **Q4 — Graffiti stroke reference `[s]`.** A button in the Graffiti app
-      showing every character stroke on one page for quick reference. **OPEN:**
-      item 12 says "swipeable", which fights rule 2 — propose paged with explicit
-      next/prev taps and confirm. The stroke data already exists (the recogniser's
-      templates); this is a rendering job, and the I1 canvas is the pool-safe
-      surface for it.
+- [x] **Q1 — Date Book day view gets a `New` button `[s]`.** DONE 2026-09-22. A
+      FIXED button, not the last row of the list: a full day would have pushed
+      that row below the fold, and "add an event" must never be hidden by how
+      busy the day is. It lands on the day you are looking at.
+- [x] **Q2 — new event: pick the date on a calendar `[s]`.** DONE 2026-09-22 by
+      reusing `due_open()` exactly as instructed — one popup, one set of state,
+      and the `lv_event_get_current_target()` fix stays in one place. "No Date"
+      is withheld for events (an event on no day is not an event) and the
+      popup's title follows the caller, since a To Do has a *due* date and an
+      event just has a date.
+- [x] **Q3 — new event: pick the time from a list `[s]`.** DONE 2026-09-22, and
+      **the whole day at 30-minute steps, not 8:00–21:00**: the list is an
+      `lv_table`, so 48 rows cost what 27 did, and it opens scrolled to the
+      event's current time. That retires the typing fallback entirely — there is
+      no time the picker cannot offer. **OPEN resolved:** `default_appt()`
+      already set end = start + 1 hour and the form only ever edited the start.
+      **A 27-row `lv_list` was the first attempt and it CRASHED THE DEVICE** —
+      see `BUILD_PROGRESS`; the gate now measures the pool because of it.
+- [x] **Q4 — Graffiti stroke reference `[s]`.** DONE 2026-09-22. All 36 glyphs
+      (a–z, 0–9) on one scrolling sheet, each with a filled dot where the pen
+      starts — the shape of an 'o' says nothing about which end to begin at, and
+      that is the commonest reason a stroke is not recognised.
+      **OPEN resolved, and it sharpened the rule:** scrolling is fine *here*
+      because the objection is to scrolling a page you must **select** from,
+      where a drag landing as a tap picks the wrong thing. Nothing on this sheet
+      is selectable, so the whole set is one page instead of three you lose your
+      place in. **Scroll-to-read is not scroll-to-select** — worth applying to
+      the rest of the phase.
 - [ ] **Q5 — lock-screen restyle `[s]`.** Item 13: the three black zone bars
       (`CONDITIONS` / `AHEAD` / `SUN & MOON`, drawn at `DASH_Y_WX`,
       `DASH_Y_AGENDA`, `DASH_Y_SUN`) go **grey**, and the zone headers stop being

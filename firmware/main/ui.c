@@ -310,6 +310,7 @@ static int disc_built;
  * Graffiti-only (no on-screen keyboard), so there's no overlay to drop here. */
 static void free_rowuids(void);
 static void free_finds(void);
+static void gref_free(void);        /* Q4: the stroke sheet's heap canvas */
 static void wifi_scan_kill(void);   /* W5: the scan poll timer (see the wizard) */
 static lv_obj_t *g_listtbl;           /* current record table (partial rebuild) */
 static lv_obj_t *g_findtbl;           /* Find results table                     */
@@ -1839,6 +1840,145 @@ static void tr_mode_toggle(lv_event_t *e){
 
 static void graffiti_to_kana_cb(lv_event_t *e){ (void)e; show_kana(); }
 
+/* ==== Q4: the stroke reference ==============================================
+ * Every stroke the recogniser knows, on one sheet you can scroll. Not a drill
+ * and not a quiz -- the thing you look at when you cannot remember which way
+ * round 'k' goes, which on a device whose only text input is Graffiti is a
+ * question that comes up on day one and never entirely stops.
+ *
+ * IT SCROLLS, AND THAT IS THE POINT OF THE DISTINCTION: a page you scroll to
+ * READ is fine, and design rule 2's objection is to scrolling a page you have
+ * to SELECT from, where a drag that lands as a tap picks the wrong thing. There
+ * is nothing to select here, so the whole set can be one sheet rather than
+ * pages with next/prev to lose your place in.
+ *
+ * MEMORY, AND THE TRAP IN IT: one I1 canvas, 240 x GREF_H, allocated ON OPEN
+ * with plain malloc() and freed on the way out. It is far too big to be a
+ * permanent static buffer for a screen this rarely opened, and too big to share
+ * game_cv_buf (240x164, barely half the set).
+ *
+ * IT MUST NOT BE lv_malloc(). On this device LVGL runs its own allocator over a
+ * fixed 31 KB pool, so lv_malloc is the POOL and malloc is the ~140 KB system
+ * heap -- two completely separate budgets, one of them scarce. The first version of
+ * this screen called lv_malloc for 11.5 KB, which left the pool too thin for
+ * the labels that came next, and the sheet segfaulted the moment it opened.
+ * Every LVGL object here comes from the pool; only this buffer does not.
+ *
+ * A failed allocation is not a crash: the screen says so and offers the drill. */
+#define GREF_COLS  5
+#define GREF_CELL  48
+#define GREF_W     (GREF_COLS * GREF_CELL)          /* 240 */
+static const char GREF_SET[] = "abcdefghijklmnopqrstuvwxyz0123456789";
+#define GREF_N     ((int)(sizeof GREF_SET - 1))
+#define GREF_ROWS  ((GREF_N + GREF_COLS - 1) / GREF_COLS)
+#define GREF_H     (GREF_ROWS * GREF_CELL)
+
+static lv_obj_t *g_gref_cv;
+static uint8_t  *g_gref_buf;
+static void gref_free(void){
+    g_gref_cv = NULL;
+    if(g_gref_buf){ free(g_gref_buf); g_gref_buf = NULL; }
+}
+static void gref_plot(int x, int y){ i1_obj_px(g_gref_cv, x, y, 1); }
+static void gref_line(int x0,int y0,int x1,int y1){   /* 2px, as the trainer's guide */
+    int dx=abs(x1-x0), sx=x0<x1?1:-1, dy=-abs(y1-y0), sy=y0<y1?1:-1, err=dx+dy;
+    for(;;){
+        gref_plot(x0,y0); gref_plot(x0+1,y0); gref_plot(x0,y0+1);
+        if(x0==x1&&y0==y1) break;
+        int e2=2*err;
+        if(e2>=dy){ err+=dy; x0+=sx; }
+        if(e2<=dx){ err+=dx; y0+=sy; }
+    }
+}
+
+/* one cell: the stroke, and a filled dot where the pen starts. The dot is the
+ * whole reference in miniature -- the shape of an 'o' tells you nothing about
+ * which end to begin at, and beginning at the wrong end is the single most
+ * common reason a stroke is not recognised. */
+static void gref_cell(int ci, char c){
+    const int ox = (ci % GREF_COLS) * GREF_CELL;
+    const int oy = (ci / GREF_COLS) * GREF_CELL;
+    const int pad = 11, span = GREF_CELL - 2*pad - 6;
+
+    int np = 0; const float *p = graffiti_glyph_template(c, &np);
+    if(!p || np < 1){                       /* drawn as a tap, not a stroke */
+        int cx = ox + GREF_CELL/2, cy = oy + GREF_CELL/2 + 3;
+        for(int a=-2;a<=2;a++) for(int b=-2;b<=2;b++) if(a*a+b*b<=4) gref_plot(cx+a,cy+b);
+        return;
+    }
+    #define GX(i) (ox + pad + (int)(p[2*(i)]  /10.0f*span))
+    #define GY(i) (oy + pad + 4 + (int)(p[2*(i)+1]/10.0f*span))
+    for(int i=0;i<np-1;i++) gref_line(GX(i),GY(i),GX(i+1),GY(i+1));
+    int sx=GX(0), sy=GY(0);
+    for(int a=-2;a<=2;a++) for(int b=-2;b<=2;b++) if(a*a+b*b<=4) gref_plot(sx+a,sy+b);
+    #undef GX
+    #undef GY
+}
+
+static void gref_back_cb(lv_event_t *e){ (void)e; show_trainer(); }
+
+static void show_graf_ref(void){
+    kill_kb();
+    cur_app=NULL; cur_uid=0;
+    content_clear();
+    lv_label_set_text(title_lbl, "Strokes");
+    update_cat_trigger();
+
+    lv_obj_t *back = lv_button_create(content);
+    lv_obj_set_size(back, 60, 26); lv_obj_align(back, LV_ALIGN_TOP_LEFT, 2, 2);
+    lv_obj_t *bl=lv_label_create(back); lv_label_set_text(bl,"Drill"); lv_obj_center(bl);
+    lv_obj_add_event_cb(back, gref_back_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *hint = lv_label_create(content);
+    lv_label_set_text(hint, "dot = start here");
+    lv_obj_align(hint, LV_ALIGN_TOP_RIGHT, -6, 8);
+
+    /* the sheet: one scrolling page holding one tall canvas */
+    lv_obj_t *page = lv_obj_create(content);
+    lv_obj_set_size(page, LCD_W, (PDA_H - TITLE_H) - 32);
+    lv_obj_set_pos(page, 0, 32);
+    lv_obj_set_style_radius(page, 0, 0);
+    lv_obj_set_style_border_width(page, 0, 0);
+    lv_obj_set_style_bg_color(page, COL_BODY, 0);
+    lv_obj_set_style_pad_all(page, 0, 0);
+    lv_obj_set_scroll_dir(page, LV_DIR_VER);
+
+    g_gref_buf = malloc(LV_CANVAS_BUF_SIZE(GREF_W, GREF_H, 1, 1) + 16);
+    if(!g_gref_buf){
+        lv_obj_t *l = lv_label_create(page);
+        lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(l, LCD_W - 16);
+        lv_obj_set_pos(l, 8, 8);
+        lv_label_set_text(l, "Not enough memory for the stroke sheet just now. "
+                             "Close a game and try again, or use Drill, which "
+                             "shows one stroke at a time.");
+        return;
+    }
+
+    g_gref_cv = lv_canvas_create(page);
+    lv_canvas_set_buffer(g_gref_cv, g_gref_buf, GREF_W, GREF_H, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_palette(g_gref_cv, 0, lv_color_to_32(COL_BODY, 0xFF));
+    lv_canvas_set_palette(g_gref_cv, 1, lv_color_to_32(COL_LINE, 0xFF));
+    lv_obj_set_pos(g_gref_cv, 0, 0);
+    lv_obj_clear_flag(g_gref_cv, LV_OBJ_FLAG_CLICKABLE);
+    i1_obj_clear(g_gref_cv);
+    for(int i = 0; i < GREF_N; i++) gref_cell(i, GREF_SET[i]);
+    lv_obj_invalidate(g_gref_cv);            /* exactly one, for the whole sheet */
+
+    /* The letter under each stroke is a LABEL, not painted into the canvas: the
+     * Palm font is already on screen and redrawing its glyphs by hand into I1
+     * would be a second, worse font. 36 labels is well inside the pool (the
+     * gate measures it), and they scroll with the canvas because they share
+     * its parent. */
+    for(int i = 0; i < GREF_N; i++){
+        lv_obj_t *l = lv_label_create(page);
+        char t[2] = { GREF_SET[i], 0 };
+        lv_label_set_text(l, t);
+        lv_obj_set_pos(l, (i % GREF_COLS) * GREF_CELL + 4,
+                          (i / GREF_COLS) * GREF_CELL + 2);
+    }
+}
+static void graf_ref_cb(lv_event_t *e){ (void)e; show_graf_ref(); }
+
 static void show_trainer(void){
     kill_kb();
     cur_app=NULL; cur_uid=0;
@@ -1862,6 +2002,15 @@ static void show_trainer(void){
     tr_mode_lbl = lv_label_create(mb);
     lv_obj_center(tr_mode_lbl);
     lv_obj_add_event_cb(mb, tr_mode_toggle, LV_EVENT_CLICKED, NULL);
+
+    /* Q4: the stroke reference -- every glyph on one sheet, for when you cannot
+     * remember which way round 'k' goes. */
+    lv_obj_t *rb = lv_button_create(content);
+    lv_obj_set_size(rb, 56, 26);
+    lv_obj_align(rb, LV_ALIGN_TOP_RIGHT, -98, 2);
+    lv_obj_set_style_radius(rb, 0, 0);
+    lv_obj_t *rbl = lv_label_create(rb); lv_label_set_text(rbl, "Strokes"); lv_obj_center(rbl);
+    lv_obj_add_event_cb(rb, graf_ref_cb, LV_EVENT_CLICKED, NULL);
 
     /* Kana lives here (handwriting sibling of the Latin drill): a compact "あ" button
      * to its left switches into the kana trainer. */
@@ -7163,6 +7312,7 @@ static void content_clear(void){
     hs_status = NULL; hs_btn = hs_btn_lbl = NULL; disc_status = NULL;
     /* Graffiti + Kana trainers */
     tr_guide = tr_prompt = tr_score = tr_feedback = tr_mode_lbl = NULL;
+    gref_free();          /* Q4: the sheet's canvas is heap, not a static buffer */
     ka_kana = ka_prompt = ka_answer = ka_typed = ka_feedback = ka_score = NULL;
     ka_strokes_lbl = ka_model = ka_modelbl = NULL;
     /* News reader */

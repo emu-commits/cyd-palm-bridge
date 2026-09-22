@@ -16,6 +16,43 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-22 — Q1–Q4: the Date Book stops asking you to type, and the
+### strokes get a reference sheet
+
+- **Q1** — a `New event` button on the day view, fixed at the bottom rather than
+  the list's last row: a full day would push that row below the fold, and "add
+  an event" must never be hidden by how busy the day is. It lands on the day you
+  are looking at, which `default_appt()` already knew how to do.
+- **Q2/Q3** — the date and time were TYPED, in formats you had to know
+  (`M/D/YYYY`, `h:mm`) and parsed with `sscanf`. **A typo did not fail: it
+  silently kept the record's previous value**, so a mistyped date looked saved
+  and was not. Both are picked now, and a picked value cannot be malformed.
+- **Q4** — every stroke the recogniser knows, on one scrolling sheet, each with
+  a filled dot where the pen starts.
+
+**Two clock formats, obeying nobody.** The day list printed `18:00` and the week
+list printed `6:00p`, so the same event read differently depending on which way
+you had zoomed into it — and Settings ▸ Date & Time changed neither. Then the
+title bar, the weather strip and Rise/Set turned out to be hard-coded too. One
+`fmt_hm()` (plus `fmt_hour()` for the strip's narrow columns) now serves them
+all. The day list is the subtle one: the data layer zero-pads `HH:MM` *precisely
+so a lexical sort is a chronological one*, so the rewrite happens in the UI
+**after** the sort. The sortable form and the readable form are different jobs.
+
+**`lv_malloc` IS THE POOL, NOT THE HEAP.** The stroke sheet needs an 11.5 KB I1
+canvas, and the first version asked `lv_malloc` for it — which on this device
+means the fixed 31 KB LVGL pool, not the ~140 KB system heap. It left the pool
+too thin for the 36 labels that came next and **segfaulted the moment the screen
+opened**. They are two separate budgets and only one of them is scarce; plain
+`malloc` is right for a raw buffer, and every LVGL *object* still comes from the
+pool. The comment above that allocation now says so, because the comment I had
+written confidently asserted the opposite.
+
+**The rule about scrolling got sharper, from the bench.** Rule 2's objection is
+to scrolling a page you must **select** from, where a drag that lands as a tap
+picks the wrong thing. A page you scroll to **read** has no such failure. So the
+stroke sheet is one scrolling page rather than three you lose your place in.
+
 ### 2026-09-22 — the fixtures were invented, so the gate agreed with the bug
 
 The location lookup did not work on the bench, twice, and the reason was in the

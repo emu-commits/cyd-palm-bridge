@@ -54,6 +54,30 @@ t 25
 u
 t 400
 s trainer_trained
+# Q4: the stroke reference. Every glyph the recogniser knows on one sheet, with
+# a filled dot where the pen starts -- the shape of an 'o' says nothing about
+# which end to begin at, and beginning at the wrong end is the commonest reason
+# a stroke is not recognised. It SCROLLS, which rule 2 allows here: the rule is
+# against scrolling a page you must SELECT from, and there is nothing to select.
+# The canvas is ~11 KB of transient heap, so this walk also proves it is freed:
+# anything left behind would show up in the pool line or the next screen.
+# The Strokes button spans x=86..142 (TOP_RIGHT, -98, width 56). The first
+# attempt aimed at 143 -- three pixels into the gap before the kana button --
+# and q4_strokes came out as a photograph of the trainer.
+c 110 40
+t 500
+s q4_strokes
+d 120 150
+t 30
+m 120 110
+t 30
+m 120 70
+t 30
+u
+t 400
+s q4_strokes_scrolled
+c 32 40
+t 400
 c 18 225
 t 300
 # News (RSS reader, roadmap #4): launcher app (row 3 col 1) opens a one-item-per-view
