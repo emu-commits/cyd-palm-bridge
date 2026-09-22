@@ -16,6 +16,66 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-22 — the rest of the W phase: W4–W10
+
+Seven groups in one sitting, all `[s]`-gated. The common thread is the phase's
+two design rules — **tap to pick, never type** and **do not scroll** — applied
+until the only things left typed are a password, an Apple ID, and a feed URL.
+
+- **W4 — she explains every tile.** `SET_BLURB[]` says what each setting is FOR,
+  never what to tap next. **The plan's open question is closed by where the
+  keyboard lives:** the I1.2 tap keyboard is an `lv_buttonmatrix` inside the
+  *content* area, so there is no screen in Settings — not even a password — where
+  she and the input want the same pixels.
+- **W5 — four Wi-Fi networks, and the SSID is never typed.** The array order is
+  the try order and a join promotes its slot, so there is no "last used" key to
+  disagree with the list. `wifi_scan_*` scans; the user taps a name known to
+  exist. **`STA_START` no longer auto-connects** — with one network that was the
+  same as connecting on purpose, with four it burns the first network's retry
+  budget joining `""`. Slot 1 keeps the unnumbered `wifi_ssid`/`wifi_pass`, so
+  cards written before this still load. Two security gates widened to all four
+  slots: `nosecrets` and the wasm password scrubber.
+- **W6 — Accounts is two fields and a button.** "Find my calendars..." hands off
+  to discovery and collections are picked by name. Server addresses moved behind
+  **Advanced**; in the account flow they read as required fields.
+- **W7 — the News tile opens the feed list**, not a panel holding one row that
+  names the next screen. **Built-ins** restores a deleted feed: the URL is the
+  one thing here nobody can retype.
+- **W8 — the clock can be set by hand at all.** It could not before, which
+  matters on a device with no RTC: it wakes from a flat battery in 1970 and the
+  fix needs the Wi-Fi you may be standing there to configure. Minutes step by
+  five — 59 taps to cross the hour is a punishment, not a control.
+- **W9 — one pick-one-of-N screen** for the backlight timeout, the conflict
+  policy and the location. A cycling row cannot show you the options you are NOT
+  on. **Screen off** had been in `config.ini` and nowhere in the UI, despite
+  being the setting that decides most of the battery life. **Location** became a
+  list of cities by giving the zone table each city's coordinates. **Owner** now
+  renders on the lock screen, which is the only reason to collect a name.
+- **W10 — a sync stops implying iCloud.** The engine already skipped the account
+  stages with a reason; this was about what the user *reads*. The launcher's
+  demo-data hint is deleted — it dead-ended at "edit config.ini on the card",
+  read as a nag, and sat below the fold. What it was for now sits on the HotSync
+  screen, saying what *this* sync will do.
+
+**`lv_font_palm` has no symbol range, and this phase hit that wall twice more.**
+The pick-list marker was a bullet and the Set date calendar's month arrows are
+`LV_SYMBOL` glyphs; both drew as empty boxes. It is the same wall C7 hit looking
+for a check mark. Two ways out, both used: choose an ASCII character, or set
+`LV_FONT_DEFAULT` on the one widget that needs the glyph. Anything on
+`lv_layer_top()` gets montserrat for free because it inherits nothing — which is
+also why the Date Book's calendar has always looked right by accident.
+
+**The simulator now fakes the radio, not the flow.** The Wi-Fi scan and iCloud
+discovery both run against fixtures. Discovery used to answer "disabled in the
+simulator" with zero results, so **the one screen that exists to stop people
+pasting UUID paths had never been rendered by CI.**
+
+**Three times in this phase a tap in the smoke script missed and the run stayed
+green** — the Date & Time rows shifted 56 px under an inserted row, a Cancel tap
+fell between two buttons, and the role popup's header ate a tap meant for its
+first option. Each produced a screenshot of the *previous* screen under the new
+screen's name. Measure off the PNG; never guess a coordinate.
+
 ### 2026-09-22 — the Assistant greets Settings, from the Graffiti strip (W3)
 
 - **A greeting that does not take the screen away.** Coach and Guru greet you *over

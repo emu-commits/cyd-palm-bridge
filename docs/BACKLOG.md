@@ -19,17 +19,34 @@ mostly away from the bench via the browser simulator).
 
 ## RESUME HERE — state at 2026-09-22
 
-**W1, W2 and W3 are done.** Settings is a nine-tile grid with its own icons,
-every tile opens a real panel, the smoke walks it, and the Assistant greets it
-once per unlock session **from the Graffiti strip** — so the greeting costs the
-grid no room and the tiles stay live behind her. **W4 is next**, and W3 has
-already answered its OPEN question in one direction: see §W4.
+**THE W PHASE IS CODE COMPLETE. W1–W10 are all built and gated**; what is left of
+it is `[d]` boxes. Settings is a nine-tile grid, every tile is a real screen, the
+Assistant explains each one from the Graffiti strip, Wi-Fi remembers four
+networks and finds them by scanning, the clock can be set by hand, Accounts
+discovers collections by name, and a sync no longer implies iCloud. **`Q` is the
+next phase** — and Q1–Q8 were written under the same design rules, so read them
+before starting.
 
-**The strip is a place to stand.** W3's finding, and it is reusable: 240×112 of
-screen that any non-typing screen has no use for, addressable by putting an
-overlay on `lv_layer_top()` at `PDA_H`. `speaker_aside()` is that, and
-`content_clear()` takes it down. It costs the four silkscreen buttons while it is
-up — one extra tap on Home — which is the open `[d]` question on it.
+**The strip is a place to stand.** W3's finding, and the one most reusable thing
+the phase produced: 240×112 of screen that any non-typing screen has no use for,
+addressable by putting an overlay on `lv_layer_top()` at `PDA_H`.
+`speaker_aside()` is that, and `content_clear()` takes it down. It costs the four
+silkscreen buttons while it is up — one extra tap on Home — which is the open
+`[d]` question on it.
+
+**`lv_font_palm` HAS NO SYMBOLS, and the phase hit that wall three times** in one
+day: the pick-list marker (a bullet), the Set date calendar's month arrows, and
+— years earlier — C7's check mark. It is a 32..255 Latin subset, so anything
+outside ASCII draws as an empty box. Two ways out, both used here: pick an ASCII
+character, or set `LV_FONT_DEFAULT` on the one widget that needs the glyph.
+Anything on `lv_layer_top()` gets montserrat for free, because it inherits
+nothing — which is also why the greeting pane had to name its own font.
+
+**The simulator now fakes the radio, not the flow.** Both the Wi-Fi scan and
+iCloud discovery run against fixtures in `sim/stubs/hotsync_stub.c`, so the two
+screens whose entire purpose is "never type this value" are gated by CI. Before
+this, discovery answered "disabled in the simulator" and its screen had never
+been rendered by a test.
 
 **A credential leak was found and fixed on the way** (`nosecrets`, 2026-09-21).
 Simulator builds were compiling a developer's real `secrets.h` in, because an
@@ -37,13 +54,10 @@ include-order "shield" cannot beat C's rule that a quoted include resolves
 relative to the including file's own directory. CI was never affected and could
 never have caught it — which is the lesson worth keeping.
 
-**A big new body of work arrived and is now written down.** Seventeen items,
-grouped into two new phases: **W — Settings and its nine wizards** (the whole
-Preferences surface is being rebuilt as a launcher-style icon screen with the
-Assistant narrating it) and **Q — quick entry and polish** (tap-not-type entry in
-the Date Book, quick-add rows, a Graffiti stroke reference, the lock-screen
-restyle). Both are below, each group sized to one commit. **W is the active
-phase; the three-speakers phase is done except for its `[d]` boxes.**
+**Seventeen items arrived on 2026-09-21 as two phases.** **W — Settings and its
+nine wizards** is now code complete (above). **Q — quick entry and polish**
+(tap-not-type entry in the Date Book, quick-add rows, a Graffiti stroke
+reference, the lock-screen restyle) is the active phase from here.
 
 **Read the W phase's design rules before building anything in it.** Two of them
 overturn habits this codebase already has: *no scrolling if it can be avoided*
@@ -91,11 +105,11 @@ Concise index. Detail for each is below, or in the named doc.
    collection, href relocation, `config.ini` round-trip. §Device.
 
 ### B. Code to write
-6. **W — Settings and its nine wizards.** THE ACTIVE PHASE. Preferences becomes
-   Settings, a nine-icon screen; four real wizards behind it, five small panels,
-   the Assistant narrating; Wi-Fi remembers four networks; HotSync stops needing
-   iCloud. Ten groups, `W1`–`W10`. §W.
-7. **Q — quick entry and polish.** Eight groups, `Q1`–`Q8`: Date Book `New` +
+6. **W — Settings and its nine wizards. CODE COMPLETE 2026-09-22**, `W1`–`W10`.
+   Only `[d]` boxes left: the Wi-Fi join and scan against real APs, a real iCloud
+   login, the clock write, an accountless sync, and the two questions the
+   Assistant's pane raises. §W.
+7. **Q — quick entry and polish. THE ACTIVE PHASE.** Eight groups, `Q1`–`Q8`: Date Book `New` +
    calendar + time list, Graffiti stroke reference, lock-screen restyle, quick-add
    rows in Address / To Do / Memo. §Q.
 8. **P6 — Assistant onboarding. SUPERSEDED by W**, kept for its three decided
@@ -257,7 +271,7 @@ setup" is **W8**.)*
 
 ---
 
-## §W — PHASE: Settings and its nine wizards (ACTIVE)
+## §W — PHASE: Settings and its nine wizards (CODE COMPLETE — only `[d]` left)
 
 Requested 2026-09-21, items 1–8 and 17 of seventeen. The whole configuration
 surface is rebuilt: **Menu ▸ Preferences becomes Menu ▸ Settings**, which opens a
@@ -346,53 +360,73 @@ almost everyone.
       spent when she is SHOWN, since she cannot block navigation. **Her lines
       must stay under ~78 characters — the balloon clips, it does not wrap.**
       Gated by `settings_grid` and `settings_greet_gone`.
-- [ ] **W4 — the Assistant narrates each wizard `[s]`.** Her bubble carries the
-      step's instruction. **The OPEN question has half an answer from W3:** she
-      does not have to cost the step any height at all, because `speaker_aside()`
-      stands her in the Graffiti strip instead of the content area. So "on every
-      step" is now affordable, and the real question becomes whether a wizard
-      step needs the strip for *typing* — Accounts (W6) does, and is the one
-      wizard where she and the keyboard want the same 112 px. Decide with that
-      wizard built, not in advance.
-      **Two new `[d]` checks W3 opened**, both cheap once anything from W is on
-      glass: does the pane read as her standing in front of the writing area or
-      as the screen having grown taller (the one hairline at `PDA_H` is all that
-      says so, and P9 is already asking whether greys survive the panel), and is
-      losing Home/Menu/Find/Calc for one tap per unlock session acceptable or
-      annoying with a thumb.
-- [ ] **W5 — Wi-Fi wizard: four networks `[s]`+`[d]`.** `Config` grows to four
+- [x] **W4 — the Assistant narrates each wizard `[s]`.** DONE 2026-09-22, on
+      **every** screen, and the OPEN question is closed by where the keyboard
+      lives: the I1.2 tap keyboard is an `lv_buttonmatrix` inside the *content*
+      area, so there is no screen in Settings — not even entering a password —
+      where she and the input want the same pixels. `SET_BLURB[]` says what each
+      tile is FOR; the wizards' own screens each say their piece. She costs the
+      step no height at all, so design rule 2 is untouched.
+      **Two `[d]` checks W3 opened** remain: does the pane read as her standing
+      in front of the writing area or as the screen having grown taller (the one
+      hairline at `PDA_H` is all that says so, and P9 is already asking whether
+      greys survive the panel), and is losing Home/Menu/Find/Calc for one tap
+      per unlock session acceptable or annoying with a thumb.
+- [x] **W5 — Wi-Fi wizard: four networks `[s]`, `[d]` OPEN.** DONE 2026-09-22. `Config` grows to four
       SSID/password pairs plus a last-connected marker; `config.ini` gains a
       round-trip for them (**host-gated** — `bridge/config.c` is in `make test`).
       HotSync tries them **in order of last successful connection**, most recent
-      first. Four fits one non-scrolling list. `[d]` for the join itself.
-- [ ] **W6 — Accounts wizard `[s]`+`[d]`.** Separate from Wi-Fi, per item 6.
-      Apple ID and app-specific password via keyboard (rule 1's exception), then
-      hand off to the existing **`hotsync_discover_*`** flow so collections are
-      *picked from a list*, never pasted as UUID paths. `[d]` — needs a real
-      account.
-- [ ] **W7 — News Feeds wizard `[s]`.** Its own tile. The feed manager already
-      exists (`ui.c:2535`, "Preferences → News feeds…") and mostly needs
-      re-homing plus the tap-first treatment.
-- [ ] **W8 — Date & Time wizard `[s]`.** Time, zone, 12/24h, the two world
-      clocks. The zone picker already exists (`ui.c:2673`). Time-of-day set by
-      picking, not typing.
-- [ ] **W9 — the five small panels `[s]`.** Display, Location, Sync, Owner,
-      About. All five now EXIST as lists (W1); what is left is the tap-first
-      treatment. **`Config.owner` was added early, by W1** — leaving it out
-      would have made Owner the one tile with nothing behind it. What still
-      belongs here is **rendering the owner's name on the lock screen**, which
-      is the only reason to collect it.
-- [ ] **W10 — HotSync works without iCloud `[s]`+`[d]`.** Item 17, and the one
-      that changes existing behaviour rather than adding a screen. With no
-      account configured, a sync must still do **clock and RSS** and report what
-      it did, rather than failing or steering the user into account setup. Audit
-      every prompt that pushes toward iCloud — starting with the launcher's
-      demo-data hint (`ui.c:2318`), which today dead-ends at "edit config.ini on
-      the card". See §P6 for what item 17 retires.
+      first — the array order IS the try order and a join promotes its slot, so
+      there is no separate "last used" key to disagree with the list. Four fits
+      one non-scrolling list. **An SSID is never typed:** `wifi_scan_*` scans and
+      the user taps a name known to exist; the password is the only typed value.
+      `config.ini` keeps the unnumbered `wifi_ssid`/`wifi_pass` for slot 1, so a
+      card written before this still loads. **`[d]`: the join itself, the scan
+      against real APs, and whether 8 s is enough for networks 2–4.**
+- [x] **W6 — Accounts wizard `[s]`, `[d]` OPEN.** DONE 2026-09-22. Apple ID and
+      app-specific password via keyboard (rule 1's exception), then **Find my
+      calendars...** hands off to `hotsync_discover_*` and collections are picked
+      by name. The two server addresses moved behind **Advanced** — they default
+      to iCloud and read as required fields when they sit in the account flow.
+      **Discovery now runs in the simulator** against a pretend account, so the
+      flow is gated; before this the one screen that exists to stop people
+      pasting UUID paths was never rendered by CI. **`[d]`: a real login.**
+- [x] **W7 — News Feeds wizard `[s]`.** DONE 2026-09-22. The tile opens the feed
+      list itself (it used to hold one row whose only content was the name of the
+      next screen), with no Back button — Home is the way out, like every other
+      tile. Picking was already tap-first; what was missing was a way back from a
+      mistake, so **Built-ins** restores any deleted built-in without disturbing
+      a user's own feed or re-enabling one deliberately switched off.
+- [x] **W8 — Date & Time wizard `[s]`, one `[d]`.** DONE 2026-09-22. **The clock
+      could not be set by hand at all before**, which matters because a device
+      with no RTC wakes from a flat battery in 1970 and the fix (SNTP in a sync)
+      needs the Wi-Fi you may be here to set up. Four stepper arrows and an
+      AM/PM toggle; the minute steps by five, because 59 taps to cross the hour
+      is not a control. The date uses the **same** `lv_calendar` as the Date
+      Book's due picker. **`[d]`: the write itself** — `settimeofday()` is
+      refused in a container, so the sim gates the screen and not the clock.
+- [x] **W9 — the five small panels `[s]`.** DONE 2026-09-22. One shared
+      pick-one-of-N screen serves all three choices (backlight timeout, conflict
+      policy, location) with the current value marked — a cycling row cannot show
+      you the options you are *not* on. **Screen off** was in `config.ini` and
+      nowhere in the UI, despite deciding most of the battery life. **Location**
+      is now a list of cities: the zone table carries each city's coordinates, so
+      the same list the clock uses answers "where are you". **Owner** renders on
+      the lock screen, sharing the bottom line with the unlock hint.
+- [x] **W10 — HotSync works without iCloud `[s]`, `[d]` OPEN.** DONE 2026-09-22.
+      **The engine already did the right thing** — the account stages are skipped
+      with a reason and the clock and feeds run regardless — so this was entirely
+      about what the user *reads*. The launcher's demo-data hint is **deleted**:
+      it dead-ended at "edit config.ini on the card", read as an unfinished-setup
+      nag (which item 17 rejects), and sat below the fold where nobody saw it
+      anyway. What it was for now sits on the **HotSync screen**, saying what
+      *this* sync will do given what is configured, and naming the account as the
+      thing that ADDS records rather than a precondition that is missing.
+      **`[d]`: confirm a real accountless sync reports clock + news honestly.**
 
 ---
 
-## §Q — PHASE: quick entry and polish (NEXT)
+## §Q — PHASE: quick entry and polish (ACTIVE)
 
 Items 9–16 of the same request. Independent of W, mostly small, each its own
 commit. Design rules 1–4 above apply here too — item 4's tap-don't-type and
