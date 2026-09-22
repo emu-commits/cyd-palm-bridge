@@ -17,13 +17,19 @@ mostly away from the bench via the browser simulator).
 
 ---
 
-## RESUME HERE — state at 2026-09-21
+## RESUME HERE — state at 2026-09-22
 
-**W1 and W2 are done and on `main`.** Settings is a nine-tile grid with its own
-icons, every tile opens a real panel, and the smoke walks it. **W3 is next** —
-the Assistant greeting Settings — and it should be cheap: `speaker_greet()`,
-`tap_anywhere()` and the since-unlock flag all already exist and are shared,
-and `assistant_face` is the one portrait still unused.
+**W1, W2 and W3 are done.** Settings is a nine-tile grid with its own icons,
+every tile opens a real panel, the smoke walks it, and the Assistant greets it
+once per unlock session **from the Graffiti strip** — so the greeting costs the
+grid no room and the tiles stay live behind her. **W4 is next**, and W3 has
+already answered its OPEN question in one direction: see §W4.
+
+**The strip is a place to stand.** W3's finding, and it is reusable: 240×112 of
+screen that any non-typing screen has no use for, addressable by putting an
+overlay on `lv_layer_top()` at `PDA_H`. `speaker_aside()` is that, and
+`content_clear()` takes it down. It costs the four silkscreen buttons while it is
+up — one extra tap on Home — which is the open `[d]` question on it.
 
 **A credential leak was found and fixed on the way** (`nosecrets`, 2026-09-21).
 Simulator builds were compiling a developer's real `secrets.h` in, because an
@@ -44,11 +50,18 @@ overturn habits this codebase already has: *no scrolling if it can be avoided*
 (swipe scrolling is poor on this hardware/OS pair) and *tap to pick, don't type* —
 the keyboard is for server addresses and passwords only.
 
-**The bench device is current.** It holds `4942131` = the code merged as
-`f0796b9` (**P10**: new portraits, the greeting moved onto the week screen,
-tap-anywhere). Flash verified 2026-09-21, hard reset issued. **P10's two on-glass
-questions have NOT been answered** — the user chose to merge and report later.
-The web emulator deploys from `main` and serves this code.
+**The bench device is AHEAD of `main`.** Flashed 2026-09-22 with
+`f0fcfb0-dirty` — W1 and W2 as merged, **plus W3 uncommitted from the working
+tree**, flashed so W3 could be judged on glass before being committed. Boot
+verified clean (`panel init done`, `SD mounted`, `LVGL up`, `lvgl pool: 31100
+total, 24100 free`, battery 4228 mV). **If the working tree has moved on and you
+are reasoning about what is on the glass, re-flash rather than guess — `-dirty`
+means the build is not recoverable from a commit hash.**
+
+It also still carries **P10** (new portraits, the greeting on the week screen,
+tap-anywhere), whose **two on-glass questions have NOT been answered** — the user
+chose to merge and report later. The web emulator deploys from `main`, so it does
+**not** serve W3 yet.
 
 **Nine `[d]` boxes are open** and every one is flashable-and-checkable in a single
 sitting on the code already on the device. **The user has said they will test
@@ -321,16 +334,32 @@ almost everyone.
       disk with the subject knocked out in white**, ink-as-disk not
       subject-as-ink. Remember P10's lesson — **trim blank rows top and bottom**,
       they are not free.
-- [ ] **W3 — the Assistant greets Settings `[s]`.** First entry after an unlock
-      only, rotating non-repeating lines, tap anywhere to proceed — exactly the
-      Coach/Guru contract. `speaker_greet()`, `tap_anywhere()` and the
-      since-unlock flag all exist and are shared; `assistant_face` is already in
-      flash at 60×77 and is the one portrait not yet used anywhere.
+- [x] **W3 — the Assistant greets Settings `[s]`.** DONE 2026-09-22. First entry
+      after an unlock only, rotating non-repeating lines, tap to dismiss. It is
+      **not** the Coach/Guru contract in one respect: her greeting does not
+      replace the screen, it stands on `lv_layer_top()` **in the Graffiti strip**
+      over a finished, live grid — all nine tiles stay visible and tappable, and
+      dismissing her rebuilds nothing. The Coach arrangement was built too and
+      rejected on the screenshots (her shoulders on the About tile, the balloon
+      across the silkscreen row, and a full-screen overlay eating the first tap).
+      1344 B of the 31100 B pool while up, all returned on dismiss. The bit is
+      spent when she is SHOWN, since she cannot block navigation. **Her lines
+      must stay under ~78 characters — the balloon clips, it does not wrap.**
+      Gated by `settings_grid` and `settings_greet_gone`.
 - [ ] **W4 — the Assistant narrates each wizard `[s]`.** Her bubble carries the
-      step's instruction. **OPEN:** whether she is present on *every* step or only
-      on a wizard's first screen — on a 240×184 area her portrait plus a bubble
-      costs roughly half the height, which fights design rule 2 hard. Decide with
-      one wizard built, not in advance.
+      step's instruction. **The OPEN question has half an answer from W3:** she
+      does not have to cost the step any height at all, because `speaker_aside()`
+      stands her in the Graffiti strip instead of the content area. So "on every
+      step" is now affordable, and the real question becomes whether a wizard
+      step needs the strip for *typing* — Accounts (W6) does, and is the one
+      wizard where she and the keyboard want the same 112 px. Decide with that
+      wizard built, not in advance.
+      **Two new `[d]` checks W3 opened**, both cheap once anything from W is on
+      glass: does the pane read as her standing in front of the writing area or
+      as the screen having grown taller (the one hairline at `PDA_H` is all that
+      says so, and P9 is already asking whether greys survive the panel), and is
+      losing Home/Menu/Find/Calc for one tap per unlock session acceptable or
+      annoying with a thumb.
 - [ ] **W5 — Wi-Fi wizard: four networks `[s]`+`[d]`.** `Config` grows to four
       SSID/password pairs plus a last-connected marker; `config.ini` gains a
       round-trip for them (**host-gated** — `bridge/config.c` is in `make test`).

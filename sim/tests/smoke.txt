@@ -299,7 +299,19 @@ c 18 300
 t 300
 c 75 66
 t 400
+# W3: the Assistant is owed a greeting on the first Settings entry after an
+# unlock, so THIS shot has her in the Graffiti strip with her balloon beside her.
+# All nine tiles are visible behind her and stay live -- that is the whole reason
+# she is down there rather than in the content area.
 s settings_grid
+# Tap her to put the writing strip back. The tap lands inside the pane; if the
+# greeting ever stops appearing this hits the Graffiti pad instead, which is
+# harmless here (no field is active on the grid) but will show up as an inked dot
+# in the NEXT shot -- so compare settings_greet_gone against the strip, not just
+# the exit code.
+c 120 260
+t 300
+s settings_greet_gone
 # Accounts (row 1, col 2) -> the Apple ID field -> the I1.2 tap keyboard; type one
 # key, then Save -> I4 transient "Saved" toast, and the editor returns to the
 # ACCOUNTS panel rather than to the old list. That return address is the W1 change

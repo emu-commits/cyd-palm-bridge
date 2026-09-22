@@ -57,6 +57,10 @@ static lv_obj_t *content;      /* the swappable view area */
  * it nulls every global that points into it, in the same breath that frees them.
  * Defined at the bottom of the file, where all of those globals are in scope. */
 static void content_clear(void);
+static void spk_pane_close(void);   /* a speaker's overlay: it is on lv_layer_top(),
+                                       so only content_clear() can be trusted to
+                                       take it down when the screen changes */
+static void assistant_greet(void);  /* W3: her hello, over the Settings grid */
 static lv_obj_t *title_lbl;
 static lv_obj_t *clock_lbl;    /* live clock in the title bar (Palm) */
 
@@ -85,7 +89,7 @@ static void      batt_refresh(void);
 /* Which speakers still owe a greeting this unlock session -- declared up here
  * because the lock's release handler resets it long before the greeting code
  * that reads it. See "greetings" further down for the rules. */
-enum { GREET_COACH, GREET_GURU, GREET_NSPEAKER };
+enum { GREET_COACH, GREET_GURU, GREET_ASSIST, GREET_NSPEAKER };
 static uint8_t g_greet_due = 0xFF;            /* bit per speaker; all owed at boot */
 static uint8_t g_greet_last[GREET_NSPEAKER];  /* index of the line last shown      */
 
@@ -2269,6 +2273,43 @@ static void show_news(void){
     news_render();
 }
 
+/* ONE icon cell, for BOTH icon grids -- the launcher's nine apps and Settings'
+ * nine tiles. They were duplicated boilerplate that happened to agree, which is
+ * the arrangement that drifts: the two grids are supposed to look identical
+ * (W1's whole premise is that Settings is an app), so they are now one function.
+ *
+ * NOT SCROLLABLE, and that is not cosmetic. An lv_obj scrolls by default, so a
+ * label wider than the 68 px cell makes the cell scrollable, and LVGL draws the
+ * horizontal scrollbar as a black bar under the label. "Date & Time" was the
+ * only tile wide enough to trip it, which is exactly how this kind of fault
+ * survives review -- it looks like a design decision about one icon. */
+static lv_obj_t *icon_cell(lv_obj_t *grid, const lv_image_dsc_t *icon,
+                           const char *name, lv_event_cb_t cb, void *ud){
+    lv_obj_t *cell = lv_obj_create(grid);
+    lv_obj_set_size(cell, 68, 52);
+    lv_obj_set_style_radius(cell, 0, 0);
+    lv_obj_set_style_border_width(cell, 0, 0);
+    lv_obj_set_style_bg_opa(cell, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_all(cell, 2, 0);
+    lv_obj_set_style_pad_row(cell, 3, 0);
+    lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(cell, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(cell, cb, LV_EVENT_CLICKED, ud);
+
+    lv_obj_t *img = lv_image_create(cell);
+    lv_image_set_src(img, icon);                          /* 1x (crisp) */
+    lv_obj_set_style_image_recolor(img, COL_LINE, 0);     /* A8 mask -> black */
+    lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);
+
+    lv_obj_t *lbl = lv_label_create(cell);
+    lv_label_set_text(lbl, name);
+    lv_obj_set_style_text_font(lbl, &lv_font_palm, 0);
+    return cell;
+}
+
 static void show_launcher(void){
     kill_kb();
     cur_app = NULL;
@@ -2288,28 +2329,8 @@ static void show_launcher(void){
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
 
-    for(int i=0;i<NAPPS;i++){
-        lv_obj_t *cell = lv_obj_create(grid);
-        lv_obj_set_size(cell, 68, 52);
-        lv_obj_set_style_radius(cell, 0, 0);
-        lv_obj_set_style_border_width(cell, 0, 0);
-        lv_obj_set_style_bg_opa(cell, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_pad_all(cell, 2, 0);
-        lv_obj_set_style_pad_row(cell, 3, 0);
-        lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_add_flag(cell, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(cell, app_cb, LV_EVENT_CLICKED, (void *)APPS[i]);
-
-        lv_obj_t *img = lv_image_create(cell);
-        lv_image_set_src(img, APP_ICONS[i]);                       /* 1x (crisp) */
-        lv_obj_set_style_image_recolor(img, COL_LINE, 0);          /* A8 mask -> black */
-        lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);
-
-        lv_obj_t *lbl = lv_label_create(cell);
-        lv_label_set_text(lbl, APPS[i]);
-        lv_obj_set_style_text_font(lbl, &lv_font_palm, 0);
-    }
+    for(int i=0;i<NAPPS;i++)
+        icon_cell(grid, APP_ICONS[i], APPS[i], app_cb, (void *)APPS[i]);
 
     /* I1.1: onboarding hint. Until an iCloud account is configured, the records on
      * screen are demo data -- say so and point at setup. A full-width flex item at
@@ -3049,29 +3070,13 @@ static void show_settings(void){
     lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_START);
 
-    for(int i = 0; i < SET_N; i++){
-        lv_obj_t *cell = lv_obj_create(grid);
-        lv_obj_set_size(cell, 68, 52);
-        lv_obj_set_style_radius(cell, 0, 0);
-        lv_obj_set_style_border_width(cell, 0, 0);
-        lv_obj_set_style_bg_opa(cell, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_pad_all(cell, 2, 0);
-        lv_obj_set_style_pad_row(cell, 3, 0);
-        lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
-                              LV_FLEX_ALIGN_CENTER);
-        lv_obj_add_flag(cell, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(cell, sp_tile_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+    for(int i = 0; i < SET_N; i++)
+        icon_cell(grid, SET_ICONS[i], SET_NAMES[i], sp_tile_cb, (void *)(intptr_t)i);
 
-        lv_obj_t *img = lv_image_create(cell);
-        lv_image_set_src(img, SET_ICONS[i]);                 /* 1x (crisp) */
-        lv_obj_set_style_image_recolor(img, COL_LINE, 0);    /* A8 mask -> black */
-        lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);
-
-        lv_obj_t *lbl = lv_label_create(cell);
-        lv_label_set_text(lbl, SET_NAMES[i]);
-        lv_obj_set_style_text_font(lbl, &lv_font_palm, 0);
-    }
+    /* W3: the Assistant, once per unlock session, standing OVER the finished grid
+     * rather than in place of it -- so the greeting costs the nine tiles no room
+     * and dismissing her rebuilds nothing. */
+    assistant_greet();
 }
 
 /* ---- collection discovery screen (chunk 3) ----
@@ -6084,6 +6089,12 @@ static lv_obj_t *g_zp_cv, *g_zp_status, *g_zp_timelbl;
 static void content_clear(void){
     if(!content) return;
     lv_obj_clean(content);
+    /* A greeting stands on lv_layer_top() OVER the screen it is greeting, so it
+     * is not in `content` and lv_obj_clean() cannot reach it. Every screen swap
+     * comes through here -- including the lock raising itself when the screen
+     * sleeps -- so this is the one place that can guarantee she is never left
+     * hanging over a screen she has nothing to say about. */
+    spk_pane_close();
     /* Every screen swap comes through here, so this is the one place that can
      * know the app grid is gone -- show_launcher() sets it back on the way in. */
     g_on_launcher = 0;
@@ -7331,12 +7342,19 @@ static const char *co_advice_text(int code){
  * them -- but it also means only one may be on screen at a time. That is the
  * product rule anyway (a screen has a single speaker), and it is why this is a
  * helper rather than a widget you could instantiate twice. */
-#define SPK_TAIL_W   24
-#define SPK_TAIL_H   26
-#define SPK_TAIL_APX 20                        /* apex x: points up at the face  */
-#define SPK_TAIL_B0  2                         /* base runs from x=B0..          */
-#define SPK_TAIL_B1  13                        /* ...to x=B1 on the bottom row   */
-static uint8_t spk_tail_buf[LV_CANVAS_BUF_SIZE(SPK_TAIL_W, SPK_TAIL_H, 1, 1) + 16];
+#define SPK_TAIL_W   24                        /* along the base                 */
+#define SPK_TAIL_H   26                        /* base to apex                   */
+#define SPK_TAIL_APX 20                        /* apex position along the base    */
+#define SPK_TAIL_B0  2                         /* base runs from B0..            */
+#define SPK_TAIL_B1  13                        /* ...to B1                       */
+/* The buffer serves the wedge in EITHER orientation -- upright (24 wide, 26 tall,
+ * a balloon under the face) or on its side (26 wide, 24 tall, a balloon beside
+ * it) -- so it is sized to whichever of the two costs more. The two differ: an I1
+ * row is byte-padded, so 26 px of width costs 4 bytes a row where 24 costs 3. */
+#define SPK_TAIL_BUF1 LV_CANVAS_BUF_SIZE(SPK_TAIL_W, SPK_TAIL_H, 1, 1)
+#define SPK_TAIL_BUF2 LV_CANVAS_BUF_SIZE(SPK_TAIL_H, SPK_TAIL_W, 1, 1)
+static uint8_t spk_tail_buf[(SPK_TAIL_BUF1 > SPK_TAIL_BUF2 ? SPK_TAIL_BUF1
+                                                           : SPK_TAIL_BUF2) + 16];
 
 static void spk_tail_line(lv_draw_buf_t *db, int x0, int y0, int x1, int y1){
     int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
@@ -7350,16 +7368,35 @@ static void spk_tail_line(lv_draw_buf_t *db, int x0, int y0, int x1, int y1){
     }
 }
 
-static void spk_tail_paint(lv_obj_t *cv){
+/* The wedge, in ONE painter for both placements. It is drawn in its own
+ * coordinates -- `u` along the base, `v` from the base (v = H-1) to the apex
+ * (v = 0) -- and `side` decides how that lands on the canvas:
+ *
+ *   side = 0   u -> x, v -> y      base along the BOTTOM row, apex above:
+ *                                  the balloon hangs under the portrait.
+ *   side = 1   u -> y, v -> x      base along the RIGHT column, apex to the left:
+ *                                  the balloon stands beside the portrait.
+ *
+ * Transposing one wedge is what stops the two from becoming two wedges that
+ * merely resemble each other -- the mistake P10's shared week page was built to
+ * avoid. The base row is the bubble's own border, continued across the canvas
+ * except where the wedge opens into it, which is what makes the tail read as a
+ * hole in the balloon rather than a sticker on it. */
+static void spk_tail_plot(lv_draw_buf_t *db, int u, int v, int side){
+    i1_px(db, side ? v : u, side ? u : v, 1);
+}
+static void spk_tail_wedge(lv_draw_buf_t *db, int u0, int v0, int u1, int v1, int side){
+    if(side) spk_tail_line(db, v0, u0, v1, u1);
+    else     spk_tail_line(db, u0, v0, u1, v1);
+}
+static void spk_tail_paint_dir(lv_obj_t *cv, int side){
     lv_draw_buf_t *db = lv_canvas_get_draw_buf(cv);
     if(!db) return;
     i1_clear(db);
-    /* the bubble's top border, continued across this canvas except where the
-     * wedge opens into it */
-    for(int x = 0; x < SPK_TAIL_W; x++)
-        if(x < SPK_TAIL_B0 || x > SPK_TAIL_B1) i1_px(db, x, SPK_TAIL_H - 1, 1);
-    spk_tail_line(db, SPK_TAIL_B0, SPK_TAIL_H - 1, SPK_TAIL_APX, 0); /* trailing */
-    spk_tail_line(db, SPK_TAIL_B1, SPK_TAIL_H - 1, SPK_TAIL_APX, 0); /* leading  */
+    for(int u = 0; u < SPK_TAIL_W; u++)
+        if(u < SPK_TAIL_B0 || u > SPK_TAIL_B1) spk_tail_plot(db, u, SPK_TAIL_H - 1, side);
+    spk_tail_wedge(db, SPK_TAIL_B0, SPK_TAIL_H - 1, SPK_TAIL_APX, 0, side); /* trailing */
+    spk_tail_wedge(db, SPK_TAIL_B1, SPK_TAIL_H - 1, SPK_TAIL_APX, 0, side); /* leading  */
     lv_obj_invalidate(cv);                      /* exactly one, for the whole tail */
 }
 
@@ -7387,34 +7424,28 @@ static void spk_tail_paint(lv_obj_t *cv){
 #define SPK_BUB_MIN(face) (SPK_FACE_TOP + (int)(face)->header.h \
                            + SPK_CHIN_GAP + (SPK_TAIL_H - 1))
 
-/* Stand `face` on `page` saying `text`, with the tail joining them. `bub_y` is
- * the balloon's top edge; the portrait hangs above it, so a caller that pushes
- * the balloon down (a long week) moves the pair down together and the tail stays
- * the short hop from the shoulder to the balloon instead of stretching into a
- * wire. Returns the y just past the balloon, for whatever comes next.
+/* ---- the three pieces every speaker screen is built from ----
+ * Pulled out of speaker_say() when the Assistant needed the same portrait and
+ * the same balloon in a different arrangement (see speaker_aside()). Two
+ * placements of one set of parts, not two sets that look alike.
  *
  * The portrait is flash-resident A8 recolored to the ink colour exactly the way
- * the launcher icons are: no pool cost and nothing to repaint. Its size is read
- * off the descriptor rather than restated, so a regenerated face at a different
- * height still lands correctly (tools/gen_faces.py). */
-static int speaker_say(lv_obj_t *page, const lv_image_dsc_t *face,
-                       const char *text, int bub_y, int bub_h){
-    const int face_w = (int)face->header.w;
-    const int face_h = (int)face->header.h;
-    const int face_x = SPK_FACE_R - face_w;
-    const int face_y = bub_y - (SPK_TAIL_H - 1) - SPK_CHIN_GAP - face_h;
-
-    lv_obj_t *img = lv_image_create(page);
+ * the launcher icons are: no pool cost and nothing to repaint. */
+static void spk_portrait(lv_obj_t *par, const lv_image_dsc_t *face, int x, int y){
+    lv_obj_t *img = lv_image_create(par);
     lv_image_set_src(img, face);
-    lv_obj_set_pos(img, face_x, face_y);
+    lv_obj_set_pos(img, x, y);
     lv_obj_set_style_image_recolor(img, COL_LINE, 0);
     lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);
+}
 
-    /* a plain bordered rectangle: rounded corners and a border are drawn straight
-     * into the frame buffer; only the indicator widgets take a layer. */
-    lv_obj_t *bub = lv_obj_create(page);
-    lv_obj_set_size(bub, SPK_BUB_W, bub_h);
-    lv_obj_set_pos(bub, SPK_BUB_X, bub_y);
+/* A plain bordered rectangle with the words centred in it: rounded corners and a
+ * border are drawn straight into the frame buffer; only the indicator widgets
+ * take a layer. */
+static void spk_bubble(lv_obj_t *par, int x, int y, int w, int h, const char *text){
+    lv_obj_t *bub = lv_obj_create(par);
+    lv_obj_set_size(bub, w, h);
+    lv_obj_set_pos(bub, x, y);
     lv_obj_set_style_radius(bub, 6, 0);
     lv_obj_set_style_border_width(bub, 1, 0);
     lv_obj_set_style_border_color(bub, COL_LINE, 0);
@@ -7424,19 +7455,45 @@ static int speaker_say(lv_obj_t *page, const lv_image_dsc_t *face,
 
     lv_obj_t *say = lv_label_create(bub);
     lv_label_set_long_mode(say, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(say, SPK_BUB_W - 2 - 12);
+    lv_obj_set_width(say, w - 2 - 12);
     lv_obj_set_style_text_align(say, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(say, text);
     lv_obj_center(say);
+}
+
+static void spk_tail(lv_obj_t *par, int x, int y, int side){
+    lv_obj_t *tail = lv_canvas_create(par);
+    lv_canvas_set_buffer(tail, spk_tail_buf,
+                         side ? SPK_TAIL_H : SPK_TAIL_W,
+                         side ? SPK_TAIL_W : SPK_TAIL_H, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_palette(tail, 0, lv_color_to_32(COL_BODY, 0xFF));
+    lv_canvas_set_palette(tail, 1, lv_color_to_32(COL_LINE, 0xFF));
+    lv_obj_set_pos(tail, x, y);
+    spk_tail_paint_dir(tail, side);
+}
+
+/* Stand `face` on `page` saying `text`, with the tail joining them. `bub_y` is
+ * the balloon's top edge; the portrait hangs above it, so a caller that pushes
+ * the balloon down (a long week) moves the pair down together and the tail stays
+ * the short hop from the shoulder to the balloon instead of stretching into a
+ * wire. Returns the y just past the balloon, for whatever comes next.
+ *
+ * The face's size is read off the descriptor rather than restated, so a
+ * regenerated portrait at a different height still lands correctly
+ * (tools/gen_faces.py). */
+static int speaker_say(lv_obj_t *page, const lv_image_dsc_t *face,
+                       const char *text, int bub_y, int bub_h){
+    const int face_w = (int)face->header.w;
+    const int face_h = (int)face->header.h;
+    const int face_x = SPK_FACE_R - face_w;
+    const int face_y = bub_y - (SPK_TAIL_H - 1) - SPK_CHIN_GAP - face_h;
+
+    spk_portrait(page, face, face_x, face_y);
+    spk_bubble(page, SPK_BUB_X, bub_y, SPK_BUB_W, bub_h, text);
 
     /* the tail last, so it paints over the bubble's top border -- the border it
      * replaces. */
-    lv_obj_t *tail = lv_canvas_create(page);
-    lv_canvas_set_buffer(tail, spk_tail_buf, SPK_TAIL_W, SPK_TAIL_H, LV_COLOR_FORMAT_I1);
-    lv_canvas_set_palette(tail, 0, lv_color_to_32(COL_BODY, 0xFF));
-    lv_canvas_set_palette(tail, 1, lv_color_to_32(COL_LINE, 0xFF));
-    lv_obj_set_pos(tail, face_x + face_w / 2 - SPK_TAIL_APX, bub_y - (SPK_TAIL_H - 1));
-    spk_tail_paint(tail);
+    spk_tail(page, face_x + face_w / 2 - SPK_TAIL_APX, bub_y - (SPK_TAIL_H - 1), 0);
 
     return bub_y + bub_h;
 }
@@ -7518,6 +7575,137 @@ static void speaker_greet(lv_obj_t *page, const lv_image_dsc_t *face,
     int after = speaker_say(page, face, line, bub_y, SPK_GREET_BUB_H);
     speaker_hint(page, "tap anywhere to continue", after + 4);
     tap_anywhere(page, on_tap);
+}
+
+/* ==== a greeting that does NOT take the screen away (W3) ====================
+ * Coach and Guru greet you over their own week screen, which works because they
+ * HAVE one: a page you were going to look at anyway. Settings has nine tiles and
+ * no such page, and the pair (portrait + tail + balloon) is 164 px tall against a
+ * 184 px content area -- so the Coach arrangement would bury the grid it is
+ * introducing, which is design rule 2's complaint exactly (docs/BACKLOG.md §W).
+ *
+ * So she stands on lv_layer_top() OVER the built grid instead, IN the Graffiti
+ * strip: 240x112 of screen that this particular app has no use for, because a
+ * grid of nine icons is not something you write into. The grid keeps all nine
+ * tiles, they stay live underneath her, and the tap that dismisses her rebuilds
+ * nothing -- the screen behind her is already finished and correct.
+ *
+ * THE ARRANGEMENT THAT WAS TRIED AND REJECTED was the Coach one unchanged, just
+ * pushed down the screen until the balloon landed on the strip. It needed no new
+ * geometry, which was its whole appeal, and it cost the same 1.3 KB. Rendered,
+ * three things were wrong with it: her shoulders landed on the About tile, the
+ * balloon lay across the silkscreen row with the hint text colliding with Menu
+ * and Calc, and -- the real fault -- a full-screen tap-anywhere overlay SWALLOWS
+ * THE FIRST TAP, so a tile tapped while she was up did nothing at all.
+ *
+ * What this arrangement costs instead: the four silkscreen buttons are under her
+ * until she is tapped, so during that one greeting Home is two taps.
+ *
+ * The pane lives on lv_layer_top() and therefore OUTLIVES a content teardown --
+ * the same trap Coach's seal documents. content_clear() closes it, so she can
+ * never be left hanging over a screen she was not greeting. */
+static lv_obj_t *g_spk_pane;                  /* the greeting overlay, or NULL */
+static void spk_pane_close(void){
+    if(g_spk_pane){ lv_obj_del(g_spk_pane); g_spk_pane = NULL; }
+}
+
+/* the overlay itself: one object, filled, standing where the strip was */
+static lv_obj_t *spk_pane(int x, int y, int w, int h){
+    spk_pane_close();
+    lv_obj_t *p = lv_obj_create(lv_layer_top());
+    lv_obj_set_pos(p, x, y);
+    lv_obj_set_size(p, w, h);
+    lv_obj_set_style_radius(p, 0, 0);
+    lv_obj_set_style_pad_all(p, 0, 0);
+    lv_obj_set_style_bg_color(p, COL_BODY, 0);
+    /* one hairline along the top: she is standing in front of the writing area,
+     * and without it the white pane and the white content area read as one
+     * screen that has suddenly grown taller. */
+    lv_obj_set_style_border_width(p, 1, 0);
+    lv_obj_set_style_border_side(p, LV_BORDER_SIDE_TOP, 0);
+    lv_obj_set_style_border_color(p, COL_LINE, 0);
+    lv_obj_clear_flag(p, LV_OBJ_FLAG_SCROLLABLE);
+    /* THE PANE MUST NAME ITS OWN FONT. ui_init() sets lv_font_palm on the active
+     * screen and everything in the app inherits it from there -- but lv_layer_top()
+     * is not a child of the screen, so nothing on this pane inherits anything and
+     * it all falls back to LV_FONT_DEFAULT (montserrat_14). That is a different
+     * typeface at a different weight and line height: the hint read as bold, and
+     * the balloon was silently budgeting ~4 lines where it had been sized for 5. */
+    lv_obj_set_style_text_font(p, &lv_font_palm, 0);
+    g_spk_pane = p;
+    return p;
+}
+
+/* ---- the portrait and the balloon side by side, in the Graffiti strip -------
+ * 112 px of height cannot stack a 77 px portrait above a balloon, so this is the
+ * one arrangement where the balloon stands BESIDE the face and the tail lies on
+ * its side. Sizes are derived from the face descriptor and the strip, not
+ * restated, so a regenerated portrait still lands. */
+#define SPK_AS_PAD    2                        /* strip edge to portrait          */
+#define SPK_AS_TOP    6                        /* strip top to the portrait       */
+#define SPK_AS_BUB_Y  4
+#define SPK_AS_BUB_H  86                       /* 5 * 14 text + pad + border      */
+static void speaker_aside(const lv_image_dsc_t *face, const char *line,
+                          lv_event_cb_t on_tap){
+    const int fw = (int)face->header.w;
+    lv_obj_t *pane = spk_pane(0, PDA_H, LCD_W, GRAFFITI_H);
+
+    /* the tail's base column lands ON the balloon's left border, which is the
+     * border it replaces -- so the balloon starts a whole tail to her right. */
+    const int tail_x = SPK_AS_PAD + fw + 1;
+    const int bub_x  = tail_x + (SPK_TAIL_H - 1);
+    const int bub_w  = LCD_W - bub_x - SPK_AS_PAD - 2;
+
+    spk_portrait(pane, face, SPK_AS_PAD, SPK_AS_TOP);
+    spk_bubble(pane, bub_x, SPK_AS_BUB_Y, bub_w, SPK_AS_BUB_H, line);
+    /* apex level with her head rather than her middle: the wedge is pointing at
+     * the person talking, and on all three portraits that is the top third. */
+    spk_tail(pane, tail_x, SPK_AS_BUB_Y + 4, 1);
+
+    lv_obj_t *h = lv_label_create(pane);
+    lv_label_set_text(h, "tap to continue");
+    lv_obj_align(h, LV_ALIGN_BOTTOM_MID, 0, -4);
+
+    /* the same treatment the week screens need, and for the same reason: the
+     * balloon covers most of the pane and is clickable by default, so without
+     * this the one place you would naturally aim -- her own speech bubble --
+     * swallows the tap and she cannot be dismissed at all. */
+    tap_anywhere(pane, on_tap);
+}
+
+/* Her hellos. They say what the SCREEN is for, not what to do next -- the tiles
+ * are self-describing, and narrating them would be reading the grid out loud.
+ *
+ * KEEP THEM UNDER ~115 CHARACTERS: five lines of lv_font_palm in the 134 px
+ * balloon. Over that they do not wrap, they CLIP, top and bottom -- the balloon
+ * is a fixed height so short and long hellos are the same object. (The first
+ * budget written here was ~78, measured while the pane was accidentally
+ * rendering in montserrat_14; see spk_pane() for why it was.) */
+static const char *const AS_GREETINGS[] = {
+    "Where the device learns about your world -- network, account, where you are.",
+    "Nine things to set. Do the ones you need; none of it has to be done today.",
+    "What you set here is kept on the card in this device, and nowhere else.",
+    "Wi-Fi and Accounts make the others work. The rest are preferences.",
+    "Nothing here is permanent. Any of these can be opened again and put right.",
+};
+#define AS_NGREET ((int)(sizeof(AS_GREETINGS) / sizeof(AS_GREETINGS[0])))
+
+static void as_greet_tap_cb(lv_event_t *e){ (void)e; spk_pane_close(); }
+
+/* Called by show_settings() on every entry; it decides for itself whether one is
+ * owed, so the Settings screen does not have to know the greeting rules.
+ *
+ * The bit is spent when she is SHOWN, not when she is tapped -- which is where
+ * this parts company with Coach and Guru. Their greeting IS the screen, so a tap
+ * is the only way past it and clearing on the tap is exact. Hers sits over a
+ * finished, live grid: you can open a tile and never tap her at all, and a
+ * greeting that came back because you took the other route would be a nag. */
+static void assistant_greet(void){
+    if(!greet_due(GREET_ASSIST)) return;
+    greet_done(GREET_ASSIST);
+    speaker_aside(&assistant_face,
+                  greet_pick(AS_GREETINGS, AS_NGREET, &g_greet_last[GREET_ASSIST]),
+                  as_greet_tap_cb);
 }
 
 /* ---- the weekly report's own geometry ----

@@ -16,6 +16,48 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-22 — the Assistant greets Settings, from the Graffiti strip (W3)
+
+- **A greeting that does not take the screen away.** Coach and Guru greet you *over
+  their own week screen*, which works because they have one. Settings has nine tiles
+  and no such page, and the portrait-plus-balloon pair is **164 px tall against a
+  184 px content area** — so the Coach arrangement would have buried the grid it was
+  introducing. She stands on `lv_layer_top()` **in the Graffiti strip** instead:
+  240×112 that this app has no use for, because a grid of nine icons is not something
+  you write into. All nine tiles stay visible **and live**, and dismissing her
+  rebuilds nothing — the screen behind her was already finished and correct.
+- **The arrangement that was tried and rejected** was the Coach one unchanged, pushed
+  down until the balloon landed on the strip. It needed no new geometry and cost the
+  same 1.3 KB. Rendered, it put her shoulders on the About tile, laid the balloon
+  across the silkscreen row with the hint text colliding with Menu and Calc, and —
+  the real fault — **a full-screen tap-anywhere overlay swallows the first tap**, so a
+  tile tapped while she was up did nothing at all. Both were built and screenshotted
+  before either was argued about, which is the only reason that was obvious.
+- **One set of parts, two placements.** `speaker_say()`'s innards came out as
+  `spk_portrait()` / `spk_bubble()` / `spk_tail()`, and the wedge is now **one painter
+  drawn in its own u/v coordinates and transposed** — upright for a balloon under the
+  face, on its side for one beside it. Two wedges that merely resembled each other is
+  exactly the drift P10's shared week page was built to prevent.
+- **Her own balloon swallowed the tap that dismisses her**, first build. That is
+  precisely what `tap_anywhere()` exists for — an `lv_obj` is clickable by default, so
+  the one place you would naturally aim was the one place that did not work. The fix
+  was to call it, not to write anything.
+- **The greeting bit is spent when she is SHOWN, not when she is tapped** — where this
+  parts company with Coach and Guru on purpose. Theirs *is* the screen, so a tap is
+  the only way past it. Hers sits over a live grid: you can open a tile and never tap
+  her, and a hello that came back because you took the other route is a nag.
+- **`content_clear()` closes the pane.** It is on `lv_layer_top()`, so `lv_obj_clean()`
+  cannot reach it — the same trap Coach's seal documents, and it is what stops her
+  being left hanging over the lock screen when the display sleeps.
+- **Cost, measured on the true device-sized pool** (`smoke32`, 31100 B): **1344 bytes
+  while she is up, all of it returned on dismiss** (12976 B free before and after). No
+  draw layers — the portrait is flash-resident A8 recolored like the launcher icons,
+  the tail reuses the shared I1 buffer, the balloon is a plain bordered rect.
+- **Keep her lines under ~78 characters.** The balloon is a fixed height so short and
+  long hellos are the same object, and a line over that does not wrap — it **clips**,
+  top and bottom. Gated by `settings_grid` (now with her in it) and
+  `settings_greet_gone`.
+
 ### 2026-09-21 — Preferences becomes Settings, and it is a launcher (W1)
 - **Menu ▸ Preferences is now Menu ▸ Settings**, opening a nine-tile icon grid instead
   of a fourteen-row list. The grid is `show_launcher()`'s geometry *deliberately* —
