@@ -1864,14 +1864,37 @@ static void graffiti_to_kana_cb(lv_event_t *e){ (void)e; show_kana(); }
  * the labels that came next, and the sheet segfaulted the moment it opened.
  * Every LVGL object here comes from the pool; only this buffer does not.
  *
- * A failed allocation is not a crash: the screen says so and offers the drill. */
-#define GREF_COLS  5
-#define GREF_CELL  48
+ * A failed allocation is not a crash: the screen says so and offers the drill.
+ *
+ * THE POOL COST IS THE LABELS, and this is the tightest screen in the build:
+ * 45 glyph captions plus a heading leave ~7.5 KB of the 31 KB pool free, which
+ * the smoke reports as its low-water mark. That is comfortable -- the floor is
+ * 3 KB and the failures this project has actually had were at nearly zero --
+ * but it is the number to watch if anything else is ever added to this screen,
+ * and the gate will name it if it moves. */
+/* SIX columns of 40, not five of 48. Almost all of a cell is padding -- the
+ * stroke itself only shrinks from 20 px to 18 -- so the tighter grid fits the
+ * punctuation set as well as the letters and digits AND asks for a SMALLER
+ * buffer than the old sheet did: 240x338 is ~10 KB where 240x384 was ~11.5 KB.
+ * Adding a section by making the cells smaller is the cheapest kind of "no". */
+#define GREF_COLS  6
+#define GREF_CELL  40
 #define GREF_W     (GREF_COLS * GREF_CELL)          /* 240 */
+#define GREF_BAND  18                               /* the punctuation heading   */
 static const char GREF_SET[] = "abcdefghijklmnopqrstuvwxyz0123456789";
 #define GREF_N     ((int)(sizeof GREF_SET - 1))
 #define GREF_ROWS  ((GREF_N + GREF_COLS - 1) / GREF_COLS)
-#define GREF_H     (GREF_ROWS * GREF_CELL)
+
+/* Everything the recogniser knows after the punctuation shift. '.' is LAST and
+ * has no stroke at all -- it is the tap that follows the shift, so the sheet
+ * draws it as the dot it is, which is exactly what you do. `_` is missing on
+ * purpose and not by omission: the $1 normaliser scales every stroke to a unit
+ * box, so `_` and `-` are the same shape and only one of them can exist. */
+static const char GREF_PUN[] = "@,/-'()?.";
+#define GREF_PN    ((int)(sizeof GREF_PUN - 1))
+#define GREF_PROWS ((GREF_PN + GREF_COLS - 1) / GREF_COLS)
+#define GREF_PY    (GREF_ROWS * GREF_CELL + GREF_BAND)   /* top of the punct rows */
+#define GREF_H     (GREF_PY + GREF_PROWS * GREF_CELL)
 
 static lv_obj_t *g_gref_cv;
 static uint8_t  *g_gref_buf;
@@ -1895,10 +1918,10 @@ static void gref_line(int x0,int y0,int x1,int y1){   /* 2px, as the trainer's g
  * whole reference in miniature -- the shape of an 'o' tells you nothing about
  * which end to begin at, and beginning at the wrong end is the single most
  * common reason a stroke is not recognised. */
-static void gref_cell(int ci, char c){
+static void gref_cell(int ci, char c, int y0){
     const int ox = (ci % GREF_COLS) * GREF_CELL;
-    const int oy = (ci / GREF_COLS) * GREF_CELL;
-    const int pad = 11, span = GREF_CELL - 2*pad - 6;
+    const int oy = y0 + (ci / GREF_COLS) * GREF_CELL;
+    const int pad = 8, span = GREF_CELL - 2*pad - 6;
 
     int np = 0; const float *p = graffiti_glyph_template(c, &np);
     if(!p || np < 1){                       /* drawn as a tap, not a stroke */
@@ -1961,7 +1984,12 @@ static void show_graf_ref(void){
     lv_obj_set_pos(g_gref_cv, 0, 0);
     lv_obj_clear_flag(g_gref_cv, LV_OBJ_FLAG_CLICKABLE);
     i1_obj_clear(g_gref_cv);
-    for(int i = 0; i < GREF_N; i++) gref_cell(i, GREF_SET[i]);
+    for(int i = 0; i < GREF_N; i++)  gref_cell(i, GREF_SET[i], 0);
+    for(int i = 0; i < GREF_PN; i++) gref_cell(i, GREF_PUN[i], GREF_PY);
+    /* A rule at the TOP of the heading band, not through the middle of it: at
+     * GREF_PY-5 it struck the heading out, which is a thing you see immediately
+     * in a screenshot and never in the code. */
+    for(int x = 4; x < GREF_W - 4; x++) gref_plot(x, GREF_PY - GREF_BAND);
     lv_obj_invalidate(g_gref_cv);            /* exactly one, for the whole sheet */
 
     /* The letter under each stroke is a LABEL, not painted into the canvas: the
@@ -1973,8 +2001,22 @@ static void show_graf_ref(void){
         lv_obj_t *l = lv_label_create(page);
         char t[2] = { GREF_SET[i], 0 };
         lv_label_set_text(l, t);
-        lv_obj_set_pos(l, (i % GREF_COLS) * GREF_CELL + 4,
-                          (i / GREF_COLS) * GREF_CELL + 2);
+        lv_obj_set_pos(l, (i % GREF_COLS) * GREF_CELL + 3,
+                          (i / GREF_COLS) * GREF_CELL + 1);
+    }
+    /* The heading earns its place: these strokes do NOTHING on their own. Palm
+     * enters punctuation as a shift (one tap) and then the stroke, so a sheet
+     * that showed the shapes without saying that would be teaching the half of
+     * it that does not work. */
+    lv_obj_t *ph = lv_label_create(page);
+    lv_label_set_text(ph, "Punctuation: tap once first, then draw");
+    lv_obj_set_pos(ph, 4, GREF_PY - GREF_BAND + 3);
+    for(int i = 0; i < GREF_PN; i++){
+        lv_obj_t *l = lv_label_create(page);
+        char t[2] = { GREF_PUN[i], 0 };
+        lv_label_set_text(l, t);
+        lv_obj_set_pos(l, (i % GREF_COLS) * GREF_CELL + 3,
+                          GREF_PY + (i / GREF_COLS) * GREF_CELL + 1);
     }
 }
 static void graf_ref_cb(lv_event_t *e){ (void)e; show_graf_ref(); }
