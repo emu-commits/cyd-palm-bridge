@@ -16,6 +16,41 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-21 — Nine Settings icons, knocked out of one disk (W2)
+- **`tools/gen_settings_icons.py` draws all nine in one file**, not nine files. The two
+  icon generators before it are a script each, which was right for one icon and is wrong
+  for nine: these share a drawing toolkit, and far more importantly they share a *look*.
+  Separate files drift — one author picks a 7.4 disk and the next picks 8.6, and the grid
+  ends up with icons that are individually fine and collectively a jumble.
+- **The house idiom held.** A Palm launcher icon is a solid disk with the subject knocked
+  out of it in *white*; detail is then painted back in ink inside the hole. Drawing the
+  subject as ink on nothing is the obvious approach and the wrong one — it reads as
+  spindly line art beside the PumpkinOS originals.
+- **Painting ink back in outside the disk grows a wart, and knowing that did not prevent
+  it.** The hazard is written at the top of the file; the Owner tile walked into it within
+  the hour, because the ink gap keeping its head off its shoulders is a full-width row and
+  a full-width row does not stop at the disk edge. It rendered as a bar straight through
+  the icon. The fix is a `clip()` applied to every tile on the way out, not a rule to
+  remember at the ninth icon — *"remember to clip" is not a rule that survives nine
+  icons.*
+- **Three designs died at 24x22, and the sizes are why.** A *screen on a stand with a sun
+  lit inside it* needs ~10px of width to read as a screen, which is the entire width the
+  disk has at that height — so its top edge sheared the disk's crown off. *Three Wi-Fi
+  arcs* need three 2px whites plus two ink gaps plus a dot, which is more radius than
+  there is; the third ate the last gap and the fan became a crescent moon. *Two chasing
+  arcs* for Sync leave their only surviving ink at the far left and right, exactly where
+  the arrowheads have to go, so the interior flooded white. Two arcs, a sun, and two
+  straight arrows replaced them.
+- **The measurement that decides a knocked-out shape is the INK GAP, not the shape.** A
+  sun with body 3.4 and rays starting at 4.7 leaves 1.3px of ink, and a 1.7px ray simply
+  bridges it — the sun fused into an asterisk and the centre row ran white edge to edge.
+  Body 3.0, rays from 5.0, 2px of gap: holds. Same lesson in the Owner tile's 2px chin
+  gap and the Wi-Fi fan's 1.5px between arcs.
+- **Look at the pixels, twice.** ASCII preview catches geometry bugs (a wedge where an arc
+  should be); only a rendered PNG catches *reading* bugs — Owner passed ASCII inspection
+  and was plainly a bowl once drawn. Both are in the tool: `--preview` for the first, and
+  the disk being pure 0/255 A8 means any PNG writer does the second.
+
 ### 2026-09-21 — Hello happens on the week screen, and the page is the button
 - **New Coach and Guru portraits**, revised at 1:1 and taken back through
   `--from-exact` — brows on both, a moustache that reads as hair rather than a second
