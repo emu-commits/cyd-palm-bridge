@@ -312,6 +312,25 @@ s settings_grid
 c 120 260
 t 300
 s settings_greet_gone
+# W7: News (row 1, col 3) opens the FEED LIST directly -- the tile used to hold
+# one row whose only content was the name of the next screen. Tap the first
+# feed's box to switch it off, then "Built-ins" (top left) which puts back any
+# built-in feed that was deleted without disturbing the rest.
+c 195 56
+t 400
+s w7_feeds
+c 15 70
+t 400
+s w7_feeds_toggled
+c 50 38
+t 400
+s w7_feeds_builtins
+c 18 225
+t 300
+c 18 300
+t 300
+c 75 66
+t 400
 # W5: Wi-Fi (row 1, col 1) -> four remembered networks, none set on a fresh card.
 # Open slot 1 -> "Name" -> the SCAN PICKER. The simulator's scan is a fixed
 # pretend neighbourhood (sim/stubs/hotsync_stub.c) with deliberately awkward

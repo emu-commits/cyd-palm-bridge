@@ -60,6 +60,24 @@ int main(void){
     CHECK(feeds_count()==FEEDS_MAX, "capped at FEEDS_MAX");
     CHECK(added==FEEDS_MAX, "adds past capacity rejected");
 
+    /* W7: restoring the built-ins puts back what was deleted and disturbs
+     * nothing else -- the URL is the one thing here nobody can retype. */
+    feeds_seed_defaults();
+    int seeded = feeds_count();
+    CHECK(seeded > 0, "defaults seed a catalogue");
+    feeds_remove(0);
+    feeds_remove(0);
+    feeds_add("https://mine.example/rss", "Mine");
+    feeds_toggle(0);                      /* switch a surviving built-in OFF */
+    int off_url_kept = 0;
+    { const Feed *f = feeds_get(0); off_url_kept = f && !f->enabled; }
+    CHECK(off_url_kept, "a built-in switched off is off");
+    CHECK(feeds_restore_builtins() == 2, "restores exactly the two that were deleted");
+    CHECK(feeds_count() == seeded + 1, "...and keeps the user's own feed");
+    { const Feed *f = feeds_get(0); CHECK(f && !f->enabled,
+        "a built-in that was merely switched off is NOT re-enabled"); }
+    CHECK(feeds_restore_builtins() == 0, "restoring twice adds nothing");
+
     remove(PATH);
     printf(failures ? "\nFeeds gate: %d FAIL\n" : "\nFeeds gate: OK\n", failures);
     return failures ? 1 : 0;

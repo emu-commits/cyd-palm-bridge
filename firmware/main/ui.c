@@ -1217,6 +1217,35 @@ static void show_hotsync(void){
     lv_obj_set_style_text_align(hs_status, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(hs_status, hotsync_status());
 
+    /* W10: what a sync will do RIGHT NOW, given what is configured. The device
+     * used to imply that a sync needed iCloud and stop there; it does not -- the
+     * clock and the news need nothing but a network, and they are the two things
+     * that go stale fastest. So this says what you will get either way, and
+     * mentions the account as the thing that ADDS records, not as a precondition
+     * that is missing. It is read before the button is pressed, which is the
+     * moment the question is actually being asked. */
+    { const Config *cf = appcfg();
+      int acct = cf->dav_base[0] && cf->dav_user[0] && cf->dav_pass[0];
+      int coll = cf->cal_coll[0] || cf->todo_coll[0] || cf->card_coll[0];
+      lv_obj_t *what = lv_label_create(content);
+      lv_label_set_long_mode(what, LV_LABEL_LONG_WRAP);
+      lv_obj_set_width(what, LCD_W - 16);
+      lv_obj_set_style_text_align(what, LV_TEXT_ALIGN_CENTER, 0);
+      lv_obj_align(what, LV_ALIGN_TOP_MID, 0, 88);
+      /* Three lines is the whole budget: the status line is above and the
+       * button is below, and the first draft ran into the button. */
+      if(acct && coll)
+          lv_label_set_text(what, "Clock, news, weather, and your\n"
+                                  "calendar and contacts.");
+      else if(acct)
+          lv_label_set_text(what, "Clock and news. Settings > Sync\n"
+                                  "chooses which calendars to use.");
+      else
+          lv_label_set_text(what, "Clock and news. No account needed.\n"
+                                  "The records in the apps are samples\n"
+                                  "until Settings > Accounts has yours.");
+    }
+
     hs_btn = lv_button_create(content);
     lv_obj_set_size(hs_btn, 130, 38);
     lv_obj_align(hs_btn, LV_ALIGN_BOTTOM_MID, 0, -14);
@@ -2335,21 +2364,19 @@ static void show_launcher(void){
     for(int i=0;i<NAPPS;i++)
         icon_cell(grid, APP_ICONS[i], APPS[i], app_cb, (void *)APPS[i]);
 
-    /* I1.1: onboarding hint. Until an iCloud account is configured, the records on
-     * screen are demo data -- say so and point at setup. A full-width flex item at
-     * the end of the grid (so it flows BELOW the icons instead of overlapping them
-     * now that the app grid can be three rows); the grid scrolls to reveal it.
-     * Disappears once dav_user (the Apple ID) is set. */
-    if(appcfg()->dav_user[0] == '\0'){
-        lv_obj_t *hint = lv_label_create(grid);
-        lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(hint, lv_pct(100));
-        lv_obj_set_style_pad_top(hint, 6, 0);
-        lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
-        lv_label_set_text(hint, "Demo data shown. To sync your own:\n"
-                                "edit config.ini on the card, or tap\n"
-                                "Menu > Settings > Accounts.");
-    }
+    /* W10 REMOVED THE ONBOARDING HINT that used to hang off the end of this grid.
+     * Three faults, and the third is fatal on its own:
+     *
+     *   It dead-ended -- "edit config.ini on the card" is not something a person
+     *   holding the device can do. It read as an unfinished-setup nag, which
+     *   item 17 rejects: a sync without an account is a supported way to use
+     *   this thing, not a half-finished one. And the app grid is three rows of
+     *   52 px in a 184 px area, so the hint sat BELOW THE FOLD and the launcher
+     *   had to be scrolled to read it -- a notice nobody sees is not a notice.
+     *
+     * What it was genuinely for -- "those contacts are not yours, they are
+     * samples" -- now lives on the HotSync screen, which is where somebody is
+     * actually asking what syncing would do for them. */
 
     /* LAST, so the app grid gets the pool first. If there is not enough left for
      * four small objects, the right thing to lose is the charge readout, not an
@@ -2597,8 +2624,20 @@ static void show_pref_edit(int i){
  * keyboard (the Preferences field pattern); the name is auto-derived from the host.
  * The list persists to feeds.txt on every change, and HotSync fetches the enabled
  * feeds. See bridge/feeds.c. */
-static void feeds_back_cb(lv_event_t *e){ (void)e; show_prefs(); }
 static void feeds_add_cb(lv_event_t *e){ (void)e; show_feed_edit(-1); }
+/* W7: put the ten built-ins back. They are seeded on a fresh card and then
+ * editable, so the only way to lose one permanently was to delete it -- and the
+ * URL is the one thing here nobody can retype from memory. Adding is a no-op for
+ * a feed already in the list (feeds_add refuses duplicates), so this restores
+ * what is missing without disturbing what is there or re-enabling what was
+ * deliberately switched off. */
+static void feeds_builtin_cb(lv_event_t *e){ (void)e;
+    int before = feeds_count();
+    feeds_restore_builtins();
+    feeds_save(FEEDS_PATH);
+    show_feeds();
+    toast_show(feeds_count() > before ? "Built-ins restored" : "All built-ins present");
+}
 static void feeds_tbl_click_cb(lv_event_t *e){
     lv_obj_t *t = lv_event_get_target(e);
     uint32_t r=LV_TABLE_CELL_NONE, c=LV_TABLE_CELL_NONE;
@@ -2611,17 +2650,21 @@ static void show_feeds(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
     content_clear();
-    lv_label_set_text(title_lbl, "News Feeds");
+    lv_label_set_text(title_lbl, "News");
     update_cat_trigger();
 
-    lv_obj_t *back = lv_button_create(content);
-    lv_obj_set_size(back, 58, 26); lv_obj_align(back, LV_ALIGN_TOP_LEFT, 2, 2);
-    lv_obj_t *bl=lv_label_create(back); lv_label_set_text(bl,"Prefs"); lv_obj_center(bl);
-    lv_obj_add_event_cb(back, feeds_back_cb, LV_EVENT_CLICKED, NULL);
+    /* W7: this IS the News tile's panel now, not a sub-screen of a list of
+     * settings, so there is no "Prefs" button on it -- Home is the way out
+     * (design rule 3), the same as every other tile. The two buttons that are
+     * left both DO something to the list. */
     lv_obj_t *add = lv_button_create(content);
     lv_obj_set_size(add, 54, 26); lv_obj_align(add, LV_ALIGN_TOP_RIGHT, -2, 2);
     lv_obj_t *al=lv_label_create(add); lv_label_set_text(al,"Add"); lv_obj_center(al);
     lv_obj_add_event_cb(add, feeds_add_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *bi = lv_button_create(content);
+    lv_obj_set_size(bi, 96, 26); lv_obj_align(bi, LV_ALIGN_TOP_LEFT, 2, 2);
+    lv_obj_t *bil=lv_label_create(bi); lv_label_set_text(bil,"Built-ins"); lv_obj_center(bil);
+    lv_obj_add_event_cb(bi, feeds_builtin_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *t = lv_table_create(content);
     lv_obj_set_size(t, LCD_W, PDA_H - TITLE_H - 32);
@@ -2641,6 +2684,9 @@ static void show_feeds(void){
         }
     }
     lv_obj_add_event_cb(t, feeds_tbl_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    assist_say("Tap a box to switch a feed on or off. HotSync collects the ones "
+               "that are on, and they are read here offline.");
 }
 
 /* ---- add / edit one feed (URL on the tap keyboard; name auto-derived) ---- */
@@ -3568,6 +3614,10 @@ static void show_wifi_pick(int slot){
 
 static void show_set_panel(int tile){
     if(tile < 0 || tile >= SET_N) return;
+    /* W7: News has no panel of its own. The tile opens the feed list directly,
+     * because a panel holding one row that says "News feeds..." is a screen
+     * whose only content is the name of the next screen. */
+    if(tile == SET_NEWS){ show_feeds(); return; }
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
     content_clear();
@@ -3600,10 +3650,7 @@ static void show_set_panel(int tile){
         sp_field_row(list, tile, PF_CALB);
         sp_field_row(list, tile, PF_CARDB);
         break;
-    case SET_NEWS:
-        snprintf(row, sizeof row, "News feeds... (%d on)", feeds_enabled_count());
-        pf_add(list, row, pf_feeds_row_cb, 0);
-        break;
+
     case SET_TIME: {
         /* W8: the clock itself comes FIRST. Everything under it describes how the
          * time is displayed; these two are the time. Six rows, which is what fits
