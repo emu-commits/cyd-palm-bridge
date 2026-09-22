@@ -636,6 +636,16 @@ static void fmt_hm(int h, int m, char *out, int cap){
     snprintf(out, cap, "%d:%02d%s", h12, m, h < 12 ? "a" : "p");
 }
 
+/* The hour alone, for the weather strip's six narrow columns: "3p" or "15".
+ * Same setting, same function family -- a strip that stayed on one format while
+ * the clock above it changed is exactly the inconsistency fmt_hm was written to
+ * end. */
+static void fmt_hour(int h, char *out, int cap){
+    if(appcfg()->clock24){ snprintf(out, cap, "%02d", h); return; }
+    int h12 = h % 12 == 0 ? 12 : h % 12;
+    snprintf(out, cap, "%d%s", h12, h < 12 ? "a" : "p");
+}
+
 static void list_table_style(lv_obj_t *t){
     lv_obj_set_style_radius(t, 0, 0);
     lv_obj_set_style_border_width(t, 0, 0);            /* no frame round the list */
@@ -5686,11 +5696,9 @@ static void clock_tick(lv_timer_t *t){
     if(!clock_lbl) return;
     time_t now=0; time(&now);
     struct tm ti; localtime_r(&now, &ti);
-    int h = ti.tm_hour % 12; if(h==0) h = 12;
-    char b[24];
-    snprintf(b, sizeof b, "%d:%02d%s  %s %d",
-             h, ti.tm_min, ti.tm_hour < 12 ? "a" : "p",
-             CAL_MON[ti.tm_mon + 1], ti.tm_mday);
+    char hm[12]; fmt_hm(ti.tm_hour, ti.tm_min, hm, sizeof hm);
+    char b[32];
+    snprintf(b, sizeof b, "%s  %s %d", hm, CAL_MON[ti.tm_mon + 1], ti.tm_mday);
     lv_label_set_text(clock_lbl, b);
 }
 
@@ -6124,7 +6132,7 @@ static void dash_paint(void){
             int hh = g_wx.hr[k].hour24 % 12; if(hh==0) hh = 12;
             if(g_wx_col_t[i]){ snprintf(c,sizeof c,"%d\xC2\xB0",g_wx.hr[k].tempF);
                                lv_label_set_text(g_wx_col_t[i], c); }
-            if(g_wx_col_h[i]){ snprintf(c,sizeof c,"%d%s",hh,g_wx.hr[k].hour24<12?"a":"p");
+            if(g_wx_col_h[i]){ fmt_hour(g_wx.hr[k].hour24, c, sizeof c);
                                lv_label_set_text(g_wx_col_h[i], c); }
             if(g_wx_col_r[i]){ snprintf(c,sizeof c,"%d%%",g_wx.hr[k].rain);
                                lv_label_set_text(g_wx_col_r[i], c); }
@@ -6282,12 +6290,11 @@ void ui_show_lock(void){
     if(havewx && wx.sunrise_min>=0){
         char sun[24];
         int rh=wx.sunrise_min/60, rm=wx.sunrise_min%60, sh=wx.sunset_min/60, sm=wx.sunset_min%60;
-        int rh12=rh%12; if(rh12==0) rh12=12; int sh12=sh%12; if(sh12==0) sh12=12;
         /* one line rather than two stacked: the zone is the shortest on the
          * screen and the moon has to share it. */
-        snprintf(sun,sizeof sun,"%d:%02d%s",rh12,rm,rh<12?"a":"p");
+        fmt_hm(rh, rm, sun, sizeof sun);
         dash_lbl(DASH_MARGIN+4,286,"Rise",1); dash_lbl(DASH_MARGIN+36,286,sun,0);
-        snprintf(sun,sizeof sun,"%d:%02d%s",sh12,sm,sh<12?"a":"p");
+        fmt_hm(sh, sm, sun, sizeof sun);
         dash_lbl(DASH_MARGIN+80,286,"Set",1); dash_lbl(DASH_MARGIN+106,286,sun,0);
     }
     { int illum=0; const char *nm="";
