@@ -217,6 +217,18 @@ static lv_obj_t *active_ta;            /* last-focused textarea (Graffiti target
 
 /* To Do due-date picker state: edited via the due popup, written on Save. */
 static int g_due_has, g_due_y, g_due_m, g_due_d;
+/* Q2: the SAME date popup now serves the To Do's due date and the Date Book's
+ * event date. One popup, one set of state, one label -- writing a second
+ * calendar is how the two end up disagreeing about which day a tap means, and
+ * this one carries a hard-won fix (see due_cal_cb on
+ * lv_event_get_current_target). The only real difference is that a To Do may
+ * have no due date and an event must have a date, so "No Date" is offered to
+ * one and not the other. */
+static int g_due_optional = 1;
+/* Q3: the event's start time, picked from a list. Kept beside the date for the
+ * same reason -- the form holds it until Save, and nothing types it. */
+static int g_ev_h, g_ev_m;
+static lv_obj_t *g_time_lbl;
 static lv_obj_t *g_due_lbl;            /* label on the edit-form Due trigger */
 
 /* Date Book Details: alarm on/off + repeat type, edited in the Details sheet and
@@ -259,6 +271,9 @@ static void toast_show(const char *msg);   /* I4: transient save/delete feedback
 static void due_open(void);
 static void due_btn_cb(lv_event_t *e);
 static void due_set_label(void);
+static void time_btn_cb(lv_event_t *e);   /* Q3: the start-time list */
+static void time_set_label(void);
+static void time_close(void);
 static void br_open(void);
 
 /* Date Book uses PalmOS's date-centric views (Day/Week/Month) instead of a flat
@@ -938,9 +953,14 @@ static void save_cb(lv_event_t *e){
     if(cur_app->app == APP_CAL){
         Appt a; if(!data_get_cal(edit_uid,&a)) default_appt(&a);
         snprintf(a.description,sizeof a.description,"%s",fv(0));
-        int mo,dd,yy; if(sscanf(fv(1),"%d/%d/%d",&mo,&dd,&yy)==3){ a.month=mo; a.day=dd; a.year=yy; }
-        int hh,mm; if(sscanf(fv(2),"%d:%d",&hh,&mm)==2){ a.hasTime=1; a.sH=hh; a.sM=mm; a.eH=(hh+1)%24; a.eM=mm; }
-        snprintf(a.note,sizeof a.note,"%s",fv(3));
+        /* Q2/Q3: picked, not parsed. The old sscanf pair accepted anything that
+         * looked vaguely like a date or a time and silently kept the record's
+         * previous value when it did not -- so a mistyped date looked saved and
+         * was not. A picked value cannot be malformed. */
+        if(g_due_has){ a.year = g_due_y; a.month = g_due_m; a.day = g_due_d; }
+        a.hasTime = 1; a.sH = g_ev_h; a.sM = g_ev_m;
+        a.eH = (g_ev_h + 1) % 24; a.eM = g_ev_m;   /* an hour long, as it always was */
+        snprintf(a.note,sizeof a.note,"%s",fv(1));
         a.hasAlarm = g_ev_alarm;                          /* Details sheet: alarm + repeat */
         if(g_ev_alarm && a.alarmAdv <= 0){ a.alarmAdv = 5; a.alarmUnit = 0; }  /* default 5 min */
         if(g_ev_repeat == repeatNone){ a.hasRepeat = 0; a.repeatType = repeatNone; }
@@ -1033,15 +1053,47 @@ static void show_edit(uint32_t uid){
         Appt a; if(!data_get_cal(uid,&a)) default_appt(&a);
         g_ev_alarm  = a.hasAlarm;                              /* Details sheet state */
         g_ev_repeat = a.hasRepeat ? a.repeatType : repeatNone;
-        char ds[24]; snprintf(ds,sizeof ds,"%d/%d/%d",a.month,a.day,a.year);
-        char ts[16]; snprintf(ts,sizeof ts,"%d:%02d",a.sH,a.sM);
+        /* Q2 + Q3: the date and the time were TYPED, in two formats a person had
+         * to know -- "M/D/YYYY" and "h:mm" -- and a typo in either was accepted
+         * silently by sscanf and written to the record. Both are now taps: the
+         * date on the calendar the To Do due picker already uses, the time from
+         * a list of half-hours. The Description and the Note stay typed, which
+         * is right: they are prose, and no list can offer them. */
+        g_due_has = 1; g_due_y = a.year; g_due_m = a.month; g_due_d = a.day;
+        g_due_optional = 0;                       /* an event must have a date */
+        g_ev_h = a.hasTime ? a.sH : 9;
+        g_ev_m = a.hasTime ? a.sM : 0;
         form_field(form,"Description",a.description,255,&y);
-        form_field(form,"Date (M/D/YYYY)",ds,16,&y);
-        form_field(form,"Time (h:mm)",ts,8,&y);
+
+        lv_obj_t *dlab = lv_label_create(form);
+        lv_label_set_text(dlab, "Date"); lv_obj_set_pos(dlab, 2, y);
+        lv_obj_t *db = lv_button_create(form);
+        lv_obj_set_size(db, LCD_W - 16, 30);
+        lv_obj_set_pos(db, 2, y + 15);
+        lv_obj_set_style_radius(db, 0, 0);
+        g_due_lbl = lv_label_create(db);
+        lv_obj_align(g_due_lbl, LV_ALIGN_LEFT_MID, 4, 0);
+        lv_obj_add_event_cb(db, due_btn_cb, LV_EVENT_CLICKED, NULL);
+        due_set_label();
+        y += 52;
+
+        lv_obj_t *tlab = lv_label_create(form);
+        lv_label_set_text(tlab, "Time"); lv_obj_set_pos(tlab, 2, y);
+        lv_obj_t *tb = lv_button_create(form);
+        lv_obj_set_size(tb, LCD_W - 16, 30);
+        lv_obj_set_pos(tb, 2, y + 15);
+        lv_obj_set_style_radius(tb, 0, 0);
+        g_time_lbl = lv_label_create(tb);
+        lv_obj_align(g_time_lbl, LV_ALIGN_LEFT_MID, 4, 0);
+        lv_obj_add_event_cb(tb, time_btn_cb, LV_EVENT_CLICKED, NULL);
+        time_set_label();
+        y += 52;
+
         form_field(form,"Note",a.note,500,&y);
     } else if(cur_app->app == APP_TODO){
         Todo t; if(!data_get_todo(uid,&t)) memset(&t,0,sizeof t);
         g_due_has=t.hasDue; g_due_y=t.dueY; g_due_m=t.dueM; g_due_d=t.dueD;
+        g_due_optional = 1;                    /* a To Do may have no due date */
         form_field(form,"Description",t.description,255,&y);
         form_field(form,"Note",t.note,500,&y);
         /* Due-date trigger (Palm's To Do due popup). A button, not a text field,
@@ -1321,6 +1373,10 @@ static int day_cmp(const void *a,const void *b){
 static void day_prev_cb(lv_event_t *e){ (void)e; cal_add_days(&g_cal_y,&g_cal_m,&g_cal_d,-1); show_datebook_day(g_cal_y,g_cal_m,g_cal_d); }
 static void day_next_cb(lv_event_t *e){ (void)e; cal_add_days(&g_cal_y,&g_cal_m,&g_cal_d, 1); show_datebook_day(g_cal_y,g_cal_m,g_cal_d); }
 static void day_week_cb(lv_event_t *e){ (void)e; show_datebook_week(g_cal_y,g_cal_m,g_cal_d); }  /* zoom out to the week */
+static void day_new_cb(lv_event_t *e){ (void)e;
+    cur_app = &APPDEFS[0];          /* Date Book, so the form builds the event arm */
+    show_edit(0);
+}
 
 static void show_datebook_day(int y,int m,int d){
     kill_kb();
@@ -1345,8 +1401,12 @@ static void show_datebook_day(int y,int m,int d){
     data_cal_day(y,m,d,day_collect,NULL);
     qsort(g_dayrows,g_ndayrows,sizeof g_dayrows[0],day_cmp);
 
+    /* Q1: the list gives up its last row so New can be a FIXED button rather
+     * than the final entry in a scrolling list. A day with eight events would
+     * have pushed that entry below the fold, and "add an event" is the one
+     * thing on this screen that must never be hidden by how full the day is. */
     lv_obj_t *list=lv_list_create(content);
-    lv_obj_set_size(list,LCD_W,FORM_FULL);
+    lv_obj_set_size(list,LCD_W,FORM_FULL-30);
     lv_obj_set_pos(list,0,34);
     lv_obj_set_style_radius(list,0,0); lv_obj_set_style_border_width(list,0,0); lv_obj_set_style_pad_all(list,0,0);
     if(g_ndayrows==0){
@@ -1356,6 +1416,18 @@ static void show_datebook_day(int y,int m,int d){
         lv_obj_set_style_radius(b,0,0);
         lv_obj_add_event_cb(b,row_cb,LV_EVENT_CLICKED,(void*)(uintptr_t)g_dayrows[i].uid);
     }
+
+    /* A new event lands on the day you are looking at, not on today --
+     * default_appt() already reads g_cal_*, which is what makes this button a
+     * one-tap answer to "something is happening on Thursday" rather than a
+     * date-correcting exercise. Until now New existed only under Menu, which
+     * is exactly the kind of thing nobody finds. */
+    lv_obj_t *nb=lv_button_create(content);
+    lv_obj_set_size(nb,LCD_W-8,26);
+    lv_obj_set_pos(nb,4,(PDA_H-TITLE_H)-28);
+    lv_obj_set_style_radius(nb,0,0);
+    lv_obj_t *nbl=lv_label_create(nb); lv_label_set_text(nbl,"New event"); lv_obj_center(nbl);
+    lv_obj_add_event_cb(nb,day_new_cb,LV_EVENT_CLICKED,NULL);
 }
 
 /* --- Week view (7-day agenda: one scrollable list, a count per day, today tinted).
@@ -3163,10 +3235,14 @@ static int   g_pick_n, g_pick_cur;
 static void  (*g_pick_done)(int);
 static const char *g_pick_title, *g_pick_help;
 static void show_pick_screen(void);
-static void pick_row_cb(lv_event_t *e){
-    int i = (int)(intptr_t)lv_event_get_user_data(e);
+/* the row index is the choice, exactly as it is in the zone picker */
+static void pick_tbl_cb(lv_event_t *e){
+    lv_obj_t *t = lv_event_get_target(e);
+    uint32_t r = LV_TABLE_CELL_NONE, c = LV_TABLE_CELL_NONE;
+    lv_table_get_selected_cell(t, &r, &c);
+    if(r == LV_TABLE_CELL_NONE || (int)r >= g_pick_n) return;
     void (*done)(int) = g_pick_done;
-    if(done) done(i);
+    if(done) done((int)r);
 }
 static void pick_open(const char *title, const char *help,
                       const char *const *items, int n, int cur, void (*done)(int)){
@@ -3181,11 +3257,16 @@ static void show_pick_screen(void){
     lv_label_set_text(title_lbl, g_pick_title ? g_pick_title : "Choose");
     update_cat_trigger();
 
-    lv_obj_t *list = lv_list_create(content);
+    /* ONE lv_table, for the same reason the zone picker is one and the event
+     * time picker had to become one: this screen serves three lists, and the
+     * longest of them is two dozen cities. An lv_list materialises a button AND
+     * a label per row, so that list was the closest thing in the build to the
+     * pool ceiling -- 7636 bytes free, measured by the gate that now watches it.
+     * A table is one object whatever the row count. */
+    lv_obj_t *list = lv_table_create(content);
     lv_obj_set_size(list, lv_pct(100), lv_pct(100));
-    lv_obj_set_style_radius(list, 0, 0);
-    lv_obj_set_style_border_width(list, 0, 0);
-    lv_obj_set_style_pad_all(list, 0, 0);
+    list_table_style(list);
+    lv_table_set_column_width(list, 0, LCD_W - 8);
 
     for(int i = 0; i < g_pick_n; i++){
         char row[80];
@@ -3198,8 +3279,9 @@ static void show_pick_screen(void){
          * worse than no marker at all. */
         snprintf(row, sizeof row, "%s %s", i == g_pick_cur ? ">" : "  ",
                  g_pick_items[i]);
-        pf_add(list, row, pick_row_cb, i);
+        lv_table_set_cell_value(list, i, 0, row);
     }
+    lv_obj_add_event_cb(list, pick_tbl_cb, LV_EVENT_VALUE_CHANGED, NULL);
     if(g_pick_help) assist_say(g_pick_help);
 }
 
@@ -5065,7 +5147,9 @@ void due_open(void){
     due_quick_btn(panel, "Today",    0);
     due_quick_btn(panel, "Tomorrow", 1);
     due_quick_btn(panel, "1 Week",   2);
-    due_quick_btn(panel, "No Date",  3);
+    /* An event that is on no day is not an event. A To Do with no due date is
+     * an ordinary thing to want, so the button appears for one and not both. */
+    if(g_due_optional) due_quick_btn(panel, "No Date",  3);
 
     /* calendar for an arbitrary day, seeded to the current due (or today) */
     lv_obj_t *cal = lv_calendar_create(panel);
@@ -5084,6 +5168,137 @@ void due_open(void){
     (void)sd;
 }
 static void due_btn_cb(lv_event_t *e){ (void)e; due_open(); }
+
+/* ==== Q3: the start time, picked from a list ===============================
+ * Every half hour from 8:00 AM to 9:00 PM -- 27 rows. That is more than fits,
+ * and it is allowed to be: design rule 2 bars a scrolling PAGE, and singles out
+ * a scrolling LIST as the acceptable case, because a list drags predictably
+ * where a page does not. The window covers the hours people put things in;
+ * anything outside it is typed, which is the documented fallback and not the
+ * default path.
+ *
+ * The popup is the due-date picker's own furniture -- a dimmed backdrop and a
+ * centred panel on lv_layer_top() -- for the same reason Q2 reuses its
+ * calendar: two popups that merely resemble each other drift.
+ */
+#define TIME_FIRST_H  8        /* 8:00 AM */
+#define TIME_LAST_H  21        /* 9:00 PM, inclusive of :00 only */
+
+void time_set_label(void){
+    if(!g_time_lbl) return;
+    int h12 = g_ev_h % 12 == 0 ? 12 : g_ev_h % 12;
+    if(appcfg()->clock24) lv_label_set_text_fmt(g_time_lbl, "%02d:%02d", g_ev_h, g_ev_m);
+    else lv_label_set_text_fmt(g_time_lbl, "%d:%02d %s", h12, g_ev_m, g_ev_h < 12 ? "AM" : "PM");
+}
+
+static lv_obj_t *g_timepop;
+static void time_close(void){ if(g_timepop){ lv_obj_del(g_timepop); g_timepop=NULL; } }
+static void time_backdrop_cb(lv_event_t *e){ (void)e; time_close(); }
+/* The row index IS the time: row 0 is TIME_FIRST_H:00 and every row is another
+ * half hour, which is the same arithmetic the zone picker does with its row
+ * index and needs no per-row user_data to carry. */
+static void time_tbl_cb(lv_event_t *e){
+    lv_obj_t *t = lv_event_get_target(e);
+    uint32_t r = LV_TABLE_CELL_NONE, c = LV_TABLE_CELL_NONE;
+    lv_table_get_selected_cell(t, &r, &c);
+    if(r == LV_TABLE_CELL_NONE) return;
+    int mins = TIME_FIRST_H * 60 + (int)r * 30;
+    if(mins > TIME_LAST_H * 60) return;
+    g_ev_h = mins / 60; g_ev_m = mins % 60;
+    time_set_label();
+    time_close();
+}
+/* The fallback: an hour outside the window, or a minute that is not :00/:30.
+ * It steps the hour so that even "type it" is still tapping -- the keyboard is
+ * for values no list can offer, and there are only 24 hours. */
+static void time_hour_cb(lv_event_t *e){
+    int d = (int)(intptr_t)lv_event_get_user_data(e);
+    g_ev_h = (g_ev_h + d + 24) % 24;
+    time_set_label();
+}
+static void time_min_cb(lv_event_t *e){
+    int d = (int)(intptr_t)lv_event_get_user_data(e);
+    g_ev_m = (g_ev_m + d + 60) % 60;
+    time_set_label();
+}
+static void time_step_btn(lv_obj_t *par, const char *txt, lv_event_cb_t cb, int ud){
+    lv_obj_t *b = lv_button_create(par);
+    lv_obj_set_width(b, lv_pct(22));
+    lv_obj_set_style_radius(b, 0, 0);
+    lv_obj_set_style_pad_ver(b, 4, 0);
+    lv_obj_t *l = lv_label_create(b); lv_label_set_text(l, txt); lv_obj_center(l);
+    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, (void *)(intptr_t)ud);
+}
+
+static void time_open(void){
+    if(g_timepop) return;
+    g_timepop = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_timepop, LCD_W, LCD_H);
+    lv_obj_set_style_bg_color(g_timepop, COL_LINE, 0);
+    lv_obj_set_style_bg_opa(g_timepop, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(g_timepop, 0, 0);
+    lv_obj_set_style_pad_all(g_timepop, 0, 0);
+    lv_obj_add_flag(g_timepop, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_timepop, time_backdrop_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *panel = lv_obj_create(g_timepop);
+    lv_obj_set_width(panel, LCD_W - 20);
+    lv_obj_set_height(panel, 250);
+    lv_obj_center(panel);
+    lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_style_flex_main_place(panel, LV_FLEX_ALIGN_SPACE_BETWEEN, 0);
+    lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
+    lv_obj_set_style_border_width(panel, 1, 0);
+    lv_obj_set_style_border_color(panel, COL_LINE, 0);
+    lv_obj_set_style_radius(panel, 0, 0);
+    lv_obj_set_style_pad_all(panel, 4, 0);
+    lv_obj_set_style_pad_row(panel, 3, 0);
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *hdr = lv_label_create(panel);
+    lv_obj_set_width(hdr, lv_pct(100));
+    lv_label_set_text(hdr, "Start time:");
+    lv_obj_set_style_text_font(hdr, &lv_font_palm_bold, 0);
+
+    /* anything the list cannot offer, still without a keyboard */
+    time_step_btn(panel, "-1 h", time_hour_cb, -1);
+    time_step_btn(panel, "+1 h", time_hour_cb,  1);
+    time_step_btn(panel, "-5 m", time_min_cb,  -5);
+    time_step_btn(panel, "+5 m", time_min_cb,   5);
+
+    /* ONE lv_table, NOT 27 lv_list buttons.
+     *
+     * The first version of this screen was a list, and it crashed the device the
+     * moment the Time field was tapped. lv_list_add_button materialises a button
+     * AND a label per row -- 54 objects here -- on top of an edit form that is
+     * already built and must stay built underneath (the popup exists precisely
+     * so the typed description survives). That exhausts the 32 KB object pool,
+     * which is this project's oldest and most repeated failure: the record list
+     * hit it, the zone picker hit it at ~24 rows, the Preferences list hit it at
+     * three extra rows, and the brightness popup hit it hardest because it fails
+     * as a WDT freeze rather than an error. lv_table is VIRTUALISED -- one
+     * object whatever the row count -- and the zone picker's comment says so in
+     * as many words. I wrote the list anyway; the gate now measures the pool so
+     * the next one cannot get as far as the glass (see sim/host_main.c). */
+    lv_obj_t *t = lv_table_create(panel);
+    lv_obj_set_width(t, lv_pct(100));
+    lv_obj_set_height(t, 160);
+    list_table_style(t);
+    lv_table_set_column_width(t, 0, LCD_W - 34);
+    int h24 = appcfg()->clock24, row = 0;
+    for(int h = TIME_FIRST_H; h <= TIME_LAST_H; h++){
+        for(int m = 0; m < 60; m += 30){
+            if(h == TIME_LAST_H && m) break;      /* stops at 9:00 PM exactly */
+            char txt[16];
+            if(h24) snprintf(txt, sizeof txt, "%02d:%02d", h, m);
+            else snprintf(txt, sizeof txt, "%d:%02d %s",
+                          h % 12 == 0 ? 12 : h % 12, m, h < 12 ? "AM" : "PM");
+            lv_table_set_cell_value(t, row++, 0, txt);
+        }
+    }
+    lv_obj_add_event_cb(t, time_tbl_cb, LV_EVENT_VALUE_CHANGED, NULL);
+}
+static void time_btn_cb(lv_event_t *e){ (void)e; time_open(); }
 
 /* ------------------------- Preferences: brightness stepper ------------------------- */
 /* A [ - ]  75%  [ + ] popup that live-adjusts the backlight and persists on close.
@@ -6903,6 +7118,9 @@ static void content_clear(void){
     /* edit / preferences forms */
     g_pw_body = NULL;
     g_form = NULL; active_ta = NULL; edit_cat_lbl = NULL; g_due_lbl = NULL;
+    /* Q3: the time popup is on lv_layer_top(), so leaving the form does not take
+     * it with it -- the same trap the HotSync confirmation documents. */
+    time_close(); g_time_lbl = NULL;
     for(int i = 0; i < 12; i++) g_fields[i] = NULL;
     g_nfields = 0;
     /* record + search tables */

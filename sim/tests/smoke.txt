@@ -141,6 +141,26 @@ c 18 300
 t 300
 c 60 68
 t 400
+s q1_new_event
+# Q2: the event's date is picked on the SAME calendar the To Do due picker uses
+# -- one popup, one set of state, and it carries the hard-won
+# lv_event_get_current_target fix. "No Date" is absent here: an event that is on
+# no day is not an event.
+c 60 108
+t 400
+s q2_date_popup
+c 61 200
+t 400
+s q2_date_picked
+# Q3: the start time comes from a list of half-hours, 8:00 AM to 9:00 PM. The
+# four steppers above it reach anything the list cannot offer -- so even the
+# fallback is tapping, not typing.
+c 60 152
+t 400
+s q3_time_popup
+c 120 190
+t 400
+s q3_time_picked
 c 120 188
 t 400
 c 150 105

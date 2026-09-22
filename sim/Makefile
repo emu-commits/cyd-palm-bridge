@@ -88,7 +88,11 @@ build/liblvgl.a: lvgl/src $(LVGL_OBJS)
 build/sim_host: build/liblvgl.a $(APP_SRCS) host_main.c sim_port.h sim_heap.h lv_conf.h
 	$(CC) $(CFLAGS) $(APP_SRCS) host_main.c build/liblvgl.a -o $@ -lm $(WRAP_LD)
 
-# ---- smoke: the CI gate (scripted run must exit 0 and produce shots) ----
+# ---- smoke: the CI gate (scripted run must exit 0 and produce shots).
+# The run also WATCHES THE LVGL OBJECT POOL at every screenshot and fails if any
+# screen leaves less than POOL_FLOOR free (host_main.c). That is the project's
+# most repeated failure -- a per-row widget where a virtualised table belongs --
+# and until now it was only ever caught by a person tapping the glass. ----
 smoke: host
 	rm -rf build/shots && mkdir -p build/shots
 	./build/sim_host build/shots < tests/smoke.txt
