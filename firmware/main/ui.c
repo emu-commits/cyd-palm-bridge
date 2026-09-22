@@ -2993,7 +2993,11 @@ static void show_prefs(void){
  * are still lists -- it is the one screen that can show every setting at once,
  * which is worth something when a config.ini is wrong and you need to see why. */
 enum { SET_WIFI, SET_ACCT, SET_NEWS, SET_TIME, SET_DISP,
-       SET_LOC, SET_SYNC, SET_OWNER, SET_ABOUT, SET_N };
+       SET_LOC, SET_SYNC, SET_OWNER, SET_ABOUT, SET_N,
+       /* Not a tile -- there are nine of those and there is no tenth icon.
+        * SET_ADVANCED is a panel reached only from Accounts, and it sits past
+        * SET_N so that everything iterating the grid stops before it. */
+       SET_ADVANCED, SET_PANEL_N };
 static const char *SET_NAMES[SET_N] = {
     "Wi-Fi", "Accounts", "News", "Date & Time", "Display",
     "Location", "Sync", "Owner", "About",
@@ -3036,7 +3040,7 @@ static void show_wifi_net(int slot);
 static void set_return(void){
     if(g_set_ret == RET_DASH)   { show_dash_settings(); return; }
     if(g_set_ret == RET_WIFI)   { show_wifi_net(g_wifi_slot); return; }
-    if(g_set_ret >= 0 && g_set_ret < SET_N){ show_set_panel(g_set_ret); return; }
+    if(g_set_ret >= 0 && g_set_ret < SET_PANEL_N){ show_set_panel(g_set_ret); return; }
     show_prefs();
 }
 
@@ -3059,6 +3063,12 @@ static void sp_fmt_cb(lv_event_t *e){ (void)e;
     show_set_panel(SET_TIME);
 }
 static void sp_prefs_cb(lv_event_t *e){ (void)e; show_prefs(); }
+static void sp_advanced_cb(lv_event_t *e){ (void)e; show_set_panel(SET_ADVANCED); }
+/* Discovery, opened from a tile: the tile records itself as the way back. */
+static void sp_disc_cb(lv_event_t *e){
+    g_set_ret = (int)(intptr_t)lv_event_get_user_data(e);
+    pf_disc_row_cb(e);
+}
 static void sp_tile_cb(lv_event_t *e){
     show_set_panel((int)(intptr_t)lv_event_get_user_data(e));
 }
@@ -3613,7 +3623,7 @@ static void show_wifi_pick(int slot){
 }
 
 static void show_set_panel(int tile){
-    if(tile < 0 || tile >= SET_N) return;
+    if(tile < 0 || tile >= SET_PANEL_N) return;
     /* W7: News has no panel of its own. The tile opens the feed list directly,
      * because a panel holding one row that says "News feeds..." is a screen
      * whose only content is the name of the next screen. */
@@ -3621,7 +3631,7 @@ static void show_set_panel(int tile){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
     content_clear();
-    lv_label_set_text(title_lbl, SET_NAMES[tile]);
+    lv_label_set_text(title_lbl, tile < SET_N ? SET_NAMES[tile] : "Advanced");
     update_cat_trigger();
 
     lv_obj_t *list = lv_list_create(content);
@@ -3645,10 +3655,18 @@ static void show_set_panel(int tile){
         }
         break;
     case SET_ACCT:
+        /* W6: two things to type and then a button that finds the rest. The two
+         * server addresses moved behind "Advanced": they default to iCloud,
+         * nobody with an Apple ID ever needs them, and sitting in the account
+         * flow they read as two more required fields. */
         sp_field_row(list, tile, PF_USER);
         sp_field_row(list, tile, PF_PASS);
-        sp_field_row(list, tile, PF_CALB);
-        sp_field_row(list, tile, PF_CARDB);
+        pf_add(list, "Find my calendars...", sp_disc_cb, SET_ACCT);
+        pf_add(list, "Advanced (server addresses)", sp_advanced_cb, 0);
+        break;
+    case SET_ADVANCED:
+        sp_field_row(list, SET_ACCT, PF_CALB);
+        sp_field_row(list, SET_ACCT, PF_CARDB);
         break;
 
     case SET_TIME: {
@@ -3706,7 +3724,7 @@ static void show_set_panel(int tile){
         sp_field_row(list, tile, PF_CAL);
         sp_field_row(list, tile, PF_TODO);
         sp_field_row(list, tile, PF_CARD);
-        pf_add(list, "Discover collections...", pf_disc_row_cb, 0);
+        pf_add(list, "Discover collections...", sp_disc_cb, SET_SYNC);
         /* Most edits persist as they are made (the editor saves on Save), but
          * Discover writes straight into the in-memory config, so this row is
          * still the one that commits its results to the card. */
@@ -3730,7 +3748,10 @@ static void show_set_panel(int tile){
     /* W4: she explains what this tile is FOR, every time it opens -- this is the
      * panel's caption, not a greeting, so it is not rationed to once per unlock.
      * It costs the screen nothing: the strip has no job on a panel of buttons. */
-    assist_say(SET_BLURB[tile]);
+    assist_say(tile < SET_N ? SET_BLURB[tile]
+                            : "Where the calendars live. These are already right "
+                              "for an Apple account -- change them only for a "
+                              "server that is not iCloud.");
 }
 
 static void show_settings(void){
@@ -3832,7 +3853,10 @@ static void disc_row_cb(lv_event_t *e){
         role_btn(panel, "Address book",         idx, 'a');
     }
 }
-static void disc_back_cb(lv_event_t *e){ (void)e; show_prefs(); }
+/* W6: back to whoever opened discovery -- the Accounts tile, the Sync tile, or
+ * the one-list view. It always went to the Preferences list before, which was
+ * the only caller there was; now it is the wrong answer two times out of three. */
+static void disc_back_cb(lv_event_t *e){ (void)e; set_return(); }
 
 static void disc_show_results(void){
     disc_built = 1;
@@ -3858,6 +3882,8 @@ static void disc_show_results(void){
     lv_obj_t *hint = lv_label_create(content);
     lv_obj_align(hint, LV_ALIGN_TOP_RIGHT, -6, 8);
     lv_label_set_text(hint, "tap to assign");
+    assist_say("Your calendars and address books, as the account reports them. "
+               "Tap one to say what this device should use it for.");
 
     lv_obj_t *list = lv_list_create(content);
     lv_obj_set_size(list, LCD_W, FORM_FULL);

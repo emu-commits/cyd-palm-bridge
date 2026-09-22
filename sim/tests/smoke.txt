@@ -390,6 +390,42 @@ c 208 40
 t 200
 s prefs_field_saved
 t 300
+# W6: the account flow proper. The Accounts panel is two things to type and then
+# a button that finds the rest: "Find my calendars..." (row 3) runs discovery and
+# lists the account's collections BY NAME. Tapping one opens the role popup --
+# Calendar / Reminders / Address -- which is what stops anyone ever pasting a
+# UUID path. Discovery runs in the simulator against a pretend account (see
+# sim/stubs/hotsync_stub.c); only the network is missing, and the network is not
+# the part that gets designed wrong.
+c 120 93
+t 500
+s w6_discover
+c 120 65
+t 400
+s w6_role_popup
+# The popup is centred and sized to its content: its two role buttons land at
+# about y=158 and y=186. Measured off w6_role_popup.png, not guessed -- the
+# first attempt aimed at 126, hit the header, and w6_assigned came out as a
+# second photograph of the popup.
+c 120 158
+t 400
+s w6_assigned
+# back lands on ACCOUNTS, not on the old one-list view -- discovery is reachable
+# from three places now and "back" used to mean the same one every time.
+c 32 40
+t 400
+s w6_back_to_accounts
+# Advanced: the two server addresses, off the account path because they default
+# to iCloud and read as two more required fields when they are in it.
+c 120 121
+t 400
+s w6_advanced
+c 18 225
+t 300
+c 18 300
+t 300
+c 75 66
+t 400
 # Home, then Settings > Display (row 2, col 2) -> the brightness stepper. It must
 # NOT be an lv_slider: a bar/slider draw-layer alloc live-locks LVGL on the 32 KB
 # pool -> WDT freeze. Open the [-] NN% [+] popup, step it, close. A regression
