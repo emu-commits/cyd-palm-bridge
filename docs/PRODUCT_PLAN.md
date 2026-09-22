@@ -31,9 +31,13 @@ keep.**
   on glass doesn't build the muscle memory that transfers to pen and paper, and the
   gap only widens at kanji scale (15–20 strokes). It's a teaching tool, not a selling
   point. It stays in the launcher as a bonus, not a headline.
-- **Weather location: `lat`/`lon` in `config.ini` for v1** (2026-08-19); IP
-  geolocation at first sync as the later product answer; **WiFi positioning
-  rejected**. A forecast's resolution is kilometres, so locating the device to tens of
+- **Weather location: DERIVED, not typed** (2026-09-22). The "later product
+  answer" is now the answer: a zone pick places the device offline and instantly,
+  and the first sync corrects it by **IP geolocation** (`bridge/geoip.c`, one
+  plain HTTP GET to a CSV endpoint, made only while the location is unset). The
+  typed `lat`/`lon` in `config.ini` remain as the correction path, which is what
+  they are good for. **WiFi positioning stays rejected** — and W5's scan does not
+  reopen it. A forecast's resolution is kilometres, so locating the device to tens of
   metres is precision that gets discarded on arrival — and the free WiFi-positioning
   landscape has moved (Mozilla Location Service retired in 2024; Google's is billable
   and the key would have to ship inside the device, where it leaks). This is a desk

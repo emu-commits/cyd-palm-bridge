@@ -6,7 +6,7 @@ CORE    = bridge/pdb.c bridge/datebook.c bridge/address.c bridge/ical.c bridge/v
 
 all: roundtrip bridge_cli incremental synctoken category bigsync multiapp \
      uidmatch idempotent streamparse find_test calc_test config_test rss_test news_test wx_test \
-     feeds_test break_test toobig
+     feeds_test break_test geoip_test toobig
 
 dirs:
 	@mkdir -p pdb state
@@ -69,6 +69,11 @@ wx_test: tests/wx_test.c bridge/wxfetch.c firmware/main/dash.c | dirs
 config_test: tests/config_test.c bridge/config.c | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
+# The reply is POSITIONAL, so the query string and the parser are one decision --
+# this gate holds them together as well as checking the parse.
+geoip_test: tests/geoip_test.c bridge/geoip.c | dirs
+	$(CC) $(CFLAGS) -o $@ $^
+
 rss_test: tests/rss_test.c bridge/rss.c | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
@@ -92,11 +97,12 @@ fuzz_test: tests/fuzz_test.c $(CORE) | dirs
 rss_asan: tests/rss_test.c bridge/rss.c | dirs
 	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -o $@ $^
 
-test: roundtrip find_test calc_test config_test streamparse rss_test news_test wx_test feeds_test break_test
+test: roundtrip find_test calc_test config_test streamparse rss_test news_test wx_test feeds_test break_test geoip_test
 	./roundtrip
 	./find_test
 	./calc_test
 	./config_test
+	./geoip_test
 	./streamparse
 	./rss_test
 	./news_test

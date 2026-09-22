@@ -16,6 +16,45 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-22 — the location stops being two numbers you type
+
+Latitude and longitude were the last values in Settings that could only be
+entered as numbers, and a wrong one fails in the worst way available: silently.
+Weather simply never appears, and nothing on screen says why. W9 made them a
+list of cities; this makes them something nobody has to answer at all.
+
+- **A zone pick places the device.** Setting a time zone is unavoidable, and
+  W9 gave the zone table each city's coordinates, so an unplaced device places
+  itself for free, offline, with no taps and no network. It is a ZONE and not a
+  town -- America/New_York from Boston is a forecast 300 km away -- so it fills
+  an EMPTY location only and never replaces a city the user picked.
+- **The first sync corrects it.** `locate_by_ip()` asks ip-api.com's **CSV**
+  endpoint, for the same reason wxfetch asks Open-Meteo for `&format=csv`: this
+  device has no JSON parser and no heap to spare for one. The reply is one short
+  line. It runs ONLY while the location is unset, so it is one request in a
+  device's life rather than one per sync, and it runs BEFORE fetch_weather() so
+  the forecast in that same sync uses what it found -- the alternative is telling
+  somebody their new device will have weather tomorrow.
+- **The timezone comes back in the same reply** and is taken on the same terms:
+  only if the device does not already have one. A device that has never been
+  configured has no zone either, and this is the one moment it can learn both.
+- **Plain HTTP, deliberately.** The free tier serves no TLS, and there is nothing
+  here worth protecting: the request carries no identity beyond the source
+  address every server already sees, and the worst a man-in-the-middle achieves
+  is the wrong town's weather. The TLS handshake is the largest single allocation
+  a sync makes on this device; paying it for that would cost more than it buys.
+- **Wi-Fi positioning stays rejected** (PRODUCT_PLAN, 2026-08-19) and W5's scan
+  does not reopen it: a forecast resolves to kilometres, Mozilla's free service
+  retired in 2024, and Google's key would ship inside the device where it leaks.
+
+**The gate holds the URL and the parser together.** The reply is POSITIONAL, so a
+field added or reordered in the query string silently shifts every column --
+`geoip_test` asserts the URL asks for exactly the fields the parser reads, in
+order, alongside the parse itself. The fixtures include the two failures that are
+normal rather than exceptional: a carrier NAT's `fail,private range`, and a
+captive portal's HTML. Both must leave the location untouched, because empty is
+how "not set" is spelled and half-set would look deliberate.
+
 ### 2026-09-22 — the rest of the W phase: W4–W10
 
 Seven groups in one sitting, all `[s]`-gated. The common thread is the phase's

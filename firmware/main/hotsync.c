@@ -17,6 +17,7 @@
 #include "wxfetch.h"      /* Open-Meteo CSV -> WxCache */
 #include "secrets.h"
 #include "appcfg.h"
+#include "geoip.h"
 #include "clock.h"
 #include "power.h"        /* drain log: a sync is the expensive interval */
 #include <string.h>
@@ -532,8 +533,62 @@ static void fetch_news(void){
  * and says so, because a dashboard quietly showing sample weather forever is
  * how we got here. */
 #define WX_TMP "/sdcard/.wxtmp"
+#define GEO_TMP "/sdcard/.geotmp"   /* the IP-location reply, one short line */
 static char s_wx_why[48];
 static int  s_wx_ok;
+
+/* ---- where are we? (the first sync only) ---------------------------------
+ * Latitude and longitude were the last two values in Settings that could only be
+ * entered as numbers, and a wrong one fails silently: weather simply never
+ * appears. A device that is on the internet at all already knows enough to place
+ * itself in the right town, which is all a forecast can use.
+ *
+ * ONLY WHEN THE LOCATION IS UNSET, so this is one request in a device's life
+ * rather than one per sync, and a coordinate the user chose is never overwritten
+ * by a guess. The timezone comes back in the same reply and is taken on the same
+ * terms -- only if the device does not already have one.
+ *
+ * Runs before fetch_weather() so the forecast in THIS sync uses what it found:
+ * the alternative is telling somebody their brand new device will have weather
+ * tomorrow. See bridge/geoip.h for why this is IP-based and not Wi-Fi-based, and
+ * why it is plain HTTP. */
+static void locate_by_ip(Config *cfg){
+    if(cfg->latitude[0] && cfg->longitude[0]) return;      /* already placed */
+    setst("Finding your area...");
+
+    int st = dav_fetch_url(geoip_url(), GEO_TMP);
+    if(st < 200 || st >= 300){
+        ESP_LOGW(TAG,"geoip: GET st=%d (location still unset)", st);
+        remove(GEO_TMP);
+        return;
+    }
+    char body[160] = "";
+    FILE *f = fopen(GEO_TMP, "rb");
+    if(f){ size_t n = fread(body, 1, sizeof body - 1, f); body[n] = 0; fclose(f); }
+    remove(GEO_TMP);
+
+    char lat[sizeof cfg->latitude], lon[sizeof cfg->longitude], tz[sizeof cfg->timezone];
+    if(!geoip_parse(body, lat, sizeof lat, lon, sizeof lon, tz, sizeof tz)){
+        ESP_LOGW(TAG,"geoip: reply not usable (location still unset)");
+        return;
+    }
+    snprintf(cfg->latitude,  sizeof cfg->latitude,  "%s", lat);
+    snprintf(cfg->longitude, sizeof cfg->longitude, "%s", lon);
+    /* The zone is a bonus, and it is taken on the same terms: a device that has
+     * never been configured has no zone either, and this is the one moment it
+     * can learn both. A zone the user picked is left alone. */
+    int took_tz = 0;
+    if(tz[0] && !cfg->timezone[0]){
+        snprintf(cfg->timezone, sizeof cfg->timezone, "%s", tz);
+        clock_set_tz(cfg->timezone);
+        took_tz = 1;
+    }
+    appcfg_save();
+    /* Coordinates are not secret and this line is the only way to tell a wrong
+     * placement from a failed one, which is the whole reason weather is blank. */
+    ESP_LOGI(TAG,"geoip: located at %s,%s%s%s", cfg->latitude, cfg->longitude,
+             took_tz ? " tz=" : "", took_tz ? cfg->timezone : "");
+}
 
 static void fetch_weather(const Config *cfg){
     s_wx_ok = 0; s_wx_why[0] = 0;
@@ -822,6 +877,7 @@ static void hotsync_task(void *arg){
      * does not still sit through ten feed fetches before noticing. */
     if(!hs_stop()){
         fetch_news();      /* RSS reader: fetch configured feeds while Wi-Fi is up */
+        locate_by_ip(appcfg_mut());  /* no-op unless the device has never been placed */
         fetch_weather(cfg);/* lock-screen dashboard: the last thing the network is for */
     }
     dav_disconnect();

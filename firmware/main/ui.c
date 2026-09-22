@@ -2794,7 +2794,24 @@ static void tz_tbl_click_cb(lv_event_t *e){
         if(zi < 0 || zi >= clock_zone_count()) return;
         const char *z = clock_zone_name(zi);
         snprintf(dst, cap, "%s", z);
-        if(g_zone_target==ZTGT_TZ) clock_set_tz(z);   /* apply the system zone immediately */
+        if(g_zone_target==ZTGT_TZ){
+            clock_set_tz(z);                          /* apply the system zone immediately */
+            /* THE ZONE ALREADY KNOWS ROUGHLY WHERE YOU ARE, and setting one is
+             * unavoidable, so a device that has never been placed places itself
+             * here: free, offline, no taps, and available on a device that has
+             * never seen a network. It is a ZONE and not a town -- pick
+             * America/New_York from Boston and you get New York's forecast, 300
+             * km away -- so it fills an EMPTY location only, never replacing a
+             * city the user picked or a coordinate a sync found, and the
+             * Location tile still says which place is in force so a wrong one
+             * is visible and one tap from being fixed. */
+            const char *lat = NULL, *lon = NULL;
+            if(!cfg->latitude[0] && !cfg->longitude[0] && clock_zone_latlon(zi, &lat, &lon)){
+                snprintf(cfg->latitude,  sizeof cfg->latitude,  "%s", lat);
+                snprintf(cfg->longitude, sizeof cfg->longitude, "%s", lon);
+                toast_show("Weather location set too");
+            }
+        }
     }
     appcfg_save();            /* persist to SD now -> survives reboot */
     zone_picker_return();

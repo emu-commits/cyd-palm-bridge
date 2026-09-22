@@ -552,6 +552,30 @@ t 400
 s world_picker
 c 38 38
 t 400
+# The SYSTEM zone (row 3, y=93) is the one that also places the device: setting a
+# zone is unavoidable, the zone table carries each city's coordinates, and a
+# device that has never been placed gets a location for free and offline. It
+# fills an EMPTY location only -- W9's city picker set one earlier in this run,
+# so what this shot proves is that the earlier choice SURVIVES a zone being
+# picked afterwards. The toast appears only on the empty case.
+c 120 93
+t 400
+s tz_picker
+c 120 65
+t 500
+s tz_picked
+# ...and Location still reads Detroit, which W9 picked earlier in this run. This
+# is the assertion, not the toast: "fills an empty location" is easy to write and
+# easy to turn into "overwrites the location" by deleting one condition.
+c 18 225
+t 300
+c 18 300
+t 300
+c 75 66
+t 400
+c 195 110
+t 400
+s tz_kept_location
 c 18 225
 t 300
 # The old one-list Preferences view is NOT deleted -- it is the only screen that

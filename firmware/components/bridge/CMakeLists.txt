@@ -24,6 +24,7 @@ idf_component_register(
         "${BRIDGE_DIR}/rss.c"
         "${BRIDGE_DIR}/news.c"
         "${BRIDGE_DIR}/wxfetch.c"
+        "${BRIDGE_DIR}/geoip.c"
         "${BRIDGE_DIR}/feeds.c"
     INCLUDE_DIRS
         "."
