@@ -17,15 +17,43 @@ mostly away from the bench via the browser simulator).
 
 ---
 
-## RESUME HERE — state at 2026-09-22
+## RESUME HERE — state at 2026-09-22 (end of session)
 
-**THE W PHASE IS CODE COMPLETE. W1–W10 are all built and gated**; what is left of
-it is `[d]` boxes. Settings is a nine-tile grid, every tile is a real screen, the
-Assistant explains each one from the Graffiti strip, Wi-Fi remembers four
-networks and finds them by scanning, the clock can be set by hand, Accounts
-discovers collections by name, and a sync no longer implies iCloud. **`Q` is the
-next phase** — and Q1–Q8 were written under the same design rules, so read them
-before starting.
+**THE W PHASE IS DONE (`W1`–`W10`) AND `Q1`–`Q4` ARE DONE.** Settings is a
+nine-tile grid, every tile is a real screen, the Assistant explains each one from
+the Graffiti strip, Wi-Fi remembers four networks and finds them by scanning, the
+clock can be set by hand, Accounts discovers collections by name, a sync no
+longer implies iCloud, **the device works out where it is instead of asking**,
+the Date Book's date and time are picked rather than typed, and every Graffiti
+stroke is on one sheet. **`Q5`–`Q8` are what is left of the phase.**
+
+**FOUR THINGS THIS SESSION LEARNED THE HARD WAY.** Each cost a bench round-trip;
+none is discoverable from the code:
+
+1. **`lv_malloc` IS THE POOL, NOT THE HEAP.** Two budgets — a fixed 31 KB LVGL
+   pool and ~140 KB of system heap — and only one is scarce. An 11 KB
+   `lv_malloc` for a canvas buffer segfaulted a screen on open. Raw buffers use
+   `malloc`; every LVGL *object* comes from the pool.
+2. **THE SMOKE NOW MEASURES THE POOL** at every screenshot, names the screen at
+   the low-water mark, and fails under 3 KB (`sim/host_main.c`). This project's
+   oldest failure is a per-row widget where a virtualised table belongs, and
+   until now it was only ever caught by a person tapping glass. It has already
+   caught two: a 27-row `lv_list` that crashed the device, and a 22-row one that
+   had not yet.
+3. **INVENTED FIXTURES TEST THE AUTHOR, NOT THE SERVICE.** `ip-api.com` answers
+   in its own field order and ignores the order requested; every fixture in the
+   geoip gate had been written in the assumed shape and all of them passed, while
+   the device failed. Fixtures are verbatim captures now.
+4. **`lv_font_palm` HAS NO SYMBOL RANGE** — a 32..255 Latin subset. A bullet, a
+   check mark and `LV_SYMBOL` arrows all draw as empty boxes. Use ASCII, or set
+   `LV_FONT_DEFAULT` on the one widget that needs a glyph. Anything on
+   `lv_layer_top()` gets montserrat for free, because it inherits nothing.
+
+**SCROLL-TO-READ IS NOT SCROLL-TO-SELECT** (2026-09-22, from the bench, and it
+refines design rule 2). The objection to scrolling is about a page you must
+*select* from, where a drag that lands as a tap picks the wrong thing. A page you
+scroll to *read* has no such failure — which is why the stroke sheet is one sheet
+rather than three pages to lose your place in.
 
 **The strip is a place to stand.** W3's finding, and the one most reusable thing
 the phase produced: 240×112 of screen that any non-typing screen has no use for,
@@ -64,10 +92,13 @@ overturn habits this codebase already has: *no scrolling if it can be avoided*
 (swipe scrolling is poor on this hardware/OS pair) and *tap to pick, don't type* —
 the keyboard is for server addresses and passwords only.
 
-**The bench device is AHEAD of `main`.** Flashed 2026-09-22 with **`d012ad5`** —
-the whole W phase, `W1`–`W10`, plus the location work, as committed on
-`feat/settings-screen` (PR #59). **The IP location fix is confirmed working on
-glass** (Detroit → Bloomfield in one sync).
+**The bench device holds the session's work.** Flashed 2026-09-22, repeatedly,
+ending at the W phase + `Q1`–`Q4`. **Confirmed on glass by the user:** the
+Assistant's greeting and the Settings grid, the IP location fix (Detroit →
+Bloomfield in one sync), and the Date Book's new-event flow after the time
+picker was rebuilt. **Re-flash before reasoning about what is on it** — this
+session flashed a dozen times and the bench is only ever as current as the last
+one.
 Boot verified clean (`panel init done`, `SD mounted`, 19/19/4 records, `LVGL up`).
 W3 was judged on glass first from a `-dirty` build and two faults came back from
 that look: the "Date & Time" tile had a scrollbar drawn under its label, and the
@@ -110,7 +141,7 @@ Concise index. Detail for each is below, or in the named doc.
    Only `[d]` boxes left: the Wi-Fi join and scan against real APs, a real iCloud
    login, the clock write, an accountless sync, and the two questions the
    Assistant's pane raises. §W.
-7. **Q — quick entry and polish. THE ACTIVE PHASE.** Eight groups, `Q1`–`Q8`: Date Book `New` +
+7. **Q — quick entry and polish. THE ACTIVE PHASE, `Q1`–`Q4` done.** `Q5`–`Q8` left: Date Book `New` +
    calendar + time list, Graffiti stroke reference, lock-screen restyle, quick-add
    rows in Address / To Do / Memo. §Q.
 8. **P6 — Assistant onboarding. SUPERSEDED by W**, kept for its three decided
@@ -427,7 +458,7 @@ almost everyone.
 
 ---
 
-## §Q — PHASE: quick entry and polish (ACTIVE)
+## §Q — PHASE: quick entry and polish (ACTIVE — `Q1`–`Q4` done)
 
 Items 9–16 of the same request. Independent of W, mostly small, each its own
 commit. Design rules 1–4 above apply here too — item 4's tap-don't-type and
@@ -559,6 +590,11 @@ don't-scroll instructions were given for the whole request, not just for Setting
   from the harness.
 
 ### Live-network verifies
+- **Q1–Q4 on glass `[d]`.** The new-event flow was confirmed working after the
+  fix; still unseen by anyone: the stroke sheet's legibility at 40 px cells on a
+  real panel (the strokes are 18 px of 2 px ink), whether its scroll feels right
+  under a thumb, and whether the 12/24-hour setting now reads consistently
+  across the title bar, the weather strip and Rise/Set.
 - **IP geolocation — `[d]` CONFIRMED ON GLASS 2026-09-22.** A device holding a
   hand-picked Detroit was moved to Bloomfield NJ (the user is in Jersey City) by
   one sync, and the Location panel showed the new place and coordinates. What it
