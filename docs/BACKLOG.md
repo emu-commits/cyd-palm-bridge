@@ -19,19 +19,31 @@ mostly away from the bench via the browser simulator).
 
 ## RESUME HERE — state at 2026-09-21
 
-**The bench device is one commit behind.** It holds `81a8ded`; `main` has since
-taken the docs consolidation (`4048806`, no code) and **P10** (new portraits, the
-greeting moved onto the week screen, tap-anywhere). P10 changes pixels, so the
-device wants a reflash before any `[d]` box is looked at. The last flash booted
-clean (SD mounted, 19/19/4 records, LVGL up, battery 100%). The web emulator
-deploys from `main` and serves this code.
+**A big new body of work arrived and is now written down.** Seventeen items,
+grouped into two new phases: **W — Settings and its nine wizards** (the whole
+Preferences surface is being rebuilt as a launcher-style icon screen with the
+Assistant narrating it) and **Q — quick entry and polish** (tap-not-type entry in
+the Date Book, quick-add rows, a Graffiti stroke reference, the lock-screen
+restyle). Both are below, each group sized to one commit. **W is the active
+phase; the three-speakers phase is done except for its `[d]` boxes.**
 
-**The device is holding the newest code and almost none of it has been looked at.**
-Nine `[d]` boxes are open and every one of them is now flashable-and-checkable in a
-single sitting. **The user has said they will test later — do not tick those boxes
-for them.**
+**Read the W phase's design rules before building anything in it.** Two of them
+overturn habits this codebase already has: *no scrolling if it can be avoided*
+(swipe scrolling is poor on this hardware/OS pair) and *tap to pick, don't type* —
+the keyboard is for server addresses and passwords only.
 
-The only unbuilt code in the active phase is **P6, the Assistant onboarding**.
+**The bench device is current.** It holds `4942131` = the code merged as
+`f0796b9` (**P10**: new portraits, the greeting moved onto the week screen,
+tap-anywhere). Flash verified 2026-09-21, hard reset issued. **P10's two on-glass
+questions have NOT been answered** — the user chose to merge and report later.
+The web emulator deploys from `main` and serves this code.
+
+**Nine `[d]` boxes are open** and every one is flashable-and-checkable in a single
+sitting on the code already on the device. **The user has said they will test
+later — do not tick those boxes for them.**
+
+**P6 is superseded**, not done — see §P6. Item 17 of the new work contradicts its
+primary trigger outright.
 
 ---
 
@@ -54,60 +66,70 @@ Concise index. Detail for each is below, or in the named doc.
    collection, href relocation, `config.ini` round-trip. §Device.
 
 ### B. Code to write
-6. **P6 — Assistant onboarding (Wi-Fi + CalDAV).** The last unbuilt group in the
-   active phase. §P6.
-7. **"About this screen" help panel on every screen `[s]`.** §Sim.
-8. **Graffiti writing *feel*** — ink-trail / char-echo UX; thresholds still want
-   device telemetry. §Sim.
-9. **Engine: external merge sort** — turns "refuses safely" into "handles a real
-   account". §Engine.
-10. **Engine: shrink the sync working set** 23.5 KB → ~7 KB by streaming `g_objbuf`
+6. **W — Settings and its nine wizards.** THE ACTIVE PHASE. Preferences becomes
+   Settings, a nine-icon screen; four real wizards behind it, five small panels,
+   the Assistant narrating; Wi-Fi remembers four networks; HotSync stops needing
+   iCloud. Ten groups, `W1`–`W10`. §W.
+7. **Q — quick entry and polish.** Eight groups, `Q1`–`Q8`: Date Book `New` +
+   calendar + time list, Graffiti stroke reference, lock-screen restyle, quick-add
+   rows in Address / To Do / Memo. §Q.
+8. **P6 — Assistant onboarding. SUPERSEDED by W**, kept for its three decided
+   entry points, one of which item 17 retires. §P6.
+9. **"About this screen" help panel on every screen `[s]`.** §Sim.
+10. **Graffiti writing *feel*** — ink-trail / char-echo UX; thresholds still want
+    device telemetry. §Sim. (The stroke *reference card* is separate: `Q4`.)
+11. **Engine: external merge sort** — turns "refuses safely" into "handles a real
+    account". §Engine.
+12. **Engine: shrink the sync working set** 23.5 KB → ~7 KB by streaming `g_objbuf`
     and `g_body`. §Engine.
-11. **Engine: three small correctness items** — `pdb_read` failing loudly, the
+13. **Engine: three small correctness items** — `pdb_read` failing loudly, the
     mass-delete guard's untested positive path, `st->pushDel` mislabelling.
     §Engine.
 
 ### C. Tidy-ups (small, known, not urgent)
-12. **Move `dash.c` / `dash.h` into `bridge/`** — removes the backwards include path
+14. **Move `dash.c` / `dash.h` into `bridge/`** — removes the backwards include path
     at `firmware/components/bridge/CMakeLists.txt:35`. **Verified still open.**
-13. **CI simulator-smoke has no `timeout-minutes`.** One line; it hung 1h55m once.
+15. **CI simulator-smoke has no `timeout-minutes`.** One line; it hung 1h55m once.
     **Verified still open — there is no `timeout-minutes` anywhere in `ci.yml`.**
-14. **Delete or fix the dead boot-SNTP code** at `app_main.c:289-292` — it sits
+16. **Delete or fix the dead boot-SNTP code** at `app_main.c:289-292` — it sits
     below `lvgl_port_run()`'s `while(1)` and can never execute. §Stubbed.
-15. **Gate the `[dav]` firmware telemetry** behind a flag, as the host `[sync]`
+17. **Gate the `[dav]` firmware telemetry** behind a flag, as the host `[sync]`
     lines already are. Needs an ESP-IDF compile to confirm no unused-var warnings.
-16. **iCloud data hygiene** — one-time removal of seed contacts / duplicate events
+18. **iCloud data hygiene** — one-time removal of seed contacts / duplicate events
     left in the real account from the broken-sync era.
-17. **`heap[wifi-up]` is ~13 KB lower after a session of app use** than after a
+19. **`heap[wifi-up]` is ~13 KB lower after a session of app use** than after a
     fresh boot (44.9 KB at 18 min uptime). Not chased. The next thread if feed
     fetches fail intermittently.
 
 ### D. Hardware decisions (see `PRODUCT_PLAN.md` for the ship context)
-18. **C3 — Sound.** No speaker/DAC wired. Gates real alarms and game feedback, and
+20. **C3 — Sound.** No speaker/DAC wired. Gates real alarms and game feedback, and
     is the highest perceived-charm-per-byte item on the list.
-19. **U8 — Battery: two loose ends.** Does the gauge track a real discharge? Is the
+21. **U8 — Battery: two loose ends.** Does the gauge track a real discharge? Is the
     divider on tolerance (`BAT_TRIM_PERMILLE`)? §Device.
-20. **U8b — Screen-on power.** Idle is *solved*; the charge goes to the backlight.
+22. **U8b — Screen-on power.** Idle is *solved*; the charge goes to the backlight.
     §Device.
-21. **Hardware button → sleep, not power-off.** Firmware-or-soldering depends on
+23. **Hardware button → sleep, not power-off.** Firmware-or-soldering depends on
     which button. §Device.
-22. **U9 — Case.** Out of software scope, gating for launch.
+24. **U9 — Case.** Out of software scope, gating for launch.
 
 ### E. Parked — offered, NOT approved (do not build without a yes)
-23. Opt-in CORS-proxy RSS fetch in the web emulator.
-24. Coach's optional hardware: the 8:00 knock, the piezo tick, ESP-NOW co-working.
-25. **S5 — real sync in the sim.** Still open, but its strongest consumer (M2) is
+25. Opt-in CORS-proxy RSS fetch in the web emulator.
+26. Coach's optional hardware: the 8:00 knock, the piezo tick, ESP-NOW co-working.
+27. **S5 — real sync in the sim.** Still open, but its strongest consumer (M2) is
     done, so it now only buys emulator parity. §Stubbed.
 
 ### F. Someday
-26. Preferences app icon in the launcher; dark mode.
+28. Dark mode. *(A Preferences icon in the launcher used to sit here; **W1**
+    answers it from the Menu instead, which is where Palm put it.)*
 
 ---
 
-## PHASE: the three speakers (ACTIVE)
+## PHASE: the three speakers (CODE COMPLETE — only `[d]` boxes left)
 
-The portraits and everything built on them are on `main` as of PR #52. The phase
-stays ACTIVE because P6 is unbuilt and every `[d]` is still open.
+The portraits and everything built on them are on `main` (PR #52, then #55). **P6,
+the one group that was never built, has been superseded by the W phase** — the
+Assistant's onboarding job is now the Settings wizards, not a standalone flow. So
+nothing in this phase is waiting on code; nine `[d]` boxes are waiting on eyes.
 
 **Working agreement.** Tick a box only when it is *verified*, not when it is
 written — `[s]` = sim-verified (`make -C sim smoke` + the shot checked by eye),
@@ -177,26 +199,195 @@ off `main`.
       and if LVGL's scroll-vs-click threshold is wrong for a finger the report
       becomes unreadable rather than merely awkward.
 
-### P6 — Assistant onboarding (Wi-Fi + CalDAV) — THE LAST UNBUILT GROUP
-All three entry points decided 2026-09-18:
-- [ ] **Sync Now with no credentials** starts the guided flow instead of failing —
-      the primary trigger, because it is where the user already is.
-- [ ] **Menu > Setup Assistant**, permanent, so it is re-runnable after a wrong
-      password without clearing config by hand.
-- [ ] **The launcher's demo-data hint becomes a button** into the flow, replacing
-      today's dead-end ("edit config.ini on the card, or tap Menu > Preferences").
-- [ ] Assistant portrait + bubble guides each step; keyboard/Graffiti entry for
-      SSID, password, Apple ID, app-specific password.
-- [ ] Hands off to the existing **Discover collections** flow (`hotsync_discover_*`)
-      rather than asking for UUID paths.
-- [ ] `[d]` **device-only** — needs a real Wi-Fi join, the user's Apple ID and an
-      app-specific password.
+### P6 — Assistant onboarding — SUPERSEDED BY THE W PHASE (2026-09-21)
+Do not build P6 as written. Its whole job — the Assistant explaining Wi-Fi and
+CalDAV — is now **W2/W3/W5/W6**, reached from the Settings screen instead of from
+a one-shot flow. What is worth carrying forward, and what is not:
 
-### Parked until this phase lands — the Assistant's other jobs
+- **RETIRED. "Sync Now with no credentials starts the guided flow."** This was
+  P6's *primary* trigger, and **item 17 contradicts it outright**: HotSync must
+  work with no iCloud setup and must not prompt the user into it. A sync with no
+  credentials now does the work it *can* do (clock, RSS) and says so plainly.
+  See **W10**.
+- **CARRIED → W1.** *Menu > Setup Assistant, permanent and re-runnable after a
+  wrong password.* This survives as Menu ▸ **Settings**, which is permanent by
+  construction and re-entrable per wizard — a better answer than one linear flow.
+- **CARRIED, SOFTENED → W10.** *The launcher's demo-data hint becomes a button.*
+  The dead-end text ("edit config.ini on the card, or tap Menu > Preferences") is
+  still wrong and still wants fixing. But item 17 says not to push iCloud, so the
+  hint should point at **Settings**, not at an account flow, and it should read as
+  information rather than as an unfinished-setup nag. **OPEN:** whether the hint
+  should appear at all once sync works without iCloud.
+- **CARRIED → W6.** Hand off to the existing **Discover collections** flow
+  (`hotsync_discover_*`) rather than asking for UUID paths.
+- **STILL TRUE.** The account half is `[d]` **device-only** — a real Wi-Fi join,
+  the user's Apple ID and an app-specific password. Nothing in W changes that.
+
+### Parked until the W phase lands — the Assistant's other jobs
 Ideas only, cheapest first. **Do not build in this phase.** Sync failure explainer
 (probably the highest value — sync errors are raw status text today); first-boot
-welcome; preferences that still expect pasted paths; SD missing/corrupt explainer;
-time zone / clock drift setup.
+welcome; SD missing/corrupt explainer. *(Two former entries are now W work:
+"preferences that still expect pasted paths" is **W6**, "time zone / clock drift
+setup" is **W8**.)*
+
+---
+
+## §W — PHASE: Settings and its nine wizards (ACTIVE)
+
+Requested 2026-09-21, items 1–8 and 17 of seventeen. The whole configuration
+surface is rebuilt: **Menu ▸ Preferences becomes Menu ▸ Settings**, which opens a
+nine-icon screen in the launcher's own idiom, and each icon opens a wizard. **The
+old Preferences list is retired only when all nine tiles exist** — until then both
+routes stay reachable, because the list is the only way to reach a field whose
+wizard is unbuilt.
+
+### The design rules — read these before building any W group
+They overturn habits this codebase already has, so they are written down once,
+here, rather than re-argued per group.
+
+1. **Tap to pick, never type — unless precision demands it.** Every value that
+   comes from a known set (zones, times, policies, brightness, a discovered
+   collection) is chosen from a list or a grid. **The on-screen keyboard is for
+   server addresses and passwords only**, where the value is arbitrary and a typo
+   is silent. This is the single rule most likely to be violated by copying the
+   existing `pf_edit` single-field editor, which is a textarea for *everything*.
+2. **Do not scroll if it can be avoided.** Swipe scrolling is poor on this
+   hardware/OS pair — resistive panel plus LVGL's drag threshold. Design each
+   wizard step to fit the 240×184 content area outright. Where a list genuinely
+   cannot (a zone list, a 27-row time list), it is a *list* being scrolled, which
+   behaves far better than a scrolled *page*. **OPEN, and worth settling on
+   glass:** the Coach and Guru week screens scroll today (P10), and if item 4's
+   complaint applies to them too, `tap_anywhere()` on a scrolling page is the
+   exact combination most at risk.
+3. **The Home button is the way out.** No Back buttons — P10 established the
+   pattern and the reason (a Back button below the fold makes *leaving* the
+   hardest thing on the screen). Home returns to the launcher from anywhere in
+   Settings.
+4. **Pool-safe widgets only.** Unchanged and non-negotiable: no `lv_bar`,
+   `lv_slider`, `lv_arc` or `lv_meter` — they allocate draw layers and live-lock
+   the fixed 32 KB pool into a WDT freeze. Labels, lists, tables, button matrices
+   and the I1 canvas. A brightness *stepper* already exists and is the model for
+   any numeric control.
+5. **Every wizard is re-entrable.** A wrong password must be fixable by opening
+   the same wizard again, never by clearing `config.ini` by hand. This is what
+   P6's "permanent Menu ▸ Setup Assistant" bullet was protecting, and it survives.
+
+### The nine tiles — decided 2026-09-21
+Every tile maps to configuration that exists today, so none is a dead icon.
+**Location is the notable win:** `latitude`/`longitude` are currently reachable
+only from a Lock Screen sub-screen, which is why weather silently does nothing for
+almost everyone.
+
+| Tile | Covers | Config fields |
+|---|---|---|
+| **Wi-Fi** | four remembered networks | `wifi_ssid`/`wifi_pass` → ×4 + order |
+| **Accounts** | CalDAV/CardDAV login + hosts | `dav_user`, `dav_pass`, `dav_base`, `dav_card_base` |
+| **News** | the feed list | `feeds.h` |
+| **Date & Time** | time, zone, 12/24h, world clocks | `timezone`, `clock24`, `world1`, `world2` |
+| **Display** | brightness, backlight timeout | `brightness`, `backlight_sec` |
+| **Location** | weather location | `latitude`, `longitude` |
+| **Sync** | conflict policy + collections | `policy`, `cal_coll`, `todo_coll`, `card_coll` |
+| **Owner** | name shown on the lock screen | **NEW FIELD** — nothing exists yet |
+| **About** | version, GPLv3/PumpkinOS provenance | the existing About panel |
+
+### The groups — one commit each, branch off `main`
+- [ ] **W1 — Settings replaces Preferences `[s]`.** Rename the menu entry; build
+      the nine-icon screen on `show_launcher()`'s pattern (a flex `ROW_WRAP` grid
+      of 68×52 cells, which is already proven to seat nine icons in three rows
+      with nothing below the fold). Home exits. Tiles with no wizard yet fall
+      through to the matching Preferences field, so the screen is never a
+      dead end. **Smoke-gate the grid before any wizard exists.**
+- [ ] **W2 — nine icons in early-Palm-OS style `[s]`.** ~24×22 A8, generated the
+      way `gen_guru_icon.py` and `gen_zip_icon.py` generate theirs — **one
+      `tools/gen_settings_icons.py` for all nine**, not nine scripts. Follow the
+      house idiom that `gen_guru_icon.py` documents: the Palm icons are a **solid
+      disk with the subject knocked out in white**, ink-as-disk not
+      subject-as-ink. Remember P10's lesson — **trim blank rows top and bottom**,
+      they are not free.
+- [ ] **W3 — the Assistant greets Settings `[s]`.** First entry after an unlock
+      only, rotating non-repeating lines, tap anywhere to proceed — exactly the
+      Coach/Guru contract. `speaker_greet()`, `tap_anywhere()` and the
+      since-unlock flag all exist and are shared; `assistant_face` is already in
+      flash at 60×77 and is the one portrait not yet used anywhere.
+- [ ] **W4 — the Assistant narrates each wizard `[s]`.** Her bubble carries the
+      step's instruction. **OPEN:** whether she is present on *every* step or only
+      on a wizard's first screen — on a 240×184 area her portrait plus a bubble
+      costs roughly half the height, which fights design rule 2 hard. Decide with
+      one wizard built, not in advance.
+- [ ] **W5 — Wi-Fi wizard: four networks `[s]`+`[d]`.** `Config` grows to four
+      SSID/password pairs plus a last-connected marker; `config.ini` gains a
+      round-trip for them (**host-gated** — `bridge/config.c` is in `make test`).
+      HotSync tries them **in order of last successful connection**, most recent
+      first. Four fits one non-scrolling list. `[d]` for the join itself.
+- [ ] **W6 — Accounts wizard `[s]`+`[d]`.** Separate from Wi-Fi, per item 6.
+      Apple ID and app-specific password via keyboard (rule 1's exception), then
+      hand off to the existing **`hotsync_discover_*`** flow so collections are
+      *picked from a list*, never pasted as UUID paths. `[d]` — needs a real
+      account.
+- [ ] **W7 — News Feeds wizard `[s]`.** Its own tile. The feed manager already
+      exists (`ui.c:2535`, "Preferences → News feeds…") and mostly needs
+      re-homing plus the tap-first treatment.
+- [ ] **W8 — Date & Time wizard `[s]`.** Time, zone, 12/24h, the two world
+      clocks. The zone picker already exists (`ui.c:2673`). Time-of-day set by
+      picking, not typing.
+- [ ] **W9 — the five small panels `[s]`.** Display, Location, Sync, Owner,
+      About. Small enough to share one commit; **Owner needs a new `Config`
+      field** and a lock-screen render for it.
+- [ ] **W10 — HotSync works without iCloud `[s]`+`[d]`.** Item 17, and the one
+      that changes existing behaviour rather than adding a screen. With no
+      account configured, a sync must still do **clock and RSS** and report what
+      it did, rather than failing or steering the user into account setup. Audit
+      every prompt that pushes toward iCloud — starting with the launcher's
+      demo-data hint (`ui.c:2318`), which today dead-ends at "edit config.ini on
+      the card". See §P6 for what item 17 retires.
+
+---
+
+## §Q — PHASE: quick entry and polish (NEXT)
+
+Items 9–16 of the same request. Independent of W, mostly small, each its own
+commit. Design rules 1–4 above apply here too — item 4's tap-don't-type and
+don't-scroll instructions were given for the whole request, not just for Settings.
+
+- [ ] **Q1 — Date Book day view gets a `New` button `[s]`.** At the bottom of the
+      day's list, opening the new-event screen. Today a new event is reachable
+      only through Menu ▸ New (`act_new`, `ui.c:3013`), which is exactly the kind
+      of thing nobody finds.
+- [ ] **Q2 — new event: pick the date on a calendar `[s]`.** **Most of this is
+      already built.** `due_open()` (`ui.c:4030`) is a working calendar popup with
+      Today / Tomorrow / 1 Week quick buttons, and it carries a hard-won fix —
+      `lv_event_get_current_target()`, because the bubbled `VALUE_CHANGED` hands
+      back the button matrix and `lv_calendar_get_pressed_date()` will happily
+      cast it and return a date assembled from unrelated memory. **Reuse it; do
+      not write a second one.**
+- [ ] **Q3 — new event: pick the time from a list `[s]`.** Every 30 minutes from
+      8:00 AM to 9:00 PM — 27 rows — with typing as the fallback for anything
+      outside that window. A 27-row `lv_list` is one object and scrolls as a list,
+      not as a page (rule 2). **OPEN:** does this cover the end time as well, and
+      should end default to start + 1 hour?
+- [ ] **Q4 — Graffiti stroke reference `[s]`.** A button in the Graffiti app
+      showing every character stroke on one page for quick reference. **OPEN:**
+      item 12 says "swipeable", which fights rule 2 — propose paged with explicit
+      next/prev taps and confirm. The stroke data already exists (the recogniser's
+      templates); this is a rendering job, and the I1 canvas is the pool-safe
+      surface for it.
+- [ ] **Q5 — lock-screen restyle `[s]`.** Item 13: the three black zone bars
+      (`CONDITIONS` / `AHEAD` / `SUN & MOON`, drawn at `DASH_Y_WX`,
+      `DASH_Y_AGENDA`, `DASH_Y_SUN`) go **grey**, and the zone headers stop being
+      bold — `lv_font_palm` already exists alongside `lv_font_palm_bold`, so the
+      un-bolding is a style swap, not a font build. **Scope confirmed 2026-09-21:
+      the lock screen only.** The inverted app title bar stays black for now;
+      whether it follows is a question for the glass, since grey-on-grey through a
+      resistive panel is exactly what an emulator judges badly. Pick the grey with
+      `COL_RULE` `0xC8C8C8` and `COL_DIM` `0x8C8C8C` in mind — P9's open `[d]` box
+      is already asking whether those two are distinguishable on the real panel,
+      and this adds a third grey to the same question.
+- [ ] **Q6 — Address: shorten the lookup box, add `New` `[s]`.** Item 14.
+- [ ] **Q7 — To Do quick-add `[s]`.** A static field pinned at the top with a
+      `New` button at its right: type, tap, a row appears. Item 15.
+- [ ] **Q8 — Memo Pad quick-add `[s]`.** The same control as Q7, and it should be
+      literally the same helper — two quick-add bars that merely resemble each
+      other will drift, which is the mistake P10 was built to avoid. Item 16.
 
 ---
 
@@ -217,7 +408,8 @@ time zone / clock drift setup.
   the *feel* — ink-trail / char-echo UX — and final threshold tuning, which wants
   real on-device `graf` telemetry rather than the synthetic model. For a hand the
   built-ins still misread, **Train mode** already records a per-device template that
-  wins when closer.
+  wins when closer. **Not this item: the stroke reference card is `Q4`** — a
+  rendering job against the same template data, needing no telemetry at all.
 
 ---
 
@@ -393,7 +585,7 @@ Full text in git history.
   2026-08-27 field measurement killed the premise: drift on battery is under a minute
   a day, and idle already clears 24 h.** No part is needed for timekeeping. What
   survives is that an RTC *alarm pin* is the enabler for Coach's 8:00 knock, which is
-  parked and unapproved (§E-24) — and `PRODUCT_PLAN.md`'s 2026-08-17 note that an RTC
+  parked and unapproved (§E-26) — and `PRODUCT_PLAN.md`'s 2026-08-17 note that an RTC
   is in the production BOM stands on that basis, not on drift. **Open risk if it is
   ever fitted:** the RTC would share SPI2 with the SD card, and a breakout whose MISO
   does not go high-Z when CS is high will corrupt every SD read.
@@ -413,7 +605,7 @@ Full text in git history.
   genuinely unmeasured is the **handshake peak with the UI resident** — read it as the
   drop in `min_ever` between `pre-tls` and `post-tls` in `hs_heap()`, remembering that
   `min_ever` is since *boot*, so an unmoved value means the run was inconclusive
-  (reboot and sync immediately for a clean bracket). Folded into §C-17, the 13 KB
+  (reboot and sync immediately for a clean bracket). Folded into §C-19, the 13 KB
   post-session creep, which is the same measurement.
 - **C7 — the ✓ glyph in To Do. DONE 2026-09-20, and the blocker was never real.** It
   assumed the tick had to be a *glyph*, which the Palm font lacks in 32–255, so it sat
@@ -474,6 +666,8 @@ Full text in git history.
 
 ## Someday / nice-to-have
 
-Preferences app icon in the launcher; dark mode. *(The Graffiti case model is
-settled: one stroke set of 26 capital-style letters, lowercase output, upstroke =
-shift-next, two = caps lock.)*
+Dark mode. *(A **Preferences app icon in the launcher** used to sit here; **W1**
+answers it from Menu ▸ Settings instead, which is where Palm put it and which
+leaves the nine-app grid alone. The Graffiti case model is settled: one stroke set
+of 26 capital-style letters, lowercase output, upstroke = shift-next, two = caps
+lock.)*
