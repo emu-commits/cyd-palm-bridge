@@ -19,6 +19,10 @@ mostly away from the bench via the browser simulator).
 
 ## RESUME HERE — state at 2026-09-22 (end of session)
 
+**ALL OF IT IS MERGED TO `main`** (PR #59, 2026-09-22, 27 commits) **and the web
+emulator is redeployed from it.** `feat/settings-screen` is merged; start the
+next group on a fresh branch off `main`.
+
 **THE W PHASE IS DONE (`W1`–`W10`) AND `Q1`–`Q4` ARE DONE.** Settings is a
 nine-tile grid, every tile is a real screen, the Assistant explains each one from
 the Graffiti strip, Wi-Fi remembers four networks and finds them by scanning, the
@@ -30,6 +34,13 @@ stroke is on one sheet. **`Q5`–`Q8` are what is left of the phase.**
 **FOUR THINGS THIS SESSION LEARNED THE HARD WAY.** Each cost a bench round-trip;
 none is discoverable from the code:
 
+0. **LOCAL GREEN IS NOT CI GREEN.** Three failures in this session were
+   invisible to every local run: `make -C sim nosecrets` links a *subset* of the
+   sources (it found `appcfg.c` calling into `clock.c`), the **wasm** job is a
+   different toolchain (emscripten has no `settimeofday`, so W8's clock setter
+   failed to *link*), and ESP-IDF compiles with `-Werror=format-truncation`
+   which the simulator does not. **Before pushing: all twelve `make -C sim`
+   gates and an `idf.py build`, not just the smoke.**
 1. **`lv_malloc` IS THE POOL, NOT THE HEAP.** Two budgets — a fixed 31 KB LVGL
    pool and ~140 KB of system heap — and only one is scarce. An 11 KB
    `lv_malloc` for a canvas buffer segfaulted a screen on open. Raw buffers use
