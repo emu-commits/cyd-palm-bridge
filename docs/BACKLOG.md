@@ -64,9 +64,10 @@ overturn habits this codebase already has: *no scrolling if it can be avoided*
 (swipe scrolling is poor on this hardware/OS pair) and *tap to pick, don't type* —
 the keyboard is for server addresses and passwords only.
 
-**The bench device is AHEAD of `main`.** Flashed 2026-09-22 with **`0bbc5a7`** —
+**The bench device is AHEAD of `main`.** Flashed 2026-09-22 with **`d012ad5`** —
 the whole W phase, `W1`–`W10`, plus the location work, as committed on
-`feat/settings-screen` (PR #59).
+`feat/settings-screen` (PR #59). **The IP location fix is confirmed working on
+glass** (Detroit → Bloomfield in one sync).
 Boot verified clean (`panel init done`, `SD mounted`, 19/19/4 records, `LVGL up`).
 W3 was judged on glass first from a `-dirty` build and two faults came back from
 that look: the "Date & Time" tile had a scrollbar drawn under its label, and the
@@ -552,8 +553,14 @@ don't-scroll instructions were given for the whole request, not just for Setting
   from the harness.
 
 ### Live-network verifies
-- **IP geolocation `[d]`.** `locate_by_ip()` runs while the location is
-  APPROXIMATE (`loc_auto`) — unset, or derived from the zone or the city list. Wipe `latitude`/`longitude` from `config.ini`, sync, and
+- **IP geolocation — `[d]` CONFIRMED ON GLASS 2026-09-22.** A device holding a
+  hand-picked Detroit was moved to Bloomfield NJ (the user is in Jersey City) by
+  one sync, and the Location panel showed the new place and coordinates. What it
+  took to get there is worth keeping: see `BUILD_PROGRESS` — the CSV endpoint
+  ignores the field order you ask for, and the gate's invented fixtures agreed
+  with the bug for two builds. **Still open `[d]`:** `locate_by_ip()` runs while
+  the location is APPROXIMATE (`loc_auto`) — unset, or derived from the zone or
+  the city list. Wipe `latitude`/`longitude` from `config.ini`, sync, and
   confirm the `geoip:` log line names the right town. Two known ways it legitimately fails, both of
   which must leave the location unchanged rather than half-set: a carrier NAT
   (`fail,private range`) and a captive portal returning HTML. **Also confirm a
