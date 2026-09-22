@@ -64,8 +64,9 @@ overturn habits this codebase already has: *no scrolling if it can be avoided*
 (swipe scrolling is poor on this hardware/OS pair) and *tap to pick, don't type* —
 the keyboard is for server addresses and passwords only.
 
-**The bench device is AHEAD of `main`.** Flashed 2026-09-22 with **`a484f73`** —
-the whole W phase, `W1`–`W10`, as committed on `feat/settings-screen` (PR #59).
+**The bench device is AHEAD of `main`.** Flashed 2026-09-22 with **`0bbc5a7`** —
+the whole W phase, `W1`–`W10`, plus the location work, as committed on
+`feat/settings-screen` (PR #59).
 Boot verified clean (`panel init done`, `SD mounted`, 19/19/4 records, `LVGL up`).
 W3 was judged on glass first from a `-dirty` build and two faults came back from
 that look: the "Date & Time" tile had a scrollbar drawn under its label, and the
