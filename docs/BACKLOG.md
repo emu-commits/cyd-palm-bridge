@@ -64,13 +64,12 @@ overturn habits this codebase already has: *no scrolling if it can be avoided*
 (swipe scrolling is poor on this hardware/OS pair) and *tap to pick, don't type* —
 the keyboard is for server addresses and passwords only.
 
-**The bench device is AHEAD of `main`.** Flashed 2026-09-22 with
-`f0fcfb0-dirty` — W1 and W2 as merged, **plus W3 uncommitted from the working
-tree**, flashed so W3 could be judged on glass before being committed. Boot
-verified clean (`panel init done`, `SD mounted`, `LVGL up`, `lvgl pool: 31100
-total, 24100 free`, battery 4228 mV). **If the working tree has moved on and you
-are reasoning about what is on the glass, re-flash rather than guess — `-dirty`
-means the build is not recoverable from a commit hash.**
+**The bench device is AHEAD of `main`.** Flashed 2026-09-22 with **`a484f73`** —
+the whole W phase, `W1`–`W10`, as committed on `feat/settings-screen` (PR #59).
+Boot verified clean (`panel init done`, `SD mounted`, 19/19/4 records, `LVGL up`).
+W3 was judged on glass first from a `-dirty` build and two faults came back from
+that look: the "Date & Time" tile had a scrollbar drawn under its label, and the
+greeting's hint line was rendering in montserrat. Both fixed before W3 landed.
 
 It also still carries **P10** (new portraits, the greeting on the week screen,
 tap-anywhere), whose **two on-glass questions have NOT been answered** — the user
