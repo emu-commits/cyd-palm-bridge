@@ -927,7 +927,12 @@ static void hotsync_task(void *arg){
         snprintf(nws,sizeof nws,"no news (%.47s)", s_news_why[0] ? s_news_why : "all feeds failed");
 
     if(!dav_ok)
-        snprintf(msg,sizeof msg,"%.23s; %.63s%.39s%.47s; no records - %.39s",
+        /* The widths are a BUDGET, not decoration: msg is 208 bytes and the
+         * parts now add up to more than that if every one runs long. Adding the
+         * location note without re-cutting the others overflowed it, which
+         * ESP-IDF catches as -Werror=format-truncation and the simulator's
+         * plainer -Wall does not. 23+2+47+32+40+15+30 = 189. */
+        snprintf(msg,sizeof msg,"%.23s; %.47s%.32s%.40s; no records - %.30s",
                  clk,nws,wxs,geo,dav_why);
     else if(did==0 && failed>0){
         /* This used to say "low memory" for every failure, heap reading attached,
