@@ -61,6 +61,7 @@ static void spk_pane_close(void);   /* a speaker's overlay: it is on lv_layer_to
                                        so only content_clear() can be trusted to
                                        take it down when the screen changes */
 static void assistant_greet(void);  /* W3: her hello, over the Settings grid */
+static void assist_say(const char *text);  /* W4: her, explaining this screen */
 static lv_obj_t *title_lbl;
 static lv_obj_t *clock_lbl;    /* live clock in the title bar (Palm) */
 
@@ -2921,6 +2922,31 @@ static const char *SET_NAMES[SET_N] = {
     "Wi-Fi", "Accounts", "News", "Date & Time", "Display",
     "Location", "Sync", "Owner", "About",
 };
+/* W4: what the Assistant says when a tile opens. Each one says what the setting
+ * IS FOR -- the thing you cannot work out from the field names, and the thing
+ * that decides whether you need it at all -- never what to tap next, which the
+ * screen underneath her is already showing. Under ~115 characters (five lines in
+ * her balloon); over that they clip rather than wrap. */
+static const char *SET_BLURB[SET_N] = {
+    /* Wi-Fi     */ "The networks this device joins. It remembers four and tries "
+                    "the one that worked last, first.",
+    /* Accounts  */ "Your Apple ID, so the calendar and contacts here are the same "
+                    "ones on your phone.",
+    /* News      */ "The feeds HotSync collects. They are read here, offline, and "
+                    "need no account at all.",
+    /* Date&Time */ "The clock, the zone it keeps, and the two world clocks on the "
+                    "lock screen.",
+    /* Display   */ "How bright the screen is, and how long it stays lit. The "
+                    "backlight is most of the battery.",
+    /* Location  */ "Where you are, so the lock screen can show your weather. "
+                    "Without it, weather stays blank.",
+    /* Sync      */ "Which calendar and address book HotSync uses, and who wins "
+                    "when both sides changed.",
+    /* Owner     */ "Your name, on the lock screen, so a device found on a desk "
+                    "can be given back.",
+    /* About     */ "What this is, what it was built from, and the licence it "
+                    "ships under.",
+};
 static const lv_image_dsc_t *SET_ICONS[SET_N] = {
     &icon_set_wifi, &icon_set_accounts, &icon_set_news, &icon_set_datetime,
     &icon_set_display, &icon_set_location, &icon_set_sync, &icon_set_owner,
@@ -3051,6 +3077,11 @@ static void show_set_panel(int tile){
         pf_add(list, "All settings (one list)", sp_prefs_cb, 0);
         break;
     }
+
+    /* W4: she explains what this tile is FOR, every time it opens -- this is the
+     * panel's caption, not a greeting, so it is not rationed to once per unlock.
+     * It costs the screen nothing: the strip has no job on a panel of buttons. */
+    assist_say(SET_BLURB[tile]);
 }
 
 static void show_settings(void){
@@ -7646,7 +7677,7 @@ static lv_obj_t *spk_pane(int x, int y, int w, int h){
 #define SPK_AS_BUB_Y  4
 #define SPK_AS_BUB_H  86                       /* 5 * 14 text + pad + border      */
 static void speaker_aside(const lv_image_dsc_t *face, const char *line,
-                          lv_event_cb_t on_tap){
+                          const char *hint, lv_event_cb_t on_tap){
     const int fw = (int)face->header.w;
     lv_obj_t *pane = spk_pane(0, PDA_H, LCD_W, GRAFFITI_H);
 
@@ -7662,9 +7693,15 @@ static void speaker_aside(const lv_image_dsc_t *face, const char *line,
      * the person talking, and on all three portraits that is the top third. */
     spk_tail(pane, tail_x, SPK_AS_BUB_Y + 4, 1);
 
-    lv_obj_t *h = lv_label_create(pane);
-    lv_label_set_text(h, "tap to continue");
-    lv_obj_align(h, LV_ALIGN_BOTTOM_MID, 0, -4);
+    /* The hint is for the GREETING, which is a thing to get past. A step
+     * explanation has nowhere to continue to -- the screen it describes is
+     * already up and already live -- so it says nothing, and the tap that puts
+     * her away is learned once and works on both. */
+    if(hint){
+        lv_obj_t *h = lv_label_create(pane);
+        lv_label_set_text(h, hint);
+        lv_obj_align(h, LV_ALIGN_BOTTOM_MID, 0, -4);
+    }
 
     /* the same treatment the week screens need, and for the same reason: the
      * balloon covers most of the pane and is clickable by default, so without
@@ -7692,6 +7729,20 @@ static const char *const AS_GREETINGS[] = {
 
 static void as_greet_tap_cb(lv_event_t *e){ (void)e; spk_pane_close(); }
 
+/* W4: the Assistant explaining the screen you are on, as opposed to greeting you
+ * at the door. Same pane, same one-tap-puts-her-away rule, no hint line.
+ *
+ * She can be on EVERY step, which the plan was unsure about, and the thing that
+ * settles it is where the keyboard lives: the I1.2 tap keyboard is an
+ * lv_buttonmatrix inside the CONTENT area, not in the Graffiti strip. So there
+ * is no screen in Settings -- not even entering a password -- where she and the
+ * input want the same pixels. What she does cost on those screens is Graffiti as
+ * an alternative input, which is why one tap still puts her away. */
+static void assist_say(const char *text){
+    if(!text) return;
+    speaker_aside(&assistant_face, text, NULL, as_greet_tap_cb);
+}
+
 /* Called by show_settings() on every entry; it decides for itself whether one is
  * owed, so the Settings screen does not have to know the greeting rules.
  *
@@ -7705,7 +7756,7 @@ static void assistant_greet(void){
     greet_done(GREET_ASSIST);
     speaker_aside(&assistant_face,
                   greet_pick(AS_GREETINGS, AS_NGREET, &g_greet_last[GREET_ASSIST]),
-                  as_greet_tap_cb);
+                  "tap to continue", as_greet_tap_cb);
 }
 
 /* ---- the weekly report's own geometry ----
