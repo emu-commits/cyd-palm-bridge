@@ -622,6 +622,20 @@ static void list_draw_cb(lv_event_t *e){
 /* Everything a scrolling list shares: no frame, no cell boxes, one hairline per
  * row, and the draw hook above. Call it on every list table so they cannot
  * drift apart -- a list that skips this is a list that looks like a table. */
+/* ONE wall-clock formatter, because "12-hour or 24-hour" is a setting and a
+ * setting that half the screens ignore is worse than no setting. The Date Book
+ * had two different hard-coded answers -- the day list printed "18:00" and the
+ * week list printed "6:00p" -- so the same event read differently depending on
+ * which way you had zoomed into it, and Settings ▸ Date & Time changed neither.
+ *
+ * `pad` zero-pads the hour, which the 24-hour form always wants and the 12-hour
+ * form never does. */
+static void fmt_hm(int h, int m, char *out, int cap){
+    if(appcfg()->clock24){ snprintf(out, cap, "%02d:%02d", h, m); return; }
+    int h12 = h % 12 == 0 ? 12 : h % 12;
+    snprintf(out, cap, "%d:%02d%s", h12, m, h < 12 ? "a" : "p");
+}
+
 static void list_table_style(lv_obj_t *t){
     lv_obj_set_style_radius(t, 0, 0);
     lv_obj_set_style_border_width(t, 0, 0);            /* no frame round the list */
@@ -1367,6 +1381,21 @@ static void day_collect(uint32_t uid,const char *primary,const char *secondary,v
     snprintf(g_dayrows[g_ndayrows].txt,sizeof g_dayrows[0].txt,"%s",primary);
     g_ndayrows++;
 }
+/* "HH:MM  desc" -> "6:00p  desc" under a 12-hour clock, in place. An untimed
+ * event arrives as "--:--" and stays: it is already the right thing to read. */
+static void day_row_clock(char *txt, int cap){
+    if(appcfg()->clock24) return;                  /* already the wanted form */
+    int h, m;
+    if(sscanf(txt, "%2d:%2d", &h, &m) != 2) return;   /* "--:--", or not a time */
+    if(h < 0 || h > 23 || m < 0 || m > 59) return;
+    char hm[12]; fmt_hm(h, m, hm, sizeof hm);
+    /* Built in a local and copied back with an EXPLICIT precision: the rewrite
+     * is shorter than the original under a 12-hour clock and never longer, but
+     * gcc cannot know that and -Wformat-truncation is an error on the device. */
+    char out[160];
+    snprintf(out, sizeof out, "%s%s", hm, txt + 5);              /* past "HH:MM" */
+    snprintf(txt, cap, "%.*s", cap - 1, out);
+}
 static int day_cmp(const void *a,const void *b){
     return strcmp(((const DayRow*)a)->txt,((const DayRow*)b)->txt);   /* "HH:MM " prefix => chrono */
 }
@@ -1400,6 +1429,11 @@ static void show_datebook_day(int y,int m,int d){
     g_ndayrows=0;
     data_cal_day(y,m,d,day_collect,NULL);
     qsort(g_dayrows,g_ndayrows,sizeof g_dayrows[0],day_cmp);
+    /* The data layer hands these over as "HH:MM  description", zero-padded so a
+     * lexical sort IS a chronological one -- which is why the rewrite happens
+     * here, after the sort, rather than there. The sortable form and the
+     * readable form are two different jobs, and the data layer owns the first. */
+    for(int i=0;i<g_ndayrows;i++) day_row_clock(g_dayrows[i].txt, sizeof g_dayrows[0].txt);
 
     /* Q1: the list gives up its last row so New can be a FIXED button rather
      * than the final entry in a scrolling list. A day with eight events would
@@ -5141,7 +5175,10 @@ void due_open(void){
 
     lv_obj_t *hdr = lv_label_create(panel);
     lv_obj_set_width(hdr, lv_pct(100));
-    lv_label_set_text(hdr, "Due Date:");
+    /* The popup is shared, so its title is not: a To Do has a DUE date and an
+     * event just has a date. Reuse that renames the thing it is reused for is
+     * the kind of small wrongness nobody files a bug about and everybody reads. */
+    lv_label_set_text(hdr, g_due_optional ? "Due Date:" : "Date:");
     lv_obj_set_style_text_font(hdr, &lv_font_palm_bold, 0);
 
     due_quick_btn(panel, "Today",    0);
@@ -5181,14 +5218,25 @@ static void due_btn_cb(lv_event_t *e){ (void)e; due_open(); }
  * centred panel on lv_layer_top() -- for the same reason Q2 reuses its
  * calendar: two popups that merely resemble each other drift.
  */
-#define TIME_FIRST_H  8        /* 8:00 AM */
-#define TIME_LAST_H  21        /* 9:00 PM, inclusive of :00 only */
+/* THE WHOLE DAY, every half hour: 48 rows.
+ *
+ * It was 8:00 AM to 9:00 PM with four stepper buttons above it for anything
+ * outside that, and the steppers were worse than useless: they changed a label
+ * on the form UNDERNEATH the modal, so you could not see what you were
+ * adjusting, and there was still no way to commit except tapping a row on the
+ * half hour. A control with no visible feedback and no way to finish is not a
+ * control. Deleted -- and with them the reason the window was narrow. The list
+ * is an lv_table now, which is virtualised, so 48 rows cost exactly what 27
+ * did; the popup opens scrolled to the time the event already has, so the
+ * common case is still no scrolling at all. */
+#define TIME_FIRST_H  0
+#define TIME_LAST_H  23
+#define TIME_ROWS    (((TIME_LAST_H - TIME_FIRST_H + 1) * 60) / 30)
 
 void time_set_label(void){
     if(!g_time_lbl) return;
-    int h12 = g_ev_h % 12 == 0 ? 12 : g_ev_h % 12;
-    if(appcfg()->clock24) lv_label_set_text_fmt(g_time_lbl, "%02d:%02d", g_ev_h, g_ev_m);
-    else lv_label_set_text_fmt(g_time_lbl, "%d:%02d %s", h12, g_ev_m, g_ev_h < 12 ? "AM" : "PM");
+    char hm[12]; fmt_hm(g_ev_h, g_ev_m, hm, sizeof hm);
+    lv_label_set_text(g_time_lbl, hm);
 }
 
 static lv_obj_t *g_timepop;
@@ -5202,34 +5250,12 @@ static void time_tbl_cb(lv_event_t *e){
     uint32_t r = LV_TABLE_CELL_NONE, c = LV_TABLE_CELL_NONE;
     lv_table_get_selected_cell(t, &r, &c);
     if(r == LV_TABLE_CELL_NONE) return;
+    if((int)r >= TIME_ROWS) return;
     int mins = TIME_FIRST_H * 60 + (int)r * 30;
-    if(mins > TIME_LAST_H * 60) return;
     g_ev_h = mins / 60; g_ev_m = mins % 60;
     time_set_label();
     time_close();
 }
-/* The fallback: an hour outside the window, or a minute that is not :00/:30.
- * It steps the hour so that even "type it" is still tapping -- the keyboard is
- * for values no list can offer, and there are only 24 hours. */
-static void time_hour_cb(lv_event_t *e){
-    int d = (int)(intptr_t)lv_event_get_user_data(e);
-    g_ev_h = (g_ev_h + d + 24) % 24;
-    time_set_label();
-}
-static void time_min_cb(lv_event_t *e){
-    int d = (int)(intptr_t)lv_event_get_user_data(e);
-    g_ev_m = (g_ev_m + d + 60) % 60;
-    time_set_label();
-}
-static void time_step_btn(lv_obj_t *par, const char *txt, lv_event_cb_t cb, int ud){
-    lv_obj_t *b = lv_button_create(par);
-    lv_obj_set_width(b, lv_pct(22));
-    lv_obj_set_style_radius(b, 0, 0);
-    lv_obj_set_style_pad_ver(b, 4, 0);
-    lv_obj_t *l = lv_label_create(b); lv_label_set_text(l, txt); lv_obj_center(l);
-    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, (void *)(intptr_t)ud);
-}
-
 static void time_open(void){
     if(g_timepop) return;
     g_timepop = lv_obj_create(lv_layer_top());
@@ -5243,7 +5269,9 @@ static void time_open(void){
 
     lv_obj_t *panel = lv_obj_create(g_timepop);
     lv_obj_set_width(panel, LCD_W - 20);
-    lv_obj_set_height(panel, 250);
+    lv_obj_set_height(panel, 190);      /* header + the table, and nothing else:
+                                           the four stepper buttons that used to
+                                           sit above it are gone */
     lv_obj_center(panel);
     lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_style_flex_main_place(panel, LV_FLEX_ALIGN_SPACE_BETWEEN, 0);
@@ -5259,12 +5287,6 @@ static void time_open(void){
     lv_obj_set_width(hdr, lv_pct(100));
     lv_label_set_text(hdr, "Start time:");
     lv_obj_set_style_text_font(hdr, &lv_font_palm_bold, 0);
-
-    /* anything the list cannot offer, still without a keyboard */
-    time_step_btn(panel, "-1 h", time_hour_cb, -1);
-    time_step_btn(panel, "+1 h", time_hour_cb,  1);
-    time_step_btn(panel, "-5 m", time_min_cb,  -5);
-    time_step_btn(panel, "+5 m", time_min_cb,   5);
 
     /* ONE lv_table, NOT 27 lv_list buttons.
      *
@@ -5285,18 +5307,24 @@ static void time_open(void){
     lv_obj_set_height(t, 160);
     list_table_style(t);
     lv_table_set_column_width(t, 0, LCD_W - 34);
-    int h24 = appcfg()->clock24, row = 0;
+    int row = 0;
     for(int h = TIME_FIRST_H; h <= TIME_LAST_H; h++){
         for(int m = 0; m < 60; m += 30){
-            if(h == TIME_LAST_H && m) break;      /* stops at 9:00 PM exactly */
             char txt[16];
-            if(h24) snprintf(txt, sizeof txt, "%02d:%02d", h, m);
-            else snprintf(txt, sizeof txt, "%d:%02d %s",
-                          h % 12 == 0 ? 12 : h % 12, m, h < 12 ? "AM" : "PM");
+            fmt_hm(h, m, txt, sizeof txt);
             lv_table_set_cell_value(t, row++, 0, txt);
         }
     }
     lv_obj_add_event_cb(t, time_tbl_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    /* Open on the time the event already has. Without this a 48-row list opens
+     * at midnight and every edit begins with the same scroll; with it, the row
+     * you most likely want is the one under your thumb. The row height is the
+     * table's own -- font line plus the cell padding list_table_style sets --
+     * rather than a number typed here that would drift from the style. */
+    int cur = (g_ev_h * 60 + g_ev_m) / 30;
+    int rowh = lv_font_get_line_height(&lv_font_palm) + 4 + 4 + 1;  /* pads + rule */
+    if(cur > 2) lv_obj_scroll_to_y(t, (cur - 2) * rowh, LV_ANIM_OFF);
 }
 static void time_btn_cb(lv_event_t *e){ (void)e; time_open(); }
 
@@ -5916,9 +5944,8 @@ static void next_ev_cb(uint32_t uid,const char *pri,const char *sec,void *ctx){
     if(n->found && t >= n->best) return;
     n->best=(long)t; n->found=1;
     if(a.hasTime){
-        int h=a.sH%12; if(h==0) h=12;
-        snprintf(n->line,sizeof n->line,"%d:%02d%s  %.40s",
-                 h,a.sM,a.sH<12?"a":"p",a.description);
+        char hm[12]; fmt_hm(a.sH, a.sM, hm, sizeof hm);
+        snprintf(n->line,sizeof n->line,"%s  %.40s", hm, a.description);
     } else {
         snprintf(n->line,sizeof n->line,"all day  %.40s",a.description);
     }

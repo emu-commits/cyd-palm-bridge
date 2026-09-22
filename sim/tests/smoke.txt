@@ -149,7 +149,11 @@ s q1_new_event
 c 60 108
 t 400
 s q2_date_popup
-c 61 200
+# "Today" (the quick button at the top), NOT an arbitrary calendar cell. The
+# first version of this walk tapped (61,200), which is Tuesday the 8th -- a real
+# date, correctly saved, and three weeks outside the week view that is supposed
+# to prove it was saved. A gate step has to land somewhere the NEXT step can see.
+c 60 62
 t 400
 s q2_date_picked
 # Q3: the start time comes from a list of half-hours, 8:00 AM to 9:00 PM. The
@@ -173,6 +177,14 @@ t 200
 c 40 188
 t 300
 s cal_event_saved
+# The day view we come back to is the day we STARTED on, and Q2 just moved the
+# event to whichever day was tapped on the calendar -- so "(no events)" here is
+# correct and proves nothing. Zoom out to the week, where every day is visible:
+# THIS is the shot that says the event was really written, on the day that was
+# picked, with the time that was picked.
+c 120 40
+t 400
+s cal_event_in_week
 c 18 225
 t 300
 # Address list -> record detail -> edit form (C4 bottom bar) -> Done (I4 toast)
