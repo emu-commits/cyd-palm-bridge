@@ -16,6 +16,48 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-22 — the fixtures were invented, so the gate agreed with the bug
+
+The location lookup did not work on the bench, twice, and the reason was in the
+test file rather than the code. `ip-api.com`'s CSV endpoint **answers in its own
+field order and ignores the order the query asks for**:
+
+```
+asked:  /csv/?fields=status,lat,lon,timezone,city
+got:    success,Bloomfield,40.803,-74.1909,America/New_York
+asked:  /csv/?fields=city,status,timezone,lon,lat      <- deliberately shuffled
+got:    success,Bloomfield,40.803,-74.1909,America/New_York      <- identical
+```
+
+So the parser read a town name where a latitude belongs, `coord_ok` rejected it,
+and the sync reported "reply not understood" — correctly, and uselessly.
+
+**Every fixture in `geoip_test.c` had been written in the shape the author
+assumed**, and all of them passed. Worse, the gate asserted *"the URL asks for
+exactly the fields this parser reads, in order"* — an assertion that checked the
+assumption against itself and returned a confident green while the device failed.
+**An invented fixture tests the author, not the service.** The fixtures are now
+verbatim captures, and the assertion about field order is gone: what replaced it
+is a test that the parse does not DEPEND on order.
+
+The fix is the **JSON endpoint**, on a device that deliberately avoids JSON —
+because only the named form says which value is which. Nothing parses JSON in
+the general sense: it is a bounded search for `"key":` and a copy of what
+follows, which is all a five-key flat object needs and costs no heap, no
+tokenizer and no recursion. `fields` still trims the reply; it just cannot
+dictate the order.
+
+Two smaller things came out of the same bench report:
+
+- **The sync result and the "what this will do" line were drawn on top of each
+  other.** A finished sync's status is several lines and grows downwards into
+  the explanation's space. The explanation answers "what happens if I tap this",
+  so the tap retires it — gated now by a `hotsync_done` shot.
+- **The reply is logged verbatim with its HTTP status.** It is a coordinate and
+  a town, not a credential, and "reply not understood" left nobody able to say
+  what the server had actually sent. Had that line existed one build earlier,
+  this would have been a five-minute fix.
+
 ### 2026-09-22 — the flag that froze every device already in the field
 
 Reported from the bench: a sync still did not move the coordinates. The cause was

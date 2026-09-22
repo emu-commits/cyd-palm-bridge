@@ -1,4 +1,4 @@
-/* geoip.c -- see geoip.h. One line in, three strings out. No heap, no JSON. */
+/* geoip.c -- see geoip.h. One short body in, four strings out. No heap. */
 #include "geoip.h"
 #include <stdio.h>
 #include <string.h>
@@ -10,12 +10,20 @@
  * is a coordinate the user is about to see on screen and can correct. A
  * man-in-the-middle's worst outcome is the wrong town's weather. Paying the TLS
  * handshake's ~30 KB of heap for that would cost more than it buys -- on this
- * device that handshake is the single largest allocation a sync makes. */
-/* CITY IS LAST ON PURPOSE. The reply is positional CSV and a place name may
- * legitimately contain a comma; as the final field it is read to end-of-line, so
- * the comma problem cannot arise. Anything appended after it later would
- * reintroduce it. */
-#define GEOIP_URL "http://ip-api.com/csv/?fields=status,lat,lon,timezone,city"
+ * device that handshake is the single largest allocation a sync makes.
+ *
+ * THE JSON ENDPOINT, NOT THE CSV ONE, AND THAT IS NOT A PREFERENCE. The CSV
+ * endpoint answers in the service's OWN field order and ignores the order asked
+ * for: request `status,lat,lon,timezone,city` -- or `city,status,timezone,lon,
+ * lat`, which was tried -- and both come back as
+ *
+ *     success,Bloomfield,40.803,-74.1909,America/New_York
+ *
+ * so a positional parser reads a town name where a latitude belongs and throws
+ * the whole reply away. `fields` still trims the response to the five values
+ * that are wanted; it just cannot dictate their order, and only the JSON form
+ * says which value is which. */
+#define GEOIP_URL "http://ip-api.com/json/?fields=status,lat,lon,timezone,city"
 
 const char *geoip_url(void){ return GEOIP_URL; }
 
@@ -36,69 +44,48 @@ static int coord_ok(const char *s){
     return digits > 0;
 }
 
-/* Strip a pair of surrounding double quotes, in place. Some CSV endpoints quote
- * every field and some quote none, and which one this service does is not a
- * thing to find out from a device in somebody's hand: unquoting costs four lines
- * and makes both shapes parse. A lone quote is left alone -- that is not a
- * quoted field, it is a corrupt one, and the coordinate check will reject it. */
-static void unquote(char *s){
-    int n = (int)strlen(s);
-    if(n >= 2 && s[0] == '"' && s[n-1] == '"'){
-        memmove(s, s + 1, (size_t)(n - 2));
-        s[n-2] = 0;
-    }
-}
-
-/* Copy field `n` (0-based, comma-separated) out of `csv` into `out`, trimming
- * spaces and stopping at the end of the line. Returns 1 if the field existed. */
-static int field(const char *csv, int n, char *out, int cap){
-    if(!csv || !out || cap <= 0) return 0;
+/* Look up ONE named value in a flat JSON object.
+ *
+ * THIS IS NOT A JSON PARSER and must not grow into one -- the reason this device
+ * asks Open-Meteo for CSV stands. It is a bounded search for `"key":` followed
+ * by a copy of the value that follows, which is all a five-key flat object needs
+ * and is why the reply can be read without a heap, a tokenizer or a recursion.
+ * A string value arrives quoted and a number bare; both end at the first comma
+ * or closing brace outside the quotes.
+ *
+ * Matching includes the colon so that a key cannot match inside a longer one.
+ * Returns 1 if the key was found. */
+static int json_str(const char *body, const char *key, char *out, int cap){
+    if(!body || !key || !out || cap <= 0) return 0;
     out[0] = 0;
-    const char *p = csv;
-    for(int i = 0; i < n; i++){
-        p = strchr(p, ',');
-        if(!p) return 0;
-        p++;
-    }
+
+    char pat[32];
+    int pn = snprintf(pat, sizeof pat, "\"%s\":", key);
+    if(pn <= 0 || pn >= (int)sizeof pat) return 0;
+    const char *p = strstr(body, pat);
+    if(!p) return 0;
+    p += pn;
     while(*p == ' ' || *p == '\t') p++;
+
     int j = 0;
-    while(p[j] && p[j] != ',' && p[j] != '\n' && p[j] != '\r'){
-        if(j < cap - 1) out[j] = p[j];
-        j++;
+    if(*p == '"'){                      /* a quoted string: copy to the close */
+        p++;
+        while(*p && *p != '"'){
+            if(j < cap - 1) out[j] = *p;
+            j++; p++;
+        }
+    } else {                            /* a bare number or literal */
+        while(*p && *p != ',' && *p != '}' && *p != '\n' && *p != '\r'){
+            if(j < cap - 1) out[j] = *p;
+            j++; p++;
+        }
+        while(j > 0 && (out[j-1] == ' ' || out[j-1] == '\t')) j--;
     }
-    int end = j < cap - 1 ? j : cap - 1;
-    while(end > 0 && (out[end-1] == ' ' || out[end-1] == '\t')) end--;
-    out[end] = 0;
-    unquote(out);
+    out[j < cap - 1 ? j : cap - 1] = 0;
     return 1;
 }
 
-/* The LAST field: everything from it to the end of the line, trimmed. A place
- * name may contain a comma ("Washington, D.C.") and field() would cut it there;
- * read-to-end cannot, which is why city is last in the query string. */
-static int tail_field(const char *csv, int n, char *out, int cap){
-    if(!csv || !out || cap <= 0) return 0;
-    out[0] = 0;
-    const char *p = csv;
-    for(int i = 0; i < n; i++){
-        p = strchr(p, ',');
-        if(!p) return 0;
-        p++;
-    }
-    while(*p == ' ' || *p == '\t') p++;
-    int j = 0;
-    while(p[j] && p[j] != '\n' && p[j] != '\r'){
-        if(j < cap - 1) out[j] = p[j];
-        j++;
-    }
-    int end = j < cap - 1 ? j : cap - 1;
-    while(end > 0 && (out[end-1] == ' ' || out[end-1] == '\t')) end--;
-    out[end] = 0;
-    unquote(out);
-    return 1;
-}
-
-int geoip_parse(const char *csv,
+int geoip_parse(const char *body,
                 char *lat, int latcap,
                 char *lon, int loncap,
                 char *tz,  int tzcap,
@@ -107,18 +94,18 @@ int geoip_parse(const char *csv,
     if(lon && loncap > 0) lon[0] = 0;
     if(tz  && tzcap  > 0) tz[0]  = 0;
     if(city && citycap > 0) city[0] = 0;
-    if(!csv || !csv[0]) return 0;
+    if(!body || !body[0]) return 0;
 
-    /* Field 0 is the service's own verdict. A refusal is a normal answer here --
-     * a device on a private range behind a carrier NAT gets "fail,private range"
-     * -- so it is checked first and nothing else is even looked at. */
+    /* The service's own verdict, first. A refusal is a NORMAL answer here -- a
+     * device behind a carrier NAT gets {"status":"fail","message":"private
+     * range"} -- so it is checked before anything else is even looked at. */
     char status[16];
-    if(!field(csv, 0, status, sizeof status)) return 0;
+    if(!json_str(body, "status", status, sizeof status)) return 0;
     if(strcmp(status, "success")) return 0;
 
     char la[32], lo[32];
-    if(!field(csv, 1, la, sizeof la)) return 0;
-    if(!field(csv, 2, lo, sizeof lo)) return 0;
+    if(!json_str(body, "lat", la, sizeof la)) return 0;
+    if(!json_str(body, "lon", lo, sizeof lo)) return 0;
     if(!coord_ok(la) || !coord_ok(lo)) return 0;
 
     /* Write the outputs only once EVERYTHING has checked out, so a half-parsed
@@ -130,12 +117,12 @@ int geoip_parse(const char *csv,
         char z[64];
         /* The zone is optional: a good coordinate with a missing or unusable
          * zone is still a win, and the clock has its own way to be set. */
-        if(field(csv, 3, z, sizeof z) && z[0] && !strchr(z, ' '))
+        if(json_str(body, "timezone", z, sizeof z) && z[0] && !strchr(z, ' '))
             snprintf(tz, tzcap, "%s", z);
     }
     if(city && citycap > 0){
         char t[64];
-        if(tail_field(csv, 4, t, sizeof t) && t[0]) snprintf(city, citycap, "%s", t);
+        if(json_str(body, "city", t, sizeof t) && t[0]) snprintf(city, citycap, "%s", t);
     }
     return 1;
 }

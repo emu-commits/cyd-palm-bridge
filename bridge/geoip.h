@@ -12,9 +12,14 @@
  * discarded on arrival; Mozilla's free service retired in 2024, and Google's is
  * billable with a key that would have to ship inside the device, where it leaks.
  *
- * WHY CSV: the same reason wxfetch asks Open-Meteo for `&format=csv`. This
- * device has no JSON parser and no heap to spare for one. ip-api.com will answer
- * in CSV, so the reply is one short line and the parser is this file.
+ * WHY THE JSON ENDPOINT, ON A DEVICE THAT AVOIDS JSON: because the CSV one
+ * answers in the service's own field order and ignores the order requested, so
+ * a positional parser reads a town name where a latitude belongs. Only the JSON
+ * form says which value is which. Nothing here parses JSON in the general sense
+ * -- it is a bounded search for `"key":` and a copy of what follows, which is
+ * all a five-key flat object needs and costs no heap, no tokenizer and no
+ * recursion. The `fields` query still trims the reply to five values; it just
+ * cannot dictate their order. See geoip.c.
  *
  * WHAT IT COSTS: one plain HTTP GET, made ONLY when the location is not already
  * set -- so once in a device's life, not once per sync. Nothing is sent but the
@@ -33,8 +38,8 @@
  * the reply is positional, so the query string and the parser are one decision. */
 const char *geoip_url(void);
 
-/* Parse the reply. `csv` is the body as fetched (one line; a trailing newline is
- * fine). On success writes the coordinates as TEXT -- copied through rather than
+/* Parse the reply. `body` is the JSON object as fetched (one line; a trailing
+ * newline is fine). On success writes the coordinates as TEXT -- copied through rather than
  * rounded through a float, because config.ini stores them as text and a value
  * that round-trips unchanged is one a human can compare against a map.
  *
@@ -48,11 +53,11 @@ const char *geoip_url(void);
  * moment it can learn both. Any of the outputs may be NULL.
  *
  * Returns 1 only if the service said "success" AND both coordinates are
- * plausible numbers. A failure reply ("fail,private range") returns 0 and writes
+ * plausible numbers. A failure reply ({"status":"fail",...}) returns 0 and writes
  * nothing -- an unparsed field must never reach config.ini as an empty string,
  * because empty is how "not set" is spelled and it would look deliberate.
  */
-int geoip_parse(const char *csv,
+int geoip_parse(const char *body,
                 char *lat, int latcap,
                 char *lon, int loncap,
                 char *tz,  int tzcap,
