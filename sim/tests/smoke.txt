@@ -312,6 +312,48 @@ s settings_grid
 c 120 260
 t 300
 s settings_greet_gone
+# W5: Wi-Fi (row 1, col 1) -> four remembered networks, none set on a fresh card.
+# Open slot 1 -> "Name" -> the SCAN PICKER. The simulator's scan is a fixed
+# pretend neighbourhood (sim/stubs/hotsync_stub.c) with deliberately awkward
+# names, because an SSID you have to type is the thing this screen exists to
+# avoid. Tapping a secure network stores it and goes straight to the password
+# keyboard -- the one value that is still typed, which is design rule 1's stated
+# exception. Two fixed footer buttons are the way out for a hidden network.
+c 46 56
+t 400
+s w5_wifi_list
+c 120 37
+t 400
+s w5_net_empty
+c 120 37
+t 500
+s w5_pick
+# "Copper Beech 5G", the second row -- a name with both a space and a digit in
+# it, and the row below the strongest, so a shifted list photographs differently.
+c 120 65
+t 500
+s w5_pass_kb
+c 14 150
+t 300
+c 208 40
+t 300
+s w5_net_set
+# back to the tile list: the slot now reads with its name rather than "(empty)"
+c 18 225
+t 300
+c 18 300
+t 300
+c 75 66
+t 400
+c 46 56
+t 400
+s w5_wifi_list_set
+c 18 225
+t 300
+c 18 300
+t 300
+c 75 66
+t 400
 # Accounts (row 1, col 2) -> the Apple ID field -> the I1.2 tap keyboard; type one
 # key, then Save -> I4 transient "Saved" toast, and the editor returns to the
 # ACCOUNTS panel rather than to the old list. That return address is the W1 change

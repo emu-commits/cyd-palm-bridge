@@ -54,6 +54,39 @@ void hotsync_cancel(void)          { }
 int  hotsync_cancel_pending(void)  { return 0; }
 int  hotsync_cancelled(void)       { return 0; }
 
+/* The Wi-Fi scan DOES run here, against a fixed pretend neighbourhood. The radio
+ * is the only part the simulator cannot have; the flow built on top of it --
+ * look, list what was found, tap one, then type only the password -- is the
+ * whole point of the Wi-Fi wizard and is exactly the part worth gating. The
+ * names are deliberately awkward (a space, a hyphen, mixed case, one open
+ * network) because that is what makes typing an SSID a bad idea in the first
+ * place, and the picker has to render them.
+ *
+ * Synchronous, like the stub's "sync": busy is never observably 1, so the UI's
+ * polling path has to tolerate a run that is already finished when it looks. */
+static WifiAP s_aps[] = {
+    { "Copper Beech",   -41, 1 },
+    { "Copper Beech 5G",-44, 1 },          /* same name+suffix: NOT deduped, by design */
+    { "BT-WiFi-X",      -57, 1 },
+    { "eduroam",        -68, 1 },
+    { "Cafe Guest",     -74, 0 },          /* open */
+    { "VM8842273",      -81, 1 },
+};
+static int s_scanned;
+
+void wifi_scan_start(void){
+    s_scanned = 1;
+    snprintf(s_status, sizeof s_status, "Tap a network");
+}
+int  wifi_scan_busy(void){ return 0; }
+int  wifi_scan_done(void){ return s_scanned; }
+int  wifi_scan_count(void){
+    return s_scanned ? (int)(sizeof s_aps / sizeof s_aps[0]) : 0;
+}
+const WifiAP *wifi_scan_get(int i){
+    return (s_scanned && i >= 0 && i < wifi_scan_count()) ? &s_aps[i] : 0;
+}
+
 void hotsync_discover_start(void)  { s_status[0]=0; snprintf(s_status,sizeof s_status,"Discovery is disabled in the simulator"); }
 int  hotsync_discover_busy(void)   { return 0; }
 int  hotsync_discover_done(void)   { return 1; }   /* "finished" with zero results */

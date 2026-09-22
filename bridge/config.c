@@ -62,10 +62,32 @@ static char *trim(char *s){
 /* clamp an int to [lo,hi]. */
 static int clampi(int v,int lo,int hi){ return v<lo?lo:v>hi?hi:v; }
 
+/* The key names for Wi-Fi slot `i`. SLOT 0 KEEPS THE UNNUMBERED NAMES it has
+ * always had -- `wifi_ssid` / `wifi_pass` -- so a card written before there were
+ * four networks still loads, into the slot that is tried first. The rest are
+ * suffixed with their 1-based number, which is what a human editing the file
+ * would expect to see next to the unnumbered pair. */
+static void wifi_keys(int i, char *ks, size_t nks, char *kp, size_t nkp){
+    if(i == 0){ snprintf(ks,nks,"wifi_ssid"); snprintf(kp,nkp,"wifi_pass"); }
+    else      { snprintf(ks,nks,"wifi_ssid%d",i+1); snprintf(kp,nkp,"wifi_pass%d",i+1); }
+}
+
+int config_wifi_promote(Config *c, int i){
+    if(!c || i <= 0 || i >= CFG_WIFI_N) return 0;
+    WifiNet t = c->wifi[i];
+    for(int k = i; k > 0; k--) c->wifi[k] = c->wifi[k-1];
+    c->wifi[0] = t;
+    return 1;
+}
+
 static void apply(Config *c, const char *key, const char *val){
-    if(!strcasecmp(key,"wifi_ssid"))      setstr(c->wifi_ssid,     sizeof c->wifi_ssid, val);
-    else if(!strcasecmp(key,"wifi_pass")) setstr(c->wifi_pass,     sizeof c->wifi_pass, val);
-    else if(!strcasecmp(key,"dav_user"))  setstr(c->dav_user,      sizeof c->dav_user, val);
+    for(int i = 0; i < CFG_WIFI_N; i++){
+        char ks[16], kp[16];
+        wifi_keys(i, ks, sizeof ks, kp, sizeof kp);
+        if(!strcasecmp(key,ks)){ setstr(c->wifi[i].ssid, sizeof c->wifi[i].ssid, val); return; }
+        if(!strcasecmp(key,kp)){ setstr(c->wifi[i].pass, sizeof c->wifi[i].pass, val); return; }
+    }
+    if(!strcasecmp(key,"dav_user"))       setstr(c->dav_user,      sizeof c->dav_user, val);
     else if(!strcasecmp(key,"dav_pass"))  setstr(c->dav_pass,      sizeof c->dav_pass, val);
     else if(!strcasecmp(key,"dav_base"))  setstr(c->dav_base,      sizeof c->dav_base, val);
     else if(!strcasecmp(key,"dav_card_base")) setstr(c->dav_card_base, sizeof c->dav_card_base, val);
@@ -110,8 +132,15 @@ int config_save(const char *path, const Config *c){
     if(!f) return -1;
     fprintf(f,"# CYD Palm device config. Holds Wi-Fi + iCloud passwords -- keep private.\n");
     fprintf(f,"# `key = value`, one per line. '#' starts a comment.\n\n");
-    fprintf(f,"wifi_ssid = %s\n",     c->wifi_ssid);
-    fprintf(f,"wifi_pass = %s\n",     c->wifi_pass);
+    /* In try order, most recently connected first -- so the file reads the way
+     * the device behaves, and an empty slot writes as an empty value rather than
+     * vanishing (a missing key would silently keep whatever was loaded before). */
+    for(int i = 0; i < CFG_WIFI_N; i++){
+        char ks[16], kp[16];
+        wifi_keys(i, ks, sizeof ks, kp, sizeof kp);
+        fprintf(f,"%s = %s\n", ks, c->wifi[i].ssid);
+        fprintf(f,"%s = %s\n", kp, c->wifi[i].pass);
+    }
     fprintf(f,"dav_user = %s\n",      c->dav_user);
     fprintf(f,"dav_pass = %s\n",      c->dav_pass);
     fprintf(f,"dav_base = %s\n",      c->dav_base);

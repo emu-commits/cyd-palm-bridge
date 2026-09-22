@@ -216,18 +216,46 @@ static esp_netif_t *s_netif;
 
 static void wifi_ev(void *a, esp_event_base_t base, int32_t id, void *data){
     (void)a;
-    if(base==WIFI_EVENT && id==WIFI_EVENT_STA_START) esp_wifi_connect();
-    else if(base==WIFI_EVENT && id==WIFI_EVENT_STA_DISCONNECTED){
-        if(s_retries++ < 8) esp_wifi_connect();
+    /* STA_START does NOT auto-connect any more. With one remembered network the
+     * config was already set before esp_wifi_start(), so connecting on START was
+     * the same thing as connecting on purpose. With four, the radio starts with
+     * no network chosen and wifi_try() sets each one and connects it explicitly
+     * -- an auto-connect here would fire against an empty config and spend the
+     * first network's retry budget failing to join "".
+     *
+     * Three retries, not eight: eight was a single network's whole budget, and
+     * four networks at eight retries each is over a minute of a user watching a
+     * status line. An AP in range associates in seconds. */
+    if(base==WIFI_EVENT && id==WIFI_EVENT_STA_DISCONNECTED){
+        if(s_retries++ < 3) esp_wifi_connect();
         else xEventGroupSetBits(s_evt, WIFI_FAIL);
     } else if(base==IP_EVENT && id==IP_EVENT_STA_GOT_IP){
         s_retries=0; xEventGroupSetBits(s_evt, WIFI_OK);
     }
 }
 
-static int wifi_up(void){
-    /* Paired with wifi_down(), so discovery is covered as symmetrically as a sync
-     * and no exit path can leave the gauge believing the radio is still up. */
+/* Try ONE remembered network. The radio is already initialised and started by
+ * wifi_up(); this just points it at a different AP and waits. */
+static int wifi_try(const WifiNet *n, int timeout_ms){
+    wifi_config_t wc = { 0 };
+    strncpy((char*)wc.sta.ssid, n->ssid, sizeof wc.sta.ssid);
+    strncpy((char*)wc.sta.password, n->pass, sizeof wc.sta.password);
+    s_retries = 0;
+    xEventGroupClearBits(s_evt, WIFI_OK|WIFI_FAIL);
+    if(esp_wifi_set_config(WIFI_IF_STA, &wc)!=ESP_OK) return 0;
+    /* Never log n->pass, and never log the SSID's contents beyond this: the
+     * status line is shown on screen and the log goes to a shared console. */
+    ESP_LOGI(TAG, "wifi: trying \"%s\"", n->ssid);
+    esp_wifi_connect();
+    EventBits_t b = xEventGroupWaitBits(s_evt, WIFI_OK|WIFI_FAIL, pdFALSE, pdFALSE,
+                                        pdMS_TO_TICKS(timeout_ms));
+    return (b & WIFI_OK) ? 1 : 0;
+}
+
+/* The radio up and started, associated with NOTHING. A scan needs exactly this
+ * and no more; a sync needs this and then a join. Paired with wifi_down(), so
+ * every exit path leaves the gauge and the radio in the same state. */
+static int radio_up(void){
     power_busy(1);          /* the gauge must not read a sagging cell as a flat one */
     s_evt = xEventGroupCreate();
     if(esp_netif_init()!=ESP_OK) return 0;
@@ -237,16 +265,38 @@ static int wifi_up(void){
     if(esp_wifi_init(&cfg)!=ESP_OK) return 0;
     esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_ev, NULL, &s_h_wifi);
     esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_ev, NULL, &s_h_ip);
-    const Config *pc = appcfg();
-    wifi_config_t wc = { 0 };
-    strncpy((char*)wc.sta.ssid, pc->wifi_ssid, sizeof wc.sta.ssid);
-    strncpy((char*)wc.sta.password, pc->wifi_pass, sizeof wc.sta.password);
     if(esp_wifi_set_mode(WIFI_MODE_STA)!=ESP_OK) return 0;
-    if(esp_wifi_set_config(WIFI_IF_STA, &wc)!=ESP_OK) return 0;
     if(esp_wifi_start()!=ESP_OK) return 0;
-    EventBits_t b = xEventGroupWaitBits(s_evt, WIFI_OK|WIFI_FAIL, pdFALSE, pdFALSE, pdMS_TO_TICKS(25000));
+    return 1;
+}
+
+static int wifi_up(void){
+    if(!radio_up()) return 0;
+
+    /* W5: up to four remembered networks, in the order the config holds them,
+     * which is most-recently-connected first. The FIRST one gets the long wait
+     * (25 s) because in the overwhelmingly common case you are where you were
+     * last time and it is going to work; the rest get a short one, because four
+     * full timeouts in a row is over a minute and a half of a user watching a
+     * status line, and an AP that is actually in range associates in seconds.
+     *
+     * A network that connects is promoted to the front and the config is
+     * persisted, so the order is self-correcting: move between home and work and
+     * the device follows you after one sync each way. */
+    const Config *pc = appcfg();
+    for(int i = 0; i < CFG_WIFI_N; i++){
+        if(!pc->wifi[i].ssid[0]) continue;                  /* empty slot */
+        if(s_cancel) break;
+        if(!wifi_try(&pc->wifi[i], i == 0 ? 25000 : 8000)) continue;
+        if(config_wifi_promote(appcfg_mut(), i)){
+            appcfg_save();                                  /* the order changed */
+            ESP_LOGI(TAG, "wifi: promoted slot %d to first", i + 1);
+        }
+        (void)s_netif_inited;
+        return 1;
+    }
     (void)s_netif_inited;
-    return (b & WIFI_OK) ? 1 : 0;
+    return 0;
 }
 /* ---- what the network actually gave us -------------------------------------
  * Three internet stages (SNTP, iCloud, news feeds) all failing at once is one
@@ -952,6 +1002,77 @@ static void discover_task(void *arg){
     wifi_down();           /* also closes the discovery keep-alive connection */
     s_busy = 0;
     vTaskDelete(NULL);
+}
+
+/* ---- Wi-Fi scan ---------------------------------------------------------- */
+static WifiAP s_scan[WIFI_SCAN_MAX];
+static int    s_scan_n, s_scan_done;
+
+int           wifi_scan_busy(void){ return s_busy && !s_scan_done; }
+int           wifi_scan_done(void){ return s_scan_done; }
+int           wifi_scan_count(void){ return s_scan_n; }
+const WifiAP *wifi_scan_get(int i){
+    return (i >= 0 && i < s_scan_n) ? &s_scan[i] : NULL;
+}
+
+/* Keep the strongest sighting of each name. One network on 2.4 and 5 GHz is two
+ * records here and one network to the person choosing it, and showing it twice
+ * would make the list look broken in the one place it has to look trustworthy. */
+static void scan_add(const wifi_ap_record_t *r){
+    const char *ssid = (const char *)r->ssid;
+    if(!ssid[0]) return;                       /* hidden network: nothing to tap */
+    for(int i = 0; i < s_scan_n; i++){
+        if(strcmp(s_scan[i].ssid, ssid)) continue;
+        if(r->rssi > s_scan[i].rssi) s_scan[i].rssi = r->rssi;
+        return;
+    }
+    if(s_scan_n >= WIFI_SCAN_MAX) return;
+    snprintf(s_scan[s_scan_n].ssid, sizeof s_scan[s_scan_n].ssid, "%s", ssid);
+    s_scan[s_scan_n].rssi   = r->rssi;
+    s_scan[s_scan_n].secure = r->authmode != WIFI_AUTH_OPEN;
+    s_scan_n++;
+}
+
+static void scan_task(void *arg){
+    (void)arg;
+    /* The record array is STATIC, not on this task's stack: wifi_ap_record_t is
+     * the best part of 80 bytes and a dozen of them is a kilobyte, which is a
+     * real fraction of HOTSYNC_STACK. */
+    static wifi_ap_record_t recs[WIFI_SCAN_MAX];
+    s_scan_n = 0;
+    if(!radio_up()){ setst("Wi-Fi hardware did not start"); goto done; }
+
+    wifi_scan_config_t sc = { 0 };             /* every channel, active scan */
+    if(esp_wifi_scan_start(&sc, true) != ESP_OK){ setst("Scan failed"); goto done; }
+
+    uint16_t n = WIFI_SCAN_MAX;
+    if(esp_wifi_scan_get_ap_records(&n, recs) != ESP_OK){ setst("Scan failed"); goto done; }
+    for(int i = 0; i < (int)n; i++) scan_add(&recs[i]);
+
+    /* strongest first: an insertion sort over at most twelve entries */
+    for(int i = 1; i < s_scan_n; i++){
+        WifiAP t = s_scan[i]; int k = i - 1;
+        while(k >= 0 && s_scan[k].rssi < t.rssi){ s_scan[k+1] = s_scan[k]; k--; }
+        s_scan[k+1] = t;
+    }
+    if(s_scan_n) setst("Tap a network");
+    else         setst("No networks found");
+
+done:
+    esp_wifi_scan_stop();
+    wifi_down();
+    s_scan_done = 1;
+    s_busy = 0;
+    vTaskDelete(NULL);
+}
+
+void wifi_scan_start(void){
+    if(s_busy) return;
+    s_busy = 1; s_scan_done = 0; s_scan_n = 0;
+    setst("Looking for networks...");
+    if(xTaskCreate(scan_task, "wifiscan", HOTSYNC_STACK, NULL, 4, NULL) != pdPASS){
+        setst("Could not start the scan"); s_scan_done = 1; s_busy = 0;
+    }
 }
 
 void hotsync_discover_start(void){

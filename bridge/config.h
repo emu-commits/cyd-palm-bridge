@@ -19,9 +19,23 @@
 /* conflict policy values match ConflictPolicy in sync.h (server/local/both). */
 enum { CFG_POL_SERVER = 0, CFG_POL_LOCAL = 1, CFG_POL_BOTH = 2 };
 
+/* How many Wi-Fi networks the device remembers. Four, because that covers home /
+ * work / phone hotspot / one more, and because four rows fit one non-scrolling
+ * list on a 240x184 content area -- a fifth would buy a scrollbar. */
+#define CFG_WIFI_N 4
+
 typedef struct {
-    char wifi_ssid[64];
-    char wifi_pass[64];
+    char ssid[64];
+    char pass[64];
+} WifiNet;
+
+typedef struct {
+    /* THE ARRAY ORDER IS THE TRY ORDER, and slot 0 is whichever network
+     * connected most recently: a successful join promotes its slot to the front
+     * (config_wifi_promote). So the common case -- you are where you were last
+     * time -- connects on the first attempt, and the file needs no separate
+     * "last used" key that could disagree with the list it describes. */
+    WifiNet wifi[CFG_WIFI_N];
     char dav_user[128];        /* Apple ID email                         */
     char dav_pass[64];         /* app-specific password (with dashes)    */
     char dav_base[128];        /* caldav host, e.g. https://caldav.icloud.com   */
@@ -55,6 +69,12 @@ int  config_load(const char *path, Config *c);
 
 /* write *c to `path` as a commented key=value file. Returns 0 or -1. */
 int  config_save(const char *path, const Config *c);
+
+/* Move Wi-Fi slot `i` to the front, keeping the order of the rest. Call it when a
+ * network connects, so the next sync tries that one first. Returns 1 if the order
+ * actually changed (i.e. the caller should persist), 0 if it was already first or
+ * `i` is out of range. */
+int  config_wifi_promote(Config *c, int i);
 
 /* map a policy string ("server"/"local"/"both") to CFG_POL_*, default server. */
 int  config_policy_from_str(const char *s);

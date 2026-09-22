@@ -34,8 +34,6 @@ int main(void){
     const Config *c = appcfg();
 
     const struct { const char *name; const char *val; } f[] = {
-        { "wifi_ssid", c->wifi_ssid },
-        { "wifi_pass", c->wifi_pass },
         { "dav_user",  c->dav_user  },
         { "dav_pass",  c->dav_pass  },
     };
@@ -45,6 +43,18 @@ int main(void){
         if(f[i].val[0]){
             printf("nosecrets: FAIL -- %s is seeded into this build (%d chars)\n",
                    f[i].name, (int)strlen(f[i].val));
+            bad = 1;
+        }
+    }
+    /* EVERY Wi-Fi slot, not just the first. The device remembers four networks
+     * now, and a check that only looked at slot 1 would pass a build carrying
+     * three real passwords -- which is precisely the shape of the leak this
+     * gate was written for (see the sim Makefile's note on SIM_NO_SECRETS). */
+    for(int i = 0; i < CFG_WIFI_N; i++){
+        if(c->wifi[i].ssid[0] || c->wifi[i].pass[0]){
+            printf("nosecrets: FAIL -- wifi slot %d is seeded into this build "
+                   "(ssid %d chars, pass %d chars)\n", i + 1,
+                   (int)strlen(c->wifi[i].ssid), (int)strlen(c->wifi[i].pass));
             bad = 1;
         }
     }

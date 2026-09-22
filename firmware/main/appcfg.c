@@ -39,10 +39,10 @@ static int    g_from_sd = 0;
  * app is skipped until configured (exactly the old behaviour). */
 static void seed_from_secrets(Config *c){
 #ifdef WIFI_SSID
-    snprintf(c->wifi_ssid, sizeof c->wifi_ssid, "%s", WIFI_SSID);
+    snprintf(c->wifi[0].ssid, sizeof c->wifi[0].ssid, "%s", WIFI_SSID);
 #endif
 #ifdef WIFI_PASS
-    snprintf(c->wifi_pass, sizeof c->wifi_pass, "%s", WIFI_PASS);
+    snprintf(c->wifi[0].pass, sizeof c->wifi[0].pass, "%s", WIFI_PASS);
 #endif
 #ifdef DAV_USER
     snprintf(c->dav_user, sizeof c->dav_user, "%s", DAV_USER);

@@ -287,6 +287,7 @@ static int disc_built;
  * Graffiti-only (no on-screen keyboard), so there's no overlay to drop here. */
 static void free_rowuids(void);
 static void free_finds(void);
+static void wifi_scan_kill(void);   /* W5: the scan poll timer (see the wizard) */
 static lv_obj_t *g_listtbl;           /* current record table (partial rebuild) */
 static lv_obj_t *g_findtbl;           /* Find results table                     */
 /* Graffiti input hooks (the trainer). graf_char_hook: a recognized character goes
@@ -359,6 +360,7 @@ static void kill_kb(void){
     kill_hs();
     if(disc_timer){ lv_timer_delete(disc_timer); disc_timer=NULL; }
     disc_status=NULL;
+    wifi_scan_kill();            /* same reason as disc_timer: it polls a screen */
 }
 
 /* The record list is one virtualized `lv_table` (a SINGLE LVGL object) instead of
@@ -2433,12 +2435,29 @@ static void toast_show(const char *msg){
  * location was to pull the SD card and edit config.ini on a computer. */
 enum { PF_SSID, PF_WPASS, PF_USER, PF_PASS, PF_CALB, PF_CARDB,
        PF_CAL, PF_TODO, PF_CARD, PF_TZ, PF_N,
-       PF_LAT = PF_N, PF_LON, PF_OWNER, PF_MAX };
+       PF_LAT = PF_N, PF_LON, PF_OWNER,
+       /* W5, Wi-Fi slots 2..4. Slot 1 is PF_SSID/PF_WPASS above. These sit PAST
+        * PF_N deliberately, like latitude and owner: everything below PF_N is
+        * what the one-list Preferences view iterates, and that list is already at
+        * the object-pool ceiling (see show_prefs -- three extra rows once crashed
+        * the device-sized build). They are reached from the Wi-Fi tile. */
+       PF_SSID2, PF_WPASS2, PF_SSID3, PF_WPASS3, PF_SSID4, PF_WPASS4, PF_MAX };
 static const char *PF_LABELS[PF_MAX] = {
     "Wi-Fi SSID", "Wi-Fi pass", "Apple ID", "App pass", "CalDAV host",
     "CardDAV host", "Calendar coll", "Reminders coll", "Address coll", "Time zone",
     "Latitude", "Longitude", "Owner name",
+    "Network 2 name", "Network 2 pass", "Network 3 name", "Network 3 pass",
+    "Network 4 name", "Network 4 pass",
 };
+/* field index for Wi-Fi slot `s` (0-based): slot 0 is the unnumbered pair. */
+static int pf_wifi_ssid(int s){ return s == 0 ? PF_SSID  : PF_SSID2  + (s-1)*2; }
+static int pf_wifi_pass(int s){ return s == 0 ? PF_WPASS : PF_WPASS2 + (s-1)*2; }
+/* A password is never shown, anywhere, in any list. One predicate, because the
+ * two list builders that mask them are not the only places that will ever ask. */
+static int pf_is_secret(int i){
+    return i == PF_PASS || i == PF_WPASS || i == PF_WPASS2
+        || i == PF_WPASS3 || i == PF_WPASS4;
+}
 /* Which screen an edit returns to.
  *
  * This used to be derived from the FIELD (`pf_is_dash_field`: latitude and
@@ -2448,8 +2467,9 @@ static const char *PF_LABELS[PF_MAX] = {
  * both the Lock Screen panel and the Location tile, so the field no longer
  * says where the user came from. Only the caller knows, so the caller sets it
  * on the way IN and `set_return()` reads it on the way out. */
-enum { RET_PREFS = -1, RET_DASH = -2 };    /* >= 0 is a Settings tile index */
+enum { RET_PREFS = -1, RET_DASH = -2, RET_WIFI = -3 };  /* >= 0 is a tile index */
 static int g_set_ret = RET_PREFS;
+static int g_wifi_slot;    /* which network's screen RET_WIFI goes back to */
 static void set_return(void);
 static const char *pol_name(int p){
     return p==CFG_POL_LOCAL ? "device wins"
@@ -2459,8 +2479,14 @@ static const char *pol_name(int p){
 /* the config buffer + capacity for field i (both read and write go through this) */
 static char *pf_buf(Config *c, int i, int *cap){
     switch(i){
-        case PF_SSID:  *cap=sizeof c->wifi_ssid;     return c->wifi_ssid;
-        case PF_WPASS: *cap=sizeof c->wifi_pass;     return c->wifi_pass;
+        case PF_SSID:   *cap=sizeof c->wifi[0].ssid; return c->wifi[0].ssid;
+        case PF_WPASS:  *cap=sizeof c->wifi[0].pass; return c->wifi[0].pass;
+        case PF_SSID2:  *cap=sizeof c->wifi[1].ssid; return c->wifi[1].ssid;
+        case PF_WPASS2: *cap=sizeof c->wifi[1].pass; return c->wifi[1].pass;
+        case PF_SSID3:  *cap=sizeof c->wifi[2].ssid; return c->wifi[2].ssid;
+        case PF_WPASS3: *cap=sizeof c->wifi[2].pass; return c->wifi[2].pass;
+        case PF_SSID4:  *cap=sizeof c->wifi[3].ssid; return c->wifi[3].ssid;
+        case PF_WPASS4: *cap=sizeof c->wifi[3].pass; return c->wifi[3].pass;
         case PF_USER:  *cap=sizeof c->dav_user;      return c->dav_user;
         case PF_PASS:  *cap=sizeof c->dav_pass;      return c->dav_pass;
         case PF_CALB:  *cap=sizeof c->dav_base;      return c->dav_base;
@@ -2864,7 +2890,7 @@ static void show_prefs(void){
     for(int i=0;i<PF_N;i++){
         int cap=0; const char *v = pf_buf(c, i, &cap);
         char shown[28];
-        if(i==PF_WPASS || i==PF_PASS)
+        if(pf_is_secret(i))
             snprintf(shown, sizeof shown, "%s", (v && v[0]) ? "********" : "(unset)");
         else if(v && v[0])
             snprintf(shown, sizeof shown, "%.20s%s", v, strlen(v)>20 ? "..." : "");
@@ -2956,8 +2982,10 @@ static void show_settings(void);
 static void show_set_panel(int tile);
 
 /* go back to whoever opened the editor/picker (see g_set_ret) */
+static void show_wifi_net(int slot);
 static void set_return(void){
     if(g_set_ret == RET_DASH)   { show_dash_settings(); return; }
+    if(g_set_ret == RET_WIFI)   { show_wifi_net(g_wifi_slot); return; }
     if(g_set_ret >= 0 && g_set_ret < SET_N){ show_set_panel(g_set_ret); return; }
     show_prefs();
 }
@@ -2994,7 +3022,7 @@ static void sp_field_row(lv_obj_t *list, int tile, int f){
     const Config *c = appcfg();
     int cap = 0; const char *v = pf_buf((Config *)c, f, &cap);
     char shown[28], row[80];
-    if(f == PF_WPASS || f == PF_PASS)
+    if(pf_is_secret(f))
         snprintf(shown, sizeof shown, "%s", (v && v[0]) ? "********" : "(unset)");
     else if(v && v[0])
         snprintf(shown, sizeof shown, "%.20s%s", v, strlen(v) > 20 ? "..." : "");
@@ -3002,6 +3030,211 @@ static void sp_field_row(lv_obj_t *list, int tile, int f){
         snprintf(shown, sizeof shown, "(unset)");
     snprintf(row, sizeof row, "%s: %s", PF_LABELS[f], shown);
     pf_add(list, row, sp_field_cb, (tile << 8) | f);
+}
+
+/* ==== W5: the Wi-Fi wizard =================================================
+ * Four remembered networks, tried in the order the list shows them, with the one
+ * that worked last at the top (bridge/config.c: config_wifi_promote).
+ *
+ * The rule the whole wizard is built around is that AN SSID MUST NOT BE TYPED.
+ * It is case-sensitive, it frequently contains a space or a hyphen, and getting
+ * it wrong fails in exactly the way a wrong password fails -- silently, at the
+ * next sync, with nothing on screen to say which of the two was wrong. So the
+ * device scans and the user taps a name that is known to exist. The password is
+ * the one thing still typed, which is rule 1's stated exception: it is arbitrary
+ * by definition and no list can offer it. */
+static void show_wifi_pick(int slot);
+static void wifi_row_cb(lv_event_t *e){
+    show_wifi_net((int)(intptr_t)lv_event_get_user_data(e));
+}
+static void wifi_name_cb(lv_event_t *e){
+    show_wifi_pick((int)(intptr_t)lv_event_get_user_data(e));
+}
+static void wifi_pass_cb(lv_event_t *e){
+    int slot = (int)(intptr_t)lv_event_get_user_data(e);
+    g_set_ret = RET_WIFI; g_wifi_slot = slot;
+    show_pref_edit(pf_wifi_pass(slot));
+}
+static void wifi_promote_cb(lv_event_t *e){
+    int slot = (int)(intptr_t)lv_event_get_user_data(e);
+    if(config_wifi_promote(appcfg_mut(), slot)){ appcfg_save(); toast_show("Moved to the top"); }
+    show_set_panel(SET_WIFI);          /* the list it came from, reordered */
+}
+static void wifi_forget_cb(lv_event_t *e){
+    int slot = (int)(intptr_t)lv_event_get_user_data(e);
+    Config *c = appcfg_mut();
+    if(slot >= 0 && slot < CFG_WIFI_N){
+        c->wifi[slot].ssid[0] = 0;
+        c->wifi[slot].pass[0] = 0;
+        appcfg_save();
+        toast_show("Forgotten");
+    }
+    show_set_panel(SET_WIFI);
+}
+
+/* One network: what it is called, its password, and the two things you can do to
+ * it. Rows appear only when they mean something -- an empty slot offers a name
+ * and nothing else, because a password without a network is not a thing you can
+ * usefully be asked for. */
+static void show_wifi_net(int slot){
+    if(slot < 0 || slot >= CFG_WIFI_N) return;
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    content_clear();
+    char title[24];
+    snprintf(title, sizeof title, "Network %d", slot + 1);
+    lv_label_set_text(title_lbl, title);
+    update_cat_trigger();
+
+    const Config *c = appcfg();
+    const int set = c->wifi[slot].ssid[0] != 0;
+
+    lv_obj_t *list = lv_list_create(content);
+    lv_obj_set_size(list, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_radius(list, 0, 0);
+    lv_obj_set_style_border_width(list, 0, 0);
+    lv_obj_set_style_pad_all(list, 0, 0);
+
+    char row[96];
+    snprintf(row, sizeof row, "Name:  %s", set ? c->wifi[slot].ssid : "(not set)");
+    pf_add(list, row, wifi_name_cb, slot);
+    if(set){
+        snprintf(row, sizeof row, "Password:  %s",
+                 c->wifi[slot].pass[0] ? "********" : "(none -- open network)");
+        pf_add(list, row, wifi_pass_cb, slot);
+        if(slot > 0) pf_add(list, "Try this one first", wifi_promote_cb, slot);
+        pf_add(list, "Forget this network", wifi_forget_cb, slot);
+    }
+
+    assist_say(set ? "One of the four networks this device will try. It is tried "
+                     "in the order the list shows."
+                   : "An empty slot. Give it a name and the device will try it "
+                     "when the ones above it are out of range.");
+}
+
+/* The picker: what is actually in range, strongest first. This is the screen the
+ * no-typing rule exists for, so the fallback -- a hidden network, which by
+ * definition cannot be scanned for -- is one row at the BOTTOM rather than the
+ * default path. */
+static lv_timer_t *g_wifi_scan_timer;
+static lv_obj_t   *g_wifi_scan_status;
+static int         g_wifi_pick_slot;
+static void wifi_scan_kill(void){
+    if(g_wifi_scan_timer){ lv_timer_delete(g_wifi_scan_timer); g_wifi_scan_timer = NULL; }
+    g_wifi_scan_status = NULL;
+}
+static void wifi_pick_results(void);
+static void wifi_scan_tick(lv_timer_t *t){
+    (void)t;
+    if(wifi_scan_busy()){
+        if(g_wifi_scan_status) lv_label_set_text(g_wifi_scan_status, hotsync_status());
+        return;
+    }
+    wifi_pick_results();
+}
+/* A chosen name goes straight into the slot and straight on to the password,
+ * because that is the only thing left to ask and asking for it on the next
+ * screen is one tap the user would otherwise have to find. An OPEN network has
+ * no password to ask for, so it ends the flow instead of pretending otherwise. */
+static void wifi_pick_cb(lv_event_t *e){
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    const WifiAP *ap = wifi_scan_get(i);
+    if(!ap) return;
+    int slot = g_wifi_pick_slot;
+    Config *c = appcfg_mut();
+    snprintf(c->wifi[slot].ssid, sizeof c->wifi[slot].ssid, "%s", ap->ssid);
+    if(!ap->secure) c->wifi[slot].pass[0] = 0;
+    appcfg_save();
+    wifi_scan_kill();
+    if(ap->secure){ g_set_ret = RET_WIFI; g_wifi_slot = slot; show_pref_edit(pf_wifi_pass(slot)); }
+    else          { toast_show("Saved"); show_wifi_net(slot); }
+}
+static void wifi_type_cb(lv_event_t *e){
+    int slot = (int)(intptr_t)lv_event_get_user_data(e);
+    wifi_scan_kill();
+    g_set_ret = RET_WIFI; g_wifi_slot = slot;
+    show_pref_edit(pf_wifi_ssid(slot));
+}
+static void wifi_rescan_cb(lv_event_t *e){
+    show_wifi_pick((int)(intptr_t)lv_event_get_user_data(e));
+}
+
+/* a fixed-width button on the picker's footer bar */
+static void wifi_foot_btn(const char *text, int x, int w, lv_event_cb_t cb, int slot){
+    lv_obj_t *b = lv_button_create(content);
+    lv_obj_set_size(b, w, 26);
+    lv_obj_set_pos(b, x, (PDA_H - TITLE_H) - 28);
+    lv_obj_set_style_radius(b, 0, 0);
+    lv_obj_t *l = lv_label_create(b);
+    lv_label_set_text(l, text);
+    lv_obj_center(l);
+    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, (void *)(intptr_t)slot);
+}
+
+static void wifi_pick_results(void){
+    wifi_scan_kill();
+    content_clear();
+    int n = wifi_scan_count();
+    int slot = g_wifi_pick_slot;
+
+    /* The two ways out -- type a hidden network's name, or scan again -- are a
+     * FIXED FOOTER, not rows at the end of the list. As list rows they sat below
+     * the fold behind however many networks happened to be in range, which is
+     * the one place an escape hatch must never be: the user who needs them is
+     * exactly the user whose network is not in the list above. */
+    lv_obj_t *list = lv_list_create(content);
+    lv_obj_set_size(list, LCD_W, (PDA_H - TITLE_H) - 32);
+    lv_obj_set_pos(list, 0, 0);
+    lv_obj_set_style_radius(list, 0, 0);
+    lv_obj_set_style_border_width(list, 0, 0);
+    lv_obj_set_style_pad_all(list, 0, 0);
+
+    char row[96];
+    for(int i = 0; i < n; i++){
+        const WifiAP *ap = wifi_scan_get(i);
+        if(!ap) continue;
+        /* Signal as bars of text, not a widget: an lv_bar allocates a draw layer,
+         * and this list can hold twelve of them. */
+        const char *sig = ap->rssi > -55 ? "|||" : ap->rssi > -70 ? "||" : "|";
+        snprintf(row, sizeof row, "%-3s %.26s%s", sig, ap->ssid, ap->secure ? "" : "   (open)");
+        pf_add(list, row, wifi_pick_cb, i);
+    }
+    if(!n){
+        lv_obj_t *l = lv_label_create(list);
+        lv_label_set_text(l, "  Nothing in range.");
+    }
+    wifi_foot_btn("Type a name", 2,          (LCD_W - 6) / 2, wifi_type_cb,   slot);
+    wifi_foot_btn("Look again",  LCD_W / 2 + 1, (LCD_W - 6) / 2, wifi_rescan_cb, slot);
+
+    assist_say(n ? "The networks in range now, strongest first. Tap yours and I "
+                   "will ask for its password."
+                 : "Nothing answered. Move closer to the router, or type the name "
+                   "if the network is hidden.");
+}
+
+static void show_wifi_pick(int slot){
+    if(slot < 0 || slot >= CFG_WIFI_N) return;
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    wifi_scan_kill();
+    content_clear();
+    g_wifi_pick_slot = slot;
+    lv_label_set_text(title_lbl, "Nearby");   /* short: the clock sits at centre */
+    update_cat_trigger();
+
+    wifi_scan_start();
+
+    g_wifi_scan_status = lv_label_create(content);
+    lv_label_set_long_mode(g_wifi_scan_status, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(g_wifi_scan_status, LCD_W - 16);
+    lv_obj_set_style_text_align(g_wifi_scan_status, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(g_wifi_scan_status, LV_ALIGN_CENTER, 0, 0);
+    lv_label_set_text(g_wifi_scan_status, hotsync_status());
+
+    /* The scan may already be over -- it is synchronous in the simulator -- so
+     * the timer is a poll, not a promise that anything is still running. */
+    g_wifi_scan_timer = lv_timer_create(wifi_scan_tick, 400, NULL);
+    assist_say("Looking for networks in range. This takes a few seconds.");
 }
 
 static void show_set_panel(int tile){
@@ -3021,9 +3254,16 @@ static void show_set_panel(int tile){
     const Config *c = appcfg();
     char row[80], tag[8];
     switch(tile){
-    case SET_WIFI:                      /* W5 makes this four networks */
-        sp_field_row(list, tile, PF_SSID);
-        sp_field_row(list, tile, PF_WPASS);
+    case SET_WIFI:
+        /* W5: four remembered networks, in the order they are tried. Four rows
+         * is the whole point of four -- it fits without a scrollbar. */
+        for(int i = 0; i < CFG_WIFI_N; i++){
+            const char *s = c->wifi[i].ssid;
+            if(s[0]) snprintf(row, sizeof row, "%d.  %.28s%s", i + 1, s,
+                              c->wifi[i].pass[0] ? "" : "   (open)");
+            else     snprintf(row, sizeof row, "%d.  (empty)", i + 1);
+            pf_add(list, row, wifi_row_cb, i);
+        }
         break;
     case SET_ACCT:
         sp_field_row(list, tile, PF_USER);

@@ -40,6 +40,28 @@ typedef struct {
     int  kind;        /* 'c' = calendar/reminders (CalDAV), 'a' = address book (CardDAV)   */
 } DiscColl;
 
+/* ---- Wi-Fi scan (Settings ▸ Wi-Fi, "choose a nearby network") -------------
+ * An SSID is a value you cannot be asked to type: it is case-sensitive, often
+ * has punctuation in it, and getting it wrong fails exactly like a wrong
+ * password does. So the device looks, and the user taps. Runs on the same
+ * background task slot as a sync (one at a time), brings the radio up WITHOUT
+ * associating, and leaves it down again; the UI polls wifi_scan_busy().
+ *
+ * Results are strongest-first and de-duplicated by name, because one network on
+ * two bands is one network to the person choosing it. */
+#define WIFI_SCAN_MAX 12                       /* what one picker screen can use */
+typedef struct {
+    char ssid[33];    /* 32 chars + NUL, the 802.11 maximum */
+    int  rssi;        /* dBm; -50 is across the room, -85 is marginal */
+    int  secure;      /* 1 if the AP advertises anything but open */
+} WifiAP;
+
+void          wifi_scan_start(void);  /* begin a scan (no-op if the slot is busy) */
+int           wifi_scan_busy(void);   /* 1 while scanning */
+int           wifi_scan_done(void);   /* 1 once a run has finished (results valid) */
+int           wifi_scan_count(void);  /* networks found, 0..WIFI_SCAN_MAX */
+const WifiAP *wifi_scan_get(int i);   /* i in [0,count); NULL out of range */
+
 void            hotsync_discover_start(void);  /* begin a discovery run (no-op if busy) */
 int             hotsync_discover_busy(void);   /* 1 while discovering */
 int             hotsync_discover_done(void);   /* 1 once a run has finished (results valid) */
