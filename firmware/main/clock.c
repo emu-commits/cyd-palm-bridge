@@ -352,3 +352,40 @@ void clock_zone_hhmm(const char *iana, time_t t, char *out, int cap){
     if(save[0]) setenv("TZ", save, 1); else unsetenv("TZ");
     tzset();
 }
+
+/* ---- setting the clock by hand (W8) --------------------------------------
+ * The device has no RTC, so after a flat battery it wakes in 1970 and stays
+ * there until a sync runs SNTP -- and a sync needs Wi-Fi, which is one of the
+ * things you may be here to set up. So the clock has to be settable by hand,
+ * from the Date & Time tile, with no network and no keyboard.
+ *
+ * The components are LOCAL wall-clock time, which is what the user is reading
+ * off a watch; mktime() turns them back into an epoch under whatever zone
+ * clock_set_tz() has in force. tm_isdst = -1 asks it to work out the offset
+ * itself rather than being told, which is the only correct answer twice a year.
+ * Seconds are zeroed: a value nobody can see is a value nobody can set.
+ *
+ * Returns 0 on success. settimeofday() can fail where the process is not
+ * allowed to move the system clock -- which never happens on ESP-IDF, and
+ * always happens in a Linux container without CAP_SYS_TIME, so the simulator
+ * reports the failure honestly rather than pretending the clock moved. */
+int clock_set_now(int year, int mon, int day, int hour, int min){
+    if(year < 2024 || mon < 1 || mon > 12 || day < 1 || day > 31) return -1;
+    if(hour < 0 || hour > 23 || min < 0 || min > 59) return -1;
+    struct tm ti;
+    memset(&ti, 0, sizeof ti);
+    ti.tm_year = year - 1900; ti.tm_mon = mon - 1; ti.tm_mday = day;
+    ti.tm_hour = hour; ti.tm_min = min; ti.tm_sec = 0;
+    ti.tm_isdst = -1;                      /* let the zone decide, not the caller */
+    time_t t = mktime(&ti);
+    if(t == (time_t)-1) return -1;
+    struct timeval tv = { .tv_sec = t, .tv_usec = 0 };
+    if(settimeofday(&tv, NULL) != 0){
+        ESP_LOGW(TAG, "clock: settimeofday refused (no permission to set the clock)");
+        return -1;
+    }
+    clock_checkpoint();                    /* survive the next power cycle */
+    ESP_LOGI(TAG, "clock: set by hand to %04d-%02d-%02d %02d:%02d (local)",
+             year, mon, day, hour, min);
+    return 0;
+}

@@ -409,10 +409,39 @@ t 400
 c 46 110
 t 400
 s dash_settings
-# List rows start at y=37 and are 28px apart, so World clock 1 is the SECOND row
-# at y=65 -- y=45 is still inside row one and opened the system Time Zone picker
-# instead, which looks close enough in a thumbnail to pass unnoticed.
+# W8 PUT TWO ROWS ON TOP OF THIS PANEL (Time, Date), so every row below shifted
+# by 56 px. Rows start at y=37 and are 28 apart: Time 37, Date 65, Time zone 93,
+# World clock 1 at 121, World clock 2 at 149, Clock format at 177.
+#
+# Set time: four stepper arrows and an AM/PM toggle, no keyboard. Step the
+# minute up once and cancel -- the SYSTEM CLOCK IS NOT SET HERE, because a Linux
+# container has no CAP_SYS_TIME and settimeofday() is refused; what this gates is
+# the screen, the steppers and the way out. The write itself is a [d] check.
+c 120 37
+t 400
+s w8_set_clock
+# Coordinates here are CONTENT coordinates plus TITLE_H (24): the minute row is
+# at content y=66, so its [+] is at screen y=90..120, and Cancel is at content
+# y=144 -> screen 168..198. The first version of this walk aimed at 80 and 158,
+# which stepped the HOUR and then missed Cancel entirely -- and w8_set_date came
+# out as a second photograph of the Set time screen, with the run still green.
+c 208 105
+t 200
+s w8_set_clock_stepped
+c 50 182
+t 400
+# Set date: the SAME lv_calendar the Date Book's due-date picker uses. Cancel,
+# for the same reason -- and because a tap on a day would move the clock under
+# every later shot in this run.
 c 120 65
+t 400
+s w8_set_date
+c 50 192
+t 400
+# World clock 1 -> the shared zone picker (lv_table, pool-safe like the timezone
+# picker; a regression HANGS or exhausts the pool). Cancel back, so config and
+# the dashboard stay at defaults.
+c 120 121
 t 400
 s world_picker
 c 38 38

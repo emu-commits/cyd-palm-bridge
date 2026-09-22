@@ -3032,6 +3032,173 @@ static void sp_field_row(lv_obj_t *list, int tile, int f){
     pf_add(list, row, sp_field_cb, (tile << 8) | f);
 }
 
+/* ==== W8: setting the clock by hand ========================================
+ * A device with no RTC wakes from a flat battery in 1970, and the thing that
+ * fixes that -- SNTP inside a sync -- needs Wi-Fi, which is one of the things
+ * you may be standing here to set up. So the clock is settable by hand, and
+ * like everything else in Settings it is set by TAPPING: four steppers and a
+ * toggle, no keyboard, no Graffiti, nothing below the fold.
+ *
+ * The minute stepper moves by five. One-minute steps mean up to 59 taps to
+ * cross the hour, which is not a control, it is a punishment; and a clock set by
+ * eye off a watch is a five-minute-accurate thing anyway. Any sync afterwards
+ * corrects it to the second. */
+#define CLK_STEP_MIN 5
+static int g_clk_y, g_clk_mo, g_clk_d, g_clk_h, g_clk_mi;
+static lv_obj_t *g_clk_lbl;
+
+static void clk_render(void){
+    if(!g_clk_lbl) return;
+    int h24 = appcfg()->clock24;
+    int h = h24 ? g_clk_h : (g_clk_h % 12 == 0 ? 12 : g_clk_h % 12);
+    char buf[24];
+    if(h24) snprintf(buf, sizeof buf, "%02d:%02d", h, g_clk_mi);
+    else    snprintf(buf, sizeof buf, "%d:%02d %s", h, g_clk_mi, g_clk_h < 12 ? "AM" : "PM");
+    lv_label_set_text(g_clk_lbl, buf);
+}
+/* user_data packs the field and the direction, so one callback serves all four
+ * arrows: +-1 is the hour, +-2 is the minute. */
+static void clk_step_cb(lv_event_t *e){
+    int v = (int)(intptr_t)lv_event_get_user_data(e);
+    if(v == 1 || v == -1) g_clk_h = (g_clk_h + (v > 0 ? 1 : 23)) % 24;
+    else {
+        int step = v > 0 ? CLK_STEP_MIN : 60 - CLK_STEP_MIN;
+        /* snap to the step first, so a clock restored as 10:37 does not stay
+         * three minutes off every multiple of five for the rest of the edit */
+        g_clk_mi = ((g_clk_mi / CLK_STEP_MIN) * CLK_STEP_MIN + step) % 60;
+    }
+    clk_render();
+}
+static void clk_ampm_cb(lv_event_t *e){ (void)e; g_clk_h = (g_clk_h + 12) % 24; clk_render(); }
+static void clk_cancel_cb(lv_event_t *e){ (void)e; show_set_panel(SET_TIME); }
+static void clk_set_cb(lv_event_t *e){ (void)e;
+    if(clock_set_now(g_clk_y, g_clk_mo, g_clk_d, g_clk_h, g_clk_mi) == 0) toast_show("Clock set");
+    else toast_show("Could not set the clock");
+    show_set_panel(SET_TIME);
+}
+
+/* a stepper arrow: the Preferences brightness pattern, which is buttons and
+ * never an lv_slider (a bar allocates a draw layer and live-locks the pool) */
+static void clk_arrow(const char *txt, int x, int y, int ud){
+    lv_obj_t *b = lv_button_create(content);
+    lv_obj_set_size(b, 44, 30);
+    lv_obj_set_pos(b, x, y);
+    lv_obj_set_style_radius(b, 0, 0);
+    lv_obj_t *l = lv_label_create(b);
+    lv_label_set_text(l, txt);
+    lv_obj_center(l);
+    lv_obj_add_event_cb(b, clk_step_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ud);
+}
+static void clk_row_label(const char *txt, int y){
+    lv_obj_t *l = lv_label_create(content);
+    lv_label_set_text(l, txt);
+    lv_obj_set_pos(l, 60, y + 9);
+}
+
+static void show_set_clock(void){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    content_clear();
+    lv_label_set_text(title_lbl, "Set time");
+    update_cat_trigger();
+
+    time_t now = 0; time(&now);
+    struct tm ti; localtime_r(&now, &ti);
+    g_clk_y  = ti.tm_year + 1900 < 2024 ? 2026 : ti.tm_year + 1900;
+    g_clk_mo = ti.tm_mon + 1; g_clk_d = ti.tm_mday;
+    g_clk_h  = ti.tm_hour;    g_clk_mi = ti.tm_min;
+
+    g_clk_lbl = lv_label_create(content);
+    lv_obj_set_style_text_font(g_clk_lbl, &lv_font_palm_bold, 0);
+    lv_obj_align(g_clk_lbl, LV_ALIGN_TOP_MID, 0, 8);
+    clk_render();
+
+    clk_arrow("-", 8,   30,  -1); clk_row_label("Hour",   30); clk_arrow("+", LCD_W-52, 30,  1);
+    clk_arrow("-", 8,   66,  -2); clk_row_label("Minute", 66); clk_arrow("+", LCD_W-52, 66,  2);
+
+    if(!appcfg()->clock24){
+        lv_obj_t *b = lv_button_create(content);
+        lv_obj_set_size(b, 96, 30);
+        lv_obj_set_pos(b, (LCD_W - 96) / 2, 102);
+        lv_obj_set_style_radius(b, 0, 0);
+        lv_obj_t *l = lv_label_create(b); lv_label_set_text(l, "AM / PM"); lv_obj_center(l);
+        lv_obj_add_event_cb(b, clk_ampm_cb, LV_EVENT_CLICKED, NULL);
+    }
+
+    lv_obj_t *cancel = lv_button_create(content);
+    lv_obj_set_size(cancel, 96, 30);
+    lv_obj_set_pos(cancel, 8, 144);
+    lv_obj_set_style_radius(cancel, 0, 0);
+    lv_obj_t *cl = lv_label_create(cancel); lv_label_set_text(cl, "Cancel"); lv_obj_center(cl);
+    lv_obj_add_event_cb(cancel, clk_cancel_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *set = lv_button_create(content);
+    lv_obj_set_size(set, 96, 30);
+    lv_obj_set_pos(set, LCD_W - 104, 144);
+    lv_obj_set_style_radius(set, 0, 0);
+    lv_obj_t *sl = lv_label_create(set); lv_label_set_text(sl, "Set"); lv_obj_center(sl);
+    lv_obj_add_event_cb(set, clk_set_cb, LV_EVENT_CLICKED, NULL);
+
+    assist_say("The clock, as it should read now. A sync corrects it to the "
+               "second later -- this is for getting there first.");
+}
+
+/* The date, on the calendar the Date Book already uses. ONE calendar widget in
+ * the build, reached from two places: writing a second one is how the two end up
+ * disagreeing about which event a tap means (see due_cal_cb's note on
+ * lv_event_get_current_target -- that bug is not worth having twice). */
+static void date_cal_cb(lv_event_t *e){
+    lv_obj_t *cal = (lv_obj_t *)lv_event_get_current_target(e);
+    lv_calendar_date_t d;
+    if(lv_calendar_get_pressed_date(cal, &d) != LV_RESULT_OK) return;
+    time_t now = 0; time(&now);
+    struct tm ti; localtime_r(&now, &ti);
+    if(clock_set_now(d.year, d.month, d.day, ti.tm_hour, ti.tm_min) == 0) toast_show("Date set");
+    else toast_show("Could not set the date");
+    show_set_panel(SET_TIME);
+}
+static void date_cancel_cb(lv_event_t *e){ (void)e; show_set_panel(SET_TIME); }
+
+static void show_set_date(void){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    content_clear();
+    lv_label_set_text(title_lbl, "Set date");
+    update_cat_trigger();
+
+    time_t now = 0; time(&now);
+    struct tm ti; localtime_r(&now, &ti);
+    int y = ti.tm_year + 1900 < 2024 ? 2026 : ti.tm_year + 1900;
+
+    lv_obj_t *cal = lv_calendar_create(content);
+    lv_obj_set_size(cal, LCD_W - 8, 150);
+    lv_obj_set_pos(cal, 4, 2);
+    lv_calendar_set_showed_date(cal, y, ti.tm_mon + 1);
+    if(ti.tm_year + 1900 >= 2024)
+        lv_calendar_set_today_date(cal, y, ti.tm_mon + 1, ti.tm_mday);
+    /* The header's month arrows are LV_SYMBOL glyphs, which live in montserrat
+     * and NOT in lv_font_palm -- and this calendar is in `content`, which
+     * inherits the Palm font from the screen, so both arrows drew as empty
+     * boxes. (The Date Book's due-date calendar has always looked right for the
+     * accidental reason that it sits on lv_layer_top(), which inherits nothing
+     * and therefore falls back to montserrat. Same mechanism as the greeting
+     * pane's font; see spk_pane.) The day numbers stay in the Palm font. */
+    lv_obj_t *hdr = lv_calendar_header_arrow_create(cal);
+    lv_obj_set_style_text_font(hdr, LV_FONT_DEFAULT, 0);
+    lv_obj_add_event_cb(cal, date_cal_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_obj_t *cancel = lv_button_create(content);
+    lv_obj_set_size(cancel, 96, 26);
+    lv_obj_set_pos(cancel, 8, (PDA_H - TITLE_H) - 28);
+    lv_obj_set_style_radius(cancel, 0, 0);
+    lv_obj_t *cl = lv_label_create(cancel); lv_label_set_text(cl, "Cancel"); lv_obj_center(cl);
+    lv_obj_add_event_cb(cancel, date_cancel_cb, LV_EVENT_CLICKED, NULL);
+
+    assist_say("Tap the day. The arrows at the top change the month.");
+}
+static void sp_clock_cb(lv_event_t *e){ (void)e; show_set_clock(); }
+static void sp_date_cb(lv_event_t *e){ (void)e; show_set_date(); }
+
 /* ==== W5: the Wi-Fi wizard =================================================
  * Four remembered networks, tried in the order the list shows them, with the one
  * that worked last at the top (bridge/config.c: config_wifi_promote).
@@ -3275,7 +3442,21 @@ static void show_set_panel(int tile){
         snprintf(row, sizeof row, "News feeds... (%d on)", feeds_enabled_count());
         pf_add(list, row, pf_feeds_row_cb, 0);
         break;
-    case SET_TIME:
+    case SET_TIME: {
+        /* W8: the clock itself comes FIRST. Everything under it describes how the
+         * time is displayed; these two are the time. Six rows, which is what fits
+         * without a scrollbar -- a seventh would cost the whole panel its rule. */
+        time_t now = 0; time(&now);
+        struct tm ti; localtime_r(&now, &ti);
+        char when[32];
+        if(c->clock24) strftime(when, sizeof when, "%H:%M", &ti);
+        else           strftime(when, sizeof when, "%l:%M %p", &ti);
+        snprintf(row, sizeof row, "Time:  %s", when[0]==' ' ? when+1 : when);
+        pf_add(list, row, sp_clock_cb, 0);
+        strftime(when, sizeof when, "%a %e %b %Y", &ti);
+        snprintf(row, sizeof row, "Date:  %s", when);
+        pf_add(list, row, sp_date_cb, 0);
+        }
         snprintf(row, sizeof row, "Time zone: %s",
                  c->timezone[0] ? c->timezone : "(floating)");
         pf_add(list, row, sp_zone_cb, (tile << 8) | ZTGT_TZ);

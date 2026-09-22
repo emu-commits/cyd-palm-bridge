@@ -44,6 +44,12 @@ void clock_start_autosave(void);
 void clock_sync_begin(void);
 void clock_sync_end(int synced);
 
+/* Set the wall clock from LOCAL date/time components (Date & Time ▸ Set time).
+ * Seconds are zeroed and DST is resolved from the active zone. Returns 0, or -1
+ * if the values are out of range or the host refuses to move its clock (which is
+ * every Linux container, and never the device). Checkpoints on success. */
+int clock_set_now(int year, int mon, int day, int hour, int min);
+
 /* set the system timezone so localtime() shows the user's wall clock. Accepts a
  * POSIX TZ string directly, or maps a few common IANA names; unknown -> UTC. */
 void clock_set_tz(const char *tz);
