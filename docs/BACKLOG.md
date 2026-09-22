@@ -17,26 +17,97 @@ mostly away from the bench via the browser simulator).
 
 ---
 
-## RESUME HERE — state at 2026-09-21
+## RESUME HERE — state at 2026-09-22 (end of session)
 
-**A big new body of work arrived and is now written down.** Seventeen items,
-grouped into two new phases: **W — Settings and its nine wizards** (the whole
-Preferences surface is being rebuilt as a launcher-style icon screen with the
-Assistant narrating it) and **Q — quick entry and polish** (tap-not-type entry in
-the Date Book, quick-add rows, a Graffiti stroke reference, the lock-screen
-restyle). Both are below, each group sized to one commit. **W is the active
-phase; the three-speakers phase is done except for its `[d]` boxes.**
+**THE W PHASE IS DONE (`W1`–`W10`) AND `Q1`–`Q4` ARE DONE.** Settings is a
+nine-tile grid, every tile is a real screen, the Assistant explains each one from
+the Graffiti strip, Wi-Fi remembers four networks and finds them by scanning, the
+clock can be set by hand, Accounts discovers collections by name, a sync no
+longer implies iCloud, **the device works out where it is instead of asking**,
+the Date Book's date and time are picked rather than typed, and every Graffiti
+stroke is on one sheet. **`Q5`–`Q8` are what is left of the phase.**
+
+**FOUR THINGS THIS SESSION LEARNED THE HARD WAY.** Each cost a bench round-trip;
+none is discoverable from the code:
+
+1. **`lv_malloc` IS THE POOL, NOT THE HEAP.** Two budgets — a fixed 31 KB LVGL
+   pool and ~140 KB of system heap — and only one is scarce. An 11 KB
+   `lv_malloc` for a canvas buffer segfaulted a screen on open. Raw buffers use
+   `malloc`; every LVGL *object* comes from the pool.
+2. **THE SMOKE NOW MEASURES THE POOL** at every screenshot, names the screen at
+   the low-water mark, and fails under 3 KB (`sim/host_main.c`). This project's
+   oldest failure is a per-row widget where a virtualised table belongs, and
+   until now it was only ever caught by a person tapping glass. It has already
+   caught two: a 27-row `lv_list` that crashed the device, and a 22-row one that
+   had not yet.
+3. **INVENTED FIXTURES TEST THE AUTHOR, NOT THE SERVICE.** `ip-api.com` answers
+   in its own field order and ignores the order requested; every fixture in the
+   geoip gate had been written in the assumed shape and all of them passed, while
+   the device failed. Fixtures are verbatim captures now.
+4. **`lv_font_palm` HAS NO SYMBOL RANGE** — a 32..255 Latin subset. A bullet, a
+   check mark and `LV_SYMBOL` arrows all draw as empty boxes. Use ASCII, or set
+   `LV_FONT_DEFAULT` on the one widget that needs a glyph. Anything on
+   `lv_layer_top()` gets montserrat for free, because it inherits nothing.
+
+**SCROLL-TO-READ IS NOT SCROLL-TO-SELECT** (2026-09-22, from the bench, and it
+refines design rule 2). The objection to scrolling is about a page you must
+*select* from, where a drag that lands as a tap picks the wrong thing. A page you
+scroll to *read* has no such failure — which is why the stroke sheet is one sheet
+rather than three pages to lose your place in.
+
+**The strip is a place to stand.** W3's finding, and the one most reusable thing
+the phase produced: 240×112 of screen that any non-typing screen has no use for,
+addressable by putting an overlay on `lv_layer_top()` at `PDA_H`.
+`speaker_aside()` is that, and `content_clear()` takes it down. It costs the four
+silkscreen buttons while it is up — one extra tap on Home — which is the open
+`[d]` question on it.
+
+**`lv_font_palm` HAS NO SYMBOLS, and the phase hit that wall three times** in one
+day: the pick-list marker (a bullet), the Set date calendar's month arrows, and
+— years earlier — C7's check mark. It is a 32..255 Latin subset, so anything
+outside ASCII draws as an empty box. Two ways out, both used here: pick an ASCII
+character, or set `LV_FONT_DEFAULT` on the one widget that needs the glyph.
+Anything on `lv_layer_top()` gets montserrat for free, because it inherits
+nothing — which is also why the greeting pane had to name its own font.
+
+**The simulator now fakes the radio, not the flow.** Both the Wi-Fi scan and
+iCloud discovery run against fixtures in `sim/stubs/hotsync_stub.c`, so the two
+screens whose entire purpose is "never type this value" are gated by CI. Before
+this, discovery answered "disabled in the simulator" and its screen had never
+been rendered by a test.
+
+**A credential leak was found and fixed on the way** (`nosecrets`, 2026-09-21).
+Simulator builds were compiling a developer's real `secrets.h` in, because an
+include-order "shield" cannot beat C's rule that a quoted include resolves
+relative to the including file's own directory. CI was never affected and could
+never have caught it — which is the lesson worth keeping.
+
+**Seventeen items arrived on 2026-09-21 as two phases.** **W — Settings and its
+nine wizards** is now code complete (above). **Q — quick entry and polish**
+(tap-not-type entry in the Date Book, quick-add rows, a Graffiti stroke
+reference, the lock-screen restyle) is the active phase from here.
 
 **Read the W phase's design rules before building anything in it.** Two of them
 overturn habits this codebase already has: *no scrolling if it can be avoided*
 (swipe scrolling is poor on this hardware/OS pair) and *tap to pick, don't type* —
 the keyboard is for server addresses and passwords only.
 
-**The bench device is current.** It holds `4942131` = the code merged as
-`f0796b9` (**P10**: new portraits, the greeting moved onto the week screen,
-tap-anywhere). Flash verified 2026-09-21, hard reset issued. **P10's two on-glass
-questions have NOT been answered** — the user chose to merge and report later.
-The web emulator deploys from `main` and serves this code.
+**The bench device holds the session's work.** Flashed 2026-09-22, repeatedly,
+ending at the W phase + `Q1`–`Q4`. **Confirmed on glass by the user:** the
+Assistant's greeting and the Settings grid, the IP location fix (Detroit →
+Bloomfield in one sync), and the Date Book's new-event flow after the time
+picker was rebuilt. **Re-flash before reasoning about what is on it** — this
+session flashed a dozen times and the bench is only ever as current as the last
+one.
+Boot verified clean (`panel init done`, `SD mounted`, 19/19/4 records, `LVGL up`).
+W3 was judged on glass first from a `-dirty` build and two faults came back from
+that look: the "Date & Time" tile had a scrollbar drawn under its label, and the
+greeting's hint line was rendering in montserrat. Both fixed before W3 landed.
+
+It also still carries **P10** (new portraits, the greeting on the week screen,
+tap-anywhere), whose **two on-glass questions have NOT been answered** — the user
+chose to merge and report later. The web emulator deploys from `main`, so it does
+**not** serve W3 yet.
 
 **Nine `[d]` boxes are open** and every one is flashable-and-checkable in a single
 sitting on the code already on the device. **The user has said they will test
@@ -66,11 +137,11 @@ Concise index. Detail for each is below, or in the named doc.
    collection, href relocation, `config.ini` round-trip. §Device.
 
 ### B. Code to write
-6. **W — Settings and its nine wizards.** THE ACTIVE PHASE. Preferences becomes
-   Settings, a nine-icon screen; four real wizards behind it, five small panels,
-   the Assistant narrating; Wi-Fi remembers four networks; HotSync stops needing
-   iCloud. Ten groups, `W1`–`W10`. §W.
-7. **Q — quick entry and polish.** Eight groups, `Q1`–`Q8`: Date Book `New` +
+6. **W — Settings and its nine wizards. CODE COMPLETE 2026-09-22**, `W1`–`W10`.
+   Only `[d]` boxes left: the Wi-Fi join and scan against real APs, a real iCloud
+   login, the clock write, an accountless sync, and the two questions the
+   Assistant's pane raises. §W.
+7. **Q — quick entry and polish. THE ACTIVE PHASE, `Q1`–`Q4` done.** `Q5`–`Q8` left: Date Book `New` +
    calendar + time list, Graffiti stroke reference, lock-screen restyle, quick-add
    rows in Address / To Do / Memo. §Q.
 8. **P6 — Assistant onboarding. SUPERSEDED by W**, kept for its three decided
@@ -232,7 +303,7 @@ setup" is **W8**.)*
 
 ---
 
-## §W — PHASE: Settings and its nine wizards (ACTIVE)
+## §W — PHASE: Settings and its nine wizards (CODE COMPLETE — only `[d]` left)
 
 Requested 2026-09-21, items 1–8 and 17 of seventeen. The whole configuration
 surface is rebuilt: **Menu ▸ Preferences becomes Menu ▸ Settings**, which opens a
@@ -291,86 +362,136 @@ almost everyone.
 | **About** | version, GPLv3/PumpkinOS provenance | the existing About panel |
 
 ### The groups — one commit each, branch off `main`
-- [ ] **W1 — Settings replaces Preferences `[s]`.** Rename the menu entry; build
+- [x] **W1 — Settings replaces Preferences `[s]`.** DONE 2026-09-21. Rename the menu entry; build
       the nine-icon screen on `show_launcher()`'s pattern (a flex `ROW_WRAP` grid
       of 68×52 cells, which is already proven to seat nine icons in three rows
-      with nothing below the fold). Home exits. Tiles with no wizard yet fall
-      through to the matching Preferences field, so the screen is never a
-      dead end. **Smoke-gate the grid before any wizard exists.**
-- [ ] **W2 — nine icons in early-Palm-OS style `[s]`.** ~24×22 A8, generated the
+      with nothing below the fold). Home exits. **Every tile opens a real panel
+      — none falls through**, which went further than planned: the nine tiles
+      between them cover every field the old list held, so each one got a small
+      filtered list rather than a stub. `W5`–`W9` now *replace* those lists with
+      tap-first wizards instead of building them from nothing.
+      Gated by `settings_grid`, `settings_accounts`, `settings_display`,
+      `settings_about` and `prefs_list`.
+- [x] **W2 — nine icons in early-Palm-OS style `[s]`.** DONE 2026-09-21, ticked
+      once `settings_grid` put them on screen. ~24×22 A8, generated the
       way `gen_guru_icon.py` and `gen_zip_icon.py` generate theirs — **one
       `tools/gen_settings_icons.py` for all nine**, not nine scripts. Follow the
       house idiom that `gen_guru_icon.py` documents: the Palm icons are a **solid
       disk with the subject knocked out in white**, ink-as-disk not
       subject-as-ink. Remember P10's lesson — **trim blank rows top and bottom**,
       they are not free.
-- [ ] **W3 — the Assistant greets Settings `[s]`.** First entry after an unlock
-      only, rotating non-repeating lines, tap anywhere to proceed — exactly the
-      Coach/Guru contract. `speaker_greet()`, `tap_anywhere()` and the
-      since-unlock flag all exist and are shared; `assistant_face` is already in
-      flash at 60×77 and is the one portrait not yet used anywhere.
-- [ ] **W4 — the Assistant narrates each wizard `[s]`.** Her bubble carries the
-      step's instruction. **OPEN:** whether she is present on *every* step or only
-      on a wizard's first screen — on a 240×184 area her portrait plus a bubble
-      costs roughly half the height, which fights design rule 2 hard. Decide with
-      one wizard built, not in advance.
-- [ ] **W5 — Wi-Fi wizard: four networks `[s]`+`[d]`.** `Config` grows to four
+- [x] **W3 — the Assistant greets Settings `[s]`.** DONE 2026-09-22. First entry
+      after an unlock only, rotating non-repeating lines, tap to dismiss. It is
+      **not** the Coach/Guru contract in one respect: her greeting does not
+      replace the screen, it stands on `lv_layer_top()` **in the Graffiti strip**
+      over a finished, live grid — all nine tiles stay visible and tappable, and
+      dismissing her rebuilds nothing. The Coach arrangement was built too and
+      rejected on the screenshots (her shoulders on the About tile, the balloon
+      across the silkscreen row, and a full-screen overlay eating the first tap).
+      1344 B of the 31100 B pool while up, all returned on dismiss. The bit is
+      spent when she is SHOWN, since she cannot block navigation. **Her lines
+      must stay under ~78 characters — the balloon clips, it does not wrap.**
+      Gated by `settings_grid` and `settings_greet_gone`.
+- [x] **W4 — the Assistant narrates each wizard `[s]`.** DONE 2026-09-22, on
+      **every** screen, and the OPEN question is closed by where the keyboard
+      lives: the I1.2 tap keyboard is an `lv_buttonmatrix` inside the *content*
+      area, so there is no screen in Settings — not even entering a password —
+      where she and the input want the same pixels. `SET_BLURB[]` says what each
+      tile is FOR; the wizards' own screens each say their piece. She costs the
+      step no height at all, so design rule 2 is untouched.
+      **Two `[d]` checks W3 opened** remain: does the pane read as her standing
+      in front of the writing area or as the screen having grown taller (the one
+      hairline at `PDA_H` is all that says so, and P9 is already asking whether
+      greys survive the panel), and is losing Home/Menu/Find/Calc for one tap
+      per unlock session acceptable or annoying with a thumb.
+- [x] **W5 — Wi-Fi wizard: four networks `[s]`, `[d]` OPEN.** DONE 2026-09-22. `Config` grows to four
       SSID/password pairs plus a last-connected marker; `config.ini` gains a
       round-trip for them (**host-gated** — `bridge/config.c` is in `make test`).
       HotSync tries them **in order of last successful connection**, most recent
-      first. Four fits one non-scrolling list. `[d]` for the join itself.
-- [ ] **W6 — Accounts wizard `[s]`+`[d]`.** Separate from Wi-Fi, per item 6.
-      Apple ID and app-specific password via keyboard (rule 1's exception), then
-      hand off to the existing **`hotsync_discover_*`** flow so collections are
-      *picked from a list*, never pasted as UUID paths. `[d]` — needs a real
-      account.
-- [ ] **W7 — News Feeds wizard `[s]`.** Its own tile. The feed manager already
-      exists (`ui.c:2535`, "Preferences → News feeds…") and mostly needs
-      re-homing plus the tap-first treatment.
-- [ ] **W8 — Date & Time wizard `[s]`.** Time, zone, 12/24h, the two world
-      clocks. The zone picker already exists (`ui.c:2673`). Time-of-day set by
-      picking, not typing.
-- [ ] **W9 — the five small panels `[s]`.** Display, Location, Sync, Owner,
-      About. Small enough to share one commit; **Owner needs a new `Config`
-      field** and a lock-screen render for it.
-- [ ] **W10 — HotSync works without iCloud `[s]`+`[d]`.** Item 17, and the one
-      that changes existing behaviour rather than adding a screen. With no
-      account configured, a sync must still do **clock and RSS** and report what
-      it did, rather than failing or steering the user into account setup. Audit
-      every prompt that pushes toward iCloud — starting with the launcher's
-      demo-data hint (`ui.c:2318`), which today dead-ends at "edit config.ini on
-      the card". See §P6 for what item 17 retires.
+      first — the array order IS the try order and a join promotes its slot, so
+      there is no separate "last used" key to disagree with the list. Four fits
+      one non-scrolling list. **An SSID is never typed:** `wifi_scan_*` scans and
+      the user taps a name known to exist; the password is the only typed value.
+      `config.ini` keeps the unnumbered `wifi_ssid`/`wifi_pass` for slot 1, so a
+      card written before this still loads. **`[d]`: the join itself, the scan
+      against real APs, and whether 8 s is enough for networks 2–4.**
+- [x] **W6 — Accounts wizard `[s]`, `[d]` OPEN.** DONE 2026-09-22. Apple ID and
+      app-specific password via keyboard (rule 1's exception), then **Find my
+      calendars...** hands off to `hotsync_discover_*` and collections are picked
+      by name. The two server addresses moved behind **Advanced** — they default
+      to iCloud and read as required fields when they sit in the account flow.
+      **Discovery now runs in the simulator** against a pretend account, so the
+      flow is gated; before this the one screen that exists to stop people
+      pasting UUID paths was never rendered by CI. **`[d]`: a real login.**
+- [x] **W7 — News Feeds wizard `[s]`.** DONE 2026-09-22. The tile opens the feed
+      list itself (it used to hold one row whose only content was the name of the
+      next screen), with no Back button — Home is the way out, like every other
+      tile. Picking was already tap-first; what was missing was a way back from a
+      mistake, so **Built-ins** restores any deleted built-in without disturbing
+      a user's own feed or re-enabling one deliberately switched off.
+- [x] **W8 — Date & Time wizard `[s]`, one `[d]`.** DONE 2026-09-22. **The clock
+      could not be set by hand at all before**, which matters because a device
+      with no RTC wakes from a flat battery in 1970 and the fix (SNTP in a sync)
+      needs the Wi-Fi you may be here to set up. Four stepper arrows and an
+      AM/PM toggle; the minute steps by five, because 59 taps to cross the hour
+      is not a control. The date uses the **same** `lv_calendar` as the Date
+      Book's due picker. **`[d]`: the write itself** — `settimeofday()` is
+      refused in a container, so the sim gates the screen and not the clock.
+- [x] **W9 — the five small panels `[s]`.** DONE 2026-09-22. One shared
+      pick-one-of-N screen serves all three choices (backlight timeout, conflict
+      policy, location) with the current value marked — a cycling row cannot show
+      you the options you are *not* on. **Screen off** was in `config.ini` and
+      nowhere in the UI, despite deciding most of the battery life. **Location**
+      is now a list of cities: the zone table carries each city's coordinates, so
+      the same list the clock uses answers "where are you". **Owner** renders on
+      the lock screen, sharing the bottom line with the unlock hint.
+- [x] **W10 — HotSync works without iCloud `[s]`, `[d]` OPEN.** DONE 2026-09-22.
+      **The engine already did the right thing** — the account stages are skipped
+      with a reason and the clock and feeds run regardless — so this was entirely
+      about what the user *reads*. The launcher's demo-data hint is **deleted**:
+      it dead-ended at "edit config.ini on the card", read as an unfinished-setup
+      nag (which item 17 rejects), and sat below the fold where nobody saw it
+      anyway. What it was for now sits on the **HotSync screen**, saying what
+      *this* sync will do given what is configured, and naming the account as the
+      thing that ADDS records rather than a precondition that is missing.
+      **`[d]`: confirm a real accountless sync reports clock + news honestly.**
 
 ---
 
-## §Q — PHASE: quick entry and polish (NEXT)
+## §Q — PHASE: quick entry and polish (ACTIVE — `Q1`–`Q4` done)
 
 Items 9–16 of the same request. Independent of W, mostly small, each its own
 commit. Design rules 1–4 above apply here too — item 4's tap-don't-type and
 don't-scroll instructions were given for the whole request, not just for Settings.
 
-- [ ] **Q1 — Date Book day view gets a `New` button `[s]`.** At the bottom of the
-      day's list, opening the new-event screen. Today a new event is reachable
-      only through Menu ▸ New (`act_new`, `ui.c:3013`), which is exactly the kind
-      of thing nobody finds.
-- [ ] **Q2 — new event: pick the date on a calendar `[s]`.** **Most of this is
-      already built.** `due_open()` (`ui.c:4030`) is a working calendar popup with
-      Today / Tomorrow / 1 Week quick buttons, and it carries a hard-won fix —
-      `lv_event_get_current_target()`, because the bubbled `VALUE_CHANGED` hands
-      back the button matrix and `lv_calendar_get_pressed_date()` will happily
-      cast it and return a date assembled from unrelated memory. **Reuse it; do
-      not write a second one.**
-- [ ] **Q3 — new event: pick the time from a list `[s]`.** Every 30 minutes from
-      8:00 AM to 9:00 PM — 27 rows — with typing as the fallback for anything
-      outside that window. A 27-row `lv_list` is one object and scrolls as a list,
-      not as a page (rule 2). **OPEN:** does this cover the end time as well, and
-      should end default to start + 1 hour?
-- [ ] **Q4 — Graffiti stroke reference `[s]`.** A button in the Graffiti app
-      showing every character stroke on one page for quick reference. **OPEN:**
-      item 12 says "swipeable", which fights rule 2 — propose paged with explicit
-      next/prev taps and confirm. The stroke data already exists (the recogniser's
-      templates); this is a rendering job, and the I1 canvas is the pool-safe
-      surface for it.
+- [x] **Q1 — Date Book day view gets a `New` button `[s]`.** DONE 2026-09-22. A
+      FIXED button, not the last row of the list: a full day would have pushed
+      that row below the fold, and "add an event" must never be hidden by how
+      busy the day is. It lands on the day you are looking at.
+- [x] **Q2 — new event: pick the date on a calendar `[s]`.** DONE 2026-09-22 by
+      reusing `due_open()` exactly as instructed — one popup, one set of state,
+      and the `lv_event_get_current_target()` fix stays in one place. "No Date"
+      is withheld for events (an event on no day is not an event) and the
+      popup's title follows the caller, since a To Do has a *due* date and an
+      event just has a date.
+- [x] **Q3 — new event: pick the time from a list `[s]`.** DONE 2026-09-22, and
+      **the whole day at 30-minute steps, not 8:00–21:00**: the list is an
+      `lv_table`, so 48 rows cost what 27 did, and it opens scrolled to the
+      event's current time. That retires the typing fallback entirely — there is
+      no time the picker cannot offer. **OPEN resolved:** `default_appt()`
+      already set end = start + 1 hour and the form only ever edited the start.
+      **A 27-row `lv_list` was the first attempt and it CRASHED THE DEVICE** —
+      see `BUILD_PROGRESS`; the gate now measures the pool because of it.
+- [x] **Q4 — Graffiti stroke reference `[s]`.** DONE 2026-09-22. All 36 glyphs
+      (a–z, 0–9) on one scrolling sheet, each with a filled dot where the pen
+      starts — the shape of an 'o' says nothing about which end to begin at, and
+      that is the commonest reason a stroke is not recognised.
+      **OPEN resolved, and it sharpened the rule:** scrolling is fine *here*
+      because the objection is to scrolling a page you must **select** from,
+      where a drag landing as a tap picks the wrong thing. Nothing on this sheet
+      is selectable, so the whole set is one page instead of three you lose your
+      place in. **Scroll-to-read is not scroll-to-select** — worth applying to
+      the rest of the phase.
 - [ ] **Q5 — lock-screen restyle `[s]`.** Item 13: the three black zone bars
       (`CONDITIONS` / `AHEAD` / `SUN & MOON`, drawn at `DASH_Y_WX`,
       `DASH_Y_AGENDA`, `DASH_Y_SUN`) go **grey**, and the zone headers stop being
@@ -469,6 +590,26 @@ don't-scroll instructions were given for the whole request, not just for Setting
   from the harness.
 
 ### Live-network verifies
+- **Q1–Q4 on glass `[d]`.** The new-event flow was confirmed working after the
+  fix; still unseen by anyone: the stroke sheet's legibility at 40 px cells on a
+  real panel (the strokes are 18 px of 2 px ink), whether its scroll feels right
+  under a thumb, and whether the 12/24-hour setting now reads consistently
+  across the title bar, the weather strip and Rise/Set.
+- **IP geolocation — `[d]` CONFIRMED ON GLASS 2026-09-22.** A device holding a
+  hand-picked Detroit was moved to Bloomfield NJ (the user is in Jersey City) by
+  one sync, and the Location panel showed the new place and coordinates. What it
+  took to get there is worth keeping: see `BUILD_PROGRESS` — the CSV endpoint
+  ignores the field order you ask for, and the gate's invented fixtures agreed
+  with the bug for two builds. **Still open `[d]`:** `locate_by_ip()` runs while
+  the location is APPROXIMATE (`loc_auto`) — unset, or derived from the zone or
+  the city list. Wipe `latitude`/`longitude` from `config.ini`, sync, and
+  confirm the `geoip:` log line names the right town. Two known ways it legitimately fails, both of
+  which must leave the location unchanged rather than half-set: a carrier NAT
+  (`fail,private range`) and a captive portal returning HTML. **Also confirm a
+  PINNED location is never touched** — type a coordinate, sync twice, check it
+  survives. The parser is
+  host-gated (`make geoip_test`); what needs the bench is the live GET and
+  whether plain HTTP survives the network the device is actually on.
 - **RSS fetch.** The whole reader is feature-complete and host-gated; only the live
   network GET is unexercised. Confirm a feed fetches, items appear in News, sync
   stays quick, and heap holds during the fetch.

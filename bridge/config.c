@@ -25,6 +25,7 @@ void config_defaults(Config *c){
     c->backlight_sec = 30;     /* dim after 30 s idle */
     c->clock24       = 0;      /* 12-hour by default */
     c->policy        = CFG_POL_SERVER;
+    c->loc_auto      = -1;     /* "the file has not said"; see config.h */
 }
 
 int config_policy_from_str(const char *s){
@@ -62,10 +63,32 @@ static char *trim(char *s){
 /* clamp an int to [lo,hi]. */
 static int clampi(int v,int lo,int hi){ return v<lo?lo:v>hi?hi:v; }
 
+/* The key names for Wi-Fi slot `i`. SLOT 0 KEEPS THE UNNUMBERED NAMES it has
+ * always had -- `wifi_ssid` / `wifi_pass` -- so a card written before there were
+ * four networks still loads, into the slot that is tried first. The rest are
+ * suffixed with their 1-based number, which is what a human editing the file
+ * would expect to see next to the unnumbered pair. */
+static void wifi_keys(int i, char *ks, size_t nks, char *kp, size_t nkp){
+    if(i == 0){ snprintf(ks,nks,"wifi_ssid"); snprintf(kp,nkp,"wifi_pass"); }
+    else      { snprintf(ks,nks,"wifi_ssid%d",i+1); snprintf(kp,nkp,"wifi_pass%d",i+1); }
+}
+
+int config_wifi_promote(Config *c, int i){
+    if(!c || i <= 0 || i >= CFG_WIFI_N) return 0;
+    WifiNet t = c->wifi[i];
+    for(int k = i; k > 0; k--) c->wifi[k] = c->wifi[k-1];
+    c->wifi[0] = t;
+    return 1;
+}
+
 static void apply(Config *c, const char *key, const char *val){
-    if(!strcasecmp(key,"wifi_ssid"))      setstr(c->wifi_ssid,     sizeof c->wifi_ssid, val);
-    else if(!strcasecmp(key,"wifi_pass")) setstr(c->wifi_pass,     sizeof c->wifi_pass, val);
-    else if(!strcasecmp(key,"dav_user"))  setstr(c->dav_user,      sizeof c->dav_user, val);
+    for(int i = 0; i < CFG_WIFI_N; i++){
+        char ks[16], kp[16];
+        wifi_keys(i, ks, sizeof ks, kp, sizeof kp);
+        if(!strcasecmp(key,ks)){ setstr(c->wifi[i].ssid, sizeof c->wifi[i].ssid, val); return; }
+        if(!strcasecmp(key,kp)){ setstr(c->wifi[i].pass, sizeof c->wifi[i].pass, val); return; }
+    }
+    if(!strcasecmp(key,"dav_user"))       setstr(c->dav_user,      sizeof c->dav_user, val);
     else if(!strcasecmp(key,"dav_pass"))  setstr(c->dav_pass,      sizeof c->dav_pass, val);
     else if(!strcasecmp(key,"dav_base"))  setstr(c->dav_base,      sizeof c->dav_base, val);
     else if(!strcasecmp(key,"dav_card_base")) setstr(c->dav_card_base, sizeof c->dav_card_base, val);
@@ -73,8 +96,11 @@ static void apply(Config *c, const char *key, const char *val){
     else if(!strcasecmp(key,"todo_coll")) setstr(c->todo_coll,     sizeof c->todo_coll, val);
     else if(!strcasecmp(key,"card_coll")) setstr(c->card_coll,     sizeof c->card_coll, val);
     else if(!strcasecmp(key,"timezone"))  setstr(c->timezone,      sizeof c->timezone, val);
+    else if(!strcasecmp(key,"loc_auto"))      c->loc_auto      = clampi(atoi(val),0,1);
+    else if(!strcasecmp(key,"loc_name"))  setstr(c->loc_name,      sizeof c->loc_name, val);
     else if(!strcasecmp(key,"latitude"))  setstr(c->latitude,      sizeof c->latitude, val);
     else if(!strcasecmp(key,"longitude")) setstr(c->longitude,     sizeof c->longitude, val);
+    else if(!strcasecmp(key,"owner"))     setstr(c->owner,         sizeof c->owner, val);
     else if(!strcasecmp(key,"world1"))    setstr(c->world1,        sizeof c->world1, val);
     else if(!strcasecmp(key,"world2"))    setstr(c->world2,        sizeof c->world2, val);
     else if(!strcasecmp(key,"brightness"))    c->brightness    = clampi(atoi(val),0,100);
@@ -109,8 +135,15 @@ int config_save(const char *path, const Config *c){
     if(!f) return -1;
     fprintf(f,"# CYD Palm device config. Holds Wi-Fi + iCloud passwords -- keep private.\n");
     fprintf(f,"# `key = value`, one per line. '#' starts a comment.\n\n");
-    fprintf(f,"wifi_ssid = %s\n",     c->wifi_ssid);
-    fprintf(f,"wifi_pass = %s\n",     c->wifi_pass);
+    /* In try order, most recently connected first -- so the file reads the way
+     * the device behaves, and an empty slot writes as an empty value rather than
+     * vanishing (a missing key would silently keep whatever was loaded before). */
+    for(int i = 0; i < CFG_WIFI_N; i++){
+        char ks[16], kp[16];
+        wifi_keys(i, ks, sizeof ks, kp, sizeof kp);
+        fprintf(f,"%s = %s\n", ks, c->wifi[i].ssid);
+        fprintf(f,"%s = %s\n", kp, c->wifi[i].pass);
+    }
     fprintf(f,"dav_user = %s\n",      c->dav_user);
     fprintf(f,"dav_pass = %s\n",      c->dav_pass);
     fprintf(f,"dav_base = %s\n",      c->dav_base);
@@ -119,8 +152,12 @@ int config_save(const char *path, const Config *c){
     fprintf(f,"todo_coll = %s\n",     c->todo_coll);
     fprintf(f,"card_coll = %s\n",     c->card_coll);
     fprintf(f,"timezone = %s\n",      c->timezone);
+    /* never -1: writing the file is what settles the question for good */
+    fprintf(f,"loc_auto = %d\n",      c->loc_auto > 0 ? 1 : 0);
+    fprintf(f,"loc_name = %s\n",      c->loc_name);
     fprintf(f,"latitude = %s\n",      c->latitude);
     fprintf(f,"longitude = %s\n",     c->longitude);
+    fprintf(f,"owner = %s\n",         c->owner);
     fprintf(f,"world1 = %s\n",        c->world1);
     fprintf(f,"world2 = %s\n",        c->world2);
     fprintf(f,"brightness = %d\n",    c->brightness);

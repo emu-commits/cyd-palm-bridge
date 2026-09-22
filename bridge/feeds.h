@@ -33,6 +33,12 @@ void feeds_clear(void);
 /* replace the list with the 10 built-in reputable world English news feeds. */
 void feeds_seed_defaults(void);
 
+/* Put back any built-in feed that is no longer in the list, leaving everything
+ * else alone -- a user-added feed stays, and a built-in that is merely switched
+ * off is not touched (feeds_add refuses a URL already present). Returns how many
+ * were restored. The URL is the one thing here nobody can retype from memory. */
+int feeds_restore_builtins(void);
+
 /* ---- persistence ---- */
 int  feeds_load(const char *path);       /* 0 if read (even empty), -1 if not found */
 int  feeds_save(const char *path);       /* 0 / -1 */

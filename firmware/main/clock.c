@@ -202,30 +202,37 @@ void clock_sync_end(int synced){
  * DST automatically by the current date -- no separate DST logic needed. This
  * table is also the source for the on-device timezone picker (clock_zone_*),
  * which is why it lives at file scope. Extend as needed. */
-static const struct { const char *iana, *posix; } TZ_TBL[] = {
-    {"America/New_York",    "EST5EDT,M3.2.0,M11.1.0"},
-    {"America/Detroit",     "EST5EDT,M3.2.0,M11.1.0"},
-    {"America/Chicago",     "CST6CDT,M3.2.0,M11.1.0"},
-    {"America/Denver",      "MST7MDT,M3.2.0,M11.1.0"},
-    {"America/Phoenix",     "MST7"},
-    {"America/Los_Angeles", "PST8PDT,M3.2.0,M11.1.0"},
-    {"America/Anchorage",   "AKST9AKDT,M3.2.0,M11.1.0"},
-    {"America/Halifax",     "AST4ADT,M3.2.0,M11.1.0"},
-    {"America/Sao_Paulo",   "BRT3"},
-    {"UTC",                 "UTC0"},
-    {"Europe/London",       "GMT0BST,M3.5.0/1,M10.5.0"},
-    {"Europe/Dublin",       "GMT0IST,M3.5.0/1,M10.5.0"},
-    {"Europe/Paris",        "CET-1CEST,M3.5.0,M10.5.0/3"},
-    {"Europe/Berlin",       "CET-1CEST,M3.5.0,M10.5.0/3"},
-    {"Europe/Madrid",       "CET-1CEST,M3.5.0,M10.5.0/3"},
-    {"Europe/Athens",       "EET-2EEST,M3.5.0/3,M10.5.0/4"},
-    {"Europe/Moscow",       "MSK-3"},
-    {"Asia/Dubai",          "GST-4"},
-    {"Asia/Kolkata",        "IST-5:30"},
-    {"Asia/Shanghai",       "CST-8"},
-    {"Asia/Tokyo",          "JST-9"},
-    {"Australia/Sydney",    "AEST-10AEDT,M10.1.0,M4.1.0/3"},
-    {"Pacific/Auckland",    "NZST-12NZDT,M9.5.0,M4.1.0/3"},
+/* The zone table doubles as the device's gazetteer: each row carries the city's
+ * coordinates so Settings ▸ Location can be a LIST OF PLACES rather than two
+ * numbers typed on a keyboard. Weather is the only consumer and it wants about a
+ * city's worth of precision, so two decimals is plenty -- and stored as text
+ * because that is how config.ini holds them and how the forecast URL wants them.
+ * UTC is a zone, not a place, so it has no coordinates and is skipped by the
+ * picker. */
+static const struct { const char *iana, *posix, *lat, *lon; } TZ_TBL[] = {
+    {"America/New_York",    "EST5EDT,M3.2.0,M11.1.0", "40.71", "-74.01"},
+    {"America/Detroit",     "EST5EDT,M3.2.0,M11.1.0", "42.33", "-83.05"},
+    {"America/Chicago",     "CST6CDT,M3.2.0,M11.1.0", "41.88", "-87.63"},
+    {"America/Denver",      "MST7MDT,M3.2.0,M11.1.0", "39.74", "-104.98"},
+    {"America/Phoenix",     "MST7", "33.45", "-112.07"},
+    {"America/Los_Angeles", "PST8PDT,M3.2.0,M11.1.0", "34.05", "-118.24"},
+    {"America/Anchorage",   "AKST9AKDT,M3.2.0,M11.1.0", "61.22", "-149.90"},
+    {"America/Halifax",     "AST4ADT,M3.2.0,M11.1.0", "44.65", "-63.57"},
+    {"America/Sao_Paulo",   "BRT3", "-23.55", "-46.63"},
+    {"UTC",                 "UTC0", "", ""},
+    {"Europe/London",       "GMT0BST,M3.5.0/1,M10.5.0", "51.51", "-0.13"},
+    {"Europe/Dublin",       "GMT0IST,M3.5.0/1,M10.5.0", "53.35", "-6.26"},
+    {"Europe/Paris",        "CET-1CEST,M3.5.0,M10.5.0/3", "48.86", "2.35"},
+    {"Europe/Berlin",       "CET-1CEST,M3.5.0,M10.5.0/3", "52.52", "13.40"},
+    {"Europe/Madrid",       "CET-1CEST,M3.5.0,M10.5.0/3", "40.42", "-3.70"},
+    {"Europe/Athens",       "EET-2EEST,M3.5.0/3,M10.5.0/4", "37.98", "23.73"},
+    {"Europe/Moscow",       "MSK-3", "55.76", "37.62"},
+    {"Asia/Dubai",          "GST-4", "25.20", "55.27"},
+    {"Asia/Kolkata",        "IST-5:30", "22.57", "88.36"},
+    {"Asia/Shanghai",       "CST-8", "31.23", "121.47"},
+    {"Asia/Tokyo",          "JST-9", "35.68", "139.65"},
+    {"Australia/Sydney",    "AEST-10AEDT,M10.1.0,M4.1.0/3", "-33.87", "151.21"},
+    {"Pacific/Auckland",    "NZST-12NZDT,M9.5.0,M4.1.0/3", "-36.85", "174.76"},
 };
 #define TZ_TBL_N ((int)(sizeof TZ_TBL / sizeof TZ_TBL[0]))
 
@@ -351,4 +358,62 @@ void clock_zone_hhmm(const char *iana, time_t t, char *out, int cap){
     strftime(out, cap, "%H:%M", &ti);
     if(save[0]) setenv("TZ", save, 1); else unsetenv("TZ");
     tzset();
+}
+
+/* ---- setting the clock by hand (W8) --------------------------------------
+ * The device has no RTC, so after a flat battery it wakes in 1970 and stays
+ * there until a sync runs SNTP -- and a sync needs Wi-Fi, which is one of the
+ * things you may be here to set up. So the clock has to be settable by hand,
+ * from the Date & Time tile, with no network and no keyboard.
+ *
+ * The components are LOCAL wall-clock time, which is what the user is reading
+ * off a watch; mktime() turns them back into an epoch under whatever zone
+ * clock_set_tz() has in force. tm_isdst = -1 asks it to work out the offset
+ * itself rather than being told, which is the only correct answer twice a year.
+ * Seconds are zeroed: a value nobody can see is a value nobody can set.
+ *
+ * Returns 0 on success. settimeofday() can fail where the process is not
+ * allowed to move the system clock -- which never happens on ESP-IDF, and
+ * always happens in a Linux container without CAP_SYS_TIME, so the simulator
+ * reports the failure honestly rather than pretending the clock moved. */
+int clock_set_now(int year, int mon, int day, int hour, int min){
+    if(year < 2024 || mon < 1 || mon > 12 || day < 1 || day > 31) return -1;
+    if(hour < 0 || hour > 23 || min < 0 || min > 59) return -1;
+    struct tm ti;
+    memset(&ti, 0, sizeof ti);
+    ti.tm_year = year - 1900; ti.tm_mon = mon - 1; ti.tm_mday = day;
+    ti.tm_hour = hour; ti.tm_min = min; ti.tm_sec = 0;
+    ti.tm_isdst = -1;                      /* let the zone decide, not the caller */
+    time_t t = mktime(&ti);
+    if(t == (time_t)-1) return -1;
+#ifdef __EMSCRIPTEN__
+    /* The browser build has no settimeofday to call -- emscripten does not
+     * implement it, and the link fails rather than the call. That is the right
+     * answer anyway: the page's clock is the host machine's, it is already
+     * correct, and it is not ours to move. Report the failure honestly, exactly
+     * as the native simulator does when a container refuses CAP_SYS_TIME, and
+     * let the screen say "Could not set the clock" -- which is true. */
+    (void)t;
+    ESP_LOGW(TAG, "clock: the browser build cannot set the system clock");
+    return -1;
+#else
+    struct timeval tv = { .tv_sec = t, .tv_usec = 0 };
+    if(settimeofday(&tv, NULL) != 0){
+        ESP_LOGW(TAG, "clock: settimeofday refused (no permission to set the clock)");
+        return -1;
+    }
+    clock_checkpoint();                    /* survive the next power cycle */
+    ESP_LOGI(TAG, "clock: set by hand to %04d-%02d-%02d %02d:%02d (local)",
+             year, mon, day, hour, min);
+    return 0;
+#endif
+}
+
+/* Coordinates for zone `i`, or 0 if that row is a zone rather than a place
+ * (UTC). Settings ▸ Location uses this to turn "where are you" into a tap. */
+int clock_zone_latlon(int i, const char **lat, const char **lon){
+    if(i < 0 || i >= TZ_TBL_N || !TZ_TBL[i].lat[0]) return 0;
+    if(lat) *lat = TZ_TBL[i].lat;
+    if(lon) *lon = TZ_TBL[i].lon;
+    return 1;
 }

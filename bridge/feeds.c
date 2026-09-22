@@ -79,8 +79,10 @@ int feeds_toggle(int i){
 }
 
 /* ---- the 10 built-in feeds: reputable, English-language, world news, https ---- */
-void feeds_seed_defaults(void){
-    static const struct { const char *name, *url; int on; } D[] = {
+/* The built-in catalogue: seeded onto a fresh card, and restorable afterwards.
+ * File scope rather than a local, because feeds_restore_builtins() needs the
+ * same list and two copies of a table of URLs is two tables that drift. */
+static const struct { const char *name, *url; int on; } BUILTIN[] = {
         {"BBC World",         "https://feeds.bbci.co.uk/news/world/rss.xml",           1},
         {"NPR News",          "https://feeds.npr.org/1001/rss.xml",                    1},
         {"Guardian World",    "https://www.theguardian.com/world/rss",                 1},
@@ -91,15 +93,29 @@ void feeds_seed_defaults(void){
         {"CBC World",         "https://www.cbc.ca/webfeed/rss/rss-world",              0},
         {"Sky News World",    "https://feeds.skynews.com/feeds/rss/world.xml",         0},
         {"Independent World", "https://www.independent.co.uk/news/world/rss",          0},
-    };
+};
+#define BUILTIN_N ((int)(sizeof BUILTIN / sizeof BUILTIN[0]))
+
+void feeds_seed_defaults(void){
     feeds_clear();
-    for(unsigned i=0; i<sizeof D/sizeof D[0] && s_n<FEEDS_MAX; i++){
+    for(int i=0; i<BUILTIN_N && s_n<FEEDS_MAX; i++){
         Feed *f = &s_feeds[s_n++];
         memset(f,0,sizeof *f);
-        setstr(f->url,  sizeof f->url,  D[i].url);
-        setstr(f->name, sizeof f->name, D[i].name);
-        f->enabled = D[i].on;
+        setstr(f->url,  sizeof f->url,  BUILTIN[i].url);
+        setstr(f->name, sizeof f->name, BUILTIN[i].name);
+        f->enabled = BUILTIN[i].on;
     }
+}
+
+/* Put back any built-in that is no longer in the list, leaving everything else
+ * alone. NOT a reseed: a feed the user added stays, and one they switched off
+ * stays off -- feeds_add() refuses a URL already present, so a built-in that is
+ * merely disabled is not touched. Returns how many were restored. */
+int feeds_restore_builtins(void){
+    int added = 0;
+    for(int i=0; i<BUILTIN_N; i++)
+        if(feeds_add(BUILTIN[i].url, BUILTIN[i].name)) added++;
+    return added;
 }
 
 /* ---- persistence: "<on|off>\t name \t url" per line ---- */

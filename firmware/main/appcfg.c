@@ -1,5 +1,6 @@
 /* appcfg.c -- see appcfg.h. Seeds from secrets.h, then overlays config.ini. */
 #include "appcfg.h"
+#include "clock.h"   /* the built-in city table: see resolve_loc_auto */
 #ifndef SIM_NO_SECRETS
 #include "secrets.h"      /* compile-time seed (also .example in the repo)     */
 #endif
@@ -39,10 +40,10 @@ static int    g_from_sd = 0;
  * app is skipped until configured (exactly the old behaviour). */
 static void seed_from_secrets(Config *c){
 #ifdef WIFI_SSID
-    snprintf(c->wifi_ssid, sizeof c->wifi_ssid, "%s", WIFI_SSID);
+    snprintf(c->wifi[0].ssid, sizeof c->wifi[0].ssid, "%s", WIFI_SSID);
 #endif
 #ifdef WIFI_PASS
-    snprintf(c->wifi_pass, sizeof c->wifi_pass, "%s", WIFI_PASS);
+    snprintf(c->wifi[0].pass, sizeof c->wifi[0].pass, "%s", WIFI_PASS);
 #endif
 #ifdef DAV_USER
     snprintf(c->dav_user, sizeof c->dav_user, "%s", DAV_USER);
@@ -67,10 +68,38 @@ static void seed_from_secrets(Config *c){
 #endif
 }
 
+/* Settle `loc_auto` for a card that predates it (config.h explains the three
+ * states). The question is "did a human type these coordinates, or did a picker
+ * put them there", and there is exactly one piece of evidence: the pickers can
+ * only ever write a built-in city's coordinates, verbatim. So an exact match
+ * against the table means APPROXIMATE -- refine it -- and anything else means a
+ * person chose those digits and nothing may touch them.
+ *
+ * A location that is simply absent is approximate too: there is nothing to
+ * protect and everything to gain.
+ *
+ * The one case this gets wrong is a user who typed, by hand, a coordinate that
+ * matches a built-in city to the digit. They get their location refined to the
+ * same town they typed, which is the harmless direction to be wrong in. */
+static void resolve_loc_auto(Config *c){
+    if(c->loc_auto >= 0) return;                  /* the file said; believe it */
+    if(!c->latitude[0] || !c->longitude[0]){ c->loc_auto = 1; return; }
+    for(int i = 0; i < clock_zone_count(); i++){
+        const char *lat = NULL, *lon = NULL;
+        if(!clock_zone_latlon(i, &lat, &lon)) continue;
+        if(!strcmp(lat, c->latitude) && !strcmp(lon, c->longitude)){
+            c->loc_auto = 1;                      /* a picker wrote this */
+            return;
+        }
+    }
+    c->loc_auto = 0;                              /* somebody typed it */
+}
+
 void appcfg_load(void){
     config_defaults(&g_cfg);
     seed_from_secrets(&g_cfg);
     g_from_sd = (config_load(CFG_PATH, &g_cfg) == 0);
+    resolve_loc_auto(&g_cfg);
     g_loaded  = 1;
 }
 

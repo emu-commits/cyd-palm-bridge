@@ -88,7 +88,11 @@ build/liblvgl.a: lvgl/src $(LVGL_OBJS)
 build/sim_host: build/liblvgl.a $(APP_SRCS) host_main.c sim_port.h sim_heap.h lv_conf.h
 	$(CC) $(CFLAGS) $(APP_SRCS) host_main.c build/liblvgl.a -o $@ -lm $(WRAP_LD)
 
-# ---- smoke: the CI gate (scripted run must exit 0 and produce shots) ----
+# ---- smoke: the CI gate (scripted run must exit 0 and produce shots).
+# The run also WATCHES THE LVGL OBJECT POOL at every screenshot and fails if any
+# screen leaves less than POOL_FLOOR free (host_main.c). That is the project's
+# most repeated failure -- a per-row widget where a virtualised table belongs --
+# and until now it was only ever caught by a person tapping the glass. ----
 smoke: host
 	rm -rf build/shots && mkdir -p build/shots
 	./build/sim_host build/shots < tests/smoke.txt
@@ -125,10 +129,15 @@ poolparity:
 nosecrets: build/nosecrets
 	./build/nosecrets
 
-build/nosecrets: tests/nosecrets.c $(FW)/appcfg.c $(BR)/config.c $(FW)/appcfg.h $(BR)/config.h
+# clock.c is in this link because appcfg_load() settles `loc_auto` for a card
+# written before that key existed, and the only evidence it can use is whether
+# the coordinates are EXACTLY a built-in city's -- which is a question only the
+# zone table can answer. The NVS/esp_* shims in sim/include are header-only, so
+# it links here as cleanly as it does in the host build.
+build/nosecrets: tests/nosecrets.c $(FW)/appcfg.c $(BR)/config.c $(FW)/clock.c $(FW)/appcfg.h $(BR)/config.h
 	@mkdir -p build
 	$(CC) -O2 -Wall $(SIMDEF) -DCFG_PATH='"/nonexistent/cyd-nosecrets.ini"' $(INC) \
-	    tests/nosecrets.c $(FW)/appcfg.c $(BR)/config.c -o $@
+	    tests/nosecrets.c $(FW)/appcfg.c $(BR)/config.c $(FW)/clock.c -o $@
 
 # ---- graf: offline Graffiti recognizer accuracy gate (no LVGL/display needed).
 # Synthesizes noisy strokes from the real templates and asserts recognition

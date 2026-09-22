@@ -17,6 +17,7 @@
 #include "wxfetch.h"      /* Open-Meteo CSV -> WxCache */
 #include "secrets.h"
 #include "appcfg.h"
+#include "geoip.h"
 #include "clock.h"
 #include "power.h"        /* drain log: a sync is the expensive interval */
 #include <string.h>
@@ -216,18 +217,46 @@ static esp_netif_t *s_netif;
 
 static void wifi_ev(void *a, esp_event_base_t base, int32_t id, void *data){
     (void)a;
-    if(base==WIFI_EVENT && id==WIFI_EVENT_STA_START) esp_wifi_connect();
-    else if(base==WIFI_EVENT && id==WIFI_EVENT_STA_DISCONNECTED){
-        if(s_retries++ < 8) esp_wifi_connect();
+    /* STA_START does NOT auto-connect any more. With one remembered network the
+     * config was already set before esp_wifi_start(), so connecting on START was
+     * the same thing as connecting on purpose. With four, the radio starts with
+     * no network chosen and wifi_try() sets each one and connects it explicitly
+     * -- an auto-connect here would fire against an empty config and spend the
+     * first network's retry budget failing to join "".
+     *
+     * Three retries, not eight: eight was a single network's whole budget, and
+     * four networks at eight retries each is over a minute of a user watching a
+     * status line. An AP in range associates in seconds. */
+    if(base==WIFI_EVENT && id==WIFI_EVENT_STA_DISCONNECTED){
+        if(s_retries++ < 3) esp_wifi_connect();
         else xEventGroupSetBits(s_evt, WIFI_FAIL);
     } else if(base==IP_EVENT && id==IP_EVENT_STA_GOT_IP){
         s_retries=0; xEventGroupSetBits(s_evt, WIFI_OK);
     }
 }
 
-static int wifi_up(void){
-    /* Paired with wifi_down(), so discovery is covered as symmetrically as a sync
-     * and no exit path can leave the gauge believing the radio is still up. */
+/* Try ONE remembered network. The radio is already initialised and started by
+ * wifi_up(); this just points it at a different AP and waits. */
+static int wifi_try(const WifiNet *n, int timeout_ms){
+    wifi_config_t wc = { 0 };
+    strncpy((char*)wc.sta.ssid, n->ssid, sizeof wc.sta.ssid);
+    strncpy((char*)wc.sta.password, n->pass, sizeof wc.sta.password);
+    s_retries = 0;
+    xEventGroupClearBits(s_evt, WIFI_OK|WIFI_FAIL);
+    if(esp_wifi_set_config(WIFI_IF_STA, &wc)!=ESP_OK) return 0;
+    /* Never log n->pass, and never log the SSID's contents beyond this: the
+     * status line is shown on screen and the log goes to a shared console. */
+    ESP_LOGI(TAG, "wifi: trying \"%s\"", n->ssid);
+    esp_wifi_connect();
+    EventBits_t b = xEventGroupWaitBits(s_evt, WIFI_OK|WIFI_FAIL, pdFALSE, pdFALSE,
+                                        pdMS_TO_TICKS(timeout_ms));
+    return (b & WIFI_OK) ? 1 : 0;
+}
+
+/* The radio up and started, associated with NOTHING. A scan needs exactly this
+ * and no more; a sync needs this and then a join. Paired with wifi_down(), so
+ * every exit path leaves the gauge and the radio in the same state. */
+static int radio_up(void){
     power_busy(1);          /* the gauge must not read a sagging cell as a flat one */
     s_evt = xEventGroupCreate();
     if(esp_netif_init()!=ESP_OK) return 0;
@@ -237,16 +266,38 @@ static int wifi_up(void){
     if(esp_wifi_init(&cfg)!=ESP_OK) return 0;
     esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_ev, NULL, &s_h_wifi);
     esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_ev, NULL, &s_h_ip);
-    const Config *pc = appcfg();
-    wifi_config_t wc = { 0 };
-    strncpy((char*)wc.sta.ssid, pc->wifi_ssid, sizeof wc.sta.ssid);
-    strncpy((char*)wc.sta.password, pc->wifi_pass, sizeof wc.sta.password);
     if(esp_wifi_set_mode(WIFI_MODE_STA)!=ESP_OK) return 0;
-    if(esp_wifi_set_config(WIFI_IF_STA, &wc)!=ESP_OK) return 0;
     if(esp_wifi_start()!=ESP_OK) return 0;
-    EventBits_t b = xEventGroupWaitBits(s_evt, WIFI_OK|WIFI_FAIL, pdFALSE, pdFALSE, pdMS_TO_TICKS(25000));
+    return 1;
+}
+
+static int wifi_up(void){
+    if(!radio_up()) return 0;
+
+    /* W5: up to four remembered networks, in the order the config holds them,
+     * which is most-recently-connected first. The FIRST one gets the long wait
+     * (25 s) because in the overwhelmingly common case you are where you were
+     * last time and it is going to work; the rest get a short one, because four
+     * full timeouts in a row is over a minute and a half of a user watching a
+     * status line, and an AP that is actually in range associates in seconds.
+     *
+     * A network that connects is promoted to the front and the config is
+     * persisted, so the order is self-correcting: move between home and work and
+     * the device follows you after one sync each way. */
+    const Config *pc = appcfg();
+    for(int i = 0; i < CFG_WIFI_N; i++){
+        if(!pc->wifi[i].ssid[0]) continue;                  /* empty slot */
+        if(s_cancel) break;
+        if(!wifi_try(&pc->wifi[i], i == 0 ? 25000 : 8000)) continue;
+        if(config_wifi_promote(appcfg_mut(), i)){
+            appcfg_save();                                  /* the order changed */
+            ESP_LOGI(TAG, "wifi: promoted slot %d to first", i + 1);
+        }
+        (void)s_netif_inited;
+        return 1;
+    }
     (void)s_netif_inited;
-    return (b & WIFI_OK) ? 1 : 0;
+    return 0;
 }
 /* ---- what the network actually gave us -------------------------------------
  * Three internet stages (SNTP, iCloud, news feeds) all failing at once is one
@@ -482,8 +533,100 @@ static void fetch_news(void){
  * and says so, because a dashboard quietly showing sample weather forever is
  * how we got here. */
 #define WX_TMP "/sdcard/.wxtmp"
+#define GEO_TMP "/sdcard/.geotmp"   /* the IP-location reply, one short line */
 static char s_wx_why[48];
 static int  s_wx_ok;
+
+/* ---- where are we? (the first sync only) ---------------------------------
+ * Latitude and longitude were the last two values in Settings that could only be
+ * entered as numbers, and a wrong one fails silently: weather simply never
+ * appears. A device that is on the internet at all already knows enough to place
+ * itself in the right town, which is all a forecast can use.
+ *
+ * ONLY WHEN THE LOCATION IS UNSET, so this is one request in a device's life
+ * rather than one per sync, and a coordinate the user chose is never overwritten
+ * by a guess. The timezone comes back in the same reply and is taken on the same
+ * terms -- only if the device does not already have one.
+ *
+ * Runs before fetch_weather() so the forecast in THIS sync uses what it found:
+ * the alternative is telling somebody their brand new device will have weather
+ * tomorrow. See bridge/geoip.h for why this is IP-based and not Wi-Fi-based, and
+ * why it is plain HTTP. */
+/* What the location lookup did, for the status line. The first version of this
+ * reported only to the serial log, and the first thing that went wrong on a real
+ * device was a lookup that never ran -- which looked, on the glass, exactly like
+ * a lookup that ran and changed nothing. A sync that silently declines to do a
+ * thing has to say so where the person tapping Sync can read it. */
+static char s_geo_why[40];
+
+static void locate_by_ip(Config *cfg){
+    /* THE TEST IS "IS THIS LOCATION APPROXIMATE", not "is it missing", and the
+     * difference is the whole point. Picking a city off a list of two dozen is
+     * not "I am in New York", it is "New York is the nearest one you offered
+     * me" -- so the person most in need of a refined coordinate was exactly the
+     * person the first version refused to refine, having decided their tap made
+     * it sacred. An approximate location is re-derived every sync, which also
+     * means the weather follows a device that travels; a typed one never is. */
+    s_geo_why[0] = 0;
+    if(!cfg->loc_auto && cfg->latitude[0] && cfg->longitude[0]){
+        snprintf(s_geo_why, sizeof s_geo_why, "location kept as set");
+        return;
+    }
+    setst("Finding your area...");
+
+    int st = dav_fetch_url(geoip_url(), GEO_TMP);
+    if(st < 200 || st >= 300){
+        snprintf(s_geo_why, sizeof s_geo_why, st < 0 ? "no location (unreachable)"
+                                                     : "no location (HTTP %d)", st);
+        ESP_LOGW(TAG,"geoip: GET st=%d (location unchanged)", st);
+        remove(GEO_TMP);
+        return;
+    }
+    char body[160] = "";
+    FILE *f = fopen(GEO_TMP, "rb");
+    if(f){ size_t n = fread(body, 1, sizeof body - 1, f); body[n] = 0; fclose(f); }
+    remove(GEO_TMP);
+    /* LOG THE REPLY VERBATIM. It is a coordinate and a town -- not a credential
+     * -- and when this did not work on a real device the one question nobody
+     * could answer was "what did the server actually say". A parser that only
+     * reports "not understood" leaves you guessing at quoting, field order and
+     * captive portals. Trim the newline so the log stays one line. */
+    for(char *p = body; *p; p++) if(*p == '\n' || *p == '\r'){ *p = 0; break; }
+    ESP_LOGI(TAG,"geoip: HTTP %d, reply: %s", st, body[0] ? body : "(empty)");
+
+    char lat[sizeof cfg->latitude], lon[sizeof cfg->longitude];
+    char tz[sizeof cfg->timezone], city[sizeof cfg->loc_name];
+    if(!geoip_parse(body, lat, sizeof lat, lon, sizeof lon, tz, sizeof tz, city, sizeof city)){
+        /* Whatever was there stays there: a zone-derived coordinate is a worse
+         * answer than this one would have been, and a far better answer than
+         * none. Two ways this legitimately happens -- a carrier NAT answering
+         * "fail,private range", and a captive portal answering HTML. */
+        snprintf(s_geo_why, sizeof s_geo_why, "no location (reply not understood)");
+        ESP_LOGW(TAG,"geoip: reply not usable (location unchanged)");
+        return;
+    }
+    snprintf(cfg->latitude,  sizeof cfg->latitude,  "%s", lat);
+    snprintf(cfg->longitude, sizeof cfg->longitude, "%s", lon);
+    snprintf(cfg->loc_name,  sizeof cfg->loc_name,  "%s", city);
+    cfg->loc_auto = 1;             /* still approximate: keep improving it */
+    /* The zone is a bonus, and it is taken on the same terms: a device that has
+     * never been configured has no zone either, and this is the one moment it
+     * can learn both. A zone the user picked is left alone. */
+    int took_tz = 0;
+    if(tz[0] && !cfg->timezone[0]){
+        snprintf(cfg->timezone, sizeof cfg->timezone, "%s", tz);
+        clock_set_tz(cfg->timezone);
+        took_tz = 1;
+    }
+    appcfg_save();
+    /* Coordinates are not secret and this line is the only way to tell a wrong
+     * placement from a failed one, which is the whole reason weather is blank. */
+    snprintf(s_geo_why, sizeof s_geo_why, "located %.24s",
+             cfg->loc_name[0] ? cfg->loc_name : cfg->latitude);
+    ESP_LOGI(TAG,"geoip: located at %s,%s (%s)%s%s", cfg->latitude, cfg->longitude,
+             cfg->loc_name[0] ? cfg->loc_name : "unnamed",
+             took_tz ? " tz=" : "", took_tz ? cfg->timezone : "");
+}
 
 static void fetch_weather(const Config *cfg){
     s_wx_ok = 0; s_wx_why[0] = 0;
@@ -772,6 +915,7 @@ static void hotsync_task(void *arg){
      * does not still sit through ten feed fetches before noticing. */
     if(!hs_stop()){
         fetch_news();      /* RSS reader: fetch configured feeds while Wi-Fi is up */
+        locate_by_ip(appcfg_mut());  /* no-op while the location is pinned */
         fetch_weather(cfg);/* lock-screen dashboard: the last thing the network is for */
     }
     dav_disconnect();
@@ -779,17 +923,24 @@ static void hotsync_task(void *arg){
     /* Every internet stage reports its own outcome. The old line asserted "Clock +
      * news done" whether or not either had happened, so a run that set nothing and
      * fetched nothing still read as a success with a credentials footnote. */
-    char clk[24], nws[64], wxs[40];
+    char clk[24], nws[64], wxs[40], geo[48];
     snprintf(wxs,sizeof wxs, s_wx_ok ? "; weather" : "; no weather (%.24s)",
              s_wx_why[0] ? s_wx_why : "failed");
     snprintf(clk,sizeof clk,"%s", s_clock_synced ? "Clock set" : "CLOCK NOT SYNCED");
+    snprintf(geo,sizeof geo, s_geo_why[0] ? "; %.40s" : "%s", s_geo_why[0] ? s_geo_why : "");
     if(s_news_added > 0)
         snprintf(nws,sizeof nws,"%d articles", s_news_added);
     else
         snprintf(nws,sizeof nws,"no news (%.47s)", s_news_why[0] ? s_news_why : "all feeds failed");
 
     if(!dav_ok)
-        snprintf(msg,sizeof msg,"%.23s; %.63s%.39s; no records - %.39s",clk,nws,wxs,dav_why);
+        /* The widths are a BUDGET, not decoration: msg is 208 bytes and the
+         * parts now add up to more than that if every one runs long. Adding the
+         * location note without re-cutting the others overflowed it, which
+         * ESP-IDF catches as -Werror=format-truncation and the simulator's
+         * plainer -Wall does not. 23+2+47+32+40+15+30 = 189. */
+        snprintf(msg,sizeof msg,"%.23s; %.47s%.32s%.40s; no records - %.30s",
+                 clk,nws,wxs,geo,dav_why);
     else if(did==0 && failed>0){
         /* This used to say "low memory" for every failure, heap reading attached,
          * which is an assertion the code was in no position to make -- an SD card
@@ -815,11 +966,12 @@ static void hotsync_task(void *arg){
                      oomed, diskerr, netdown);
     }
     else
-        snprintf(msg,sizeof msg,"Done: +%d~%d-%d up +%d~%d-%d down%.16s%.20s%.10s",
+        snprintf(msg,sizeof msg,"Done: +%d~%d-%d up +%d~%d-%d down%.16s%.20s%.10s%.47s",
                  tot.pushNew,tot.pushMod,tot.pushDel, tot.pullNew,tot.pullMod,tot.pullDel,
                  (failed||protec)?" (some skipped)":"",
                  s_clock_synced ? "" : " - CLOCK NOT SYNCED",
-                 s_news_added ? "" : " - no news");
+                 s_news_added ? "" : " - no news",
+                 geo);   /* what the location lookup did, or why it did not */
     /* A cancelled run is neither a success nor a failure, and must not be dressed
      * as either: "Done" would claim work that was never attempted, and "failed"
      * would send someone debugging a network that was fine. Say what happened,
@@ -952,6 +1104,77 @@ static void discover_task(void *arg){
     wifi_down();           /* also closes the discovery keep-alive connection */
     s_busy = 0;
     vTaskDelete(NULL);
+}
+
+/* ---- Wi-Fi scan ---------------------------------------------------------- */
+static WifiAP s_scan[WIFI_SCAN_MAX];
+static int    s_scan_n, s_scan_done;
+
+int           wifi_scan_busy(void){ return s_busy && !s_scan_done; }
+int           wifi_scan_done(void){ return s_scan_done; }
+int           wifi_scan_count(void){ return s_scan_n; }
+const WifiAP *wifi_scan_get(int i){
+    return (i >= 0 && i < s_scan_n) ? &s_scan[i] : NULL;
+}
+
+/* Keep the strongest sighting of each name. One network on 2.4 and 5 GHz is two
+ * records here and one network to the person choosing it, and showing it twice
+ * would make the list look broken in the one place it has to look trustworthy. */
+static void scan_add(const wifi_ap_record_t *r){
+    const char *ssid = (const char *)r->ssid;
+    if(!ssid[0]) return;                       /* hidden network: nothing to tap */
+    for(int i = 0; i < s_scan_n; i++){
+        if(strcmp(s_scan[i].ssid, ssid)) continue;
+        if(r->rssi > s_scan[i].rssi) s_scan[i].rssi = r->rssi;
+        return;
+    }
+    if(s_scan_n >= WIFI_SCAN_MAX) return;
+    snprintf(s_scan[s_scan_n].ssid, sizeof s_scan[s_scan_n].ssid, "%s", ssid);
+    s_scan[s_scan_n].rssi   = r->rssi;
+    s_scan[s_scan_n].secure = r->authmode != WIFI_AUTH_OPEN;
+    s_scan_n++;
+}
+
+static void scan_task(void *arg){
+    (void)arg;
+    /* The record array is STATIC, not on this task's stack: wifi_ap_record_t is
+     * the best part of 80 bytes and a dozen of them is a kilobyte, which is a
+     * real fraction of HOTSYNC_STACK. */
+    static wifi_ap_record_t recs[WIFI_SCAN_MAX];
+    s_scan_n = 0;
+    if(!radio_up()){ setst("Wi-Fi hardware did not start"); goto done; }
+
+    wifi_scan_config_t sc = { 0 };             /* every channel, active scan */
+    if(esp_wifi_scan_start(&sc, true) != ESP_OK){ setst("Scan failed"); goto done; }
+
+    uint16_t n = WIFI_SCAN_MAX;
+    if(esp_wifi_scan_get_ap_records(&n, recs) != ESP_OK){ setst("Scan failed"); goto done; }
+    for(int i = 0; i < (int)n; i++) scan_add(&recs[i]);
+
+    /* strongest first: an insertion sort over at most twelve entries */
+    for(int i = 1; i < s_scan_n; i++){
+        WifiAP t = s_scan[i]; int k = i - 1;
+        while(k >= 0 && s_scan[k].rssi < t.rssi){ s_scan[k+1] = s_scan[k]; k--; }
+        s_scan[k+1] = t;
+    }
+    if(s_scan_n) setst("Tap a network");
+    else         setst("No networks found");
+
+done:
+    esp_wifi_scan_stop();
+    wifi_down();
+    s_scan_done = 1;
+    s_busy = 0;
+    vTaskDelete(NULL);
+}
+
+void wifi_scan_start(void){
+    if(s_busy) return;
+    s_busy = 1; s_scan_done = 0; s_scan_n = 0;
+    setst("Looking for networks...");
+    if(xTaskCreate(scan_task, "wifiscan", HOTSYNC_STACK, NULL, 4, NULL) != pdPASS){
+        setst("Could not start the scan"); s_scan_done = 1; s_busy = 0;
+    }
 }
 
 void hotsync_discover_start(void){

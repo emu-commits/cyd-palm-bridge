@@ -54,6 +54,30 @@ t 25
 u
 t 400
 s trainer_trained
+# Q4: the stroke reference. Every glyph the recogniser knows on one sheet, with
+# a filled dot where the pen starts -- the shape of an 'o' says nothing about
+# which end to begin at, and beginning at the wrong end is the commonest reason
+# a stroke is not recognised. It SCROLLS, which rule 2 allows here: the rule is
+# against scrolling a page you must SELECT from, and there is nothing to select.
+# The canvas is ~11 KB of transient heap, so this walk also proves it is freed:
+# anything left behind would show up in the pool line or the next screen.
+# The Strokes button spans x=86..142 (TOP_RIGHT, -98, width 56). The first
+# attempt aimed at 143 -- three pixels into the gap before the kana button --
+# and q4_strokes came out as a photograph of the trainer.
+c 110 40
+t 500
+s q4_strokes
+d 120 150
+t 30
+m 120 110
+t 30
+m 120 70
+t 30
+u
+t 400
+s q4_strokes_scrolled
+c 32 40
+t 400
 c 18 225
 t 300
 # News (RSS reader, roadmap #4): launcher app (row 3 col 1) opens a one-item-per-view
@@ -141,6 +165,30 @@ c 18 300
 t 300
 c 60 68
 t 400
+s q1_new_event
+# Q2: the event's date is picked on the SAME calendar the To Do due picker uses
+# -- one popup, one set of state, and it carries the hard-won
+# lv_event_get_current_target fix. "No Date" is absent here: an event that is on
+# no day is not an event.
+c 60 108
+t 400
+s q2_date_popup
+# "Today" (the quick button at the top), NOT an arbitrary calendar cell. The
+# first version of this walk tapped (61,200), which is Tuesday the 8th -- a real
+# date, correctly saved, and three weeks outside the week view that is supposed
+# to prove it was saved. A gate step has to land somewhere the NEXT step can see.
+c 60 62
+t 400
+s q2_date_picked
+# Q3: the start time comes from a list of half-hours, 8:00 AM to 9:00 PM. The
+# four steppers above it reach anything the list cannot offer -- so even the
+# fallback is tapping, not typing.
+c 60 152
+t 400
+s q3_time_popup
+c 120 190
+t 400
+s q3_time_picked
 c 120 188
 t 400
 c 150 105
@@ -153,6 +201,14 @@ t 200
 c 40 188
 t 300
 s cal_event_saved
+# The day view we come back to is the day we STARTED on, and Q2 just moved the
+# event to whichever day was tapped on the calendar -- so "(no events)" here is
+# correct and proves nothing. Zoom out to the week, where every day is visible:
+# THIS is the shot that says the event was really written, on the day that was
+# picked, with the time that was picked.
+c 120 40
+t 400
+s cal_event_in_week
 c 18 225
 t 300
 # Address list -> record detail -> edit form (C4 bottom bar) -> Done (I4 toast)
@@ -267,6 +323,14 @@ t 300
 c 120 110
 t 400
 s hotsync
+# Tap Sync Now and photograph the RESULT. A finished sync's status is several
+# lines -- clock, news, weather, location, and why the account was skipped -- and
+# it grows downwards into the space the "what this will do" explanation occupies,
+# which is how the two ended up drawn on top of each other on a real device. The
+# explanation answers "what happens if I tap this", so the tap is what retires it.
+c 120 175
+t 600
+s hotsync_done
 c 18 225
 t 300
 # Options menu overlay
@@ -285,12 +349,101 @@ t 400
 s power_screen
 c 18 225
 t 300
-# Preferences field editor with the I1.2 tap keyboard; type one key, then Save ->
-# I4 transient "Saved" toast (config edits close the feedback loop like records do)
+# W1: Menu > Settings is now a NINE-TILE GRID, not a fourteen-row list. The grid
+# reuses show_launcher()'s geometry exactly, so its tiles sit on the same centres
+# as the launcher's apps: x = 46 / 120 / 195, y = 56 / 110 / 160.
+#
+# THIS WHOLE SECTION WAS RE-POINTED WHEN THE GRID LANDED, and it is the reason to
+# look at the PNGs rather than the exit code. Every tap below used to walk the old
+# list; after the grid they still landed on SOMETHING, the run still exited 0, and
+# the shots quietly became pictures of the Apple ID editor with the brightness
+# drags typing junk into it. The stepper -- the one widget whose regression HANGS
+# this run -- was not being exercised at all, and nothing said so.
 c 18 300
 t 300
 c 75 66
 t 400
+# W3: the Assistant is owed a greeting on the first Settings entry after an
+# unlock, so THIS shot has her in the Graffiti strip with her balloon beside her.
+# All nine tiles are visible behind her and stay live -- that is the whole reason
+# she is down there rather than in the content area.
+s settings_grid
+# Tap her to put the writing strip back. The tap lands inside the pane; if the
+# greeting ever stops appearing this hits the Graffiti pad instead, which is
+# harmless here (no field is active on the grid) but will show up as an inked dot
+# in the NEXT shot -- so compare settings_greet_gone against the strip, not just
+# the exit code.
+c 120 260
+t 300
+s settings_greet_gone
+# W7: News (row 1, col 3) opens the FEED LIST directly -- the tile used to hold
+# one row whose only content was the name of the next screen. Tap the first
+# feed's box to switch it off, then "Built-ins" (top left) which puts back any
+# built-in feed that was deleted without disturbing the rest.
+c 195 56
+t 400
+s w7_feeds
+c 15 70
+t 400
+s w7_feeds_toggled
+c 50 38
+t 400
+s w7_feeds_builtins
+c 18 225
+t 300
+c 18 300
+t 300
+c 75 66
+t 400
+# W5: Wi-Fi (row 1, col 1) -> four remembered networks, none set on a fresh card.
+# Open slot 1 -> "Name" -> the SCAN PICKER. The simulator's scan is a fixed
+# pretend neighbourhood (sim/stubs/hotsync_stub.c) with deliberately awkward
+# names, because an SSID you have to type is the thing this screen exists to
+# avoid. Tapping a secure network stores it and goes straight to the password
+# keyboard -- the one value that is still typed, which is design rule 1's stated
+# exception. Two fixed footer buttons are the way out for a hidden network.
+c 46 56
+t 400
+s w5_wifi_list
+c 120 37
+t 400
+s w5_net_empty
+c 120 37
+t 500
+s w5_pick
+# "Copper Beech 5G", the second row -- a name with both a space and a digit in
+# it, and the row below the strongest, so a shifted list photographs differently.
+c 120 65
+t 500
+s w5_pass_kb
+c 14 150
+t 300
+c 208 40
+t 300
+s w5_net_set
+# back to the tile list: the slot now reads with its name rather than "(empty)"
+c 18 225
+t 300
+c 18 300
+t 300
+c 75 66
+t 400
+c 46 56
+t 400
+s w5_wifi_list_set
+c 18 225
+t 300
+c 18 300
+t 300
+c 75 66
+t 400
+# Accounts (row 1, col 2) -> the Apple ID field -> the I1.2 tap keyboard; type one
+# key, then Save -> I4 transient "Saved" toast, and the editor returns to the
+# ACCOUNTS panel rather than to the old list. That return address is the W1 change
+# most likely to regress silently: the editor used to infer it from the field.
+c 120 56
+t 400
+s settings_accounts
 c 120 37
 t 400
 s prefs_kb
@@ -301,34 +454,57 @@ c 208 40
 t 200
 s prefs_field_saved
 t 300
-# Brightness stepper (must NOT be an lv_slider: a bar/slider draw-layer alloc
-# live-locks LVGL on the 24 KB pool -> WDT freeze). Scroll to the Brightness row,
-# open the [-] NN% [+] popup, step it, close. A regression here HANGS this run.
-d 120 190
-t 30
-m 120 100
-t 30
-m 120 50
-t 30
-u
+# W6: the account flow proper. The Accounts panel is two things to type and then
+# a button that finds the rest: "Find my calendars..." (row 3) runs discovery and
+# lists the account's collections BY NAME. Tapping one opens the role popup --
+# Calendar / Reminders / Address -- which is what stops anyone ever pasting a
+# UUID path. Discovery runs in the simulator against a pretend account (see
+# sim/stubs/hotsync_stub.c); only the network is missing, and the network is not
+# the part that gets designed wrong.
+c 120 93
+t 500
+s w6_discover
+c 120 65
+t 400
+s w6_role_popup
+# The popup is centred and sized to its content: its two role buttons land at
+# about y=158 and y=186. Measured off w6_role_popup.png, not guessed -- the
+# first attempt aimed at 126, hit the header, and w6_assigned came out as a
+# second photograph of the popup.
+c 120 158
+t 400
+s w6_assigned
+# back lands on ACCOUNTS, not on the old one-list view -- discovery is reachable
+# from three places now and "back" used to mean the same one every time.
+c 32 40
+t 400
+s w6_back_to_accounts
+# Advanced: the two server addresses, off the account path because they default
+# to iCloud and read as two more required fields when they are in it.
+c 120 121
+t 400
+s w6_advanced
+c 18 225
 t 300
-d 120 190
-t 30
-m 120 100
-t 30
-m 120 50
-t 30
-u
+c 18 300
+t 300
+c 75 66
 t 400
-d 120 190
-t 30
-m 120 100
-t 30
-m 120 50
-t 30
-u
+# Home, then Settings > Display (row 2, col 2) -> the brightness stepper. It must
+# NOT be an lv_slider: a bar/slider draw-layer alloc live-locks LVGL on the 32 KB
+# pool -> WDT freeze. Open the [-] NN% [+] popup, step it, close. A regression
+# here HANGS this run. The Display panel is ONE row, so unlike the old list this
+# needs no scrolling to reach -- which is the whole point of the grid.
+c 18 225
+t 300
+c 18 300
+t 300
+c 75 66
 t 400
-c 120 90
+c 120 110
+t 400
+s settings_display
+c 120 37
 t 400
 s prefs_brightness
 c 52 175
@@ -338,22 +514,158 @@ t 300
 s prefs_brightness_stepped
 c 120 30
 t 400
-# Dashboard settings (new): with the prefs list scrolled to the tail, "Lock
-# screen..." sits second from bottom. Open it -> the Lock Screen sub-screen (two
-# world clocks + 12/24h), screenshot, then tap "World clock 1" -> the shared zone
-# picker (lv_table, pool-safe like the timezone picker; a regression HANGS or
-# exhausts the 24 KB pool). Cancel back (no write, so config/dashboard stay at
-# defaults), then Prefs -> home.
-c 120 178
+# W9: "Screen off" -- the backlight timeout, which until now lived in config.ini
+# and nowhere in the UI, despite being the setting that decides most of the
+# battery life. Row 2 of the Display panel (y=65) -> the shared pick-one screen,
+# with the current value marked by a bullet. Choose "1 minute" (row 4, y=121).
+c 120 65
+t 400
+s w9_backlight_pick
+c 120 121
+t 400
+s w9_display_set
+c 18 225
+t 300
+# W9: Location (row 2, col 3). latitude/longitude were two numbers on a
+# keyboard, which is why weather silently did nothing for almost everyone. The
+# zone table carries each city's coordinates, so "where are you" is now a tap on
+# the same list of cities the clock uses -- with the numbers still underneath
+# for anyone not near one of them.
+c 18 300
+t 300
+c 75 66
+t 400
+c 195 110
+t 400
+s w9_location
+c 120 37
+t 400
+s w9_city_pick
+c 120 65
+t 400
+s w9_location_set
+# ...and the panel says what KIND of location it is holding. A city off a list
+# of two dozen is a guess -- "that is the nearest one you offered me" -- so it
+# reads "Updates: when you sync" and a sync is allowed to sharpen it. Typing a
+# coordinate instead pins it. Without this row the behaviour is invisible: two
+# devices showing the same place would behave differently on the next sync.
+c 120 65
+t 400
+s w9_location_pinned
+c 120 65
+t 400
+c 18 225
+t 300
+# W9: Sync conflicts (row 3, col 1) -- a cycling row replaced by the same pick
+# screen, because a cycling row cannot show you the options you are not on: you
+# learned what "keep both" meant by landing on it. The names say what HAPPENS,
+# not what the setting is called.
+c 18 300
+t 300
+c 75 66
+t 400
+c 46 160
+t 400
+s w9_sync
+c 120 37
+t 400
+s w9_policy_pick
+c 120 93
+t 400
+s w9_sync_set
+c 18 225
+t 300
+# Settings > Date & Time (row 2, col 1): the tile that absorbed the old "Lock
+# screen..." sub-screen -- system zone, two world clocks, 12/24h, all on one
+# non-scrolling panel. Tap "World clock 1" -> the shared zone picker (lv_table,
+# pool-safe like the timezone picker; a regression HANGS or exhausts the pool).
+# Cancel back (no write, so config and the dashboard stay at defaults) -> home.
+c 18 225
+t 300
+c 18 300
+t 300
+c 75 66
+t 400
+c 46 110
 t 400
 s dash_settings
-c 120 45
+# W8 PUT TWO ROWS ON TOP OF THIS PANEL (Time, Date), so every row below shifted
+# by 56 px. Rows start at y=37 and are 28 apart: Time 37, Date 65, Time zone 93,
+# World clock 1 at 121, World clock 2 at 149, Clock format at 177.
+#
+# Set time: four stepper arrows and an AM/PM toggle, no keyboard. Step the
+# minute up once and cancel -- the SYSTEM CLOCK IS NOT SET HERE, because a Linux
+# container has no CAP_SYS_TIME and settimeofday() is refused; what this gates is
+# the screen, the steppers and the way out. The write itself is a [d] check.
+c 120 37
+t 400
+s w8_set_clock
+# Coordinates here are CONTENT coordinates plus TITLE_H (24): the minute row is
+# at content y=66, so its [+] is at screen y=90..120, and Cancel is at content
+# y=144 -> screen 168..198. The first version of this walk aimed at 80 and 158,
+# which stepped the HOUR and then missed Cancel entirely -- and w8_set_date came
+# out as a second photograph of the Set time screen, with the run still green.
+c 208 105
+t 200
+s w8_set_clock_stepped
+c 50 182
+t 400
+# Set date: the SAME lv_calendar the Date Book's due-date picker uses. Cancel,
+# for the same reason -- and because a tap on a day would move the clock under
+# every later shot in this run.
+c 120 65
+t 400
+s w8_set_date
+c 50 192
+t 400
+# World clock 1 -> the shared zone picker (lv_table, pool-safe like the timezone
+# picker; a regression HANGS or exhausts the pool). Cancel back, so config and
+# the dashboard stay at defaults.
+c 120 121
 t 400
 s world_picker
-c 32 16
+c 38 38
+t 400
+# The SYSTEM zone (row 3, y=93) is the one that also places the device: setting a
+# zone is unavoidable, the zone table carries each city's coordinates, and a
+# device that has never been placed gets a location for free and offline. It
+# fills an EMPTY location only -- W9's city picker set one earlier in this run,
+# so what this shot proves is that the earlier choice SURVIVES a zone being
+# picked afterwards. The toast appears only on the empty case.
+c 120 93
+t 400
+s tz_picker
+c 120 65
+t 500
+s tz_picked
+# ...and Location still reads Detroit, which W9 picked earlier in this run. This
+# is the assertion, not the toast: "fills an empty location" is easy to write and
+# easy to turn into "overwrites the location" by deleting one condition.
+c 18 225
 t 300
-c 30 15
+c 18 300
 t 300
+c 75 66
+t 400
+c 195 110
+t 400
+s tz_kept_location
+c 18 225
+t 300
+# The old one-list Preferences view is NOT deleted -- it is the only screen that
+# shows every setting at once, which is what you want when a config.ini is wrong.
+# It now hangs off Settings > About, and this walk is the only thing keeping it
+# gated while the wizards are still lists.
+c 18 300
+t 300
+c 75 66
+t 400
+c 195 160
+t 400
+s settings_about
+c 120 37
+t 400
+s prefs_list
 c 18 225
 t 300
 # Graffiti with the C1 ink trail: screenshot MID-stroke, then after recognition

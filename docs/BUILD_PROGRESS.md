@@ -16,6 +16,321 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-22 — Q1–Q4: the Date Book stops asking you to type, and the
+### strokes get a reference sheet
+
+- **Q1** — a `New event` button on the day view, fixed at the bottom rather than
+  the list's last row: a full day would push that row below the fold, and "add
+  an event" must never be hidden by how busy the day is. It lands on the day you
+  are looking at, which `default_appt()` already knew how to do.
+- **Q2/Q3** — the date and time were TYPED, in formats you had to know
+  (`M/D/YYYY`, `h:mm`) and parsed with `sscanf`. **A typo did not fail: it
+  silently kept the record's previous value**, so a mistyped date looked saved
+  and was not. Both are picked now, and a picked value cannot be malformed.
+- **Q4** — every stroke the recogniser knows, on one scrolling sheet, each with
+  a filled dot where the pen starts.
+
+**Two clock formats, obeying nobody.** The day list printed `18:00` and the week
+list printed `6:00p`, so the same event read differently depending on which way
+you had zoomed into it — and Settings ▸ Date & Time changed neither. Then the
+title bar, the weather strip and Rise/Set turned out to be hard-coded too. One
+`fmt_hm()` (plus `fmt_hour()` for the strip's narrow columns) now serves them
+all. The day list is the subtle one: the data layer zero-pads `HH:MM` *precisely
+so a lexical sort is a chronological one*, so the rewrite happens in the UI
+**after** the sort. The sortable form and the readable form are different jobs.
+
+**`lv_malloc` IS THE POOL, NOT THE HEAP.** The stroke sheet needs an 11.5 KB I1
+canvas, and the first version asked `lv_malloc` for it — which on this device
+means the fixed 31 KB LVGL pool, not the ~140 KB system heap. It left the pool
+too thin for the 36 labels that came next and **segfaulted the moment the screen
+opened**. They are two separate budgets and only one of them is scarce; plain
+`malloc` is right for a raw buffer, and every LVGL *object* still comes from the
+pool. The comment above that allocation now says so, because the comment I had
+written confidently asserted the opposite.
+
+**The rule about scrolling got sharper, from the bench.** Rule 2's objection is
+to scrolling a page you must **select** from, where a drag that lands as a tap
+picks the wrong thing. A page you scroll to **read** has no such failure. So the
+stroke sheet is one scrolling page rather than three you lose your place in.
+
+### 2026-09-22 — the fixtures were invented, so the gate agreed with the bug
+
+The location lookup did not work on the bench, twice, and the reason was in the
+test file rather than the code. `ip-api.com`'s CSV endpoint **answers in its own
+field order and ignores the order the query asks for**:
+
+```
+asked:  /csv/?fields=status,lat,lon,timezone,city
+got:    success,Bloomfield,40.803,-74.1909,America/New_York
+asked:  /csv/?fields=city,status,timezone,lon,lat      <- deliberately shuffled
+got:    success,Bloomfield,40.803,-74.1909,America/New_York      <- identical
+```
+
+So the parser read a town name where a latitude belongs, `coord_ok` rejected it,
+and the sync reported "reply not understood" — correctly, and uselessly.
+
+**Every fixture in `geoip_test.c` had been written in the shape the author
+assumed**, and all of them passed. Worse, the gate asserted *"the URL asks for
+exactly the fields this parser reads, in order"* — an assertion that checked the
+assumption against itself and returned a confident green while the device failed.
+**An invented fixture tests the author, not the service.** The fixtures are now
+verbatim captures, and the assertion about field order is gone: what replaced it
+is a test that the parse does not DEPEND on order.
+
+The fix is the **JSON endpoint**, on a device that deliberately avoids JSON —
+because only the named form says which value is which. Nothing parses JSON in
+the general sense: it is a bounded search for `"key":` and a copy of what
+follows, which is all a five-key flat object needs and costs no heap, no
+tokenizer and no recursion. `fields` still trims the reply; it just cannot
+dictate the order.
+
+Two smaller things came out of the same bench report:
+
+- **The sync result and the "what this will do" line were drawn on top of each
+  other.** A finished sync's status is several lines and grows downwards into
+  the explanation's space. The explanation answers "what happens if I tap this",
+  so the tap retires it — gated now by a `hotsync_done` shot.
+- **The reply is logged verbatim with its HTTP status.** It is a coordinate and
+  a town, not a credential, and "reply not understood" left nobody able to say
+  what the server had actually sent. Had that line existed one build earlier,
+  this would have been a five-minute fix.
+
+### 2026-09-22 — the flag that froze every device already in the field
+
+Reported from the bench: a sync still did not move the coordinates. The cause was
+the DEFAULT chosen an hour earlier, not the mechanism.
+
+`loc_auto` had two states, and a card written before it existed has no such key.
+Reading that silence as "pinned" protected hand-edited cards — and froze **every
+device whose location came from the city list**, which is every device that had
+used W9. The rule protected a minority and broke the majority it was built for.
+The opposite default would have been worse: silently overwriting numbers a person
+typed.
+
+So the flag has THREE states, and `-1` means "the file has not said". It is
+settled once, at load, by the only evidence that exists: **the pickers can only
+ever write a built-in city's coordinates, verbatim.** An exact match against the
+table means a picker put them there (refine it); anything else means a person
+chose those digits (leave them). `config_save` always writes 0 or 1, so a card is
+asked at most once. The one case it gets wrong is someone who typed, by hand, a
+coordinate matching a built-in city to the digit — and they get refined to the
+same town they typed, which is the harmless direction to be wrong in.
+
+**The deeper fault was that the device said nothing.** A lookup that never ran
+looked, on the glass, exactly like a lookup that ran and changed nothing — and
+the only explanation went to the serial log, where a person holding the device
+cannot read it. The sync's status line now carries what the location lookup did
+or why it declined: `located Boston`, `location kept as set`, `no location
+(unreachable)`, `no location (reply not understood)`. **A sync that silently
+declines to do a thing has to say so where the person tapping Sync can read it.**
+
+### 2026-09-22 — a location can be approximate, and a sync may improve it
+
+Same day, caught by the user: pick "New York" off the city list and a sync would
+never refine it. The rule as first written was "never overwrite a location the
+user chose" — but **choosing a city from a list of two dozen is not choosing New
+York, it is choosing the nearest one on offer.** Somebody in Boston taps New
+York, and the code then treats that coarse guess as sacred. The one user who
+most needs the IP refinement was the one it refused to run for.
+
+So a location now carries where it CAME FROM (`loc_auto`):
+
+- **Approximate** — from the zone, the city list, or a previous lookup. A sync
+  re-derives it, which also means the weather follows a device that travels.
+- **Pinned** — coordinates somebody typed. Never touched.
+
+**The default is PINNED, and that direction is the part that protects people.** A
+`config.ini` written before the flag existed has hand-entered coordinates and no
+`loc_auto` key, and the safe reading of that silence is "a human put these here".
+Everything that fills the location automatically sets the flag on its way past,
+so silence can never mean "help yourself". `config_test` gates the direction, not
+just the round-trip.
+
+**The panel says which kind it is holding** ("Updates: when you sync" / "kept as
+set"), because otherwise the behaviour is invisible: two devices showing the same
+place would behave differently on the next sync with nothing on screen to say
+why. It doubles as the off switch for anyone who wants the forecast somewhere
+other than where the device is.
+
+**A refined coordinate matches no city in the built-in table** — being better
+than all of them is the point — so the reply now carries the place name too, and
+`loc_name` is what the panel shows. Without it the display would fall back to raw
+numbers at the exact moment it got more accurate, which reads as a regression.
+The name is the LAST field in the CSV on purpose: a place name may contain a
+comma ("Washington, D.C.") and a field read to end-of-line cannot be cut by one.
+
+### 2026-09-22 — the location stops being two numbers you type
+
+Latitude and longitude were the last values in Settings that could only be
+entered as numbers, and a wrong one fails in the worst way available: silently.
+Weather simply never appears, and nothing on screen says why. W9 made them a
+list of cities; this makes them something nobody has to answer at all.
+
+- **A zone pick places the device.** Setting a time zone is unavoidable, and
+  W9 gave the zone table each city's coordinates, so an unplaced device places
+  itself for free, offline, with no taps and no network. It is a ZONE and not a
+  town -- America/New_York from Boston is a forecast 300 km away -- so it fills
+  an EMPTY location only and never replaces a city the user picked.
+- **The first sync corrects it.** `locate_by_ip()` asks ip-api.com's **CSV**
+  endpoint, for the same reason wxfetch asks Open-Meteo for `&format=csv`: this
+  device has no JSON parser and no heap to spare for one. The reply is one short
+  line. It runs ONLY while the location is unset, so it is one request in a
+  device's life rather than one per sync, and it runs BEFORE fetch_weather() so
+  the forecast in that same sync uses what it found -- the alternative is telling
+  somebody their new device will have weather tomorrow.
+- **The timezone comes back in the same reply** and is taken on the same terms:
+  only if the device does not already have one. A device that has never been
+  configured has no zone either, and this is the one moment it can learn both.
+- **Plain HTTP, deliberately.** The free tier serves no TLS, and there is nothing
+  here worth protecting: the request carries no identity beyond the source
+  address every server already sees, and the worst a man-in-the-middle achieves
+  is the wrong town's weather. The TLS handshake is the largest single allocation
+  a sync makes on this device; paying it for that would cost more than it buys.
+- **Wi-Fi positioning stays rejected** (PRODUCT_PLAN, 2026-08-19) and W5's scan
+  does not reopen it: a forecast resolves to kilometres, Mozilla's free service
+  retired in 2024, and Google's key would ship inside the device where it leaks.
+
+**The gate holds the URL and the parser together.** The reply is POSITIONAL, so a
+field added or reordered in the query string silently shifts every column --
+`geoip_test` asserts the URL asks for exactly the fields the parser reads, in
+order, alongside the parse itself. The fixtures include the two failures that are
+normal rather than exceptional: a carrier NAT's `fail,private range`, and a
+captive portal's HTML. Both must leave the location untouched, because empty is
+how "not set" is spelled and half-set would look deliberate.
+
+### 2026-09-22 — the rest of the W phase: W4–W10
+
+Seven groups in one sitting, all `[s]`-gated. The common thread is the phase's
+two design rules — **tap to pick, never type** and **do not scroll** — applied
+until the only things left typed are a password, an Apple ID, and a feed URL.
+
+- **W4 — she explains every tile.** `SET_BLURB[]` says what each setting is FOR,
+  never what to tap next. **The plan's open question is closed by where the
+  keyboard lives:** the I1.2 tap keyboard is an `lv_buttonmatrix` inside the
+  *content* area, so there is no screen in Settings — not even a password — where
+  she and the input want the same pixels.
+- **W5 — four Wi-Fi networks, and the SSID is never typed.** The array order is
+  the try order and a join promotes its slot, so there is no "last used" key to
+  disagree with the list. `wifi_scan_*` scans; the user taps a name known to
+  exist. **`STA_START` no longer auto-connects** — with one network that was the
+  same as connecting on purpose, with four it burns the first network's retry
+  budget joining `""`. Slot 1 keeps the unnumbered `wifi_ssid`/`wifi_pass`, so
+  cards written before this still load. Two security gates widened to all four
+  slots: `nosecrets` and the wasm password scrubber.
+- **W6 — Accounts is two fields and a button.** "Find my calendars..." hands off
+  to discovery and collections are picked by name. Server addresses moved behind
+  **Advanced**; in the account flow they read as required fields.
+- **W7 — the News tile opens the feed list**, not a panel holding one row that
+  names the next screen. **Built-ins** restores a deleted feed: the URL is the
+  one thing here nobody can retype.
+- **W8 — the clock can be set by hand at all.** It could not before, which
+  matters on a device with no RTC: it wakes from a flat battery in 1970 and the
+  fix needs the Wi-Fi you may be standing there to configure. Minutes step by
+  five — 59 taps to cross the hour is a punishment, not a control.
+- **W9 — one pick-one-of-N screen** for the backlight timeout, the conflict
+  policy and the location. A cycling row cannot show you the options you are NOT
+  on. **Screen off** had been in `config.ini` and nowhere in the UI, despite
+  being the setting that decides most of the battery life. **Location** became a
+  list of cities by giving the zone table each city's coordinates. **Owner** now
+  renders on the lock screen, which is the only reason to collect a name.
+- **W10 — a sync stops implying iCloud.** The engine already skipped the account
+  stages with a reason; this was about what the user *reads*. The launcher's
+  demo-data hint is deleted — it dead-ended at "edit config.ini on the card",
+  read as a nag, and sat below the fold. What it was for now sits on the HotSync
+  screen, saying what *this* sync will do.
+
+**`lv_font_palm` has no symbol range, and this phase hit that wall twice more.**
+The pick-list marker was a bullet and the Set date calendar's month arrows are
+`LV_SYMBOL` glyphs; both drew as empty boxes. It is the same wall C7 hit looking
+for a check mark. Two ways out, both used: choose an ASCII character, or set
+`LV_FONT_DEFAULT` on the one widget that needs the glyph. Anything on
+`lv_layer_top()` gets montserrat for free because it inherits nothing — which is
+also why the Date Book's calendar has always looked right by accident.
+
+**The simulator now fakes the radio, not the flow.** The Wi-Fi scan and iCloud
+discovery both run against fixtures. Discovery used to answer "disabled in the
+simulator" with zero results, so **the one screen that exists to stop people
+pasting UUID paths had never been rendered by CI.**
+
+**Three times in this phase a tap in the smoke script missed and the run stayed
+green** — the Date & Time rows shifted 56 px under an inserted row, a Cancel tap
+fell between two buttons, and the role popup's header ate a tap meant for its
+first option. Each produced a screenshot of the *previous* screen under the new
+screen's name. Measure off the PNG; never guess a coordinate.
+
+### 2026-09-22 — the Assistant greets Settings, from the Graffiti strip (W3)
+
+- **A greeting that does not take the screen away.** Coach and Guru greet you *over
+  their own week screen*, which works because they have one. Settings has nine tiles
+  and no such page, and the portrait-plus-balloon pair is **164 px tall against a
+  184 px content area** — so the Coach arrangement would have buried the grid it was
+  introducing. She stands on `lv_layer_top()` **in the Graffiti strip** instead:
+  240×112 that this app has no use for, because a grid of nine icons is not something
+  you write into. All nine tiles stay visible **and live**, and dismissing her
+  rebuilds nothing — the screen behind her was already finished and correct.
+- **The arrangement that was tried and rejected** was the Coach one unchanged, pushed
+  down until the balloon landed on the strip. It needed no new geometry and cost the
+  same 1.3 KB. Rendered, it put her shoulders on the About tile, laid the balloon
+  across the silkscreen row with the hint text colliding with Menu and Calc, and —
+  the real fault — **a full-screen tap-anywhere overlay swallows the first tap**, so a
+  tile tapped while she was up did nothing at all. Both were built and screenshotted
+  before either was argued about, which is the only reason that was obvious.
+- **One set of parts, two placements.** `speaker_say()`'s innards came out as
+  `spk_portrait()` / `spk_bubble()` / `spk_tail()`, and the wedge is now **one painter
+  drawn in its own u/v coordinates and transposed** — upright for a balloon under the
+  face, on its side for one beside it. Two wedges that merely resembled each other is
+  exactly the drift P10's shared week page was built to prevent.
+- **Her own balloon swallowed the tap that dismisses her**, first build. That is
+  precisely what `tap_anywhere()` exists for — an `lv_obj` is clickable by default, so
+  the one place you would naturally aim was the one place that did not work. The fix
+  was to call it, not to write anything.
+- **The greeting bit is spent when she is SHOWN, not when she is tapped** — where this
+  parts company with Coach and Guru on purpose. Theirs *is* the screen, so a tap is
+  the only way past it. Hers sits over a live grid: you can open a tile and never tap
+  her, and a hello that came back because you took the other route is a nag.
+- **`content_clear()` closes the pane.** It is on `lv_layer_top()`, so `lv_obj_clean()`
+  cannot reach it — the same trap Coach's seal documents, and it is what stops her
+  being left hanging over the lock screen when the display sleeps.
+- **Cost, measured on the true device-sized pool** (`smoke32`, 31100 B): **1344 bytes
+  while she is up, all of it returned on dismiss** (12976 B free before and after). No
+  draw layers — the portrait is flash-resident A8 recolored like the launcher icons,
+  the tail reuses the shared I1 buffer, the balloon is a plain bordered rect.
+- **Keep her lines under ~78 characters.** The balloon is a fixed height so short and
+  long hellos are the same object, and a line over that does not wrap — it **clips**,
+  top and bottom. Gated by `settings_grid` (now with her in it) and
+  `settings_greet_gone`.
+
+### 2026-09-21 — Preferences becomes Settings, and it is a launcher (W1)
+- **Menu ▸ Preferences is now Menu ▸ Settings**, opening a nine-tile icon grid instead
+  of a fourteen-row list. The grid is `show_launcher()`'s geometry *deliberately* —
+  same 68×52 cells, same `ROW_WRAP`, same `SPACE_EVENLY` — so the tiles land on the
+  same centres as the nine apps, and Settings looks like what it was on Palm: an app.
+- **Every tile opens a real panel; none falls through.** The plan allowed stubs, but
+  the nine tiles between them cover every field the old list held, so each got a small
+  filtered list. `W5`–`W9` now *replace* those with tap-first wizards rather than
+  building them from nothing — the grid is the seam that makes that one tile at a time
+  instead of one rewrite.
+- **A screen's return address is the caller's business, not the field's.** The field
+  editor used to infer where "back" went from *which field* was open (lat/long → the
+  Lock Screen panel, everything else → the Preferences list). W1 broke that: latitude
+  is now reachable from both the Lock Screen panel and the Location tile, so the field
+  no longer knows. `g_set_ret` is set on the way in and read on the way out. The zone
+  picker had the identical bug for the identical reason.
+- **The smoke gate lied again, and louder this time.** Every old Preferences tap still
+  landed on *something* after the grid arrived, so the run still exited 0 — while the
+  screenshots quietly became pictures of the Apple ID editor with the brightness drags
+  typing junk into it. **The brightness stepper, whose regression HANGS the run, was
+  not being exercised at all, and nothing said so.** Re-pointed, with `settings_grid`,
+  `settings_accounts`, `settings_display`, `settings_about` and `prefs_list` added.
+  Second time in one day: *the exit code is not the gate, the pixels are.*
+- **A tap at y=45 is not row two.** List rows start at y=37 and are 28px apart, so
+  y=45 is still inside row one — it opened the system Time Zone picker instead of the
+  World Clock one, which in a thumbnail looks close enough to pass unnoticed.
+- **The old one-list view is kept, behind Settings ▸ About.** It is the only screen
+  that shows every setting at once, which is what you want when a `config.ini` is
+  wrong and you need to see why. It stays gated (`prefs_list`) rather than drifting
+  into untested code.
+
 ### 2026-09-21 — The simulator was compiling real credentials in, and CI could never have caught it
 - **`sim/Makefile` claimed `sim/include` "shields the build from a real (gitignored)
   `secrets.h`" by sitting first on the include path. It cannot, and never did.**

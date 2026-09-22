@@ -26,6 +26,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#include "lvgl.h"
 #include "sim_port.h"
 #include "sim_heap.h"
 #include "ui.h"
@@ -34,6 +35,28 @@
 #include "clock.h"
 
 static const char *s_shotdir = "build/shots";
+
+/* ---- the LVGL object pool, watched across the whole run --------------------
+ * THE POOL IS THIS PROJECT'S OLDEST AND MOST REPEATED FAILURE. The record list
+ * hit it, the zone picker hit it at ~24 buttons, the Preferences list hit it at
+ * three extra rows, the brightness popup hit it hardest because a bar's draw
+ * layer fails as a WDT FREEZE rather than an error -- and most recently a
+ * 27-row lv_list in the event time picker crashed the moment it was opened.
+ *
+ * Every one of those was found by a person tapping the glass, because the gate
+ * only noticed the pool when exhaustion happened to be fatal DURING the walk.
+ * A screen that leaves 200 bytes free passes and ships. So the run now reads
+ * lv_mem_monitor() at every screenshot, remembers the worst, and fails if it
+ * ever drops under a floor -- which turns "it crashed on the device, sometimes"
+ * into "this shot took the pool to N bytes", with the screen's own name on it.
+ *
+ * The floor is deliberately generous: it is not a budget to spend down to, it
+ * is a tripwire for a screen that has gone structurally wrong (a per-row widget
+ * where a table belongs). Normal screens here sit 11-17 KB free. */
+#define POOL_FLOOR 3072
+static size_t s_pool_min = (size_t)-1;
+static char   s_pool_min_shot[128] = "(none)";
+static int    s_pool_bad;
 
 /* Pump the UI for `ms` of REAL time. `t` advances only LVGL's simulated tick, so
  * anything reading time(NULL) -- the game play clocks -- stands still under it.
@@ -60,7 +83,22 @@ static int shot(const char *name){
     const uint8_t *fb = sim_fb_ptr();
     for(int i = 0; i < SIM_W * SIM_H; i++) fwrite(fb + i * 4, 1, 3, f);  /* drop A */
     fclose(f);
-    fprintf(stderr, "shot: %s\n", path);
+
+    lv_mem_monitor_t mon;
+    lv_mem_monitor(&mon);
+    if(mon.free_size < s_pool_min){
+        s_pool_min = mon.free_size;
+        snprintf(s_pool_min_shot, sizeof s_pool_min_shot, "%s", name);
+    }
+    if(mon.free_size < POOL_FLOOR){
+        fprintf(stderr, "POOL FLOOR: %s left only %u bytes free (floor %u, "
+                        "largest block %u) -- a screen this close to the ceiling "
+                        "freezes the device\n",
+                name, (unsigned)mon.free_size, (unsigned)POOL_FLOOR,
+                (unsigned)mon.free_biggest_size);
+        s_pool_bad = 1;
+    }
+    fprintf(stderr, "shot: %s | pool free=%u\n", path, (unsigned)mon.free_size);
     return 0;
 }
 
@@ -105,5 +143,9 @@ int main(int argc, char **argv){
     }
     fprintf(stderr, "sim_host: done (rc=%d) | heap used=%zu peak=%zu of %u budget\n",
             rc, sim_heap_used(), sim_heap_peak(), (unsigned)SIM_HEAP_BUDGET);
+    fprintf(stderr, "sim_host: lvgl pool low-water %u bytes, at \"%s\" (floor %u)\n",
+            (unsigned)(s_pool_min == (size_t)-1 ? 0 : s_pool_min),
+            s_pool_min_shot, (unsigned)POOL_FLOOR);
+    if(s_pool_bad) rc = 1;
     return rc;
 }

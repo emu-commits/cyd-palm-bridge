@@ -57,6 +57,16 @@ static lv_obj_t *content;      /* the swappable view area */
  * it nulls every global that points into it, in the same breath that frees them.
  * Defined at the bottom of the file, where all of those globals are in scope. */
 static void content_clear(void);
+static void spk_pane_close(void);   /* a speaker's overlay: it is on lv_layer_top(),
+                                       so only content_clear() can be trusted to
+                                       take it down when the screen changes */
+static void assistant_greet(void);  /* W3: her hello, over the Settings grid */
+static void assist_say(const char *text);  /* W4: her, explaining this screen */
+/* "America/New_York" is a zone identifier; this is the city out of it. Declared
+ * here because the zone picker (which places the device) sits above the Location
+ * panel (which names the place), and both want the same two lines of string
+ * work. */
+static void city_name(const char *iana, char *out, int cap);
 static lv_obj_t *title_lbl;
 static lv_obj_t *clock_lbl;    /* live clock in the title bar (Palm) */
 
@@ -85,7 +95,7 @@ static void      batt_refresh(void);
 /* Which speakers still owe a greeting this unlock session -- declared up here
  * because the lock's release handler resets it long before the greeting code
  * that reads it. See "greetings" further down for the rules. */
-enum { GREET_COACH, GREET_GURU, GREET_NSPEAKER };
+enum { GREET_COACH, GREET_GURU, GREET_ASSIST, GREET_NSPEAKER };
 static uint8_t g_greet_due = 0xFF;            /* bit per speaker; all owed at boot */
 static uint8_t g_greet_last[GREET_NSPEAKER];  /* index of the line last shown      */
 
@@ -207,6 +217,18 @@ static lv_obj_t *active_ta;            /* last-focused textarea (Graffiti target
 
 /* To Do due-date picker state: edited via the due popup, written on Save. */
 static int g_due_has, g_due_y, g_due_m, g_due_d;
+/* Q2: the SAME date popup now serves the To Do's due date and the Date Book's
+ * event date. One popup, one set of state, one label -- writing a second
+ * calendar is how the two end up disagreeing about which day a tap means, and
+ * this one carries a hard-won fix (see due_cal_cb on
+ * lv_event_get_current_target). The only real difference is that a To Do may
+ * have no due date and an event must have a date, so "No Date" is offered to
+ * one and not the other. */
+static int g_due_optional = 1;
+/* Q3: the event's start time, picked from a list. Kept beside the date for the
+ * same reason -- the form holds it until Save, and nothing types it. */
+static int g_ev_h, g_ev_m;
+static lv_obj_t *g_time_lbl;
 static lv_obj_t *g_due_lbl;            /* label on the edit-form Due trigger */
 
 /* Date Book Details: alarm on/off + repeat type, edited in the Details sheet and
@@ -235,6 +257,7 @@ static void list_view(const AppDef *ad);
 static void show_detail(uint32_t uid);
 static void show_edit(uint32_t uid);
 static void show_prefs(void);
+static void show_settings(void);        /* W1: Menu > Settings, the nine tiles */
 static void show_dash_settings(void);                          /* Lock Screen settings sub-screen */
 static void world_tag(const char *zone, char *out, int cap);   /* 3-letter world-clock tag */
 static lv_obj_t *pf_add(lv_obj_t *list, const char *text, lv_event_cb_t cb, int ud);
@@ -248,6 +271,9 @@ static void toast_show(const char *msg);   /* I4: transient save/delete feedback
 static void due_open(void);
 static void due_btn_cb(lv_event_t *e);
 static void due_set_label(void);
+static void time_btn_cb(lv_event_t *e);   /* Q3: the start-time list */
+static void time_set_label(void);
+static void time_close(void);
 static void br_open(void);
 
 /* Date Book uses PalmOS's date-centric views (Day/Week/Month) instead of a flat
@@ -265,12 +291,15 @@ static int  g_cal_y, g_cal_m, g_cal_d;
 static lv_obj_t *hs_status;
 static lv_timer_t *hs_timer;
 static lv_obj_t *hs_btn, *hs_btn_lbl;
+static lv_obj_t *g_hs_what;     /* "what a sync will do", shown until one runs */
+static int       g_hs_ran;      /* a sync has been started this boot            */
 static void hs_confirm_close(void);
 /* The confirmation lives on lv_layer_top(), so leaving the screen does NOT take
  * it with it -- it would hang over whatever came next, still wired to a button
  * that no longer exists. Drop it here, where "you left HotSync" is known. */
 static void kill_hs(void){ if(hs_timer){ lv_timer_delete(hs_timer); hs_timer=NULL; }
-                           hs_confirm_close(); hs_status=NULL; hs_btn=hs_btn_lbl=NULL; }
+                           hs_confirm_close(); hs_status=NULL; hs_btn=hs_btn_lbl=NULL;
+                           g_hs_what=NULL; }
 
 /* Discovery screen state (a status label + polling timer, like HotSync) */
 static lv_obj_t *disc_status;
@@ -281,6 +310,8 @@ static int disc_built;
  * Graffiti-only (no on-screen keyboard), so there's no overlay to drop here. */
 static void free_rowuids(void);
 static void free_finds(void);
+static void gref_free(void);        /* Q4: the stroke sheet's heap canvas */
+static void wifi_scan_kill(void);   /* W5: the scan poll timer (see the wizard) */
 static lv_obj_t *g_listtbl;           /* current record table (partial rebuild) */
 static lv_obj_t *g_findtbl;           /* Find results table                     */
 /* Graffiti input hooks (the trainer). graf_char_hook: a recognized character goes
@@ -353,6 +384,7 @@ static void kill_kb(void){
     kill_hs();
     if(disc_timer){ lv_timer_delete(disc_timer); disc_timer=NULL; }
     disc_status=NULL;
+    wifi_scan_kill();            /* same reason as disc_timer: it polls a screen */
 }
 
 /* The record list is one virtualized `lv_table` (a SINGLE LVGL object) instead of
@@ -591,6 +623,30 @@ static void list_draw_cb(lv_event_t *e){
 /* Everything a scrolling list shares: no frame, no cell boxes, one hairline per
  * row, and the draw hook above. Call it on every list table so they cannot
  * drift apart -- a list that skips this is a list that looks like a table. */
+/* ONE wall-clock formatter, because "12-hour or 24-hour" is a setting and a
+ * setting that half the screens ignore is worse than no setting. The Date Book
+ * had two different hard-coded answers -- the day list printed "18:00" and the
+ * week list printed "6:00p" -- so the same event read differently depending on
+ * which way you had zoomed into it, and Settings ▸ Date & Time changed neither.
+ *
+ * `pad` zero-pads the hour, which the 24-hour form always wants and the 12-hour
+ * form never does. */
+static void fmt_hm(int h, int m, char *out, int cap){
+    if(appcfg()->clock24){ snprintf(out, cap, "%02d:%02d", h, m); return; }
+    int h12 = h % 12 == 0 ? 12 : h % 12;
+    snprintf(out, cap, "%d:%02d%s", h12, m, h < 12 ? "a" : "p");
+}
+
+/* The hour alone, for the weather strip's six narrow columns: "3p" or "15".
+ * Same setting, same function family -- a strip that stayed on one format while
+ * the clock above it changed is exactly the inconsistency fmt_hm was written to
+ * end. */
+static void fmt_hour(int h, char *out, int cap){
+    if(appcfg()->clock24){ snprintf(out, cap, "%02d", h); return; }
+    int h12 = h % 12 == 0 ? 12 : h % 12;
+    snprintf(out, cap, "%d%s", h12, h < 12 ? "a" : "p");
+}
+
 static void list_table_style(lv_obj_t *t){
     lv_obj_set_style_radius(t, 0, 0);
     lv_obj_set_style_border_width(t, 0, 0);            /* no frame round the list */
@@ -922,9 +978,14 @@ static void save_cb(lv_event_t *e){
     if(cur_app->app == APP_CAL){
         Appt a; if(!data_get_cal(edit_uid,&a)) default_appt(&a);
         snprintf(a.description,sizeof a.description,"%s",fv(0));
-        int mo,dd,yy; if(sscanf(fv(1),"%d/%d/%d",&mo,&dd,&yy)==3){ a.month=mo; a.day=dd; a.year=yy; }
-        int hh,mm; if(sscanf(fv(2),"%d:%d",&hh,&mm)==2){ a.hasTime=1; a.sH=hh; a.sM=mm; a.eH=(hh+1)%24; a.eM=mm; }
-        snprintf(a.note,sizeof a.note,"%s",fv(3));
+        /* Q2/Q3: picked, not parsed. The old sscanf pair accepted anything that
+         * looked vaguely like a date or a time and silently kept the record's
+         * previous value when it did not -- so a mistyped date looked saved and
+         * was not. A picked value cannot be malformed. */
+        if(g_due_has){ a.year = g_due_y; a.month = g_due_m; a.day = g_due_d; }
+        a.hasTime = 1; a.sH = g_ev_h; a.sM = g_ev_m;
+        a.eH = (g_ev_h + 1) % 24; a.eM = g_ev_m;   /* an hour long, as it always was */
+        snprintf(a.note,sizeof a.note,"%s",fv(1));
         a.hasAlarm = g_ev_alarm;                          /* Details sheet: alarm + repeat */
         if(g_ev_alarm && a.alarmAdv <= 0){ a.alarmAdv = 5; a.alarmUnit = 0; }  /* default 5 min */
         if(g_ev_repeat == repeatNone){ a.hasRepeat = 0; a.repeatType = repeatNone; }
@@ -1017,15 +1078,47 @@ static void show_edit(uint32_t uid){
         Appt a; if(!data_get_cal(uid,&a)) default_appt(&a);
         g_ev_alarm  = a.hasAlarm;                              /* Details sheet state */
         g_ev_repeat = a.hasRepeat ? a.repeatType : repeatNone;
-        char ds[24]; snprintf(ds,sizeof ds,"%d/%d/%d",a.month,a.day,a.year);
-        char ts[16]; snprintf(ts,sizeof ts,"%d:%02d",a.sH,a.sM);
+        /* Q2 + Q3: the date and the time were TYPED, in two formats a person had
+         * to know -- "M/D/YYYY" and "h:mm" -- and a typo in either was accepted
+         * silently by sscanf and written to the record. Both are now taps: the
+         * date on the calendar the To Do due picker already uses, the time from
+         * a list of half-hours. The Description and the Note stay typed, which
+         * is right: they are prose, and no list can offer them. */
+        g_due_has = 1; g_due_y = a.year; g_due_m = a.month; g_due_d = a.day;
+        g_due_optional = 0;                       /* an event must have a date */
+        g_ev_h = a.hasTime ? a.sH : 9;
+        g_ev_m = a.hasTime ? a.sM : 0;
         form_field(form,"Description",a.description,255,&y);
-        form_field(form,"Date (M/D/YYYY)",ds,16,&y);
-        form_field(form,"Time (h:mm)",ts,8,&y);
+
+        lv_obj_t *dlab = lv_label_create(form);
+        lv_label_set_text(dlab, "Date"); lv_obj_set_pos(dlab, 2, y);
+        lv_obj_t *db = lv_button_create(form);
+        lv_obj_set_size(db, LCD_W - 16, 30);
+        lv_obj_set_pos(db, 2, y + 15);
+        lv_obj_set_style_radius(db, 0, 0);
+        g_due_lbl = lv_label_create(db);
+        lv_obj_align(g_due_lbl, LV_ALIGN_LEFT_MID, 4, 0);
+        lv_obj_add_event_cb(db, due_btn_cb, LV_EVENT_CLICKED, NULL);
+        due_set_label();
+        y += 52;
+
+        lv_obj_t *tlab = lv_label_create(form);
+        lv_label_set_text(tlab, "Time"); lv_obj_set_pos(tlab, 2, y);
+        lv_obj_t *tb = lv_button_create(form);
+        lv_obj_set_size(tb, LCD_W - 16, 30);
+        lv_obj_set_pos(tb, 2, y + 15);
+        lv_obj_set_style_radius(tb, 0, 0);
+        g_time_lbl = lv_label_create(tb);
+        lv_obj_align(g_time_lbl, LV_ALIGN_LEFT_MID, 4, 0);
+        lv_obj_add_event_cb(tb, time_btn_cb, LV_EVENT_CLICKED, NULL);
+        time_set_label();
+        y += 52;
+
         form_field(form,"Note",a.note,500,&y);
     } else if(cur_app->app == APP_TODO){
         Todo t; if(!data_get_todo(uid,&t)) memset(&t,0,sizeof t);
         g_due_has=t.hasDue; g_due_y=t.dueY; g_due_m=t.dueM; g_due_d=t.dueD;
+        g_due_optional = 1;                    /* a To Do may have no due date */
         form_field(form,"Description",t.description,255,&y);
         form_field(form,"Note",t.note,500,&y);
         /* Due-date trigger (Palm's To Do due popup). A button, not a text field,
@@ -1180,8 +1273,11 @@ static void hs_confirm_open(void){
 /* One button, three jobs -- see hs_btn_sync(). */
 static void hs_sync_cb(lv_event_t *e){ (void)e;
     if(hotsync_cancel_pending()) return;         /* already stopping */
-    if(hotsync_busy()) hs_confirm_open();
-    else               hotsync_start();
+    if(hotsync_busy()){ hs_confirm_open(); return; }
+    /* The explanation has been read; from here the status line owns that space. */
+    g_hs_ran = 1;
+    if(g_hs_what) lv_obj_add_flag(g_hs_what, LV_OBJ_FLAG_HIDDEN);
+    hotsync_start();
 }
 
 static void show_hotsync(void){
@@ -1206,8 +1302,48 @@ static void show_hotsync(void){
     lv_label_set_long_mode(hs_status, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(hs_status, LCD_W - 12);
     lv_obj_align(hs_status, LV_ALIGN_TOP_MID, 0, 56);
+    /* A finished sync's status is several lines -- clock, news, weather,
+     * location, and why the account was skipped -- and it grows DOWNWARDS from
+     * here into the space the explanation above was using. That is why the
+     * explanation goes away on the first tap rather than being made smaller. */
     lv_obj_set_style_text_align(hs_status, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(hs_status, hotsync_status());
+
+    /* W10: what a sync will do RIGHT NOW, given what is configured. The device
+     * used to imply that a sync needed iCloud and stop there; it does not -- the
+     * clock and the news need nothing but a network, and they are the two things
+     * that go stale fastest. So this says what you will get either way, and
+     * mentions the account as the thing that ADDS records, not as a precondition
+     * that is missing. It is read before the button is pressed, which is the
+     * moment the question is actually being asked. */
+    { const Config *cf = appcfg();
+      int acct = cf->dav_base[0] && cf->dav_user[0] && cf->dav_pass[0];
+      int coll = cf->cal_coll[0] || cf->todo_coll[0] || cf->card_coll[0];
+      g_hs_what = lv_label_create(content);
+      lv_obj_t *what = g_hs_what;
+      lv_label_set_long_mode(what, LV_LABEL_LONG_WRAP);
+      lv_obj_set_width(what, LCD_W - 16);
+      lv_obj_set_style_text_align(what, LV_TEXT_ALIGN_CENTER, 0);
+      lv_obj_align(what, LV_ALIGN_TOP_MID, 0, 88);
+      /* Three lines is the whole budget: the status line is above and the
+       * button is below, and the first draft ran into the button. */
+      if(acct && coll)
+          lv_label_set_text(what, "Clock, news, weather, and your\n"
+                                  "calendar and contacts.");
+      else if(acct)
+          lv_label_set_text(what, "Clock and news. Settings > Sync\n"
+                                  "chooses which calendars to use.");
+      else
+          lv_label_set_text(what, "Clock and news. No account needed.\n"
+                                  "The records in the apps are samples\n"
+                                  "until Settings > Accounts has yours.");
+      /* IT ANSWERS "what happens if I tap this", so it belongs to the moment
+       * BEFORE the tap. Once a sync has run, the status line below is a result
+       * -- several lines of it -- and the two were drawn on top of each other.
+       * The answer is not to squeeze both in: it is that the question has been
+       * answered and the explanation has done its job. */
+      if(g_hs_ran || hotsync_busy()) lv_obj_add_flag(what, LV_OBJ_FLAG_HIDDEN);
+    }
 
     hs_btn = lv_button_create(content);
     lv_obj_set_size(hs_btn, 130, 38);
@@ -1256,12 +1392,31 @@ static void day_collect(uint32_t uid,const char *primary,const char *secondary,v
     snprintf(g_dayrows[g_ndayrows].txt,sizeof g_dayrows[0].txt,"%s",primary);
     g_ndayrows++;
 }
+/* "HH:MM  desc" -> "6:00p  desc" under a 12-hour clock, in place. An untimed
+ * event arrives as "--:--" and stays: it is already the right thing to read. */
+static void day_row_clock(char *txt, int cap){
+    if(appcfg()->clock24) return;                  /* already the wanted form */
+    int h, m;
+    if(sscanf(txt, "%2d:%2d", &h, &m) != 2) return;   /* "--:--", or not a time */
+    if(h < 0 || h > 23 || m < 0 || m > 59) return;
+    char hm[12]; fmt_hm(h, m, hm, sizeof hm);
+    /* Built in a local and copied back with an EXPLICIT precision: the rewrite
+     * is shorter than the original under a 12-hour clock and never longer, but
+     * gcc cannot know that and -Wformat-truncation is an error on the device. */
+    char out[160];
+    snprintf(out, sizeof out, "%s%s", hm, txt + 5);              /* past "HH:MM" */
+    snprintf(txt, cap, "%.*s", cap - 1, out);
+}
 static int day_cmp(const void *a,const void *b){
     return strcmp(((const DayRow*)a)->txt,((const DayRow*)b)->txt);   /* "HH:MM " prefix => chrono */
 }
 static void day_prev_cb(lv_event_t *e){ (void)e; cal_add_days(&g_cal_y,&g_cal_m,&g_cal_d,-1); show_datebook_day(g_cal_y,g_cal_m,g_cal_d); }
 static void day_next_cb(lv_event_t *e){ (void)e; cal_add_days(&g_cal_y,&g_cal_m,&g_cal_d, 1); show_datebook_day(g_cal_y,g_cal_m,g_cal_d); }
 static void day_week_cb(lv_event_t *e){ (void)e; show_datebook_week(g_cal_y,g_cal_m,g_cal_d); }  /* zoom out to the week */
+static void day_new_cb(lv_event_t *e){ (void)e;
+    cur_app = &APPDEFS[0];          /* Date Book, so the form builds the event arm */
+    show_edit(0);
+}
 
 static void show_datebook_day(int y,int m,int d){
     kill_kb();
@@ -1285,9 +1440,18 @@ static void show_datebook_day(int y,int m,int d){
     g_ndayrows=0;
     data_cal_day(y,m,d,day_collect,NULL);
     qsort(g_dayrows,g_ndayrows,sizeof g_dayrows[0],day_cmp);
+    /* The data layer hands these over as "HH:MM  description", zero-padded so a
+     * lexical sort IS a chronological one -- which is why the rewrite happens
+     * here, after the sort, rather than there. The sortable form and the
+     * readable form are two different jobs, and the data layer owns the first. */
+    for(int i=0;i<g_ndayrows;i++) day_row_clock(g_dayrows[i].txt, sizeof g_dayrows[0].txt);
 
+    /* Q1: the list gives up its last row so New can be a FIXED button rather
+     * than the final entry in a scrolling list. A day with eight events would
+     * have pushed that entry below the fold, and "add an event" is the one
+     * thing on this screen that must never be hidden by how full the day is. */
     lv_obj_t *list=lv_list_create(content);
-    lv_obj_set_size(list,LCD_W,FORM_FULL);
+    lv_obj_set_size(list,LCD_W,FORM_FULL-30);
     lv_obj_set_pos(list,0,34);
     lv_obj_set_style_radius(list,0,0); lv_obj_set_style_border_width(list,0,0); lv_obj_set_style_pad_all(list,0,0);
     if(g_ndayrows==0){
@@ -1297,6 +1461,18 @@ static void show_datebook_day(int y,int m,int d){
         lv_obj_set_style_radius(b,0,0);
         lv_obj_add_event_cb(b,row_cb,LV_EVENT_CLICKED,(void*)(uintptr_t)g_dayrows[i].uid);
     }
+
+    /* A new event lands on the day you are looking at, not on today --
+     * default_appt() already reads g_cal_*, which is what makes this button a
+     * one-tap answer to "something is happening on Thursday" rather than a
+     * date-correcting exercise. Until now New existed only under Menu, which
+     * is exactly the kind of thing nobody finds. */
+    lv_obj_t *nb=lv_button_create(content);
+    lv_obj_set_size(nb,LCD_W-8,26);
+    lv_obj_set_pos(nb,4,(PDA_H-TITLE_H)-28);
+    lv_obj_set_style_radius(nb,0,0);
+    lv_obj_t *nbl=lv_label_create(nb); lv_label_set_text(nbl,"New event"); lv_obj_center(nbl);
+    lv_obj_add_event_cb(nb,day_new_cb,LV_EVENT_CLICKED,NULL);
 }
 
 /* --- Week view (7-day agenda: one scrollable list, a count per day, today tinted).
@@ -1664,6 +1840,187 @@ static void tr_mode_toggle(lv_event_t *e){
 
 static void graffiti_to_kana_cb(lv_event_t *e){ (void)e; show_kana(); }
 
+/* ==== Q4: the stroke reference ==============================================
+ * Every stroke the recogniser knows, on one sheet you can scroll. Not a drill
+ * and not a quiz -- the thing you look at when you cannot remember which way
+ * round 'k' goes, which on a device whose only text input is Graffiti is a
+ * question that comes up on day one and never entirely stops.
+ *
+ * IT SCROLLS, AND THAT IS THE POINT OF THE DISTINCTION: a page you scroll to
+ * READ is fine, and design rule 2's objection is to scrolling a page you have
+ * to SELECT from, where a drag that lands as a tap picks the wrong thing. There
+ * is nothing to select here, so the whole set can be one sheet rather than
+ * pages with next/prev to lose your place in.
+ *
+ * MEMORY, AND THE TRAP IN IT: one I1 canvas, 240 x GREF_H, allocated ON OPEN
+ * with plain malloc() and freed on the way out. It is far too big to be a
+ * permanent static buffer for a screen this rarely opened, and too big to share
+ * game_cv_buf (240x164, barely half the set).
+ *
+ * IT MUST NOT BE lv_malloc(). On this device LVGL runs its own allocator over a
+ * fixed 31 KB pool, so lv_malloc is the POOL and malloc is the ~140 KB system
+ * heap -- two completely separate budgets, one of them scarce. The first version of
+ * this screen called lv_malloc for 11.5 KB, which left the pool too thin for
+ * the labels that came next, and the sheet segfaulted the moment it opened.
+ * Every LVGL object here comes from the pool; only this buffer does not.
+ *
+ * A failed allocation is not a crash: the screen says so and offers the drill.
+ *
+ * THE POOL COST IS THE LABELS, and this is the tightest screen in the build:
+ * 45 glyph captions plus a heading leave ~7.5 KB of the 31 KB pool free, which
+ * the smoke reports as its low-water mark. That is comfortable -- the floor is
+ * 3 KB and the failures this project has actually had were at nearly zero --
+ * but it is the number to watch if anything else is ever added to this screen,
+ * and the gate will name it if it moves. */
+/* SIX columns of 40, not five of 48. Almost all of a cell is padding -- the
+ * stroke itself only shrinks from 20 px to 18 -- so the tighter grid fits the
+ * punctuation set as well as the letters and digits AND asks for a SMALLER
+ * buffer than the old sheet did: 240x338 is ~10 KB where 240x384 was ~11.5 KB.
+ * Adding a section by making the cells smaller is the cheapest kind of "no". */
+#define GREF_COLS  6
+#define GREF_CELL  40
+#define GREF_W     (GREF_COLS * GREF_CELL)          /* 240 */
+#define GREF_BAND  18                               /* the punctuation heading   */
+static const char GREF_SET[] = "abcdefghijklmnopqrstuvwxyz0123456789";
+#define GREF_N     ((int)(sizeof GREF_SET - 1))
+#define GREF_ROWS  ((GREF_N + GREF_COLS - 1) / GREF_COLS)
+
+/* Everything the recogniser knows after the punctuation shift. '.' is LAST and
+ * has no stroke at all -- it is the tap that follows the shift, so the sheet
+ * draws it as the dot it is, which is exactly what you do. `_` is missing on
+ * purpose and not by omission: the $1 normaliser scales every stroke to a unit
+ * box, so `_` and `-` are the same shape and only one of them can exist. */
+static const char GREF_PUN[] = "@,/-'()?.";
+#define GREF_PN    ((int)(sizeof GREF_PUN - 1))
+#define GREF_PROWS ((GREF_PN + GREF_COLS - 1) / GREF_COLS)
+#define GREF_PY    (GREF_ROWS * GREF_CELL + GREF_BAND)   /* top of the punct rows */
+#define GREF_H     (GREF_PY + GREF_PROWS * GREF_CELL)
+
+static lv_obj_t *g_gref_cv;
+static uint8_t  *g_gref_buf;
+static void gref_free(void){
+    g_gref_cv = NULL;
+    if(g_gref_buf){ free(g_gref_buf); g_gref_buf = NULL; }
+}
+static void gref_plot(int x, int y){ i1_obj_px(g_gref_cv, x, y, 1); }
+static void gref_line(int x0,int y0,int x1,int y1){   /* 2px, as the trainer's guide */
+    int dx=abs(x1-x0), sx=x0<x1?1:-1, dy=-abs(y1-y0), sy=y0<y1?1:-1, err=dx+dy;
+    for(;;){
+        gref_plot(x0,y0); gref_plot(x0+1,y0); gref_plot(x0,y0+1);
+        if(x0==x1&&y0==y1) break;
+        int e2=2*err;
+        if(e2>=dy){ err+=dy; x0+=sx; }
+        if(e2<=dx){ err+=dx; y0+=sy; }
+    }
+}
+
+/* one cell: the stroke, and a filled dot where the pen starts. The dot is the
+ * whole reference in miniature -- the shape of an 'o' tells you nothing about
+ * which end to begin at, and beginning at the wrong end is the single most
+ * common reason a stroke is not recognised. */
+static void gref_cell(int ci, char c, int y0){
+    const int ox = (ci % GREF_COLS) * GREF_CELL;
+    const int oy = y0 + (ci / GREF_COLS) * GREF_CELL;
+    const int pad = 8, span = GREF_CELL - 2*pad - 6;
+
+    int np = 0; const float *p = graffiti_glyph_template(c, &np);
+    if(!p || np < 1){                       /* drawn as a tap, not a stroke */
+        int cx = ox + GREF_CELL/2, cy = oy + GREF_CELL/2 + 3;
+        for(int a=-2;a<=2;a++) for(int b=-2;b<=2;b++) if(a*a+b*b<=4) gref_plot(cx+a,cy+b);
+        return;
+    }
+    #define GX(i) (ox + pad + (int)(p[2*(i)]  /10.0f*span))
+    #define GY(i) (oy + pad + 4 + (int)(p[2*(i)+1]/10.0f*span))
+    for(int i=0;i<np-1;i++) gref_line(GX(i),GY(i),GX(i+1),GY(i+1));
+    int sx=GX(0), sy=GY(0);
+    for(int a=-2;a<=2;a++) for(int b=-2;b<=2;b++) if(a*a+b*b<=4) gref_plot(sx+a,sy+b);
+    #undef GX
+    #undef GY
+}
+
+static void gref_back_cb(lv_event_t *e){ (void)e; show_trainer(); }
+
+static void show_graf_ref(void){
+    kill_kb();
+    cur_app=NULL; cur_uid=0;
+    content_clear();
+    lv_label_set_text(title_lbl, "Strokes");
+    update_cat_trigger();
+
+    lv_obj_t *back = lv_button_create(content);
+    lv_obj_set_size(back, 60, 26); lv_obj_align(back, LV_ALIGN_TOP_LEFT, 2, 2);
+    lv_obj_t *bl=lv_label_create(back); lv_label_set_text(bl,"Drill"); lv_obj_center(bl);
+    lv_obj_add_event_cb(back, gref_back_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *hint = lv_label_create(content);
+    lv_label_set_text(hint, "dot = start here");
+    lv_obj_align(hint, LV_ALIGN_TOP_RIGHT, -6, 8);
+
+    /* the sheet: one scrolling page holding one tall canvas */
+    lv_obj_t *page = lv_obj_create(content);
+    lv_obj_set_size(page, LCD_W, (PDA_H - TITLE_H) - 32);
+    lv_obj_set_pos(page, 0, 32);
+    lv_obj_set_style_radius(page, 0, 0);
+    lv_obj_set_style_border_width(page, 0, 0);
+    lv_obj_set_style_bg_color(page, COL_BODY, 0);
+    lv_obj_set_style_pad_all(page, 0, 0);
+    lv_obj_set_scroll_dir(page, LV_DIR_VER);
+
+    g_gref_buf = malloc(LV_CANVAS_BUF_SIZE(GREF_W, GREF_H, 1, 1) + 16);
+    if(!g_gref_buf){
+        lv_obj_t *l = lv_label_create(page);
+        lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(l, LCD_W - 16);
+        lv_obj_set_pos(l, 8, 8);
+        lv_label_set_text(l, "Not enough memory for the stroke sheet just now. "
+                             "Close a game and try again, or use Drill, which "
+                             "shows one stroke at a time.");
+        return;
+    }
+
+    g_gref_cv = lv_canvas_create(page);
+    lv_canvas_set_buffer(g_gref_cv, g_gref_buf, GREF_W, GREF_H, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_palette(g_gref_cv, 0, lv_color_to_32(COL_BODY, 0xFF));
+    lv_canvas_set_palette(g_gref_cv, 1, lv_color_to_32(COL_LINE, 0xFF));
+    lv_obj_set_pos(g_gref_cv, 0, 0);
+    lv_obj_clear_flag(g_gref_cv, LV_OBJ_FLAG_CLICKABLE);
+    i1_obj_clear(g_gref_cv);
+    for(int i = 0; i < GREF_N; i++)  gref_cell(i, GREF_SET[i], 0);
+    for(int i = 0; i < GREF_PN; i++) gref_cell(i, GREF_PUN[i], GREF_PY);
+    /* A rule at the TOP of the heading band, not through the middle of it: at
+     * GREF_PY-5 it struck the heading out, which is a thing you see immediately
+     * in a screenshot and never in the code. */
+    for(int x = 4; x < GREF_W - 4; x++) gref_plot(x, GREF_PY - GREF_BAND);
+    lv_obj_invalidate(g_gref_cv);            /* exactly one, for the whole sheet */
+
+    /* The letter under each stroke is a LABEL, not painted into the canvas: the
+     * Palm font is already on screen and redrawing its glyphs by hand into I1
+     * would be a second, worse font. 36 labels is well inside the pool (the
+     * gate measures it), and they scroll with the canvas because they share
+     * its parent. */
+    for(int i = 0; i < GREF_N; i++){
+        lv_obj_t *l = lv_label_create(page);
+        char t[2] = { GREF_SET[i], 0 };
+        lv_label_set_text(l, t);
+        lv_obj_set_pos(l, (i % GREF_COLS) * GREF_CELL + 3,
+                          (i / GREF_COLS) * GREF_CELL + 1);
+    }
+    /* The heading earns its place: these strokes do NOTHING on their own. Palm
+     * enters punctuation as a shift (one tap) and then the stroke, so a sheet
+     * that showed the shapes without saying that would be teaching the half of
+     * it that does not work. */
+    lv_obj_t *ph = lv_label_create(page);
+    lv_label_set_text(ph, "Punctuation: tap once first, then draw");
+    lv_obj_set_pos(ph, 4, GREF_PY - GREF_BAND + 3);
+    for(int i = 0; i < GREF_PN; i++){
+        lv_obj_t *l = lv_label_create(page);
+        char t[2] = { GREF_PUN[i], 0 };
+        lv_label_set_text(l, t);
+        lv_obj_set_pos(l, (i % GREF_COLS) * GREF_CELL + 3,
+                          GREF_PY + (i / GREF_COLS) * GREF_CELL + 1);
+    }
+}
+static void graf_ref_cb(lv_event_t *e){ (void)e; show_graf_ref(); }
+
 static void show_trainer(void){
     kill_kb();
     cur_app=NULL; cur_uid=0;
@@ -1687,6 +2044,15 @@ static void show_trainer(void){
     tr_mode_lbl = lv_label_create(mb);
     lv_obj_center(tr_mode_lbl);
     lv_obj_add_event_cb(mb, tr_mode_toggle, LV_EVENT_CLICKED, NULL);
+
+    /* Q4: the stroke reference -- every glyph on one sheet, for when you cannot
+     * remember which way round 'k' goes. */
+    lv_obj_t *rb = lv_button_create(content);
+    lv_obj_set_size(rb, 56, 26);
+    lv_obj_align(rb, LV_ALIGN_TOP_RIGHT, -98, 2);
+    lv_obj_set_style_radius(rb, 0, 0);
+    lv_obj_t *rbl = lv_label_create(rb); lv_label_set_text(rbl, "Strokes"); lv_obj_center(rbl);
+    lv_obj_add_event_cb(rb, graf_ref_cb, LV_EVENT_CLICKED, NULL);
 
     /* Kana lives here (handwriting sibling of the Latin drill): a compact "あ" button
      * to its left switches into the kana trainer. */
@@ -2144,7 +2510,7 @@ static void news_render(void){
         if(g_news_feed)  lv_label_set_text(g_news_feed, "");
         if(g_news_title) lv_label_set_text(g_news_title, "No news yet");
         if(g_news_body)  lv_label_set_text(g_news_body, "HotSync fetches your feeds.\n"
-                                           "Add feed URLs in Preferences.");
+                                           "Add feed URLs in Settings > News.");
         if(g_news_hint)  lv_label_set_text(g_news_hint, "");
         return;
     }
@@ -2268,6 +2634,43 @@ static void show_news(void){
     news_render();
 }
 
+/* ONE icon cell, for BOTH icon grids -- the launcher's nine apps and Settings'
+ * nine tiles. They were duplicated boilerplate that happened to agree, which is
+ * the arrangement that drifts: the two grids are supposed to look identical
+ * (W1's whole premise is that Settings is an app), so they are now one function.
+ *
+ * NOT SCROLLABLE, and that is not cosmetic. An lv_obj scrolls by default, so a
+ * label wider than the 68 px cell makes the cell scrollable, and LVGL draws the
+ * horizontal scrollbar as a black bar under the label. "Date & Time" was the
+ * only tile wide enough to trip it, which is exactly how this kind of fault
+ * survives review -- it looks like a design decision about one icon. */
+static lv_obj_t *icon_cell(lv_obj_t *grid, const lv_image_dsc_t *icon,
+                           const char *name, lv_event_cb_t cb, void *ud){
+    lv_obj_t *cell = lv_obj_create(grid);
+    lv_obj_set_size(cell, 68, 52);
+    lv_obj_set_style_radius(cell, 0, 0);
+    lv_obj_set_style_border_width(cell, 0, 0);
+    lv_obj_set_style_bg_opa(cell, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_all(cell, 2, 0);
+    lv_obj_set_style_pad_row(cell, 3, 0);
+    lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(cell, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(cell, cb, LV_EVENT_CLICKED, ud);
+
+    lv_obj_t *img = lv_image_create(cell);
+    lv_image_set_src(img, icon);                          /* 1x (crisp) */
+    lv_obj_set_style_image_recolor(img, COL_LINE, 0);     /* A8 mask -> black */
+    lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);
+
+    lv_obj_t *lbl = lv_label_create(cell);
+    lv_label_set_text(lbl, name);
+    lv_obj_set_style_text_font(lbl, &lv_font_palm, 0);
+    return cell;
+}
+
 static void show_launcher(void){
     kill_kb();
     cur_app = NULL;
@@ -2287,44 +2690,22 @@ static void show_launcher(void){
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
 
-    for(int i=0;i<NAPPS;i++){
-        lv_obj_t *cell = lv_obj_create(grid);
-        lv_obj_set_size(cell, 68, 52);
-        lv_obj_set_style_radius(cell, 0, 0);
-        lv_obj_set_style_border_width(cell, 0, 0);
-        lv_obj_set_style_bg_opa(cell, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_pad_all(cell, 2, 0);
-        lv_obj_set_style_pad_row(cell, 3, 0);
-        lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_add_flag(cell, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(cell, app_cb, LV_EVENT_CLICKED, (void *)APPS[i]);
+    for(int i=0;i<NAPPS;i++)
+        icon_cell(grid, APP_ICONS[i], APPS[i], app_cb, (void *)APPS[i]);
 
-        lv_obj_t *img = lv_image_create(cell);
-        lv_image_set_src(img, APP_ICONS[i]);                       /* 1x (crisp) */
-        lv_obj_set_style_image_recolor(img, COL_LINE, 0);          /* A8 mask -> black */
-        lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);
-
-        lv_obj_t *lbl = lv_label_create(cell);
-        lv_label_set_text(lbl, APPS[i]);
-        lv_obj_set_style_text_font(lbl, &lv_font_palm, 0);
-    }
-
-    /* I1.1: onboarding hint. Until an iCloud account is configured, the records on
-     * screen are demo data -- say so and point at setup. A full-width flex item at
-     * the end of the grid (so it flows BELOW the icons instead of overlapping them
-     * now that the app grid can be three rows); the grid scrolls to reveal it.
-     * Disappears once dav_user (the Apple ID) is set. */
-    if(appcfg()->dav_user[0] == '\0'){
-        lv_obj_t *hint = lv_label_create(grid);
-        lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(hint, lv_pct(100));
-        lv_obj_set_style_pad_top(hint, 6, 0);
-        lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
-        lv_label_set_text(hint, "Demo data shown. To sync your own:\n"
-                                "edit config.ini on the card, or tap\n"
-                                "Menu > Preferences.");
-    }
+    /* W10 REMOVED THE ONBOARDING HINT that used to hang off the end of this grid.
+     * Three faults, and the third is fatal on its own:
+     *
+     *   It dead-ended -- "edit config.ini on the card" is not something a person
+     *   holding the device can do. It read as an unfinished-setup nag, which
+     *   item 17 rejects: a sync without an account is a supported way to use
+     *   this thing, not a half-finished one. And the app grid is three rows of
+     *   52 px in a 184 px area, so the hint sat BELOW THE FOLD and the launcher
+     *   had to be scrolled to read it -- a notice nobody sees is not a notice.
+     *
+     * What it was genuinely for -- "those contacts are not yours, they are
+     * samples" -- now lives on the HotSync screen, which is where somebody is
+     * actually asking what syncing would do for them. */
 
     /* LAST, so the app grid gets the pool first. If there is not enough left for
      * four small objects, the right thing to lose is the charge readout, not an
@@ -2410,14 +2791,42 @@ static void toast_show(const char *msg){
  * location was to pull the SD card and edit config.ini on a computer. */
 enum { PF_SSID, PF_WPASS, PF_USER, PF_PASS, PF_CALB, PF_CARDB,
        PF_CAL, PF_TODO, PF_CARD, PF_TZ, PF_N,
-       PF_LAT = PF_N, PF_LON, PF_MAX };
+       PF_LAT = PF_N, PF_LON, PF_OWNER,
+       /* W5, Wi-Fi slots 2..4. Slot 1 is PF_SSID/PF_WPASS above. These sit PAST
+        * PF_N deliberately, like latitude and owner: everything below PF_N is
+        * what the one-list Preferences view iterates, and that list is already at
+        * the object-pool ceiling (see show_prefs -- three extra rows once crashed
+        * the device-sized build). They are reached from the Wi-Fi tile. */
+       PF_SSID2, PF_WPASS2, PF_SSID3, PF_WPASS3, PF_SSID4, PF_WPASS4, PF_MAX };
 static const char *PF_LABELS[PF_MAX] = {
     "Wi-Fi SSID", "Wi-Fi pass", "Apple ID", "App pass", "CalDAV host",
     "CardDAV host", "Calendar coll", "Reminders coll", "Address coll", "Time zone",
-    "Latitude", "Longitude",
+    "Latitude", "Longitude", "Owner name",
+    "Network 2 name", "Network 2 pass", "Network 3 name", "Network 3 pass",
+    "Network 4 name", "Network 4 pass",
 };
-/* which screen an edit returns to */
-static int pf_is_dash_field(int i){ return i==PF_LAT || i==PF_LON; }
+/* field index for Wi-Fi slot `s` (0-based): slot 0 is the unnumbered pair. */
+static int pf_wifi_ssid(int s){ return s == 0 ? PF_SSID  : PF_SSID2  + (s-1)*2; }
+static int pf_wifi_pass(int s){ return s == 0 ? PF_WPASS : PF_WPASS2 + (s-1)*2; }
+/* A password is never shown, anywhere, in any list. One predicate, because the
+ * two list builders that mask them are not the only places that will ever ask. */
+static int pf_is_secret(int i){
+    return i == PF_PASS || i == PF_WPASS || i == PF_WPASS2
+        || i == PF_WPASS3 || i == PF_WPASS4;
+}
+/* Which screen an edit returns to.
+ *
+ * This used to be derived from the FIELD (`pf_is_dash_field`: latitude and
+ * longitude came from the Lock Screen panel, everything else from the
+ * Preferences list). W1 broke that: the same field editor is now reachable
+ * from a third place -- a Settings tile -- and latitude is reachable from
+ * both the Lock Screen panel and the Location tile, so the field no longer
+ * says where the user came from. Only the caller knows, so the caller sets it
+ * on the way IN and `set_return()` reads it on the way out. */
+enum { RET_PREFS = -1, RET_DASH = -2, RET_WIFI = -3 };  /* >= 0 is a tile index */
+static int g_set_ret = RET_PREFS;
+static int g_wifi_slot;    /* which network's screen RET_WIFI goes back to */
+static void set_return(void);
 static const char *pol_name(int p){
     return p==CFG_POL_LOCAL ? "device wins"
          : p==CFG_POL_BOTH  ? "keep both"
@@ -2426,8 +2835,14 @@ static const char *pol_name(int p){
 /* the config buffer + capacity for field i (both read and write go through this) */
 static char *pf_buf(Config *c, int i, int *cap){
     switch(i){
-        case PF_SSID:  *cap=sizeof c->wifi_ssid;     return c->wifi_ssid;
-        case PF_WPASS: *cap=sizeof c->wifi_pass;     return c->wifi_pass;
+        case PF_SSID:   *cap=sizeof c->wifi[0].ssid; return c->wifi[0].ssid;
+        case PF_WPASS:  *cap=sizeof c->wifi[0].pass; return c->wifi[0].pass;
+        case PF_SSID2:  *cap=sizeof c->wifi[1].ssid; return c->wifi[1].ssid;
+        case PF_WPASS2: *cap=sizeof c->wifi[1].pass; return c->wifi[1].pass;
+        case PF_SSID3:  *cap=sizeof c->wifi[2].ssid; return c->wifi[2].ssid;
+        case PF_WPASS3: *cap=sizeof c->wifi[2].pass; return c->wifi[2].pass;
+        case PF_SSID4:  *cap=sizeof c->wifi[3].ssid; return c->wifi[3].ssid;
+        case PF_WPASS4: *cap=sizeof c->wifi[3].pass; return c->wifi[3].pass;
         case PF_USER:  *cap=sizeof c->dav_user;      return c->dav_user;
         case PF_PASS:  *cap=sizeof c->dav_pass;      return c->dav_pass;
         case PF_CALB:  *cap=sizeof c->dav_base;      return c->dav_base;
@@ -2438,6 +2853,7 @@ static char *pf_buf(Config *c, int i, int *cap){
         case PF_TZ:    *cap=sizeof c->timezone;      return c->timezone;
         case PF_LAT:   *cap=sizeof c->latitude;      return c->latitude;
         case PF_LON:   *cap=sizeof c->longitude;     return c->longitude;
+        case PF_OWNER: *cap=sizeof c->owner;         return c->owner;
     }
     *cap=0; return NULL;
 }
@@ -2445,13 +2861,21 @@ static char *pf_buf(Config *c, int i, int *cap){
 /* ---- single-field editor (one textarea at a time) ---- */
 static int pf_edit_idx;
 static void show_dash_settings(void);
-static void pf_edit_back(void){
-    if(pf_is_dash_field(pf_edit_idx)) show_dash_settings(); else show_prefs();
-}
+static void pf_edit_back(void){ set_return(); }
 static void pf_edit_cancel_cb(lv_event_t *e){ (void)e; pf_edit_back(); }
 static void pf_edit_save_cb(lv_event_t *e){ (void)e;
-    int cap=0; char *dst = pf_buf(appcfg_mut(), pf_edit_idx, &cap);
+    Config *cfg = appcfg_mut();
+    int cap=0; char *dst = pf_buf(cfg, pf_edit_idx, &cap);
     if(dst && cap) snprintf(dst, cap, "%s", lv_textarea_get_text(g_fields[0]));
+    /* TYPING A COORDINATE PINS IT. Everything else that fills the location is a
+     * guess of some kind -- the zone, the city list, the IP lookup -- and a sync
+     * is allowed to improve a guess. Numbers somebody entered by hand are the one
+     * answer nothing is allowed to touch, and the name goes with them because a
+     * name copied from a previous guess would be a label for the wrong place. */
+    if(pf_edit_idx == PF_LAT || pf_edit_idx == PF_LON){
+        cfg->loc_auto = 0;
+        cfg->loc_name[0] = 0;
+    }
     appcfg_save();            /* persist to SD now -> survives reboot */
     pf_edit_back();
     toast_show("Saved");      /* I4: same transient feedback as record save/delete */
@@ -2539,8 +2963,20 @@ static void show_pref_edit(int i){
  * keyboard (the Preferences field pattern); the name is auto-derived from the host.
  * The list persists to feeds.txt on every change, and HotSync fetches the enabled
  * feeds. See bridge/feeds.c. */
-static void feeds_back_cb(lv_event_t *e){ (void)e; show_prefs(); }
 static void feeds_add_cb(lv_event_t *e){ (void)e; show_feed_edit(-1); }
+/* W7: put the ten built-ins back. They are seeded on a fresh card and then
+ * editable, so the only way to lose one permanently was to delete it -- and the
+ * URL is the one thing here nobody can retype from memory. Adding is a no-op for
+ * a feed already in the list (feeds_add refuses duplicates), so this restores
+ * what is missing without disturbing what is there or re-enabling what was
+ * deliberately switched off. */
+static void feeds_builtin_cb(lv_event_t *e){ (void)e;
+    int before = feeds_count();
+    feeds_restore_builtins();
+    feeds_save(FEEDS_PATH);
+    show_feeds();
+    toast_show(feeds_count() > before ? "Built-ins restored" : "All built-ins present");
+}
 static void feeds_tbl_click_cb(lv_event_t *e){
     lv_obj_t *t = lv_event_get_target(e);
     uint32_t r=LV_TABLE_CELL_NONE, c=LV_TABLE_CELL_NONE;
@@ -2553,17 +2989,21 @@ static void show_feeds(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
     content_clear();
-    lv_label_set_text(title_lbl, "News Feeds");
+    lv_label_set_text(title_lbl, "News");
     update_cat_trigger();
 
-    lv_obj_t *back = lv_button_create(content);
-    lv_obj_set_size(back, 58, 26); lv_obj_align(back, LV_ALIGN_TOP_LEFT, 2, 2);
-    lv_obj_t *bl=lv_label_create(back); lv_label_set_text(bl,"Prefs"); lv_obj_center(bl);
-    lv_obj_add_event_cb(back, feeds_back_cb, LV_EVENT_CLICKED, NULL);
+    /* W7: this IS the News tile's panel now, not a sub-screen of a list of
+     * settings, so there is no "Prefs" button on it -- Home is the way out
+     * (design rule 3), the same as every other tile. The two buttons that are
+     * left both DO something to the list. */
     lv_obj_t *add = lv_button_create(content);
     lv_obj_set_size(add, 54, 26); lv_obj_align(add, LV_ALIGN_TOP_RIGHT, -2, 2);
     lv_obj_t *al=lv_label_create(add); lv_label_set_text(al,"Add"); lv_obj_center(al);
     lv_obj_add_event_cb(add, feeds_add_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *bi = lv_button_create(content);
+    lv_obj_set_size(bi, 96, 26); lv_obj_align(bi, LV_ALIGN_TOP_LEFT, 2, 2);
+    lv_obj_t *bil=lv_label_create(bi); lv_label_set_text(bil,"Built-ins"); lv_obj_center(bil);
+    lv_obj_add_event_cb(bi, feeds_builtin_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *t = lv_table_create(content);
     lv_obj_set_size(t, LCD_W, PDA_H - TITLE_H - 32);
@@ -2583,6 +3023,9 @@ static void show_feeds(void){
         }
     }
     lv_obj_add_event_cb(t, feeds_tbl_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    assist_say("Tap a box to switch a feed on or off. HotSync collects the ones "
+               "that are on, and they are read here offline.");
 }
 
 /* ---- add / edit one feed (URL on the tap keyboard; name auto-derived) ---- */
@@ -2670,11 +3113,11 @@ static char *zone_target_buf(Config *c, int *cap){
         default:      *cap=sizeof c->timezone; return c->timezone;
     }
 }
-/* the picker returns to Preferences for the system zone, or to the Lock Screen
- * sub-screen for a world clock. */
-static void zone_picker_return(void){
-    if(g_zone_target==ZTGT_TZ) show_prefs(); else show_dash_settings();
-}
+/* The picker goes back wherever it was opened from -- same reasoning as the
+ * field editor above. It used to decide from the TARGET (system zone -> the
+ * Preferences list, world clock -> the Lock Screen panel), which stopped being
+ * true when the Date & Time tile started opening all three. */
+static void zone_picker_return(void){ set_return(); }
 static void tz_cancel_cb(lv_event_t *e){ (void)e; zone_picker_return(); }
 static void tz_tbl_click_cb(lv_event_t *e){
     lv_obj_t *t = lv_event_get_target(e);
@@ -2690,7 +3133,26 @@ static void tz_tbl_click_cb(lv_event_t *e){
         if(zi < 0 || zi >= clock_zone_count()) return;
         const char *z = clock_zone_name(zi);
         snprintf(dst, cap, "%s", z);
-        if(g_zone_target==ZTGT_TZ) clock_set_tz(z);   /* apply the system zone immediately */
+        if(g_zone_target==ZTGT_TZ){
+            clock_set_tz(z);                          /* apply the system zone immediately */
+            /* THE ZONE ALREADY KNOWS ROUGHLY WHERE YOU ARE, and setting one is
+             * unavoidable, so a device that has never been placed places itself
+             * here: free, offline, no taps, and available on a device that has
+             * never seen a network. It is a ZONE and not a town -- pick
+             * America/New_York from Boston and you get New York's forecast, 300
+             * km away -- so it fills an EMPTY location only, never replacing a
+             * city the user picked or a coordinate a sync found, and the
+             * Location tile still says which place is in force so a wrong one
+             * is visible and one tap from being fixed. */
+            const char *lat = NULL, *lon = NULL;
+            if(!cfg->latitude[0] && !cfg->longitude[0] && clock_zone_latlon(zi, &lat, &lon)){
+                snprintf(cfg->latitude,  sizeof cfg->latitude,  "%s", lat);
+                snprintf(cfg->longitude, sizeof cfg->longitude, "%s", lon);
+                city_name(z, cfg->loc_name, sizeof cfg->loc_name);
+                cfg->loc_auto = 1;          /* the coarsest guess of all: refine it */
+                toast_show("Weather location set too");
+            }
+        }
     }
     appcfg_save();            /* persist to SD now -> survives reboot */
     zone_picker_return();
@@ -2738,10 +3200,11 @@ static void show_zone_picker(int target){
  * row toggles in place. */
 static void ds_back_cb(lv_event_t *e){ (void)e; show_prefs(); }
 static void show_pref_edit(int i);
-static void ds_lat_cb(lv_event_t *e){ (void)e; show_pref_edit(PF_LAT); }
-static void ds_lon_cb(lv_event_t *e){ (void)e; show_pref_edit(PF_LON); }
-static void ds_world1_cb(lv_event_t *e){ (void)e; show_zone_picker(ZTGT_W1); }
-static void ds_world2_cb(lv_event_t *e){ (void)e; show_zone_picker(ZTGT_W2); }
+/* the Lock Screen panel's rows: everything they open comes back HERE */
+static void ds_lat_cb(lv_event_t *e){ (void)e; g_set_ret = RET_DASH; show_pref_edit(PF_LAT); }
+static void ds_lon_cb(lv_event_t *e){ (void)e; g_set_ret = RET_DASH; show_pref_edit(PF_LON); }
+static void ds_world1_cb(lv_event_t *e){ (void)e; g_set_ret = RET_DASH; show_zone_picker(ZTGT_W1); }
+static void ds_world2_cb(lv_event_t *e){ (void)e; g_set_ret = RET_DASH; show_zone_picker(ZTGT_W2); }
 static void ds_fmt_cb(lv_event_t *e){ (void)e;
     Config *c = appcfg_mut(); c->clock24 = !c->clock24; appcfg_save(); show_dash_settings();
 }
@@ -2786,6 +3249,7 @@ static void show_dash_settings(void){
 static lv_obj_t *g_pf_bright_btn;   /* the "Brightness: NN%" row, refreshed on stepper close */
 static void pf_row_open_cb(lv_event_t *e){
     int i = (int)(intptr_t)lv_event_get_user_data(e);
+    g_set_ret = RET_PREFS;                                 /* came from the old list */
     if(i == PF_TZ){ show_zone_picker(ZTGT_TZ); return; }   /* zone -> picker, not text entry */
     show_pref_edit(i);
 }
@@ -2809,7 +3273,11 @@ static void pf_saverow_cb(lv_event_t *e){ (void)e;
 static lv_obj_t *pf_add(lv_obj_t *list, const char *text, lv_event_cb_t cb, int ud){
     lv_obj_t *b = lv_list_add_button(list, NULL, text);
     lv_obj_set_style_radius(b, 0, 0);
-    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, (void *)(intptr_t)ud);
+    /* A NULL callback means the row is a STATEMENT, not a control (the About
+     * panel's provenance lines). It stops being clickable rather than being a
+     * button that silently does nothing when tapped. */
+    if(cb) lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, (void *)(intptr_t)ud);
+    else   lv_obj_clear_flag(b, LV_OBJ_FLAG_CLICKABLE);
     return b;
 }
 static void show_prefs(void){
@@ -2830,7 +3298,7 @@ static void show_prefs(void){
     for(int i=0;i<PF_N;i++){
         int cap=0; const char *v = pf_buf(c, i, &cap);
         char shown[28];
-        if(i==PF_WPASS || i==PF_PASS)
+        if(pf_is_secret(i))
             snprintf(shown, sizeof shown, "%s", (v && v[0]) ? "********" : "(unset)");
         else if(v && v[0])
             snprintf(shown, sizeof shown, "%.20s%s", v, strlen(v)>20 ? "..." : "");
@@ -2852,6 +3320,858 @@ static void show_prefs(void){
      * to allocate its draw buffer and crashed on the device-sized 32-bit build). */
     pf_add(list, "Lock screen...", pf_dash_row_cb, 0);
     pf_add(list, "Save to config.ini", pf_saverow_cb, 0);
+}
+
+/* ============ W1: Settings -- nine tiles instead of one long list ============
+ *
+ * Menu > Preferences is now Menu > Settings, and it opens an icon grid rather
+ * than a fourteen-row list. Two reasons, and the second is the real one:
+ *
+ *   * The list had outgrown the screen. Fourteen rows in a 184px content area
+ *     is a scroll, and scrolling is the interaction this hardware is worst at
+ *     (a resistive panel plus LVGL's drag threshold). Nine tiles fit outright.
+ *   * A flat list of "Calendar coll" and "CardDAV host" asks the user to know
+ *     what those ARE. Grouping them behind Accounts and Sync means a wizard can
+ *     later ask a question instead of naming a field -- which is what W5..W9
+ *     are for. The grid is the seam that makes that replacement one tile at a
+ *     time instead of one big rewrite.
+ *
+ * The grid is show_launcher()'s geometry deliberately: same 68x52 cells, same
+ * ROW_WRAP flex, same SPACE_EVENLY. Nine tiles land on the same centres as the
+ * nine apps, which is why a Settings tile can be tapped at the coordinates the
+ * smoke script already uses for a launcher cell. It also means Settings LOOKS
+ * like the launcher, which is the point -- on Palm, Prefs was an app.
+ *
+ * Home exits, as it does everywhere else. There is no Back button: P10 settled
+ * that argument (a Back button below the fold makes leaving the hardest thing
+ * on the screen), and the silkscreen Home is always on glass.
+ *
+ * The old show_prefs() list is NOT deleted. Every field it holds is reachable
+ * from a tile, but it stays reachable from Settings > About while the wizards
+ * are still lists -- it is the one screen that can show every setting at once,
+ * which is worth something when a config.ini is wrong and you need to see why. */
+enum { SET_WIFI, SET_ACCT, SET_NEWS, SET_TIME, SET_DISP,
+       SET_LOC, SET_SYNC, SET_OWNER, SET_ABOUT, SET_N,
+       /* Not a tile -- there are nine of those and there is no tenth icon.
+        * SET_ADVANCED is a panel reached only from Accounts, and it sits past
+        * SET_N so that everything iterating the grid stops before it. */
+       SET_ADVANCED, SET_PANEL_N };
+static const char *SET_NAMES[SET_N] = {
+    "Wi-Fi", "Accounts", "News", "Date & Time", "Display",
+    "Location", "Sync", "Owner", "About",
+};
+/* W4: what the Assistant says when a tile opens. Each one says what the setting
+ * IS FOR -- the thing you cannot work out from the field names, and the thing
+ * that decides whether you need it at all -- never what to tap next, which the
+ * screen underneath her is already showing. Under ~115 characters (five lines in
+ * her balloon); over that they clip rather than wrap. */
+static const char *SET_BLURB[SET_N] = {
+    /* Wi-Fi     */ "The networks this device joins. It remembers four and tries "
+                    "the one that worked last, first.",
+    /* Accounts  */ "Your Apple ID, so the calendar and contacts here are the same "
+                    "ones on your phone.",
+    /* News      */ "The feeds HotSync collects. They are read here, offline, and "
+                    "need no account at all.",
+    /* Date&Time */ "The clock, the zone it keeps, and the two world clocks on the "
+                    "lock screen.",
+    /* Display   */ "How bright the screen is, and how long it stays lit. The "
+                    "backlight is most of the battery.",
+    /* Location  */ "Where you are, so the lock screen can show your weather. A "
+                    "sync sharpens this unless you have set it yourself.",
+    /* Sync      */ "Which calendar and address book HotSync uses, and who wins "
+                    "when both sides changed.",
+    /* Owner     */ "Your name, on the lock screen, so a device found on a desk "
+                    "can be given back.",
+    /* About     */ "What this is, what it was built from, and the licence it "
+                    "ships under.",
+};
+static const lv_image_dsc_t *SET_ICONS[SET_N] = {
+    &icon_set_wifi, &icon_set_accounts, &icon_set_news, &icon_set_datetime,
+    &icon_set_display, &icon_set_location, &icon_set_sync, &icon_set_owner,
+    &icon_set_about,
+};
+static void show_settings(void);
+static void show_set_panel(int tile);
+
+/* go back to whoever opened the editor/picker (see g_set_ret) */
+static void show_wifi_net(int slot);
+static void set_return(void){
+    if(g_set_ret == RET_DASH)   { show_dash_settings(); return; }
+    if(g_set_ret == RET_WIFI)   { show_wifi_net(g_wifi_slot); return; }
+    if(g_set_ret >= 0 && g_set_ret < SET_PANEL_N){ show_set_panel(g_set_ret); return; }
+    show_prefs();
+}
+
+/* A tile panel's rows open the SAME editors the Preferences list opens; only
+ * the return address differs. user_data packs (tile<<8)|field so one callback
+ * serves all nine panels -- the alternative is nine near-identical callbacks,
+ * which is how two of them end up with the wrong return address. */
+static void sp_field_cb(lv_event_t *e){
+    intptr_t v = (intptr_t)lv_event_get_user_data(e);
+    g_set_ret = (int)(v >> 8);
+    show_pref_edit((int)(v & 0xff));
+}
+static void sp_zone_cb(lv_event_t *e){
+    intptr_t v = (intptr_t)lv_event_get_user_data(e);
+    g_set_ret = (int)(v >> 8);
+    show_zone_picker((int)(v & 0xff));
+}
+static void sp_fmt_cb(lv_event_t *e){ (void)e;
+    Config *c = appcfg_mut(); c->clock24 = !c->clock24; appcfg_save();
+    show_set_panel(SET_TIME);
+}
+static void sp_prefs_cb(lv_event_t *e){ (void)e; show_prefs(); }
+static void sp_advanced_cb(lv_event_t *e){ (void)e; show_set_panel(SET_ADVANCED); }
+/* Two states, so this is a toggle rather than a pick screen -- the pick screen
+ * exists to show you options you are not on, and with two there is only one. */
+static void sp_locauto_cb(lv_event_t *e){ (void)e;
+    Config *c = appcfg_mut();
+    c->loc_auto = !c->loc_auto;
+    appcfg_save();
+    show_set_panel(SET_LOC);
+}
+/* Discovery, opened from a tile: the tile records itself as the way back. */
+static void sp_disc_cb(lv_event_t *e){
+    g_set_ret = (int)(intptr_t)lv_event_get_user_data(e);
+    pf_disc_row_cb(e);
+}
+static void sp_tile_cb(lv_event_t *e){
+    show_set_panel((int)(intptr_t)lv_event_get_user_data(e));
+}
+
+/* one row per field, value shown inline, passwords masked (never the value) */
+static void sp_field_row(lv_obj_t *list, int tile, int f){
+    const Config *c = appcfg();
+    int cap = 0; const char *v = pf_buf((Config *)c, f, &cap);
+    char shown[28], row[80];
+    if(pf_is_secret(f))
+        snprintf(shown, sizeof shown, "%s", (v && v[0]) ? "********" : "(unset)");
+    else if(v && v[0])
+        snprintf(shown, sizeof shown, "%.20s%s", v, strlen(v) > 20 ? "..." : "");
+    else
+        snprintf(shown, sizeof shown, "(unset)");
+    snprintf(row, sizeof row, "%s: %s", PF_LABELS[f], shown);
+    pf_add(list, row, sp_field_cb, (tile << 8) | f);
+}
+
+/* ==== W9: one pick-one-of-N screen, used by every panel that has a choice ===
+ * Three settings in Settings are "choose one from a short fixed set": how long
+ * the backlight stays on, which side wins a sync conflict, and which city you
+ * are in. Three cycling rows would have been less code -- tap to advance, no
+ * screen at all -- but a cycling row cannot show you the options you are NOT on,
+ * so you learn what "keep both" means by landing on it. This shows the whole set
+ * with the current one marked, which is the tap-to-pick rule applied honestly.
+ *
+ * ONE screen, not three: the alternative is three lists that look alike until
+ * somebody fixes the marker on two of them. The caller hands over a title, the
+ * items, the current index and what to do with the answer. */
+static const char *const *g_pick_items;
+static int   g_pick_n, g_pick_cur;
+static void  (*g_pick_done)(int);
+static const char *g_pick_title, *g_pick_help;
+static void show_pick_screen(void);
+/* the row index is the choice, exactly as it is in the zone picker */
+static void pick_tbl_cb(lv_event_t *e){
+    lv_obj_t *t = lv_event_get_target(e);
+    uint32_t r = LV_TABLE_CELL_NONE, c = LV_TABLE_CELL_NONE;
+    lv_table_get_selected_cell(t, &r, &c);
+    if(r == LV_TABLE_CELL_NONE || (int)r >= g_pick_n) return;
+    void (*done)(int) = g_pick_done;
+    if(done) done((int)r);
+}
+static void pick_open(const char *title, const char *help,
+                      const char *const *items, int n, int cur, void (*done)(int)){
+    g_pick_title = title; g_pick_help = help;
+    g_pick_items = items; g_pick_n = n; g_pick_cur = cur; g_pick_done = done;
+    show_pick_screen();
+}
+static void show_pick_screen(void){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    content_clear();
+    lv_label_set_text(title_lbl, g_pick_title ? g_pick_title : "Choose");
+    update_cat_trigger();
+
+    /* ONE lv_table, for the same reason the zone picker is one and the event
+     * time picker had to become one: this screen serves three lists, and the
+     * longest of them is two dozen cities. An lv_list materialises a button AND
+     * a label per row, so that list was the closest thing in the build to the
+     * pool ceiling -- 7636 bytes free, measured by the gate that now watches it.
+     * A table is one object whatever the row count. */
+    lv_obj_t *list = lv_table_create(content);
+    lv_obj_set_size(list, lv_pct(100), lv_pct(100));
+    list_table_style(list);
+    lv_table_set_column_width(list, 0, LCD_W - 8);
+
+    for(int i = 0; i < g_pick_n; i++){
+        char row[80];
+        /* THE MARKER IS PLAIN ASCII. The first version used a bullet, on the
+         * reasoning that a bullet is in every font there is -- it is not in this
+         * one. lv_font_palm is a 32..255 Latin subset with no symbol range at
+         * all, which is the same wall C7 hit looking for a check mark and the
+         * same one the calendar's month arrows hit. Anything outside ASCII here
+         * draws as an empty box, and an empty box next to the CURRENT setting is
+         * worse than no marker at all. */
+        snprintf(row, sizeof row, "%s %s", i == g_pick_cur ? ">" : "  ",
+                 g_pick_items[i]);
+        lv_table_set_cell_value(list, i, 0, row);
+    }
+    lv_obj_add_event_cb(list, pick_tbl_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    if(g_pick_help) assist_say(g_pick_help);
+}
+
+/* ==== W8: setting the clock by hand ========================================
+ * A device with no RTC wakes from a flat battery in 1970, and the thing that
+ * fixes that -- SNTP inside a sync -- needs Wi-Fi, which is one of the things
+ * you may be standing here to set up. So the clock is settable by hand, and
+ * like everything else in Settings it is set by TAPPING: four steppers and a
+ * toggle, no keyboard, no Graffiti, nothing below the fold.
+ *
+ * The minute stepper moves by five. One-minute steps mean up to 59 taps to
+ * cross the hour, which is not a control, it is a punishment; and a clock set by
+ * eye off a watch is a five-minute-accurate thing anyway. Any sync afterwards
+ * corrects it to the second. */
+#define CLK_STEP_MIN 5
+static int g_clk_y, g_clk_mo, g_clk_d, g_clk_h, g_clk_mi;
+static lv_obj_t *g_clk_lbl;
+
+static void clk_render(void){
+    if(!g_clk_lbl) return;
+    int h24 = appcfg()->clock24;
+    int h = h24 ? g_clk_h : (g_clk_h % 12 == 0 ? 12 : g_clk_h % 12);
+    char buf[24];
+    if(h24) snprintf(buf, sizeof buf, "%02d:%02d", h, g_clk_mi);
+    else    snprintf(buf, sizeof buf, "%d:%02d %s", h, g_clk_mi, g_clk_h < 12 ? "AM" : "PM");
+    lv_label_set_text(g_clk_lbl, buf);
+}
+/* user_data packs the field and the direction, so one callback serves all four
+ * arrows: +-1 is the hour, +-2 is the minute. */
+static void clk_step_cb(lv_event_t *e){
+    int v = (int)(intptr_t)lv_event_get_user_data(e);
+    if(v == 1 || v == -1) g_clk_h = (g_clk_h + (v > 0 ? 1 : 23)) % 24;
+    else {
+        int step = v > 0 ? CLK_STEP_MIN : 60 - CLK_STEP_MIN;
+        /* snap to the step first, so a clock restored as 10:37 does not stay
+         * three minutes off every multiple of five for the rest of the edit */
+        g_clk_mi = ((g_clk_mi / CLK_STEP_MIN) * CLK_STEP_MIN + step) % 60;
+    }
+    clk_render();
+}
+static void clk_ampm_cb(lv_event_t *e){ (void)e; g_clk_h = (g_clk_h + 12) % 24; clk_render(); }
+static void clk_cancel_cb(lv_event_t *e){ (void)e; show_set_panel(SET_TIME); }
+static void clk_set_cb(lv_event_t *e){ (void)e;
+    if(clock_set_now(g_clk_y, g_clk_mo, g_clk_d, g_clk_h, g_clk_mi) == 0) toast_show("Clock set");
+    else toast_show("Could not set the clock");
+    show_set_panel(SET_TIME);
+}
+
+/* a stepper arrow: the Preferences brightness pattern, which is buttons and
+ * never an lv_slider (a bar allocates a draw layer and live-locks the pool) */
+static void clk_arrow(const char *txt, int x, int y, int ud){
+    lv_obj_t *b = lv_button_create(content);
+    lv_obj_set_size(b, 44, 30);
+    lv_obj_set_pos(b, x, y);
+    lv_obj_set_style_radius(b, 0, 0);
+    lv_obj_t *l = lv_label_create(b);
+    lv_label_set_text(l, txt);
+    lv_obj_center(l);
+    lv_obj_add_event_cb(b, clk_step_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ud);
+}
+static void clk_row_label(const char *txt, int y){
+    lv_obj_t *l = lv_label_create(content);
+    lv_label_set_text(l, txt);
+    lv_obj_set_pos(l, 60, y + 9);
+}
+
+static void show_set_clock(void){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    content_clear();
+    lv_label_set_text(title_lbl, "Set time");
+    update_cat_trigger();
+
+    time_t now = 0; time(&now);
+    struct tm ti; localtime_r(&now, &ti);
+    g_clk_y  = ti.tm_year + 1900 < 2024 ? 2026 : ti.tm_year + 1900;
+    g_clk_mo = ti.tm_mon + 1; g_clk_d = ti.tm_mday;
+    g_clk_h  = ti.tm_hour;    g_clk_mi = ti.tm_min;
+
+    g_clk_lbl = lv_label_create(content);
+    lv_obj_set_style_text_font(g_clk_lbl, &lv_font_palm_bold, 0);
+    lv_obj_align(g_clk_lbl, LV_ALIGN_TOP_MID, 0, 8);
+    clk_render();
+
+    clk_arrow("-", 8,   30,  -1); clk_row_label("Hour",   30); clk_arrow("+", LCD_W-52, 30,  1);
+    clk_arrow("-", 8,   66,  -2); clk_row_label("Minute", 66); clk_arrow("+", LCD_W-52, 66,  2);
+
+    if(!appcfg()->clock24){
+        lv_obj_t *b = lv_button_create(content);
+        lv_obj_set_size(b, 96, 30);
+        lv_obj_set_pos(b, (LCD_W - 96) / 2, 102);
+        lv_obj_set_style_radius(b, 0, 0);
+        lv_obj_t *l = lv_label_create(b); lv_label_set_text(l, "AM / PM"); lv_obj_center(l);
+        lv_obj_add_event_cb(b, clk_ampm_cb, LV_EVENT_CLICKED, NULL);
+    }
+
+    lv_obj_t *cancel = lv_button_create(content);
+    lv_obj_set_size(cancel, 96, 30);
+    lv_obj_set_pos(cancel, 8, 144);
+    lv_obj_set_style_radius(cancel, 0, 0);
+    lv_obj_t *cl = lv_label_create(cancel); lv_label_set_text(cl, "Cancel"); lv_obj_center(cl);
+    lv_obj_add_event_cb(cancel, clk_cancel_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *set = lv_button_create(content);
+    lv_obj_set_size(set, 96, 30);
+    lv_obj_set_pos(set, LCD_W - 104, 144);
+    lv_obj_set_style_radius(set, 0, 0);
+    lv_obj_t *sl = lv_label_create(set); lv_label_set_text(sl, "Set"); lv_obj_center(sl);
+    lv_obj_add_event_cb(set, clk_set_cb, LV_EVENT_CLICKED, NULL);
+
+    assist_say("The clock, as it should read now. A sync corrects it to the "
+               "second later -- this is for getting there first.");
+}
+
+/* The date, on the calendar the Date Book already uses. ONE calendar widget in
+ * the build, reached from two places: writing a second one is how the two end up
+ * disagreeing about which event a tap means (see due_cal_cb's note on
+ * lv_event_get_current_target -- that bug is not worth having twice). */
+static void date_cal_cb(lv_event_t *e){
+    lv_obj_t *cal = (lv_obj_t *)lv_event_get_current_target(e);
+    lv_calendar_date_t d;
+    if(lv_calendar_get_pressed_date(cal, &d) != LV_RESULT_OK) return;
+    time_t now = 0; time(&now);
+    struct tm ti; localtime_r(&now, &ti);
+    if(clock_set_now(d.year, d.month, d.day, ti.tm_hour, ti.tm_min) == 0) toast_show("Date set");
+    else toast_show("Could not set the date");
+    show_set_panel(SET_TIME);
+}
+static void date_cancel_cb(lv_event_t *e){ (void)e; show_set_panel(SET_TIME); }
+
+static void show_set_date(void){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    content_clear();
+    lv_label_set_text(title_lbl, "Set date");
+    update_cat_trigger();
+
+    time_t now = 0; time(&now);
+    struct tm ti; localtime_r(&now, &ti);
+    int y = ti.tm_year + 1900 < 2024 ? 2026 : ti.tm_year + 1900;
+
+    lv_obj_t *cal = lv_calendar_create(content);
+    lv_obj_set_size(cal, LCD_W - 8, 150);
+    lv_obj_set_pos(cal, 4, 2);
+    lv_calendar_set_showed_date(cal, y, ti.tm_mon + 1);
+    if(ti.tm_year + 1900 >= 2024)
+        lv_calendar_set_today_date(cal, y, ti.tm_mon + 1, ti.tm_mday);
+    /* The header's month arrows are LV_SYMBOL glyphs, which live in montserrat
+     * and NOT in lv_font_palm -- and this calendar is in `content`, which
+     * inherits the Palm font from the screen, so both arrows drew as empty
+     * boxes. (The Date Book's due-date calendar has always looked right for the
+     * accidental reason that it sits on lv_layer_top(), which inherits nothing
+     * and therefore falls back to montserrat. Same mechanism as the greeting
+     * pane's font; see spk_pane.) The day numbers stay in the Palm font. */
+    lv_obj_t *hdr = lv_calendar_header_arrow_create(cal);
+    lv_obj_set_style_text_font(hdr, LV_FONT_DEFAULT, 0);
+    lv_obj_add_event_cb(cal, date_cal_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_obj_t *cancel = lv_button_create(content);
+    lv_obj_set_size(cancel, 96, 26);
+    lv_obj_set_pos(cancel, 8, (PDA_H - TITLE_H) - 28);
+    lv_obj_set_style_radius(cancel, 0, 0);
+    lv_obj_t *cl = lv_label_create(cancel); lv_label_set_text(cl, "Cancel"); lv_obj_center(cl);
+    lv_obj_add_event_cb(cancel, date_cancel_cb, LV_EVENT_CLICKED, NULL);
+
+    assist_say("Tap the day. The arrows at the top change the month.");
+}
+static void sp_clock_cb(lv_event_t *e){ (void)e; show_set_clock(); }
+static void sp_date_cb(lv_event_t *e){ (void)e; show_set_date(); }
+
+/* ---- W9: the choices behind Display, Sync and Location ------------------- */
+
+/* Backlight timeout. The values are the ones a person actually wants, not a
+ * range: anything under 15 s blanks while you are reading, and "never" has to be
+ * on the list because it is what you want on a desk with the charger in. */
+static const int BL_SECS[] = { 0, 15, 30, 60, 120, 300 };
+static const char *const BL_NAMES[] = {
+    "Never (stays on)", "15 seconds", "30 seconds", "1 minute", "2 minutes", "5 minutes",
+};
+#define BL_N ((int)(sizeof BL_SECS / sizeof BL_SECS[0]))
+static void bl_done(int i){
+    if(i >= 0 && i < BL_N){ appcfg_mut()->backlight_sec = BL_SECS[i]; appcfg_save(); }
+    show_set_panel(SET_DISP);
+}
+static void sp_backlight_cb(lv_event_t *e){ (void)e;
+    int cur = 0, want = appcfg()->backlight_sec;
+    for(int i = 0; i < BL_N; i++) if(BL_SECS[i] == want) cur = i;
+    pick_open("Screen off", "How long the screen waits before it blanks. The "
+                            "backlight is most of what this device spends.",
+              BL_NAMES, BL_N, cur, bl_done);
+}
+static const char *bl_name(int secs){
+    for(int i = 0; i < BL_N; i++) if(BL_SECS[i] == secs) return BL_NAMES[i];
+    return "custom";       /* a hand-edited config.ini may hold anything */
+}
+
+/* Conflict policy. The names say what HAPPENS, not what the setting is called:
+ * "server" and "local" are words about the implementation, and the question
+ * being answered is "you changed this in two places -- now what". */
+static const char *const POL_NAMES[] = {
+    "iCloud wins", "This device wins", "Keep both copies",
+};
+static void pol_done(int i){
+    if(i >= 0 && i < 3){ appcfg_mut()->policy = i; appcfg_save(); }
+    show_set_panel(SET_SYNC);
+}
+static void sp_pol_pick_cb(lv_event_t *e){ (void)e;
+    pick_open("Conflicts", "When the same thing changed on both sides since the "
+                           "last sync, this decides which copy survives.",
+              POL_NAMES, 3, appcfg()->policy, pol_done);
+}
+
+/* Location, as a list of places. The zone table carries each city's coordinates
+ * (clock_zone_latlon), so "where are you" is a tap on the same list of cities
+ * the clock already uses -- and latitude/longitude stay editable by hand
+ * underneath, for anyone who is not in one of them. */
+static void loc_done(int i){
+    const char *lat = NULL, *lon = NULL;
+    if(clock_zone_latlon(i, &lat, &lon)){
+        Config *c = appcfg_mut();
+        snprintf(c->latitude,  sizeof c->latitude,  "%s", lat);
+        snprintf(c->longitude, sizeof c->longitude, "%s", lon);
+        city_name(clock_zone_name(i), c->loc_name, sizeof c->loc_name);
+        /* Still a guess: the list holds two dozen cities and what a tap on it
+         * means is "that is the nearest one you offered me". So a sync may
+         * improve it -- which is the whole reason this flag exists. */
+        c->loc_auto = 1;
+        appcfg_save();
+        toast_show("Location set");
+    }
+    show_set_panel(SET_LOC);
+}
+/* Built once, pointing into the zone table's own strings: the picker wants an
+ * array of names and the cities are exactly the zones that have coordinates. */
+/* "America/New_York" is a timezone identifier, and this is a list of PLACES:
+ * the tail after the last slash, with the underscores put back to spaces, is
+ * what a person calls the city they are in. (The zone picker keeps the full
+ * IANA name, where it is the right answer.) */
+static void city_name(const char *iana, char *out, int cap){
+    const char *slash = strrchr(iana, '/');
+    snprintf(out, cap, "%s", slash ? slash + 1 : iana);
+    for(char *p = out; *p; p++) if(*p == '_') *p = ' ';
+}
+#define LOC_MAX 24
+static char        g_loc_txt[LOC_MAX][24];
+static const char *g_loc_names[LOC_MAX];
+static int         g_loc_zone[LOC_MAX];
+static int         g_loc_n;
+static void loc_pick_done(int row){ if(row >= 0 && row < g_loc_n) loc_done(g_loc_zone[row]); }
+static void sp_loc_cb(lv_event_t *e){ (void)e;
+    const Config *c = appcfg();
+    int n = clock_zone_count(), cur = -1;
+    g_loc_n = 0;
+    for(int i = 0; i < n && g_loc_n < LOC_MAX; i++){
+        const char *lat = NULL, *lon = NULL;
+        if(!clock_zone_latlon(i, &lat, &lon)) continue;      /* a zone, not a place */
+        if(!strcmp(lat, c->latitude) && !strcmp(lon, c->longitude)) cur = g_loc_n;
+        g_loc_zone[g_loc_n]  = i;
+        city_name(clock_zone_name(i), g_loc_txt[g_loc_n], sizeof g_loc_txt[0]);
+        g_loc_names[g_loc_n] = g_loc_txt[g_loc_n];
+        g_loc_n++;
+    }
+    pick_open("Location", "The nearest of these is close enough for a forecast. "
+                          "Only the coordinates are sent, never your name.",
+              g_loc_names, g_loc_n, cur, loc_pick_done);
+}
+/* the city whose coordinates are currently stored, or NULL for anywhere else */
+static const char *loc_city_name(const Config *c){
+    static char buf[24];
+    if(!c->latitude[0]) return NULL;
+    /* The name the location came with, if it has one. A coordinate refined by a
+     * sync matches no city in the table -- being more accurate than any of them
+     * is the point -- so without this the panel would fall back to raw numbers
+     * at the exact moment it got better. */
+    if(c->loc_name[0]) return c->loc_name;
+    for(int i = 0; i < clock_zone_count(); i++){
+        const char *lat = NULL, *lon = NULL;
+        if(!clock_zone_latlon(i, &lat, &lon)) continue;
+        if(!strcmp(lat, c->latitude) && !strcmp(lon, c->longitude)){
+            city_name(clock_zone_name(i), buf, sizeof buf);
+            return buf;
+        }
+    }
+    return NULL;
+}
+
+/* ==== W5: the Wi-Fi wizard =================================================
+ * Four remembered networks, tried in the order the list shows them, with the one
+ * that worked last at the top (bridge/config.c: config_wifi_promote).
+ *
+ * The rule the whole wizard is built around is that AN SSID MUST NOT BE TYPED.
+ * It is case-sensitive, it frequently contains a space or a hyphen, and getting
+ * it wrong fails in exactly the way a wrong password fails -- silently, at the
+ * next sync, with nothing on screen to say which of the two was wrong. So the
+ * device scans and the user taps a name that is known to exist. The password is
+ * the one thing still typed, which is rule 1's stated exception: it is arbitrary
+ * by definition and no list can offer it. */
+static void show_wifi_pick(int slot);
+static void wifi_row_cb(lv_event_t *e){
+    show_wifi_net((int)(intptr_t)lv_event_get_user_data(e));
+}
+static void wifi_name_cb(lv_event_t *e){
+    show_wifi_pick((int)(intptr_t)lv_event_get_user_data(e));
+}
+static void wifi_pass_cb(lv_event_t *e){
+    int slot = (int)(intptr_t)lv_event_get_user_data(e);
+    g_set_ret = RET_WIFI; g_wifi_slot = slot;
+    show_pref_edit(pf_wifi_pass(slot));
+}
+static void wifi_promote_cb(lv_event_t *e){
+    int slot = (int)(intptr_t)lv_event_get_user_data(e);
+    if(config_wifi_promote(appcfg_mut(), slot)){ appcfg_save(); toast_show("Moved to the top"); }
+    show_set_panel(SET_WIFI);          /* the list it came from, reordered */
+}
+static void wifi_forget_cb(lv_event_t *e){
+    int slot = (int)(intptr_t)lv_event_get_user_data(e);
+    Config *c = appcfg_mut();
+    if(slot >= 0 && slot < CFG_WIFI_N){
+        c->wifi[slot].ssid[0] = 0;
+        c->wifi[slot].pass[0] = 0;
+        appcfg_save();
+        toast_show("Forgotten");
+    }
+    show_set_panel(SET_WIFI);
+}
+
+/* One network: what it is called, its password, and the two things you can do to
+ * it. Rows appear only when they mean something -- an empty slot offers a name
+ * and nothing else, because a password without a network is not a thing you can
+ * usefully be asked for. */
+static void show_wifi_net(int slot){
+    if(slot < 0 || slot >= CFG_WIFI_N) return;
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    content_clear();
+    char title[24];
+    snprintf(title, sizeof title, "Network %d", slot + 1);
+    lv_label_set_text(title_lbl, title);
+    update_cat_trigger();
+
+    const Config *c = appcfg();
+    const int set = c->wifi[slot].ssid[0] != 0;
+
+    lv_obj_t *list = lv_list_create(content);
+    lv_obj_set_size(list, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_radius(list, 0, 0);
+    lv_obj_set_style_border_width(list, 0, 0);
+    lv_obj_set_style_pad_all(list, 0, 0);
+
+    char row[96];
+    snprintf(row, sizeof row, "Name:  %s", set ? c->wifi[slot].ssid : "(not set)");
+    pf_add(list, row, wifi_name_cb, slot);
+    if(set){
+        snprintf(row, sizeof row, "Password:  %s",
+                 c->wifi[slot].pass[0] ? "********" : "(none -- open network)");
+        pf_add(list, row, wifi_pass_cb, slot);
+        if(slot > 0) pf_add(list, "Try this one first", wifi_promote_cb, slot);
+        pf_add(list, "Forget this network", wifi_forget_cb, slot);
+    }
+
+    assist_say(set ? "One of the four networks this device will try. It is tried "
+                     "in the order the list shows."
+                   : "An empty slot. Give it a name and the device will try it "
+                     "when the ones above it are out of range.");
+}
+
+/* The picker: what is actually in range, strongest first. This is the screen the
+ * no-typing rule exists for, so the fallback -- a hidden network, which by
+ * definition cannot be scanned for -- is one row at the BOTTOM rather than the
+ * default path. */
+static lv_timer_t *g_wifi_scan_timer;
+static lv_obj_t   *g_wifi_scan_status;
+static int         g_wifi_pick_slot;
+static void wifi_scan_kill(void){
+    if(g_wifi_scan_timer){ lv_timer_delete(g_wifi_scan_timer); g_wifi_scan_timer = NULL; }
+    g_wifi_scan_status = NULL;
+}
+static void wifi_pick_results(void);
+static void wifi_scan_tick(lv_timer_t *t){
+    (void)t;
+    if(wifi_scan_busy()){
+        if(g_wifi_scan_status) lv_label_set_text(g_wifi_scan_status, hotsync_status());
+        return;
+    }
+    wifi_pick_results();
+}
+/* A chosen name goes straight into the slot and straight on to the password,
+ * because that is the only thing left to ask and asking for it on the next
+ * screen is one tap the user would otherwise have to find. An OPEN network has
+ * no password to ask for, so it ends the flow instead of pretending otherwise. */
+static void wifi_pick_cb(lv_event_t *e){
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    const WifiAP *ap = wifi_scan_get(i);
+    if(!ap) return;
+    int slot = g_wifi_pick_slot;
+    Config *c = appcfg_mut();
+    snprintf(c->wifi[slot].ssid, sizeof c->wifi[slot].ssid, "%s", ap->ssid);
+    if(!ap->secure) c->wifi[slot].pass[0] = 0;
+    appcfg_save();
+    wifi_scan_kill();
+    if(ap->secure){ g_set_ret = RET_WIFI; g_wifi_slot = slot; show_pref_edit(pf_wifi_pass(slot)); }
+    else          { toast_show("Saved"); show_wifi_net(slot); }
+}
+static void wifi_type_cb(lv_event_t *e){
+    int slot = (int)(intptr_t)lv_event_get_user_data(e);
+    wifi_scan_kill();
+    g_set_ret = RET_WIFI; g_wifi_slot = slot;
+    show_pref_edit(pf_wifi_ssid(slot));
+}
+static void wifi_rescan_cb(lv_event_t *e){
+    show_wifi_pick((int)(intptr_t)lv_event_get_user_data(e));
+}
+
+/* a fixed-width button on the picker's footer bar */
+static void wifi_foot_btn(const char *text, int x, int w, lv_event_cb_t cb, int slot){
+    lv_obj_t *b = lv_button_create(content);
+    lv_obj_set_size(b, w, 26);
+    lv_obj_set_pos(b, x, (PDA_H - TITLE_H) - 28);
+    lv_obj_set_style_radius(b, 0, 0);
+    lv_obj_t *l = lv_label_create(b);
+    lv_label_set_text(l, text);
+    lv_obj_center(l);
+    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, (void *)(intptr_t)slot);
+}
+
+static void wifi_pick_results(void){
+    wifi_scan_kill();
+    content_clear();
+    int n = wifi_scan_count();
+    int slot = g_wifi_pick_slot;
+
+    /* The two ways out -- type a hidden network's name, or scan again -- are a
+     * FIXED FOOTER, not rows at the end of the list. As list rows they sat below
+     * the fold behind however many networks happened to be in range, which is
+     * the one place an escape hatch must never be: the user who needs them is
+     * exactly the user whose network is not in the list above. */
+    lv_obj_t *list = lv_list_create(content);
+    lv_obj_set_size(list, LCD_W, (PDA_H - TITLE_H) - 32);
+    lv_obj_set_pos(list, 0, 0);
+    lv_obj_set_style_radius(list, 0, 0);
+    lv_obj_set_style_border_width(list, 0, 0);
+    lv_obj_set_style_pad_all(list, 0, 0);
+
+    char row[96];
+    for(int i = 0; i < n; i++){
+        const WifiAP *ap = wifi_scan_get(i);
+        if(!ap) continue;
+        /* Signal as bars of text, not a widget: an lv_bar allocates a draw layer,
+         * and this list can hold twelve of them. */
+        const char *sig = ap->rssi > -55 ? "|||" : ap->rssi > -70 ? "||" : "|";
+        snprintf(row, sizeof row, "%-3s %.26s%s", sig, ap->ssid, ap->secure ? "" : "   (open)");
+        pf_add(list, row, wifi_pick_cb, i);
+    }
+    if(!n){
+        lv_obj_t *l = lv_label_create(list);
+        lv_label_set_text(l, "  Nothing in range.");
+    }
+    wifi_foot_btn("Type a name", 2,          (LCD_W - 6) / 2, wifi_type_cb,   slot);
+    wifi_foot_btn("Look again",  LCD_W / 2 + 1, (LCD_W - 6) / 2, wifi_rescan_cb, slot);
+
+    assist_say(n ? "The networks in range now, strongest first. Tap yours and I "
+                   "will ask for its password."
+                 : "Nothing answered. Move closer to the router, or type the name "
+                   "if the network is hidden.");
+}
+
+static void show_wifi_pick(int slot){
+    if(slot < 0 || slot >= CFG_WIFI_N) return;
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    wifi_scan_kill();
+    content_clear();
+    g_wifi_pick_slot = slot;
+    lv_label_set_text(title_lbl, "Nearby");   /* short: the clock sits at centre */
+    update_cat_trigger();
+
+    wifi_scan_start();
+
+    g_wifi_scan_status = lv_label_create(content);
+    lv_label_set_long_mode(g_wifi_scan_status, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(g_wifi_scan_status, LCD_W - 16);
+    lv_obj_set_style_text_align(g_wifi_scan_status, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(g_wifi_scan_status, LV_ALIGN_CENTER, 0, 0);
+    lv_label_set_text(g_wifi_scan_status, hotsync_status());
+
+    /* The scan may already be over -- it is synchronous in the simulator -- so
+     * the timer is a poll, not a promise that anything is still running. */
+    g_wifi_scan_timer = lv_timer_create(wifi_scan_tick, 400, NULL);
+    assist_say("Looking for networks in range. This takes a few seconds.");
+}
+
+static void show_set_panel(int tile){
+    if(tile < 0 || tile >= SET_PANEL_N) return;
+    /* W7: News has no panel of its own. The tile opens the feed list directly,
+     * because a panel holding one row that says "News feeds..." is a screen
+     * whose only content is the name of the next screen. */
+    if(tile == SET_NEWS){ show_feeds(); return; }
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    content_clear();
+    lv_label_set_text(title_lbl, tile < SET_N ? SET_NAMES[tile] : "Advanced");
+    update_cat_trigger();
+
+    lv_obj_t *list = lv_list_create(content);
+    lv_obj_set_size(list, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_radius(list, 0, 0);
+    lv_obj_set_style_border_width(list, 0, 0);
+    lv_obj_set_style_pad_all(list, 0, 0);
+
+    const Config *c = appcfg();
+    char row[80], tag[8];
+    switch(tile){
+    case SET_WIFI:
+        /* W5: four remembered networks, in the order they are tried. Four rows
+         * is the whole point of four -- it fits without a scrollbar. */
+        for(int i = 0; i < CFG_WIFI_N; i++){
+            const char *s = c->wifi[i].ssid;
+            if(s[0]) snprintf(row, sizeof row, "%d.  %.28s%s", i + 1, s,
+                              c->wifi[i].pass[0] ? "" : "   (open)");
+            else     snprintf(row, sizeof row, "%d.  (empty)", i + 1);
+            pf_add(list, row, wifi_row_cb, i);
+        }
+        break;
+    case SET_ACCT:
+        /* W6: two things to type and then a button that finds the rest. The two
+         * server addresses moved behind "Advanced": they default to iCloud,
+         * nobody with an Apple ID ever needs them, and sitting in the account
+         * flow they read as two more required fields. */
+        sp_field_row(list, tile, PF_USER);
+        sp_field_row(list, tile, PF_PASS);
+        pf_add(list, "Find my calendars...", sp_disc_cb, SET_ACCT);
+        pf_add(list, "Advanced (server addresses)", sp_advanced_cb, 0);
+        break;
+    case SET_ADVANCED:
+        sp_field_row(list, SET_ACCT, PF_CALB);
+        sp_field_row(list, SET_ACCT, PF_CARDB);
+        break;
+
+    case SET_TIME: {
+        /* W8: the clock itself comes FIRST. Everything under it describes how the
+         * time is displayed; these two are the time. Six rows, which is what fits
+         * without a scrollbar -- a seventh would cost the whole panel its rule. */
+        time_t now = 0; time(&now);
+        struct tm ti; localtime_r(&now, &ti);
+        char when[32];
+        if(c->clock24) strftime(when, sizeof when, "%H:%M", &ti);
+        else           strftime(when, sizeof when, "%l:%M %p", &ti);
+        snprintf(row, sizeof row, "Time:  %s", when[0]==' ' ? when+1 : when);
+        pf_add(list, row, sp_clock_cb, 0);
+        strftime(when, sizeof when, "%a %e %b %Y", &ti);
+        snprintf(row, sizeof row, "Date:  %s", when);
+        pf_add(list, row, sp_date_cb, 0);
+        }
+        snprintf(row, sizeof row, "Time zone: %s",
+                 c->timezone[0] ? c->timezone : "(floating)");
+        pf_add(list, row, sp_zone_cb, (tile << 8) | ZTGT_TZ);
+        if(c->world1[0]){ world_tag(c->world1, tag, sizeof tag);
+            snprintf(row, sizeof row, "World clock 1: %s (%s)", tag, c->world1); }
+        else snprintf(row, sizeof row, "World clock 1: (off)");
+        pf_add(list, row, sp_zone_cb, (tile << 8) | ZTGT_W1);
+        if(c->world2[0]){ world_tag(c->world2, tag, sizeof tag);
+            snprintf(row, sizeof row, "World clock 2: %s (%s)", tag, c->world2); }
+        else snprintf(row, sizeof row, "World clock 2: (off)");
+        pf_add(list, row, sp_zone_cb, (tile << 8) | ZTGT_W2);
+        snprintf(row, sizeof row, "Clock format: %s", c->clock24 ? "24-hour" : "12-hour");
+        pf_add(list, row, sp_fmt_cb, 0);
+        break;
+    case SET_DISP:
+        snprintf(row, sizeof row, "Brightness: %d%%", c->brightness);
+        g_pf_bright_btn = pf_add(list, row, pf_bright_row_cb, 0);
+        /* W9: the backlight timeout was in config.ini and NOWHERE in the UI --
+         * the one setting that decides most of the battery life, editable only
+         * by pulling the card. */
+        snprintf(row, sizeof row, "Screen off: %s", bl_name(c->backlight_sec));
+        pf_add(list, row, sp_backlight_cb, 0);
+        break;
+    case SET_LOC: {
+        const char *city = loc_city_name(c);
+        if(city)                snprintf(row, sizeof row, "Place: %s", city);
+        else if(c->latitude[0]) snprintf(row, sizeof row, "Place: %s, %s", c->latitude, c->longitude);
+        else                    snprintf(row, sizeof row, "Place: (not set)");
+        pf_add(list, row, sp_loc_cb, 0);
+        /* Whether a sync may improve this, said out loud. Without the row the
+         * behaviour is invisible: two devices showing "Place: New York" would
+         * behave differently on the next sync and nothing on screen would say
+         * why. It is also the off switch, for anyone who wants the forecast
+         * somewhere other than where the device is. */
+        snprintf(row, sizeof row, "Updates: %s",
+                 c->loc_auto ? "when you sync" : "kept as set");
+        pf_add(list, row, sp_locauto_cb, 0);
+        /* the two numbers stay reachable, for anyone not near one of the cities */
+        sp_field_row(list, tile, PF_LAT);
+        sp_field_row(list, tile, PF_LON);
+        }
+        break;
+    case SET_SYNC:
+        snprintf(row, sizeof row, "Conflicts: %s", pol_name(c->policy));
+        pf_add(list, row, sp_pol_pick_cb, 0);
+        sp_field_row(list, tile, PF_CAL);
+        sp_field_row(list, tile, PF_TODO);
+        sp_field_row(list, tile, PF_CARD);
+        pf_add(list, "Discover collections...", sp_disc_cb, SET_SYNC);
+        /* Most edits persist as they are made (the editor saves on Save), but
+         * Discover writes straight into the in-memory config, so this row is
+         * still the one that commits its results to the card. */
+        pf_add(list, "Save to config.ini", pf_saverow_cb, 0);
+        break;
+    case SET_OWNER:
+        sp_field_row(list, tile, PF_OWNER);
+        break;
+    case SET_ABOUT:
+        /* W9: the tile said "About" and showed one row that was not about
+         * anything. The provenance belongs here, where someone looking for it
+         * will look; the whole-list view stays underneath it as the escape
+         * hatch for a config.ini that has gone wrong. */
+        pf_add(list, "CYD Palm Bridge", NULL, 0);
+        pf_add(list, "A Palm-style PDA on a $12 board", NULL, 0);
+        pf_add(list, "GPLv3. Icons + font from PumpkinOS", NULL, 0);
+        pf_add(list, "All settings (one list)", sp_prefs_cb, 0);
+        break;
+    }
+
+    /* W4: she explains what this tile is FOR, every time it opens -- this is the
+     * panel's caption, not a greeting, so it is not rationed to once per unlock.
+     * It costs the screen nothing: the strip has no job on a panel of buttons. */
+    assist_say(tile < SET_N ? SET_BLURB[tile]
+                            : "Where the calendars live. These are already right "
+                              "for an Apple account -- change them only for a "
+                              "server that is not iCloud.");
+}
+
+static void show_settings(void){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    content_clear();
+    lv_label_set_text(title_lbl, "Settings");
+    update_cat_trigger();   /* hides the category picker (no data app) */
+
+    lv_obj_t *grid = lv_obj_create(content);
+    lv_obj_set_size(grid, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_radius(grid, 0, 0);
+    lv_obj_set_style_border_width(grid, 0, 0);
+    lv_obj_set_style_bg_color(grid, COL_BODY, 0);
+    lv_obj_set_style_pad_all(grid, 6, 0);
+    lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_START);
+
+    for(int i = 0; i < SET_N; i++)
+        icon_cell(grid, SET_ICONS[i], SET_NAMES[i], sp_tile_cb, (void *)(intptr_t)i);
+
+    /* W3: the Assistant, once per unlock session, standing OVER the finished grid
+     * rather than in place of it -- so the greeting costs the nine tiles no room
+     * and dismissing her rebuilds nothing. */
+    assistant_greet();
 }
 
 /* ---- collection discovery screen (chunk 3) ----
@@ -2927,7 +4247,10 @@ static void disc_row_cb(lv_event_t *e){
         role_btn(panel, "Address book",         idx, 'a');
     }
 }
-static void disc_back_cb(lv_event_t *e){ (void)e; show_prefs(); }
+/* W6: back to whoever opened discovery -- the Accounts tile, the Sync tile, or
+ * the one-list view. It always went to the Preferences list before, which was
+ * the only caller there was; now it is the wrong answer two times out of three. */
+static void disc_back_cb(lv_event_t *e){ (void)e; set_return(); }
 
 static void disc_show_results(void){
     disc_built = 1;
@@ -2953,6 +4276,8 @@ static void disc_show_results(void){
     lv_obj_t *hint = lv_label_create(content);
     lv_obj_align(hint, LV_ALIGN_TOP_RIGHT, -6, 8);
     lv_label_set_text(hint, "tap to assign");
+    assist_say("Your calendars and address books, as the account reports them. "
+               "Tap one to say what this device should use it for.");
 
     lv_obj_t *list = lv_list_create(content);
     lv_obj_set_size(list, LCD_W, FORM_FULL);
@@ -3016,7 +4341,7 @@ static void act_delete(lv_event_t *e){ (void)e;
     if(u) ask_delete(u);   /* shared confirm dialog */
 }
 static void act_categories(lv_event_t *e){ (void)e; menu_close(); cat_trigger_cb(NULL); }
-static void act_prefs(lv_event_t *e){ (void)e; menu_close(); show_prefs(); }
+static void act_prefs(lv_event_t *e){ (void)e; menu_close(); show_settings(); }
 static void act_tr_reset(lv_event_t *e){ (void)e; menu_close(); tr_reset_progress(); show_trainer(); }
 /* Coach: the session length cycles through the four lengths people actually use,
  * so setting it costs one tap and needs no picker screen.
@@ -3428,7 +4753,7 @@ static void menu_open(void){
         menu_item(panel, g_todo_show_done ? "Hide Completed" : "Show Completed", act_toggle_done);
         menu_item(panel, g_todo_sort_due ? "Sort by Priority" : "Sort by Due Date", act_toggle_sort);
     }
-    menu_item(panel, "Preferences", act_prefs);
+    menu_item(panel, "Settings", act_prefs);
     menu_item(panel, "Power", act_power);
     if(g_trainer_open)
         menu_item(panel, "Reset progress", act_tr_reset);   /* Graffiti trainer only */
@@ -4051,13 +5376,18 @@ void due_open(void){
 
     lv_obj_t *hdr = lv_label_create(panel);
     lv_obj_set_width(hdr, lv_pct(100));
-    lv_label_set_text(hdr, "Due Date:");
+    /* The popup is shared, so its title is not: a To Do has a DUE date and an
+     * event just has a date. Reuse that renames the thing it is reused for is
+     * the kind of small wrongness nobody files a bug about and everybody reads. */
+    lv_label_set_text(hdr, g_due_optional ? "Due Date:" : "Date:");
     lv_obj_set_style_text_font(hdr, &lv_font_palm_bold, 0);
 
     due_quick_btn(panel, "Today",    0);
     due_quick_btn(panel, "Tomorrow", 1);
     due_quick_btn(panel, "1 Week",   2);
-    due_quick_btn(panel, "No Date",  3);
+    /* An event that is on no day is not an event. A To Do with no due date is
+     * an ordinary thing to want, so the button appears for one and not both. */
+    if(g_due_optional) due_quick_btn(panel, "No Date",  3);
 
     /* calendar for an arbitrary day, seeded to the current due (or today) */
     lv_obj_t *cal = lv_calendar_create(panel);
@@ -4076,6 +5406,128 @@ void due_open(void){
     (void)sd;
 }
 static void due_btn_cb(lv_event_t *e){ (void)e; due_open(); }
+
+/* ==== Q3: the start time, picked from a list ===============================
+ * Every half hour from 8:00 AM to 9:00 PM -- 27 rows. That is more than fits,
+ * and it is allowed to be: design rule 2 bars a scrolling PAGE, and singles out
+ * a scrolling LIST as the acceptable case, because a list drags predictably
+ * where a page does not. The window covers the hours people put things in;
+ * anything outside it is typed, which is the documented fallback and not the
+ * default path.
+ *
+ * The popup is the due-date picker's own furniture -- a dimmed backdrop and a
+ * centred panel on lv_layer_top() -- for the same reason Q2 reuses its
+ * calendar: two popups that merely resemble each other drift.
+ */
+/* THE WHOLE DAY, every half hour: 48 rows.
+ *
+ * It was 8:00 AM to 9:00 PM with four stepper buttons above it for anything
+ * outside that, and the steppers were worse than useless: they changed a label
+ * on the form UNDERNEATH the modal, so you could not see what you were
+ * adjusting, and there was still no way to commit except tapping a row on the
+ * half hour. A control with no visible feedback and no way to finish is not a
+ * control. Deleted -- and with them the reason the window was narrow. The list
+ * is an lv_table now, which is virtualised, so 48 rows cost exactly what 27
+ * did; the popup opens scrolled to the time the event already has, so the
+ * common case is still no scrolling at all. */
+#define TIME_FIRST_H  0
+#define TIME_LAST_H  23
+#define TIME_ROWS    (((TIME_LAST_H - TIME_FIRST_H + 1) * 60) / 30)
+
+void time_set_label(void){
+    if(!g_time_lbl) return;
+    char hm[12]; fmt_hm(g_ev_h, g_ev_m, hm, sizeof hm);
+    lv_label_set_text(g_time_lbl, hm);
+}
+
+static lv_obj_t *g_timepop;
+static void time_close(void){ if(g_timepop){ lv_obj_del(g_timepop); g_timepop=NULL; } }
+static void time_backdrop_cb(lv_event_t *e){ (void)e; time_close(); }
+/* The row index IS the time: row 0 is TIME_FIRST_H:00 and every row is another
+ * half hour, which is the same arithmetic the zone picker does with its row
+ * index and needs no per-row user_data to carry. */
+static void time_tbl_cb(lv_event_t *e){
+    lv_obj_t *t = lv_event_get_target(e);
+    uint32_t r = LV_TABLE_CELL_NONE, c = LV_TABLE_CELL_NONE;
+    lv_table_get_selected_cell(t, &r, &c);
+    if(r == LV_TABLE_CELL_NONE) return;
+    if((int)r >= TIME_ROWS) return;
+    int mins = TIME_FIRST_H * 60 + (int)r * 30;
+    g_ev_h = mins / 60; g_ev_m = mins % 60;
+    time_set_label();
+    time_close();
+}
+static void time_open(void){
+    if(g_timepop) return;
+    g_timepop = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_timepop, LCD_W, LCD_H);
+    lv_obj_set_style_bg_color(g_timepop, COL_LINE, 0);
+    lv_obj_set_style_bg_opa(g_timepop, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(g_timepop, 0, 0);
+    lv_obj_set_style_pad_all(g_timepop, 0, 0);
+    lv_obj_add_flag(g_timepop, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_timepop, time_backdrop_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *panel = lv_obj_create(g_timepop);
+    lv_obj_set_width(panel, LCD_W - 20);
+    lv_obj_set_height(panel, 190);      /* header + the table, and nothing else:
+                                           the four stepper buttons that used to
+                                           sit above it are gone */
+    lv_obj_center(panel);
+    lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_style_flex_main_place(panel, LV_FLEX_ALIGN_SPACE_BETWEEN, 0);
+    lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
+    lv_obj_set_style_border_width(panel, 1, 0);
+    lv_obj_set_style_border_color(panel, COL_LINE, 0);
+    lv_obj_set_style_radius(panel, 0, 0);
+    lv_obj_set_style_pad_all(panel, 4, 0);
+    lv_obj_set_style_pad_row(panel, 3, 0);
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *hdr = lv_label_create(panel);
+    lv_obj_set_width(hdr, lv_pct(100));
+    lv_label_set_text(hdr, "Start time:");
+    lv_obj_set_style_text_font(hdr, &lv_font_palm_bold, 0);
+
+    /* ONE lv_table, NOT 27 lv_list buttons.
+     *
+     * The first version of this screen was a list, and it crashed the device the
+     * moment the Time field was tapped. lv_list_add_button materialises a button
+     * AND a label per row -- 54 objects here -- on top of an edit form that is
+     * already built and must stay built underneath (the popup exists precisely
+     * so the typed description survives). That exhausts the 32 KB object pool,
+     * which is this project's oldest and most repeated failure: the record list
+     * hit it, the zone picker hit it at ~24 rows, the Preferences list hit it at
+     * three extra rows, and the brightness popup hit it hardest because it fails
+     * as a WDT freeze rather than an error. lv_table is VIRTUALISED -- one
+     * object whatever the row count -- and the zone picker's comment says so in
+     * as many words. I wrote the list anyway; the gate now measures the pool so
+     * the next one cannot get as far as the glass (see sim/host_main.c). */
+    lv_obj_t *t = lv_table_create(panel);
+    lv_obj_set_width(t, lv_pct(100));
+    lv_obj_set_height(t, 160);
+    list_table_style(t);
+    lv_table_set_column_width(t, 0, LCD_W - 34);
+    int row = 0;
+    for(int h = TIME_FIRST_H; h <= TIME_LAST_H; h++){
+        for(int m = 0; m < 60; m += 30){
+            char txt[16];
+            fmt_hm(h, m, txt, sizeof txt);
+            lv_table_set_cell_value(t, row++, 0, txt);
+        }
+    }
+    lv_obj_add_event_cb(t, time_tbl_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    /* Open on the time the event already has. Without this a 48-row list opens
+     * at midnight and every edit begins with the same scroll; with it, the row
+     * you most likely want is the one under your thumb. The row height is the
+     * table's own -- font line plus the cell padding list_table_style sets --
+     * rather than a number typed here that would drift from the style. */
+    int cur = (g_ev_h * 60 + g_ev_m) / 30;
+    int rowh = lv_font_get_line_height(&lv_font_palm) + 4 + 4 + 1;  /* pads + rule */
+    if(cur > 2) lv_obj_scroll_to_y(t, (cur - 2) * rowh, LV_ANIM_OFF);
+}
+static void time_btn_cb(lv_event_t *e){ (void)e; time_open(); }
 
 /* ------------------------- Preferences: brightness stepper ------------------------- */
 /* A [ - ]  75%  [ + ] popup that live-adjusts the backlight and persists on close.
@@ -4435,11 +5887,9 @@ static void clock_tick(lv_timer_t *t){
     if(!clock_lbl) return;
     time_t now=0; time(&now);
     struct tm ti; localtime_r(&now, &ti);
-    int h = ti.tm_hour % 12; if(h==0) h = 12;
-    char b[24];
-    snprintf(b, sizeof b, "%d:%02d%s  %s %d",
-             h, ti.tm_min, ti.tm_hour < 12 ? "a" : "p",
-             CAL_MON[ti.tm_mon + 1], ti.tm_mday);
+    char hm[12]; fmt_hm(ti.tm_hour, ti.tm_min, hm, sizeof hm);
+    char b[32];
+    snprintf(b, sizeof b, "%s  %s %d", hm, CAL_MON[ti.tm_mon + 1], ti.tm_mday);
     lv_label_set_text(clock_lbl, b);
 }
 
@@ -4693,9 +6143,8 @@ static void next_ev_cb(uint32_t uid,const char *pri,const char *sec,void *ctx){
     if(n->found && t >= n->best) return;
     n->best=(long)t; n->found=1;
     if(a.hasTime){
-        int h=a.sH%12; if(h==0) h=12;
-        snprintf(n->line,sizeof n->line,"%d:%02d%s  %.40s",
-                 h,a.sM,a.sH<12?"a":"p",a.description);
+        char hm[12]; fmt_hm(a.sH, a.sM, hm, sizeof hm);
+        snprintf(n->line,sizeof n->line,"%s  %.40s", hm, a.description);
     } else {
         snprintf(n->line,sizeof n->line,"all day  %.40s",a.description);
     }
@@ -4874,7 +6323,7 @@ static void dash_paint(void){
             int hh = g_wx.hr[k].hour24 % 12; if(hh==0) hh = 12;
             if(g_wx_col_t[i]){ snprintf(c,sizeof c,"%d\xC2\xB0",g_wx.hr[k].tempF);
                                lv_label_set_text(g_wx_col_t[i], c); }
-            if(g_wx_col_h[i]){ snprintf(c,sizeof c,"%d%s",hh,g_wx.hr[k].hour24<12?"a":"p");
+            if(g_wx_col_h[i]){ fmt_hour(g_wx.hr[k].hour24, c, sizeof c);
                                lv_label_set_text(g_wx_col_h[i], c); }
             if(g_wx_col_r[i]){ snprintf(c,sizeof c,"%d%%",g_wx.hr[k].rain);
                                lv_label_set_text(g_wx_col_r[i], c); }
@@ -4983,6 +6432,7 @@ void ui_show_lock(void){
     dash_lbl_rev(DASH_MARGIN+4, DASH_Y_AGENDA, "AHEAD");
     dash_lbl_rev(DASH_MARGIN+4, DASH_Y_SUN,    "SUN & MOON");
 
+
     /* ---- weather ---- */
     if(havewx){
         char wl[48];
@@ -5031,12 +6481,11 @@ void ui_show_lock(void){
     if(havewx && wx.sunrise_min>=0){
         char sun[24];
         int rh=wx.sunrise_min/60, rm=wx.sunrise_min%60, sh=wx.sunset_min/60, sm=wx.sunset_min%60;
-        int rh12=rh%12; if(rh12==0) rh12=12; int sh12=sh%12; if(sh12==0) sh12=12;
         /* one line rather than two stacked: the zone is the shortest on the
          * screen and the moon has to share it. */
-        snprintf(sun,sizeof sun,"%d:%02d%s",rh12,rm,rh<12?"a":"p");
+        fmt_hm(rh, rm, sun, sizeof sun);
         dash_lbl(DASH_MARGIN+4,286,"Rise",1); dash_lbl(DASH_MARGIN+36,286,sun,0);
-        snprintf(sun,sizeof sun,"%d:%02d%s",sh12,sm,sh<12?"a":"p");
+        fmt_hm(sh, sm, sun, sizeof sun);
         dash_lbl(DASH_MARGIN+80,286,"Set",1); dash_lbl(DASH_MARGIN+106,286,sun,0);
     }
     { int illum=0; const char *nm="";
@@ -5046,7 +6495,23 @@ void ui_show_lock(void){
       lv_obj_t*o=dash_lbl(0,286,ml,0); lv_obj_align(o,LV_ALIGN_TOP_RIGHT,-42,286); }
 
     /* ---- unlock hint ---- */
-    { lv_obj_t*o=dash_lbl(0,308,"swipe up to unlock",0); lv_obj_align(o,LV_ALIGN_BOTTOM_MID,0,-2); }
+    /* ---- the bottom line: the way in, and whose device this is ----
+     * W9 put the owner's name here, which is the only reason to collect a name
+     * at all: a device found face-up on a desk says whose it is without being
+     * unlocked. There is exactly ONE line left below the open-bottomed SUN &
+     * MOON zone (it closes at 304, of 320), so the two share it -- name to the
+     * left, instruction to the right. With no name the instruction keeps the
+     * centred position it has always had, because a line that shifts depending
+     * on a setting you cannot see from here looks like a bug. */
+    { const char *own = appcfg()->owner;
+      lv_obj_t *o = dash_lbl(0,308,"swipe up to unlock",0);
+      if(own[0]){
+          lv_obj_align(o, LV_ALIGN_BOTTOM_RIGHT, -6, -2);
+          lv_obj_t *n = dash_lbl(0,308,own,0);
+          lv_obj_align(n, LV_ALIGN_BOTTOM_LEFT, 6, -2);
+      } else {
+          lv_obj_align(o, LV_ALIGN_BOTTOM_MID, 0, -2);
+      } }
 
     dash_paint();
 }
@@ -5864,6 +7329,12 @@ static lv_obj_t *g_zp_cv, *g_zp_status, *g_zp_timelbl;
 static void content_clear(void){
     if(!content) return;
     lv_obj_clean(content);
+    /* A greeting stands on lv_layer_top() OVER the screen it is greeting, so it
+     * is not in `content` and lv_obj_clean() cannot reach it. Every screen swap
+     * comes through here -- including the lock raising itself when the screen
+     * sleeps -- so this is the one place that can guarantee she is never left
+     * hanging over a screen she has nothing to say about. */
+    spk_pane_close();
     /* Every screen swap comes through here, so this is the one place that can
      * know the app grid is gone -- show_launcher() sets it back on the way in. */
     g_on_launcher = 0;
@@ -5872,6 +7343,9 @@ static void content_clear(void){
     /* edit / preferences forms */
     g_pw_body = NULL;
     g_form = NULL; active_ta = NULL; edit_cat_lbl = NULL; g_due_lbl = NULL;
+    /* Q3: the time popup is on lv_layer_top(), so leaving the form does not take
+     * it with it -- the same trap the HotSync confirmation documents. */
+    time_close(); g_time_lbl = NULL;
     for(int i = 0; i < 12; i++) g_fields[i] = NULL;
     g_nfields = 0;
     /* record + search tables */
@@ -5880,6 +7354,7 @@ static void content_clear(void){
     hs_status = NULL; hs_btn = hs_btn_lbl = NULL; disc_status = NULL;
     /* Graffiti + Kana trainers */
     tr_guide = tr_prompt = tr_score = tr_feedback = tr_mode_lbl = NULL;
+    gref_free();          /* Q4: the sheet's canvas is heap, not a static buffer */
     ka_kana = ka_prompt = ka_answer = ka_typed = ka_feedback = ka_score = NULL;
     ka_strokes_lbl = ka_model = ka_modelbl = NULL;
     /* News reader */
@@ -7111,12 +8586,19 @@ static const char *co_advice_text(int code){
  * them -- but it also means only one may be on screen at a time. That is the
  * product rule anyway (a screen has a single speaker), and it is why this is a
  * helper rather than a widget you could instantiate twice. */
-#define SPK_TAIL_W   24
-#define SPK_TAIL_H   26
-#define SPK_TAIL_APX 20                        /* apex x: points up at the face  */
-#define SPK_TAIL_B0  2                         /* base runs from x=B0..          */
-#define SPK_TAIL_B1  13                        /* ...to x=B1 on the bottom row   */
-static uint8_t spk_tail_buf[LV_CANVAS_BUF_SIZE(SPK_TAIL_W, SPK_TAIL_H, 1, 1) + 16];
+#define SPK_TAIL_W   24                        /* along the base                 */
+#define SPK_TAIL_H   26                        /* base to apex                   */
+#define SPK_TAIL_APX 20                        /* apex position along the base    */
+#define SPK_TAIL_B0  2                         /* base runs from B0..            */
+#define SPK_TAIL_B1  13                        /* ...to B1                       */
+/* The buffer serves the wedge in EITHER orientation -- upright (24 wide, 26 tall,
+ * a balloon under the face) or on its side (26 wide, 24 tall, a balloon beside
+ * it) -- so it is sized to whichever of the two costs more. The two differ: an I1
+ * row is byte-padded, so 26 px of width costs 4 bytes a row where 24 costs 3. */
+#define SPK_TAIL_BUF1 LV_CANVAS_BUF_SIZE(SPK_TAIL_W, SPK_TAIL_H, 1, 1)
+#define SPK_TAIL_BUF2 LV_CANVAS_BUF_SIZE(SPK_TAIL_H, SPK_TAIL_W, 1, 1)
+static uint8_t spk_tail_buf[(SPK_TAIL_BUF1 > SPK_TAIL_BUF2 ? SPK_TAIL_BUF1
+                                                           : SPK_TAIL_BUF2) + 16];
 
 static void spk_tail_line(lv_draw_buf_t *db, int x0, int y0, int x1, int y1){
     int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
@@ -7130,16 +8612,35 @@ static void spk_tail_line(lv_draw_buf_t *db, int x0, int y0, int x1, int y1){
     }
 }
 
-static void spk_tail_paint(lv_obj_t *cv){
+/* The wedge, in ONE painter for both placements. It is drawn in its own
+ * coordinates -- `u` along the base, `v` from the base (v = H-1) to the apex
+ * (v = 0) -- and `side` decides how that lands on the canvas:
+ *
+ *   side = 0   u -> x, v -> y      base along the BOTTOM row, apex above:
+ *                                  the balloon hangs under the portrait.
+ *   side = 1   u -> y, v -> x      base along the RIGHT column, apex to the left:
+ *                                  the balloon stands beside the portrait.
+ *
+ * Transposing one wedge is what stops the two from becoming two wedges that
+ * merely resemble each other -- the mistake P10's shared week page was built to
+ * avoid. The base row is the bubble's own border, continued across the canvas
+ * except where the wedge opens into it, which is what makes the tail read as a
+ * hole in the balloon rather than a sticker on it. */
+static void spk_tail_plot(lv_draw_buf_t *db, int u, int v, int side){
+    i1_px(db, side ? v : u, side ? u : v, 1);
+}
+static void spk_tail_wedge(lv_draw_buf_t *db, int u0, int v0, int u1, int v1, int side){
+    if(side) spk_tail_line(db, v0, u0, v1, u1);
+    else     spk_tail_line(db, u0, v0, u1, v1);
+}
+static void spk_tail_paint_dir(lv_obj_t *cv, int side){
     lv_draw_buf_t *db = lv_canvas_get_draw_buf(cv);
     if(!db) return;
     i1_clear(db);
-    /* the bubble's top border, continued across this canvas except where the
-     * wedge opens into it */
-    for(int x = 0; x < SPK_TAIL_W; x++)
-        if(x < SPK_TAIL_B0 || x > SPK_TAIL_B1) i1_px(db, x, SPK_TAIL_H - 1, 1);
-    spk_tail_line(db, SPK_TAIL_B0, SPK_TAIL_H - 1, SPK_TAIL_APX, 0); /* trailing */
-    spk_tail_line(db, SPK_TAIL_B1, SPK_TAIL_H - 1, SPK_TAIL_APX, 0); /* leading  */
+    for(int u = 0; u < SPK_TAIL_W; u++)
+        if(u < SPK_TAIL_B0 || u > SPK_TAIL_B1) spk_tail_plot(db, u, SPK_TAIL_H - 1, side);
+    spk_tail_wedge(db, SPK_TAIL_B0, SPK_TAIL_H - 1, SPK_TAIL_APX, 0, side); /* trailing */
+    spk_tail_wedge(db, SPK_TAIL_B1, SPK_TAIL_H - 1, SPK_TAIL_APX, 0, side); /* leading  */
     lv_obj_invalidate(cv);                      /* exactly one, for the whole tail */
 }
 
@@ -7167,34 +8668,28 @@ static void spk_tail_paint(lv_obj_t *cv){
 #define SPK_BUB_MIN(face) (SPK_FACE_TOP + (int)(face)->header.h \
                            + SPK_CHIN_GAP + (SPK_TAIL_H - 1))
 
-/* Stand `face` on `page` saying `text`, with the tail joining them. `bub_y` is
- * the balloon's top edge; the portrait hangs above it, so a caller that pushes
- * the balloon down (a long week) moves the pair down together and the tail stays
- * the short hop from the shoulder to the balloon instead of stretching into a
- * wire. Returns the y just past the balloon, for whatever comes next.
+/* ---- the three pieces every speaker screen is built from ----
+ * Pulled out of speaker_say() when the Assistant needed the same portrait and
+ * the same balloon in a different arrangement (see speaker_aside()). Two
+ * placements of one set of parts, not two sets that look alike.
  *
  * The portrait is flash-resident A8 recolored to the ink colour exactly the way
- * the launcher icons are: no pool cost and nothing to repaint. Its size is read
- * off the descriptor rather than restated, so a regenerated face at a different
- * height still lands correctly (tools/gen_faces.py). */
-static int speaker_say(lv_obj_t *page, const lv_image_dsc_t *face,
-                       const char *text, int bub_y, int bub_h){
-    const int face_w = (int)face->header.w;
-    const int face_h = (int)face->header.h;
-    const int face_x = SPK_FACE_R - face_w;
-    const int face_y = bub_y - (SPK_TAIL_H - 1) - SPK_CHIN_GAP - face_h;
-
-    lv_obj_t *img = lv_image_create(page);
+ * the launcher icons are: no pool cost and nothing to repaint. */
+static void spk_portrait(lv_obj_t *par, const lv_image_dsc_t *face, int x, int y){
+    lv_obj_t *img = lv_image_create(par);
     lv_image_set_src(img, face);
-    lv_obj_set_pos(img, face_x, face_y);
+    lv_obj_set_pos(img, x, y);
     lv_obj_set_style_image_recolor(img, COL_LINE, 0);
     lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);
+}
 
-    /* a plain bordered rectangle: rounded corners and a border are drawn straight
-     * into the frame buffer; only the indicator widgets take a layer. */
-    lv_obj_t *bub = lv_obj_create(page);
-    lv_obj_set_size(bub, SPK_BUB_W, bub_h);
-    lv_obj_set_pos(bub, SPK_BUB_X, bub_y);
+/* A plain bordered rectangle with the words centred in it: rounded corners and a
+ * border are drawn straight into the frame buffer; only the indicator widgets
+ * take a layer. */
+static void spk_bubble(lv_obj_t *par, int x, int y, int w, int h, const char *text){
+    lv_obj_t *bub = lv_obj_create(par);
+    lv_obj_set_size(bub, w, h);
+    lv_obj_set_pos(bub, x, y);
     lv_obj_set_style_radius(bub, 6, 0);
     lv_obj_set_style_border_width(bub, 1, 0);
     lv_obj_set_style_border_color(bub, COL_LINE, 0);
@@ -7204,19 +8699,45 @@ static int speaker_say(lv_obj_t *page, const lv_image_dsc_t *face,
 
     lv_obj_t *say = lv_label_create(bub);
     lv_label_set_long_mode(say, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(say, SPK_BUB_W - 2 - 12);
+    lv_obj_set_width(say, w - 2 - 12);
     lv_obj_set_style_text_align(say, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(say, text);
     lv_obj_center(say);
+}
+
+static void spk_tail(lv_obj_t *par, int x, int y, int side){
+    lv_obj_t *tail = lv_canvas_create(par);
+    lv_canvas_set_buffer(tail, spk_tail_buf,
+                         side ? SPK_TAIL_H : SPK_TAIL_W,
+                         side ? SPK_TAIL_W : SPK_TAIL_H, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_palette(tail, 0, lv_color_to_32(COL_BODY, 0xFF));
+    lv_canvas_set_palette(tail, 1, lv_color_to_32(COL_LINE, 0xFF));
+    lv_obj_set_pos(tail, x, y);
+    spk_tail_paint_dir(tail, side);
+}
+
+/* Stand `face` on `page` saying `text`, with the tail joining them. `bub_y` is
+ * the balloon's top edge; the portrait hangs above it, so a caller that pushes
+ * the balloon down (a long week) moves the pair down together and the tail stays
+ * the short hop from the shoulder to the balloon instead of stretching into a
+ * wire. Returns the y just past the balloon, for whatever comes next.
+ *
+ * The face's size is read off the descriptor rather than restated, so a
+ * regenerated portrait at a different height still lands correctly
+ * (tools/gen_faces.py). */
+static int speaker_say(lv_obj_t *page, const lv_image_dsc_t *face,
+                       const char *text, int bub_y, int bub_h){
+    const int face_w = (int)face->header.w;
+    const int face_h = (int)face->header.h;
+    const int face_x = SPK_FACE_R - face_w;
+    const int face_y = bub_y - (SPK_TAIL_H - 1) - SPK_CHIN_GAP - face_h;
+
+    spk_portrait(page, face, face_x, face_y);
+    spk_bubble(page, SPK_BUB_X, bub_y, SPK_BUB_W, bub_h, text);
 
     /* the tail last, so it paints over the bubble's top border -- the border it
      * replaces. */
-    lv_obj_t *tail = lv_canvas_create(page);
-    lv_canvas_set_buffer(tail, spk_tail_buf, SPK_TAIL_W, SPK_TAIL_H, LV_COLOR_FORMAT_I1);
-    lv_canvas_set_palette(tail, 0, lv_color_to_32(COL_BODY, 0xFF));
-    lv_canvas_set_palette(tail, 1, lv_color_to_32(COL_LINE, 0xFF));
-    lv_obj_set_pos(tail, face_x + face_w / 2 - SPK_TAIL_APX, bub_y - (SPK_TAIL_H - 1));
-    spk_tail_paint(tail);
+    spk_tail(page, face_x + face_w / 2 - SPK_TAIL_APX, bub_y - (SPK_TAIL_H - 1), 0);
 
     return bub_y + bub_h;
 }
@@ -7298,6 +8819,157 @@ static void speaker_greet(lv_obj_t *page, const lv_image_dsc_t *face,
     int after = speaker_say(page, face, line, bub_y, SPK_GREET_BUB_H);
     speaker_hint(page, "tap anywhere to continue", after + 4);
     tap_anywhere(page, on_tap);
+}
+
+/* ==== a greeting that does NOT take the screen away (W3) ====================
+ * Coach and Guru greet you over their own week screen, which works because they
+ * HAVE one: a page you were going to look at anyway. Settings has nine tiles and
+ * no such page, and the pair (portrait + tail + balloon) is 164 px tall against a
+ * 184 px content area -- so the Coach arrangement would bury the grid it is
+ * introducing, which is design rule 2's complaint exactly (docs/BACKLOG.md §W).
+ *
+ * So she stands on lv_layer_top() OVER the built grid instead, IN the Graffiti
+ * strip: 240x112 of screen that this particular app has no use for, because a
+ * grid of nine icons is not something you write into. The grid keeps all nine
+ * tiles, they stay live underneath her, and the tap that dismisses her rebuilds
+ * nothing -- the screen behind her is already finished and correct.
+ *
+ * THE ARRANGEMENT THAT WAS TRIED AND REJECTED was the Coach one unchanged, just
+ * pushed down the screen until the balloon landed on the strip. It needed no new
+ * geometry, which was its whole appeal, and it cost the same 1.3 KB. Rendered,
+ * three things were wrong with it: her shoulders landed on the About tile, the
+ * balloon lay across the silkscreen row with the hint text colliding with Menu
+ * and Calc, and -- the real fault -- a full-screen tap-anywhere overlay SWALLOWS
+ * THE FIRST TAP, so a tile tapped while she was up did nothing at all.
+ *
+ * What this arrangement costs instead: the four silkscreen buttons are under her
+ * until she is tapped, so during that one greeting Home is two taps.
+ *
+ * The pane lives on lv_layer_top() and therefore OUTLIVES a content teardown --
+ * the same trap Coach's seal documents. content_clear() closes it, so she can
+ * never be left hanging over a screen she was not greeting. */
+static lv_obj_t *g_spk_pane;                  /* the greeting overlay, or NULL */
+static void spk_pane_close(void){
+    if(g_spk_pane){ lv_obj_del(g_spk_pane); g_spk_pane = NULL; }
+}
+
+/* the overlay itself: one object, filled, standing where the strip was */
+static lv_obj_t *spk_pane(int x, int y, int w, int h){
+    spk_pane_close();
+    lv_obj_t *p = lv_obj_create(lv_layer_top());
+    lv_obj_set_pos(p, x, y);
+    lv_obj_set_size(p, w, h);
+    lv_obj_set_style_radius(p, 0, 0);
+    lv_obj_set_style_pad_all(p, 0, 0);
+    lv_obj_set_style_bg_color(p, COL_BODY, 0);
+    /* one hairline along the top: she is standing in front of the writing area,
+     * and without it the white pane and the white content area read as one
+     * screen that has suddenly grown taller. */
+    lv_obj_set_style_border_width(p, 1, 0);
+    lv_obj_set_style_border_side(p, LV_BORDER_SIDE_TOP, 0);
+    lv_obj_set_style_border_color(p, COL_LINE, 0);
+    lv_obj_clear_flag(p, LV_OBJ_FLAG_SCROLLABLE);
+    /* THE PANE MUST NAME ITS OWN FONT. ui_init() sets lv_font_palm on the active
+     * screen and everything in the app inherits it from there -- but lv_layer_top()
+     * is not a child of the screen, so nothing on this pane inherits anything and
+     * it all falls back to LV_FONT_DEFAULT (montserrat_14). That is a different
+     * typeface at a different weight and line height: the hint read as bold, and
+     * the balloon was silently budgeting ~4 lines where it had been sized for 5. */
+    lv_obj_set_style_text_font(p, &lv_font_palm, 0);
+    g_spk_pane = p;
+    return p;
+}
+
+/* ---- the portrait and the balloon side by side, in the Graffiti strip -------
+ * 112 px of height cannot stack a 77 px portrait above a balloon, so this is the
+ * one arrangement where the balloon stands BESIDE the face and the tail lies on
+ * its side. Sizes are derived from the face descriptor and the strip, not
+ * restated, so a regenerated portrait still lands. */
+#define SPK_AS_PAD    2                        /* strip edge to portrait          */
+#define SPK_AS_TOP    6                        /* strip top to the portrait       */
+#define SPK_AS_BUB_Y  4
+#define SPK_AS_BUB_H  86                       /* 5 * 14 text + pad + border      */
+static void speaker_aside(const lv_image_dsc_t *face, const char *line,
+                          const char *hint, lv_event_cb_t on_tap){
+    const int fw = (int)face->header.w;
+    lv_obj_t *pane = spk_pane(0, PDA_H, LCD_W, GRAFFITI_H);
+
+    /* the tail's base column lands ON the balloon's left border, which is the
+     * border it replaces -- so the balloon starts a whole tail to her right. */
+    const int tail_x = SPK_AS_PAD + fw + 1;
+    const int bub_x  = tail_x + (SPK_TAIL_H - 1);
+    const int bub_w  = LCD_W - bub_x - SPK_AS_PAD - 2;
+
+    spk_portrait(pane, face, SPK_AS_PAD, SPK_AS_TOP);
+    spk_bubble(pane, bub_x, SPK_AS_BUB_Y, bub_w, SPK_AS_BUB_H, line);
+    /* apex level with her head rather than her middle: the wedge is pointing at
+     * the person talking, and on all three portraits that is the top third. */
+    spk_tail(pane, tail_x, SPK_AS_BUB_Y + 4, 1);
+
+    /* The hint is for the GREETING, which is a thing to get past. A step
+     * explanation has nowhere to continue to -- the screen it describes is
+     * already up and already live -- so it says nothing, and the tap that puts
+     * her away is learned once and works on both. */
+    if(hint){
+        lv_obj_t *h = lv_label_create(pane);
+        lv_label_set_text(h, hint);
+        lv_obj_align(h, LV_ALIGN_BOTTOM_MID, 0, -4);
+    }
+
+    /* the same treatment the week screens need, and for the same reason: the
+     * balloon covers most of the pane and is clickable by default, so without
+     * this the one place you would naturally aim -- her own speech bubble --
+     * swallows the tap and she cannot be dismissed at all. */
+    tap_anywhere(pane, on_tap);
+}
+
+/* Her hellos. They say what the SCREEN is for, not what to do next -- the tiles
+ * are self-describing, and narrating them would be reading the grid out loud.
+ *
+ * KEEP THEM UNDER ~115 CHARACTERS: five lines of lv_font_palm in the 134 px
+ * balloon. Over that they do not wrap, they CLIP, top and bottom -- the balloon
+ * is a fixed height so short and long hellos are the same object. (The first
+ * budget written here was ~78, measured while the pane was accidentally
+ * rendering in montserrat_14; see spk_pane() for why it was.) */
+static const char *const AS_GREETINGS[] = {
+    "Where the device learns about your world -- network, account, where you are.",
+    "Nine things to set. Do the ones you need; none of it has to be done today.",
+    "What you set here is kept on the card in this device, and nowhere else.",
+    "Wi-Fi and Accounts make the others work. The rest are preferences.",
+    "Nothing here is permanent. Any of these can be opened again and put right.",
+};
+#define AS_NGREET ((int)(sizeof(AS_GREETINGS) / sizeof(AS_GREETINGS[0])))
+
+static void as_greet_tap_cb(lv_event_t *e){ (void)e; spk_pane_close(); }
+
+/* W4: the Assistant explaining the screen you are on, as opposed to greeting you
+ * at the door. Same pane, same one-tap-puts-her-away rule, no hint line.
+ *
+ * She can be on EVERY step, which the plan was unsure about, and the thing that
+ * settles it is where the keyboard lives: the I1.2 tap keyboard is an
+ * lv_buttonmatrix inside the CONTENT area, not in the Graffiti strip. So there
+ * is no screen in Settings -- not even entering a password -- where she and the
+ * input want the same pixels. What she does cost on those screens is Graffiti as
+ * an alternative input, which is why one tap still puts her away. */
+static void assist_say(const char *text){
+    if(!text) return;
+    speaker_aside(&assistant_face, text, NULL, as_greet_tap_cb);
+}
+
+/* Called by show_settings() on every entry; it decides for itself whether one is
+ * owed, so the Settings screen does not have to know the greeting rules.
+ *
+ * The bit is spent when she is SHOWN, not when she is tapped -- which is where
+ * this parts company with Coach and Guru. Their greeting IS the screen, so a tap
+ * is the only way past it and clearing on the tap is exact. Hers sits over a
+ * finished, live grid: you can open a tile and never tap her at all, and a
+ * greeting that came back because you took the other route would be a nag. */
+static void assistant_greet(void){
+    if(!greet_due(GREET_ASSIST)) return;
+    greet_done(GREET_ASSIST);
+    speaker_aside(&assistant_face,
+                  greet_pick(AS_GREETINGS, AS_NGREET, &g_greet_last[GREET_ASSIST]),
+                  "tap to continue", as_greet_tap_cb);
 }
 
 /* ---- the weekly report's own geometry ----
