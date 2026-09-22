@@ -586,6 +586,13 @@ static void locate_by_ip(Config *cfg){
     FILE *f = fopen(GEO_TMP, "rb");
     if(f){ size_t n = fread(body, 1, sizeof body - 1, f); body[n] = 0; fclose(f); }
     remove(GEO_TMP);
+    /* LOG THE REPLY VERBATIM. It is a coordinate and a town -- not a credential
+     * -- and when this did not work on a real device the one question nobody
+     * could answer was "what did the server actually say". A parser that only
+     * reports "not understood" leaves you guessing at quoting, field order and
+     * captive portals. Trim the newline so the log stays one line. */
+    for(char *p = body; *p; p++) if(*p == '\n' || *p == '\r'){ *p = 0; break; }
+    ESP_LOGI(TAG,"geoip: HTTP %d, reply: %s", st, body[0] ? body : "(empty)");
 
     char lat[sizeof cfg->latitude], lon[sizeof cfg->longitude];
     char tz[sizeof cfg->timezone], city[sizeof cfg->loc_name];
@@ -908,7 +915,7 @@ static void hotsync_task(void *arg){
      * does not still sit through ten feed fetches before noticing. */
     if(!hs_stop()){
         fetch_news();      /* RSS reader: fetch configured feeds while Wi-Fi is up */
-        locate_by_ip(appcfg_mut());  /* no-op unless the device has never been placed */
+        locate_by_ip(appcfg_mut());  /* no-op while the location is pinned */
         fetch_weather(cfg);/* lock-screen dashboard: the last thing the network is for */
     }
     dav_disconnect();

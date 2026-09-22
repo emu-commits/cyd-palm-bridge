@@ -78,6 +78,16 @@ int main(void){
        "a reply with no city still parses");
     CK(city[0] == 0, "...and leaves the name empty rather than guessing one");
 
+    /* Quoted fields. Some CSV endpoints quote everything and some quote nothing,
+     * and which one this service does is not a thing to discover from a device
+     * in somebody's hand. Both shapes parse. */
+    CK(geoip_parse("\"success\",\"40.7128\",\"-74.0060\",\"America/New_York\",\"Jersey City\"",
+                   lat, sizeof lat, lon, sizeof lon, tz, sizeof tz, city, sizeof city) == 1,
+       "a fully quoted reply parses");
+    CK(!strcmp(lat, "40.7128") && !strcmp(lon, "-74.0060"), "...with the quotes off the numbers");
+    CK(!strcmp(tz, "America/New_York"), "...and off the zone");
+    CK(!strcmp(city, "Jersey City"), "...and off the city");
+
     /* NULL outputs are allowed: a caller that only wants the coordinates */
     CK(geoip_parse("success,1.3521,103.8198,Asia/Singapore",
                    lat, sizeof lat, lon, sizeof lon, NULL, 0, NULL, 0) == 1, "a NULL output is fine");

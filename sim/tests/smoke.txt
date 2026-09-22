@@ -267,6 +267,14 @@ t 300
 c 120 110
 t 400
 s hotsync
+# Tap Sync Now and photograph the RESULT. A finished sync's status is several
+# lines -- clock, news, weather, location, and why the account was skipped -- and
+# it grows downwards into the space the "what this will do" explanation occupies,
+# which is how the two ended up drawn on top of each other on a real device. The
+# explanation answers "what happens if I tap this", so the tap is what retires it.
+c 120 175
+t 600
+s hotsync_done
 c 18 225
 t 300
 # Options menu overlay

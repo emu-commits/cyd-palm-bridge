@@ -276,12 +276,15 @@ static int  g_cal_y, g_cal_m, g_cal_d;
 static lv_obj_t *hs_status;
 static lv_timer_t *hs_timer;
 static lv_obj_t *hs_btn, *hs_btn_lbl;
+static lv_obj_t *g_hs_what;     /* "what a sync will do", shown until one runs */
+static int       g_hs_ran;      /* a sync has been started this boot            */
 static void hs_confirm_close(void);
 /* The confirmation lives on lv_layer_top(), so leaving the screen does NOT take
  * it with it -- it would hang over whatever came next, still wired to a button
  * that no longer exists. Drop it here, where "you left HotSync" is known. */
 static void kill_hs(void){ if(hs_timer){ lv_timer_delete(hs_timer); hs_timer=NULL; }
-                           hs_confirm_close(); hs_status=NULL; hs_btn=hs_btn_lbl=NULL; }
+                           hs_confirm_close(); hs_status=NULL; hs_btn=hs_btn_lbl=NULL;
+                           g_hs_what=NULL; }
 
 /* Discovery screen state (a status label + polling timer, like HotSync) */
 static lv_obj_t *disc_status;
@@ -1193,8 +1196,11 @@ static void hs_confirm_open(void){
 /* One button, three jobs -- see hs_btn_sync(). */
 static void hs_sync_cb(lv_event_t *e){ (void)e;
     if(hotsync_cancel_pending()) return;         /* already stopping */
-    if(hotsync_busy()) hs_confirm_open();
-    else               hotsync_start();
+    if(hotsync_busy()){ hs_confirm_open(); return; }
+    /* The explanation has been read; from here the status line owns that space. */
+    g_hs_ran = 1;
+    if(g_hs_what) lv_obj_add_flag(g_hs_what, LV_OBJ_FLAG_HIDDEN);
+    hotsync_start();
 }
 
 static void show_hotsync(void){
@@ -1219,6 +1225,10 @@ static void show_hotsync(void){
     lv_label_set_long_mode(hs_status, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(hs_status, LCD_W - 12);
     lv_obj_align(hs_status, LV_ALIGN_TOP_MID, 0, 56);
+    /* A finished sync's status is several lines -- clock, news, weather,
+     * location, and why the account was skipped -- and it grows DOWNWARDS from
+     * here into the space the explanation above was using. That is why the
+     * explanation goes away on the first tap rather than being made smaller. */
     lv_obj_set_style_text_align(hs_status, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(hs_status, hotsync_status());
 
@@ -1232,7 +1242,8 @@ static void show_hotsync(void){
     { const Config *cf = appcfg();
       int acct = cf->dav_base[0] && cf->dav_user[0] && cf->dav_pass[0];
       int coll = cf->cal_coll[0] || cf->todo_coll[0] || cf->card_coll[0];
-      lv_obj_t *what = lv_label_create(content);
+      g_hs_what = lv_label_create(content);
+      lv_obj_t *what = g_hs_what;
       lv_label_set_long_mode(what, LV_LABEL_LONG_WRAP);
       lv_obj_set_width(what, LCD_W - 16);
       lv_obj_set_style_text_align(what, LV_TEXT_ALIGN_CENTER, 0);
@@ -1249,6 +1260,12 @@ static void show_hotsync(void){
           lv_label_set_text(what, "Clock and news. No account needed.\n"
                                   "The records in the apps are samples\n"
                                   "until Settings > Accounts has yours.");
+      /* IT ANSWERS "what happens if I tap this", so it belongs to the moment
+       * BEFORE the tap. Once a sync has run, the status line below is a result
+       * -- several lines of it -- and the two were drawn on top of each other.
+       * The answer is not to squeeze both in: it is that the question has been
+       * answered and the explanation has done its job. */
+      if(g_hs_ran || hotsync_busy()) lv_obj_add_flag(what, LV_OBJ_FLAG_HIDDEN);
     }
 
     hs_btn = lv_button_create(content);

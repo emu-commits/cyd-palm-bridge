@@ -36,6 +36,19 @@ static int coord_ok(const char *s){
     return digits > 0;
 }
 
+/* Strip a pair of surrounding double quotes, in place. Some CSV endpoints quote
+ * every field and some quote none, and which one this service does is not a
+ * thing to find out from a device in somebody's hand: unquoting costs four lines
+ * and makes both shapes parse. A lone quote is left alone -- that is not a
+ * quoted field, it is a corrupt one, and the coordinate check will reject it. */
+static void unquote(char *s){
+    int n = (int)strlen(s);
+    if(n >= 2 && s[0] == '"' && s[n-1] == '"'){
+        memmove(s, s + 1, (size_t)(n - 2));
+        s[n-2] = 0;
+    }
+}
+
 /* Copy field `n` (0-based, comma-separated) out of `csv` into `out`, trimming
  * spaces and stopping at the end of the line. Returns 1 if the field existed. */
 static int field(const char *csv, int n, char *out, int cap){
@@ -56,6 +69,7 @@ static int field(const char *csv, int n, char *out, int cap){
     int end = j < cap - 1 ? j : cap - 1;
     while(end > 0 && (out[end-1] == ' ' || out[end-1] == '\t')) end--;
     out[end] = 0;
+    unquote(out);
     return 1;
 }
 
@@ -80,6 +94,7 @@ static int tail_field(const char *csv, int n, char *out, int cap){
     int end = j < cap - 1 ? j : cap - 1;
     while(end > 0 && (out[end-1] == ' ' || out[end-1] == '\t')) end--;
     out[end] = 0;
+    unquote(out);
     return 1;
 }
 
