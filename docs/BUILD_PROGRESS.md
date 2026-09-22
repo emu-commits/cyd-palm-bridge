@@ -16,6 +16,39 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-21 — The simulator was compiling real credentials in, and CI could never have caught it
+- **`sim/Makefile` claimed `sim/include` "shields the build from a real (gitignored)
+  `secrets.h`" by sitting first on the include path. It cannot, and never did.**
+  `appcfg.c` lives in `firmware/main` and includes `"secrets.h"` **in quotes**, and C
+  resolves a quoted include *relative to the including file's own directory* before it
+  searches any `-I` path. `firmware/main/secrets.h` therefore won every time and
+  `sim/include/secrets.h` was never once opened. Every simulator binary built on a
+  machine with real credentials had the Wi-Fi password and the Apple app-specific
+  password compiled into it, with the SSID and Apple ID legible in the smoke
+  screenshots. Confirmed with `strings sim/build/sim_host`.
+- **The shield is now `-DSIM_NO_SECRETS`**, which `appcfg.c` honours by not including
+  the header at all, so every `WIFI_SSID` / `DAV_PASS` macro is simply undefined and
+  `seed_from_secrets()` compiles away. *An include-order trick cannot beat the
+  language's own lookup rule; only not including the file can.*
+- **Why it survived: it was invisible precisely where anyone would look.** `secrets.h`
+  is gitignored, so CI has no such file, so CI builds were always clean and every
+  published artefact was genuinely safe. The exposure existed only on developer
+  machines, only in build outputs nobody diffs. **A green CI was evidence of nothing
+  here** — the one environment guaranteed not to reproduce the bug was the only one
+  being watched.
+- **The gate has to fail where the bug lives.** `make -C sim nosecrets` points
+  `CFG_PATH` at a file that cannot exist, so `config.ini` cannot overlay the seed and
+  any non-empty credential field can only have come from a compile-time seed. It
+  passes trivially in CI (nothing to leak) and fails on exactly the machines that have
+  a `secrets.h`. Verified in *both* directions before being believed: built without
+  the flag it reported all four fields seeded; with it, clean.
+- **A gate that catches a credential must not then publish it.** `nosecrets` prints the
+  field's *name and length* and nothing else. The failure output of a security check
+  ends up in CI logs and terminal scrollback forever.
+- **The flag is defined once, as `SIMDEF`.** `smoke32` rebuilt `CFLAGS` from a
+  hand-copied list, which is how a build flag silently stops applying to half the
+  gates — and a security flag that applies to *some* builds is not a fix.
+
 ### 2026-09-21 — Nine Settings icons, knocked out of one disk (W2)
 - **`tools/gen_settings_icons.py` draws all nine in one file**, not nine files. The two
   icon generators before it are a script each, which was right for one icon and is wrong

@@ -1,10 +1,33 @@
 /* appcfg.c -- see appcfg.h. Seeds from secrets.h, then overlays config.ini. */
 #include "appcfg.h"
+#ifndef SIM_NO_SECRETS
 #include "secrets.h"      /* compile-time seed (also .example in the repo)     */
+#endif
+/* SIM_NO_SECRETS (set by sim/Makefile) omits the seed header entirely, so every
+ * WIFI_SSID / DAV_PASS macro below is simply undefined and seed_from_secrets()
+ * compiles away to nothing.
+ *
+ * It must be done HERE, by not including the file, rather than by pointing the
+ * include path at a stub. sim/include/secrets.h was exactly that stub and it
+ * never once got used: this file lives in firmware/main, and a QUOTED include
+ * is resolved relative to the including file's own directory before any -I path
+ * is searched -- so firmware/main/secrets.h shadowed the stub unconditionally.
+ * The result was a simulator binary carrying a developer's real Wi-Fi password
+ * and Apple app-specific password, with the SSID and Apple ID legible in the
+ * smoke screenshots. CI never saw it, because secrets.h is gitignored and CI
+ * has no such file -- which is precisely why it survived so long.
+ *
+ * `make -C sim nosecrets` now fails if a seeded credential reaches the config. */
 #include <stdio.h>
 #include <string.h>
 
+/* Overridable so a gate can point it at a path that does not exist and see the
+ * config as it arrives from the SEED alone, with no config.ini overlaying it.
+ * That is the only way `nosecrets` can tell a seeded credential apart from one
+ * the user legitimately saved to the card. */
+#ifndef CFG_PATH
 #define CFG_PATH "/sdcard/config.ini"
+#endif
 
 static Config g_cfg;
 static int    g_loaded  = 0;
