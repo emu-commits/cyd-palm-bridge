@@ -386,6 +386,17 @@ int clock_set_now(int year, int mon, int day, int hour, int min){
     ti.tm_isdst = -1;                      /* let the zone decide, not the caller */
     time_t t = mktime(&ti);
     if(t == (time_t)-1) return -1;
+#ifdef __EMSCRIPTEN__
+    /* The browser build has no settimeofday to call -- emscripten does not
+     * implement it, and the link fails rather than the call. That is the right
+     * answer anyway: the page's clock is the host machine's, it is already
+     * correct, and it is not ours to move. Report the failure honestly, exactly
+     * as the native simulator does when a container refuses CAP_SYS_TIME, and
+     * let the screen say "Could not set the clock" -- which is true. */
+    (void)t;
+    ESP_LOGW(TAG, "clock: the browser build cannot set the system clock");
+    return -1;
+#else
     struct timeval tv = { .tv_sec = t, .tv_usec = 0 };
     if(settimeofday(&tv, NULL) != 0){
         ESP_LOGW(TAG, "clock: settimeofday refused (no permission to set the clock)");
@@ -395,6 +406,7 @@ int clock_set_now(int year, int mon, int day, int hour, int min){
     ESP_LOGI(TAG, "clock: set by hand to %04d-%02d-%02d %02d:%02d (local)",
              year, mon, day, hour, min);
     return 0;
+#endif
 }
 
 /* Coordinates for zone `i`, or 0 if that row is a zone rather than a place
