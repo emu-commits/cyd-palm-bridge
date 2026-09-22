@@ -2869,7 +2869,11 @@ static void pf_saverow_cb(lv_event_t *e){ (void)e;
 static lv_obj_t *pf_add(lv_obj_t *list, const char *text, lv_event_cb_t cb, int ud){
     lv_obj_t *b = lv_list_add_button(list, NULL, text);
     lv_obj_set_style_radius(b, 0, 0);
-    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, (void *)(intptr_t)ud);
+    /* A NULL callback means the row is a STATEMENT, not a control (the About
+     * panel's provenance lines). It stops being clickable rather than being a
+     * button that silently does nothing when tapped. */
+    if(cb) lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, (void *)(intptr_t)ud);
+    else   lv_obj_clear_flag(b, LV_OBJ_FLAG_CLICKABLE);
     return b;
 }
 static void show_prefs(void){
@@ -3008,10 +3012,6 @@ static void sp_fmt_cb(lv_event_t *e){ (void)e;
     Config *c = appcfg_mut(); c->clock24 = !c->clock24; appcfg_save();
     show_set_panel(SET_TIME);
 }
-static void sp_pol_cb(lv_event_t *e){ (void)e;
-    Config *c = appcfg_mut(); c->policy = (c->policy + 1) % 3; appcfg_save();
-    show_set_panel(SET_SYNC);
-}
 static void sp_prefs_cb(lv_event_t *e){ (void)e; show_prefs(); }
 static void sp_tile_cb(lv_event_t *e){
     show_set_panel((int)(intptr_t)lv_event_get_user_data(e));
@@ -3030,6 +3030,62 @@ static void sp_field_row(lv_obj_t *list, int tile, int f){
         snprintf(shown, sizeof shown, "(unset)");
     snprintf(row, sizeof row, "%s: %s", PF_LABELS[f], shown);
     pf_add(list, row, sp_field_cb, (tile << 8) | f);
+}
+
+/* ==== W9: one pick-one-of-N screen, used by every panel that has a choice ===
+ * Three settings in Settings are "choose one from a short fixed set": how long
+ * the backlight stays on, which side wins a sync conflict, and which city you
+ * are in. Three cycling rows would have been less code -- tap to advance, no
+ * screen at all -- but a cycling row cannot show you the options you are NOT on,
+ * so you learn what "keep both" means by landing on it. This shows the whole set
+ * with the current one marked, which is the tap-to-pick rule applied honestly.
+ *
+ * ONE screen, not three: the alternative is three lists that look alike until
+ * somebody fixes the marker on two of them. The caller hands over a title, the
+ * items, the current index and what to do with the answer. */
+static const char *const *g_pick_items;
+static int   g_pick_n, g_pick_cur;
+static void  (*g_pick_done)(int);
+static const char *g_pick_title, *g_pick_help;
+static void show_pick_screen(void);
+static void pick_row_cb(lv_event_t *e){
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    void (*done)(int) = g_pick_done;
+    if(done) done(i);
+}
+static void pick_open(const char *title, const char *help,
+                      const char *const *items, int n, int cur, void (*done)(int)){
+    g_pick_title = title; g_pick_help = help;
+    g_pick_items = items; g_pick_n = n; g_pick_cur = cur; g_pick_done = done;
+    show_pick_screen();
+}
+static void show_pick_screen(void){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0;
+    content_clear();
+    lv_label_set_text(title_lbl, g_pick_title ? g_pick_title : "Choose");
+    update_cat_trigger();
+
+    lv_obj_t *list = lv_list_create(content);
+    lv_obj_set_size(list, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_radius(list, 0, 0);
+    lv_obj_set_style_border_width(list, 0, 0);
+    lv_obj_set_style_pad_all(list, 0, 0);
+
+    for(int i = 0; i < g_pick_n; i++){
+        char row[80];
+        /* THE MARKER IS PLAIN ASCII. The first version used a bullet, on the
+         * reasoning that a bullet is in every font there is -- it is not in this
+         * one. lv_font_palm is a 32..255 Latin subset with no symbol range at
+         * all, which is the same wall C7 hit looking for a check mark and the
+         * same one the calendar's month arrows hit. Anything outside ASCII here
+         * draws as an empty box, and an empty box next to the CURRENT setting is
+         * worse than no marker at all. */
+        snprintf(row, sizeof row, "%s %s", i == g_pick_cur ? ">" : "  ",
+                 g_pick_items[i]);
+        pf_add(list, row, pick_row_cb, i);
+    }
+    if(g_pick_help) assist_say(g_pick_help);
 }
 
 /* ==== W8: setting the clock by hand ========================================
@@ -3198,6 +3254,112 @@ static void show_set_date(void){
 }
 static void sp_clock_cb(lv_event_t *e){ (void)e; show_set_clock(); }
 static void sp_date_cb(lv_event_t *e){ (void)e; show_set_date(); }
+
+/* ---- W9: the choices behind Display, Sync and Location ------------------- */
+
+/* Backlight timeout. The values are the ones a person actually wants, not a
+ * range: anything under 15 s blanks while you are reading, and "never" has to be
+ * on the list because it is what you want on a desk with the charger in. */
+static const int BL_SECS[] = { 0, 15, 30, 60, 120, 300 };
+static const char *const BL_NAMES[] = {
+    "Never (stays on)", "15 seconds", "30 seconds", "1 minute", "2 minutes", "5 minutes",
+};
+#define BL_N ((int)(sizeof BL_SECS / sizeof BL_SECS[0]))
+static void bl_done(int i){
+    if(i >= 0 && i < BL_N){ appcfg_mut()->backlight_sec = BL_SECS[i]; appcfg_save(); }
+    show_set_panel(SET_DISP);
+}
+static void sp_backlight_cb(lv_event_t *e){ (void)e;
+    int cur = 0, want = appcfg()->backlight_sec;
+    for(int i = 0; i < BL_N; i++) if(BL_SECS[i] == want) cur = i;
+    pick_open("Screen off", "How long the screen waits before it blanks. The "
+                            "backlight is most of what this device spends.",
+              BL_NAMES, BL_N, cur, bl_done);
+}
+static const char *bl_name(int secs){
+    for(int i = 0; i < BL_N; i++) if(BL_SECS[i] == secs) return BL_NAMES[i];
+    return "custom";       /* a hand-edited config.ini may hold anything */
+}
+
+/* Conflict policy. The names say what HAPPENS, not what the setting is called:
+ * "server" and "local" are words about the implementation, and the question
+ * being answered is "you changed this in two places -- now what". */
+static const char *const POL_NAMES[] = {
+    "iCloud wins", "This device wins", "Keep both copies",
+};
+static void pol_done(int i){
+    if(i >= 0 && i < 3){ appcfg_mut()->policy = i; appcfg_save(); }
+    show_set_panel(SET_SYNC);
+}
+static void sp_pol_pick_cb(lv_event_t *e){ (void)e;
+    pick_open("Conflicts", "When the same thing changed on both sides since the "
+                           "last sync, this decides which copy survives.",
+              POL_NAMES, 3, appcfg()->policy, pol_done);
+}
+
+/* Location, as a list of places. The zone table carries each city's coordinates
+ * (clock_zone_latlon), so "where are you" is a tap on the same list of cities
+ * the clock already uses -- and latitude/longitude stay editable by hand
+ * underneath, for anyone who is not in one of them. */
+static void loc_done(int i){
+    const char *lat = NULL, *lon = NULL;
+    if(clock_zone_latlon(i, &lat, &lon)){
+        Config *c = appcfg_mut();
+        snprintf(c->latitude,  sizeof c->latitude,  "%s", lat);
+        snprintf(c->longitude, sizeof c->longitude, "%s", lon);
+        appcfg_save();
+        toast_show("Location set");
+    }
+    show_set_panel(SET_LOC);
+}
+/* Built once, pointing into the zone table's own strings: the picker wants an
+ * array of names and the cities are exactly the zones that have coordinates. */
+/* "America/New_York" is a timezone identifier, and this is a list of PLACES:
+ * the tail after the last slash, with the underscores put back to spaces, is
+ * what a person calls the city they are in. (The zone picker keeps the full
+ * IANA name, where it is the right answer.) */
+static void city_name(const char *iana, char *out, int cap){
+    const char *slash = strrchr(iana, '/');
+    snprintf(out, cap, "%s", slash ? slash + 1 : iana);
+    for(char *p = out; *p; p++) if(*p == '_') *p = ' ';
+}
+#define LOC_MAX 24
+static char        g_loc_txt[LOC_MAX][24];
+static const char *g_loc_names[LOC_MAX];
+static int         g_loc_zone[LOC_MAX];
+static int         g_loc_n;
+static void loc_pick_done(int row){ if(row >= 0 && row < g_loc_n) loc_done(g_loc_zone[row]); }
+static void sp_loc_cb(lv_event_t *e){ (void)e;
+    const Config *c = appcfg();
+    int n = clock_zone_count(), cur = -1;
+    g_loc_n = 0;
+    for(int i = 0; i < n && g_loc_n < LOC_MAX; i++){
+        const char *lat = NULL, *lon = NULL;
+        if(!clock_zone_latlon(i, &lat, &lon)) continue;      /* a zone, not a place */
+        if(!strcmp(lat, c->latitude) && !strcmp(lon, c->longitude)) cur = g_loc_n;
+        g_loc_zone[g_loc_n]  = i;
+        city_name(clock_zone_name(i), g_loc_txt[g_loc_n], sizeof g_loc_txt[0]);
+        g_loc_names[g_loc_n] = g_loc_txt[g_loc_n];
+        g_loc_n++;
+    }
+    pick_open("Location", "The nearest of these is close enough for a forecast. "
+                          "Only the coordinates are sent, never your name.",
+              g_loc_names, g_loc_n, cur, loc_pick_done);
+}
+/* the city whose coordinates are currently stored, or NULL for anywhere else */
+static const char *loc_city_name(const Config *c){
+    static char buf[24];
+    if(!c->latitude[0]) return NULL;
+    for(int i = 0; i < clock_zone_count(); i++){
+        const char *lat = NULL, *lon = NULL;
+        if(!clock_zone_latlon(i, &lat, &lon)) continue;
+        if(!strcmp(lat, c->latitude) && !strcmp(lon, c->longitude)){
+            city_name(clock_zone_name(i), buf, sizeof buf);
+            return buf;
+        }
+    }
+    return NULL;
+}
 
 /* ==== W5: the Wi-Fi wizard =================================================
  * Four remembered networks, tried in the order the list shows them, with the one
@@ -3474,14 +3636,26 @@ static void show_set_panel(int tile){
     case SET_DISP:
         snprintf(row, sizeof row, "Brightness: %d%%", c->brightness);
         g_pf_bright_btn = pf_add(list, row, pf_bright_row_cb, 0);
+        /* W9: the backlight timeout was in config.ini and NOWHERE in the UI --
+         * the one setting that decides most of the battery life, editable only
+         * by pulling the card. */
+        snprintf(row, sizeof row, "Screen off: %s", bl_name(c->backlight_sec));
+        pf_add(list, row, sp_backlight_cb, 0);
         break;
-    case SET_LOC:
+    case SET_LOC: {
+        const char *city = loc_city_name(c);
+        if(city)                snprintf(row, sizeof row, "Place: %s", city);
+        else if(c->latitude[0]) snprintf(row, sizeof row, "Place: %s, %s", c->latitude, c->longitude);
+        else                    snprintf(row, sizeof row, "Place: (not set)");
+        pf_add(list, row, sp_loc_cb, 0);
+        /* the two numbers stay reachable, for anyone not near one of the cities */
         sp_field_row(list, tile, PF_LAT);
         sp_field_row(list, tile, PF_LON);
+        }
         break;
     case SET_SYNC:
         snprintf(row, sizeof row, "Conflicts: %s", pol_name(c->policy));
-        pf_add(list, row, sp_pol_cb, 0);
+        pf_add(list, row, sp_pol_pick_cb, 0);
         sp_field_row(list, tile, PF_CAL);
         sp_field_row(list, tile, PF_TODO);
         sp_field_row(list, tile, PF_CARD);
@@ -3495,6 +3669,13 @@ static void show_set_panel(int tile){
         sp_field_row(list, tile, PF_OWNER);
         break;
     case SET_ABOUT:
+        /* W9: the tile said "About" and showed one row that was not about
+         * anything. The provenance belongs here, where someone looking for it
+         * will look; the whole-list view stays underneath it as the escape
+         * hatch for a config.ini that has gone wrong. */
+        pf_add(list, "CYD Palm Bridge", NULL, 0);
+        pf_add(list, "A Palm-style PDA on a $12 board", NULL, 0);
+        pf_add(list, "GPLv3. Icons + font from PumpkinOS", NULL, 0);
         pf_add(list, "All settings (one list)", sp_prefs_cb, 0);
         break;
     }
@@ -5660,6 +5841,7 @@ void ui_show_lock(void){
     dash_lbl_rev(DASH_MARGIN+4, DASH_Y_AGENDA, "AHEAD");
     dash_lbl_rev(DASH_MARGIN+4, DASH_Y_SUN,    "SUN & MOON");
 
+
     /* ---- weather ---- */
     if(havewx){
         char wl[48];
@@ -5723,7 +5905,23 @@ void ui_show_lock(void){
       lv_obj_t*o=dash_lbl(0,286,ml,0); lv_obj_align(o,LV_ALIGN_TOP_RIGHT,-42,286); }
 
     /* ---- unlock hint ---- */
-    { lv_obj_t*o=dash_lbl(0,308,"swipe up to unlock",0); lv_obj_align(o,LV_ALIGN_BOTTOM_MID,0,-2); }
+    /* ---- the bottom line: the way in, and whose device this is ----
+     * W9 put the owner's name here, which is the only reason to collect a name
+     * at all: a device found face-up on a desk says whose it is without being
+     * unlocked. There is exactly ONE line left below the open-bottomed SUN &
+     * MOON zone (it closes at 304, of 320), so the two share it -- name to the
+     * left, instruction to the right. With no name the instruction keeps the
+     * centred position it has always had, because a line that shifts depending
+     * on a setting you cannot see from here looks like a bug. */
+    { const char *own = appcfg()->owner;
+      lv_obj_t *o = dash_lbl(0,308,"swipe up to unlock",0);
+      if(own[0]){
+          lv_obj_align(o, LV_ALIGN_BOTTOM_RIGHT, -6, -2);
+          lv_obj_t *n = dash_lbl(0,308,own,0);
+          lv_obj_align(n, LV_ALIGN_BOTTOM_LEFT, 6, -2);
+      } else {
+          lv_obj_align(o, LV_ALIGN_BOTTOM_MID, 0, -2);
+      } }
 
     dash_paint();
 }

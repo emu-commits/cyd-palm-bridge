@@ -395,6 +395,57 @@ t 300
 s prefs_brightness_stepped
 c 120 30
 t 400
+# W9: "Screen off" -- the backlight timeout, which until now lived in config.ini
+# and nowhere in the UI, despite being the setting that decides most of the
+# battery life. Row 2 of the Display panel (y=65) -> the shared pick-one screen,
+# with the current value marked by a bullet. Choose "1 minute" (row 4, y=121).
+c 120 65
+t 400
+s w9_backlight_pick
+c 120 121
+t 400
+s w9_display_set
+c 18 225
+t 300
+# W9: Location (row 2, col 3). latitude/longitude were two numbers on a
+# keyboard, which is why weather silently did nothing for almost everyone. The
+# zone table carries each city's coordinates, so "where are you" is now a tap on
+# the same list of cities the clock uses -- with the numbers still underneath
+# for anyone not near one of them.
+c 18 300
+t 300
+c 75 66
+t 400
+c 195 110
+t 400
+s w9_location
+c 120 37
+t 400
+s w9_city_pick
+c 120 65
+t 400
+s w9_location_set
+c 18 225
+t 300
+# W9: Sync conflicts (row 3, col 1) -- a cycling row replaced by the same pick
+# screen, because a cycling row cannot show you the options you are not on: you
+# learned what "keep both" meant by landing on it. The names say what HAPPENS,
+# not what the setting is called.
+c 18 300
+t 300
+c 75 66
+t 400
+c 46 160
+t 400
+s w9_sync
+c 120 37
+t 400
+s w9_policy_pick
+c 120 93
+t 400
+s w9_sync_set
+c 18 225
+t 300
 # Settings > Date & Time (row 2, col 1): the tile that absorbed the old "Lock
 # screen..." sub-screen -- system zone, two world clocks, 12/24h, all on one
 # non-scrolling panel. Tap "World clock 1" -> the shared zone picker (lv_table,

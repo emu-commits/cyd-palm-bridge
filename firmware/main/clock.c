@@ -202,30 +202,37 @@ void clock_sync_end(int synced){
  * DST automatically by the current date -- no separate DST logic needed. This
  * table is also the source for the on-device timezone picker (clock_zone_*),
  * which is why it lives at file scope. Extend as needed. */
-static const struct { const char *iana, *posix; } TZ_TBL[] = {
-    {"America/New_York",    "EST5EDT,M3.2.0,M11.1.0"},
-    {"America/Detroit",     "EST5EDT,M3.2.0,M11.1.0"},
-    {"America/Chicago",     "CST6CDT,M3.2.0,M11.1.0"},
-    {"America/Denver",      "MST7MDT,M3.2.0,M11.1.0"},
-    {"America/Phoenix",     "MST7"},
-    {"America/Los_Angeles", "PST8PDT,M3.2.0,M11.1.0"},
-    {"America/Anchorage",   "AKST9AKDT,M3.2.0,M11.1.0"},
-    {"America/Halifax",     "AST4ADT,M3.2.0,M11.1.0"},
-    {"America/Sao_Paulo",   "BRT3"},
-    {"UTC",                 "UTC0"},
-    {"Europe/London",       "GMT0BST,M3.5.0/1,M10.5.0"},
-    {"Europe/Dublin",       "GMT0IST,M3.5.0/1,M10.5.0"},
-    {"Europe/Paris",        "CET-1CEST,M3.5.0,M10.5.0/3"},
-    {"Europe/Berlin",       "CET-1CEST,M3.5.0,M10.5.0/3"},
-    {"Europe/Madrid",       "CET-1CEST,M3.5.0,M10.5.0/3"},
-    {"Europe/Athens",       "EET-2EEST,M3.5.0/3,M10.5.0/4"},
-    {"Europe/Moscow",       "MSK-3"},
-    {"Asia/Dubai",          "GST-4"},
-    {"Asia/Kolkata",        "IST-5:30"},
-    {"Asia/Shanghai",       "CST-8"},
-    {"Asia/Tokyo",          "JST-9"},
-    {"Australia/Sydney",    "AEST-10AEDT,M10.1.0,M4.1.0/3"},
-    {"Pacific/Auckland",    "NZST-12NZDT,M9.5.0,M4.1.0/3"},
+/* The zone table doubles as the device's gazetteer: each row carries the city's
+ * coordinates so Settings ▸ Location can be a LIST OF PLACES rather than two
+ * numbers typed on a keyboard. Weather is the only consumer and it wants about a
+ * city's worth of precision, so two decimals is plenty -- and stored as text
+ * because that is how config.ini holds them and how the forecast URL wants them.
+ * UTC is a zone, not a place, so it has no coordinates and is skipped by the
+ * picker. */
+static const struct { const char *iana, *posix, *lat, *lon; } TZ_TBL[] = {
+    {"America/New_York",    "EST5EDT,M3.2.0,M11.1.0", "40.71", "-74.01"},
+    {"America/Detroit",     "EST5EDT,M3.2.0,M11.1.0", "42.33", "-83.05"},
+    {"America/Chicago",     "CST6CDT,M3.2.0,M11.1.0", "41.88", "-87.63"},
+    {"America/Denver",      "MST7MDT,M3.2.0,M11.1.0", "39.74", "-104.98"},
+    {"America/Phoenix",     "MST7", "33.45", "-112.07"},
+    {"America/Los_Angeles", "PST8PDT,M3.2.0,M11.1.0", "34.05", "-118.24"},
+    {"America/Anchorage",   "AKST9AKDT,M3.2.0,M11.1.0", "61.22", "-149.90"},
+    {"America/Halifax",     "AST4ADT,M3.2.0,M11.1.0", "44.65", "-63.57"},
+    {"America/Sao_Paulo",   "BRT3", "-23.55", "-46.63"},
+    {"UTC",                 "UTC0", "", ""},
+    {"Europe/London",       "GMT0BST,M3.5.0/1,M10.5.0", "51.51", "-0.13"},
+    {"Europe/Dublin",       "GMT0IST,M3.5.0/1,M10.5.0", "53.35", "-6.26"},
+    {"Europe/Paris",        "CET-1CEST,M3.5.0,M10.5.0/3", "48.86", "2.35"},
+    {"Europe/Berlin",       "CET-1CEST,M3.5.0,M10.5.0/3", "52.52", "13.40"},
+    {"Europe/Madrid",       "CET-1CEST,M3.5.0,M10.5.0/3", "40.42", "-3.70"},
+    {"Europe/Athens",       "EET-2EEST,M3.5.0/3,M10.5.0/4", "37.98", "23.73"},
+    {"Europe/Moscow",       "MSK-3", "55.76", "37.62"},
+    {"Asia/Dubai",          "GST-4", "25.20", "55.27"},
+    {"Asia/Kolkata",        "IST-5:30", "22.57", "88.36"},
+    {"Asia/Shanghai",       "CST-8", "31.23", "121.47"},
+    {"Asia/Tokyo",          "JST-9", "35.68", "139.65"},
+    {"Australia/Sydney",    "AEST-10AEDT,M10.1.0,M4.1.0/3", "-33.87", "151.21"},
+    {"Pacific/Auckland",    "NZST-12NZDT,M9.5.0,M4.1.0/3", "-36.85", "174.76"},
 };
 #define TZ_TBL_N ((int)(sizeof TZ_TBL / sizeof TZ_TBL[0]))
 
@@ -388,4 +395,13 @@ int clock_set_now(int year, int mon, int day, int hour, int min){
     ESP_LOGI(TAG, "clock: set by hand to %04d-%02d-%02d %02d:%02d (local)",
              year, mon, day, hour, min);
     return 0;
+}
+
+/* Coordinates for zone `i`, or 0 if that row is a zone rather than a place
+ * (UTC). Settings ▸ Location uses this to turn "where are you" into a tap. */
+int clock_zone_latlon(int i, const char **lat, const char **lon){
+    if(i < 0 || i >= TZ_TBL_N || !TZ_TBL[i].lat[0]) return 0;
+    if(lat) *lat = TZ_TBL[i].lat;
+    if(lon) *lon = TZ_TBL[i].lon;
+    return 1;
 }

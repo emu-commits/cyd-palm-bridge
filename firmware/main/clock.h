@@ -65,6 +65,11 @@ const char *clock_tz_posix(void);
 int clock_zone_count(void);
 const char *clock_zone_name(int i);   /* IANA name, e.g. "America/New_York" */
 
+/* Coordinates for zone `i` as text, or 0 if that row names a zone rather than a
+ * place (UTC). This is what lets Settings ▸ Location be a list of cities instead
+ * of two numbers on a keyboard; weather wants about a city's worth of precision. */
+int clock_zone_latlon(int i, const char **lat, const char **lon);
+
 /* describe the CURRENT wall clock under the active TZ, e.g. "EDT -0400 (DST)".
  * Reflects the system time + whichever TZ clock_set_tz() last applied. */
 void clock_now_desc(char *out, int cap);
