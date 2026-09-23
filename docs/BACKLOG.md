@@ -17,11 +17,13 @@ mostly away from the bench via the browser simulator).
 
 ---
 
-## RESUME HERE — state at 2026-09-22 (second session)
+## RESUME HERE — state at 2026-09-22 (end of the second session)
 
-**PR #59 (W1–W10, Q1–Q4) IS MERGED TO `main` and the web emulator is redeployed
-from it.** The work after it is on **`feat/q5-q8-quick-entry`**: Q5–Q8 and
-tidy-ups 14–17.
+**EVERYTHING IS MERGED TO `main` (`958a979`).** PR #59 (W1–W10, Q1–Q4), then
+**#60** (Q5–Q8 + tidy-ups 14–17) and **#62** (engine correctness). The web
+emulator is redeployed from it and **the bench device is flashed from it** —
+which it had not been for the whole of Q5–Q8. Start the next group on a fresh
+branch off `main`.
 
 **THE W PHASE AND THE Q PHASE ARE BOTH CODE COMPLETE (`W1`–`W10`, `Q1`–`Q8`).**
 Settings is a nine-tile grid, every tile is a real screen, the Assistant explains
@@ -40,10 +42,22 @@ not write, so any screen whose behaviour depends on what is IN a field could onl
 ever be photographed empty — which is exactly how a quick-add bar that clipped
 its input at 23 characters would have shipped.
 
-**NEXT, IN ORDER OF VALUE:** the `[d]` bench checks (nothing in Q5–Q8 has been
-seen on glass); then §Engine items 11–13, of which **13 is the small one** —
-three named correctness bugs, all host-testable. Item 9 ("About this screen" on
-every screen) is the next real feature.
+**THE MASS-DELETE GUARD NEVER RESTORED ANYTHING** (fixed 2026-09-22, and the
+single most important thing in this session). It declined to delete and wrote
+nothing for the missing records, so a device whose card read short stayed empty
+and **every subsequent sync reached the identical conclusion** — server keeps
+everything, device keeps nothing, forever. Its own comment promised a restore it
+had never performed. It survived months of green CI because **the guard had no
+test**: fifteen gates "covered" it by staying silent, and every one of them would
+have stayed just as silent with the guard deleted outright. `tests/massdel.c`
+failed on its first run. See §Engine item 13.
+
+**NEXT, IN ORDER OF VALUE:** the `[d]` bench checks — **the device is flashed
+with all of this and none of it has been looked at**, and Q5's greys are the one
+thing an emulator judges badly. Then §Engine **11** (external merge sort: turns
+"refuses safely" into "handles a real account") and **12** (shrink the sync
+working set 23.5 KB → ~7 KB). Item 9 ("About this screen" on every screen) is the
+next real feature. Item 13 is done; 14–17 are done.
 
 **FOUR THINGS THIS SESSION LEARNED THE HARD WAY.** Each cost a bench round-trip;
 none is discoverable from the code:
@@ -596,6 +610,32 @@ don't-scroll instructions were given for the whole request, not just for Setting
 ---
 
 ## §Device — needs the bench
+
+### FLASHED AND UNSEEN — the Q phase, 2026-09-22 (`958a979`)
+The device carries all of `Q1`–`Q8` and **not one of these screens has been
+looked at by a person.** In rough order of how likely the emulator is to have
+lied:
+
+- [ ] **Q5's greys, the whole question at once.** The zone bars are `COL_RULE`
+      `0xC8C8C8`, the same value as the hairlines, with plain black headings.
+      Grey-on-grey through a resistive panel is exactly what an emulator judges
+      badly. Look at the bar, the hairlines and the dimmed done-To Do text
+      *together* — that is P9's open `[d]` box (`COL_RULE` vs `COL_DIM`) and this
+      is now the same question. If the bar disappears into the page, it wants
+      `COL_DIM`; if it competes with the data, the old black was not the problem.
+- [ ] **Q4's stroke sheet at 40 px cells.** Legible? And does the scroll feel
+      right under a thumb — it is scroll-to-read, so a drag that lands as a tap
+      must do nothing at all.
+- [ ] **Q7/Q8 quick-add with Graffiti**, not with the harness's `k`. Write a
+      couple of words into the To Do bar and tap `New`. The field is 127
+      characters now; the recogniser is the slow part, so the question is whether
+      the bar is worth using versus the full form.
+- [ ] **Q6: is the shortened Look Up box still wide enough** to show what you
+      typed while filtering?
+- [ ] **12/24-hour consistency** across the title bar, the weather strip and
+      Rise/Set, after flipping the setting.
+- [ ] **The Assistant's strip pane** covers the four silkscreen buttons while it
+      is up (W3's open question) — one extra tap on Home. Tolerable or not?
 
 ### On-glass verifies of things already written
 - **Coach, round 2.** Round 1's six notes all shipped. Still open, and still what
