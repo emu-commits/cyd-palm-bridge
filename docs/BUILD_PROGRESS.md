@@ -16,6 +16,44 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-22 — Q5–Q8, the engine's correctness items, and a guard that never restored
+
+- **Q5 — the lock screen's zone bars are grey.** The grey could not come off the
+  canvas: it is I1, two palette entries, and index 1 is every other mark on the
+  screen. So the bar is a background on the heading label that was there anyway
+  (`dash_zone_hdr()`), which costs nothing from the pool. The fill is
+  `COL_RULE`, the hairlines' value — no third grey.
+- **Q6/Q7/Q8 — one top bar for Address, To Do and Memo** (`list_top_bar()` +
+  `quick_add_cb()`, one predicate `list_bar_app()`, one height `LIST_BAR_H`).
+  On Address the field is a filter and `New` opens a blank form; on To Do and
+  Memo the field *is* the record. `New` on an empty field opens the full form,
+  and a quick-added record is filed under the category the list is showing.
+  **Sharing went one step too far and the gate caught it:** the field inherited
+  Look Up's 23-character cap and clipped "Pick up the dry cleaning" to
+  "…cleanin". The cap is a parameter now.
+- **The smoke can type.** `k <text>` writes into the focused field through
+  `lv_textarea_add_char`, one character at a time, as the recogniser does. The
+  clipped quick-add was invisible until then: a screen whose behaviour depends
+  on what is IN a field could only be photographed empty.
+- **Tidy-ups.** `dash.c` moved to `bridge/` (the backwards `../../main` include
+  is gone); every CI job has a `timeout-minutes`; ~150 lines of unreachable boot
+  code below `lvgl_port_run()` deleted, including a drifted second copy of the
+  effective-host logic, so `app_main.c` no longer includes `secrets.h`.
+  The `[dav]` telemetry was left ON deliberately: the serial line is the only
+  window into a sync, and one of those lines found the geoip bug.
+- **Engine.** `pdb_read` names every failure on stderr instead of reading as an
+  empty database; deleted-on-both-sides counts as `bothDel`, not a push.
+- **THE MASS-DELETE GUARD NEVER RESTORED ANYTHING.** It declined to delete and
+  wrote nothing for the missing records, so a device whose card read short
+  stayed empty and every later sync reached the identical conclusion — server
+  keeps everything, device keeps nothing, forever. Its comment promised a
+  restore it had never performed. It survived months of green CI because it
+  had **no test**; `tests/massdel.c` failed on its first run. The guard now
+  pulls the server's copies back in the guarded run. **The trade:**
+  `data_delete()` drops a record rather than tombstoning it, so a real bulk
+  delete and a bad card read look the same from inside the engine, and
+  restoring undoes a genuine bulk delete. That is the right way round.
+
 ### 2026-09-22 — Q1–Q4: the Date Book stops asking you to type, and the
 ### strokes get a reference sheet
 
