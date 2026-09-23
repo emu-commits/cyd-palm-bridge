@@ -46,5 +46,6 @@
 /sim/lvgl/
 /sim/build/
 /break_test
+/geoip_test
 /toobig
 __pycache__/

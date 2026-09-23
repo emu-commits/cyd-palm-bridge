@@ -152,9 +152,10 @@ Concise index. Detail for each is below, or in the named doc.
    Only `[d]` boxes left: the Wi-Fi join and scan against real APs, a real iCloud
    login, the clock write, an accountless sync, and the two questions the
    Assistant's pane raises. §W.
-7. **Q — quick entry and polish. THE ACTIVE PHASE, `Q1`–`Q4` done.** `Q5`–`Q8` left: Date Book `New` +
-   calendar + time list, Graffiti stroke reference, lock-screen restyle, quick-add
-   rows in Address / To Do / Memo. §Q.
+7. **Q — quick entry and polish. CODE COMPLETE 2026-09-22**, `Q1`–`Q8`. Date
+   Book `New` + calendar + time list, the Graffiti stroke reference, the
+   lock-screen restyle, and one shared quick-add bar across Address / To Do /
+   Memo. Only `[d]` boxes left. §Q.
 8. **P6 — Assistant onboarding. SUPERSEDED by W**, kept for its three decided
    entry points, one of which item 17 retires. §P6.
 9. **"About this screen" help panel on every screen `[s]`.** §Sim.
@@ -469,7 +470,7 @@ almost everyone.
 
 ---
 
-## §Q — PHASE: quick entry and polish (ACTIVE — `Q1`–`Q4` done)
+## §Q — PHASE: quick entry and polish (CODE COMPLETE — only `[d]` left)
 
 Items 9–16 of the same request. Independent of W, mostly small, each its own
 commit. Design rules 1–4 above apply here too — item 4's tap-don't-type and
@@ -503,23 +504,39 @@ don't-scroll instructions were given for the whole request, not just for Setting
       is selectable, so the whole set is one page instead of three you lose your
       place in. **Scroll-to-read is not scroll-to-select** — worth applying to
       the rest of the phase.
-- [ ] **Q5 — lock-screen restyle `[s]`.** Item 13: the three black zone bars
-      (`CONDITIONS` / `AHEAD` / `SUN & MOON`, drawn at `DASH_Y_WX`,
-      `DASH_Y_AGENDA`, `DASH_Y_SUN`) go **grey**, and the zone headers stop being
-      bold — `lv_font_palm` already exists alongside `lv_font_palm_bold`, so the
-      un-bolding is a style swap, not a font build. **Scope confirmed 2026-09-21:
-      the lock screen only.** The inverted app title bar stays black for now;
-      whether it follows is a question for the glass, since grey-on-grey through a
-      resistive panel is exactly what an emulator judges badly. Pick the grey with
-      `COL_RULE` `0xC8C8C8` and `COL_DIM` `0x8C8C8C` in mind — P9's open `[d]` box
-      is already asking whether those two are distinguishable on the real panel,
-      and this adds a third grey to the same question.
-- [ ] **Q6 — Address: shorten the lookup box, add `New` `[s]`.** Item 14.
-- [ ] **Q7 — To Do quick-add `[s]`.** A static field pinned at the top with a
-      `New` button at its right: type, tap, a row appears. Item 15.
-- [ ] **Q8 — Memo Pad quick-add `[s]`.** The same control as Q7, and it should be
-      literally the same helper — two quick-add bars that merely resemble each
-      other will drift, which is the mistake P10 was built to avoid. Item 16.
+- [x] **Q5 — lock-screen restyle `[s]`.** DONE 2026-09-22. The three zone bars
+      are grey with plain black headings. **The grey could not come off the
+      canvas** — it is I1, two palette entries, and index 1 is already every
+      other mark on the screen (clock, moon, rain bars, shoulders, rules). So
+      the bar is a background on the heading label that was there anyway, which
+      costs nothing from the pool; `dbar()` had no other caller and is gone.
+      **It adds no third grey:** the fill is `COL_RULE`, the value the hairlines
+      already use, so P9's open `[d]` question about `COL_RULE` vs `COL_DIM` is
+      left exactly as wide as it was instead of being widened. Scope held to the
+      lock screen — the top status strip and the inverted app title bar stay
+      black. **`[d]`: grey-on-grey through a resistive panel is the one thing an
+      emulator judges badly, so the bar, the hairlines and the dimmed text want
+      looking at together on glass.**
+- [x] **Q6 — Address: shorten the lookup box, add `New` `[s]`.** DONE 2026-09-22.
+      Item 14, and it turned into the shared bar below rather than a one-off.
+- [x] **Q7 — To Do quick-add `[s]`.** DONE 2026-09-22. Item 15.
+- [x] **Q8 — Memo Pad quick-add `[s]`.** DONE 2026-09-22, through **literally
+      the same helper** as Q7 and Q6 (`list_top_bar` + `quick_add_cb` in
+      `ui.c`), which is what item 16 asked for. One predicate, `list_bar_app()`,
+      decides which lists get a bar, and the table's height is computed from the
+      same `LIST_BAR_H` the bar is built from, so the two cannot disagree.
+      What differs between the three is only what the FIELD means, and that is a
+      real difference rather than drift: on Address it is a filter (Palm's Look
+      Up) and `New` opens a blank form; on To Do and Memo it *is* the record.
+      Two decisions worth keeping: **`New` on an empty field opens the full
+      form** rather than doing nothing, so it is never a dead button; and the
+      record is filed under **the category the list is filtered to**, because a
+      to do that lands somewhere you cannot see is indistinguishable from an add
+      that failed.
+      **Sharing went one step too far and the gate caught it:** the quick-add
+      field inherited Look Up's 23-character cap from `g_lookup` and silently
+      clipped "Pick up the dry cleaning" to "…cleanin" — saved, listed, wrong,
+      and nothing on screen to say so. The cap is a parameter now.
 
 ---
 
