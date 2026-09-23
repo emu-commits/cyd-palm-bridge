@@ -6018,11 +6018,11 @@ static void dfill(int x,int y,int w,int h){
  * the background, which is why dash_lbl() grew a `rev` variant below. */
 static void drule(int x0,int x1,int y){ for(int x=x0;x<=x1;x++) dpx(x,y); }
 
-/* A section header: a filled strip the width of the zone. The label goes on top
- * in reverse. `h` is the bar height -- 13 clears the Palm font's cap height with
- * a pixel to spare top and bottom. */
+/* A section header's height: 13 clears the Palm font's cap height with a pixel
+ * to spare top and bottom. The strip itself used to be a dfill() on this canvas;
+ * since Q5 it is the heading label's own grey background (dash_zone_hdr), so
+ * only the measurement is still shared. */
 #define DASH_BAR_H 13
-static void dbar(int x0,int x1,int y){ dfill(x0,y,x1-x0+1,DASH_BAR_H); }
 
 /* The zone's left and right shoulders: a short vertical tick dropping from the
  * header bar, which is what makes a band read as a bounded block rather than as
@@ -6195,10 +6195,36 @@ static lv_obj_t *dash_lbl(int x,int y,const char *txt,int bold){
 
 /* The same label, recoloured to sit on top of a filled bar. Knocked out of the
  * ink rather than drawn in it -- which is the whole reason the section headings
- * read as headings and not as more data. */
+ * read as headings and not as more data. Still used by the top status strip,
+ * which stays reversed black. */
 static lv_obj_t *dash_lbl_rev(int x,int y,const char *txt){
     lv_obj_t *l = dash_lbl(x,y,txt,1);
     lv_obj_set_style_text_color(l, COL_BODY, 0);
+    return l;
+}
+
+/* ---- a zone heading (Q5) -------------------------------------------------
+ * The three zone bars are GREY with plain black text, not black with reversed
+ * bold: three solid black bars on a 240x320 panel read as three horizon lines
+ * and the eye lands on the furniture instead of the data.
+ *
+ * The grey CANNOT come off the canvas -- it is I1, two palette entries, and
+ * index 1 is already every other mark on the screen (clock, moon, rain bars,
+ * shoulders, rules). So the bar is a background on the heading label that was
+ * there anyway: full zone width, DASH_BAR_H tall, which costs NOTHING from the
+ * pool. dash_paint() no longer dfill()s under these three.
+ *
+ * The grey is COL_RULE, deliberately NOT a new one. The hairlines are already
+ * that value, so the screen gains a grey AREA without gaining a grey -- which
+ * matters because P9 is still asking whether COL_RULE and COL_DIM are
+ * distinguishable on the real panel, and a third grey would widen that question
+ * instead of leaving it alone. */
+static lv_obj_t *dash_zone_hdr(int y,const char *txt){
+    lv_obj_t *l = dash_lbl(DASH_MARGIN, y, txt, 0);     /* 0 = not bold */
+    lv_obj_set_size(l, DASH_CW - 2*DASH_MARGIN, DASH_BAR_H);
+    lv_obj_set_style_bg_color(l, COL_RULE, 0);
+    lv_obj_set_style_bg_opa(l, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_left(l, 4, 0);
     return l;
 }
 
@@ -6268,9 +6294,10 @@ static void dash_paint(void){
      * here, the word that sits on it is created there. */
     dfill(0,0,DASH_CW,DASH_TOPBAR_H);              /* status strip, reversed   */
 
-    dbar(DASH_MARGIN, DASH_CW-DASH_MARGIN, DASH_Y_WX);       /* CONDITIONS     */
-    dbar(DASH_MARGIN, DASH_CW-DASH_MARGIN, DASH_Y_AGENDA);   /* AHEAD          */
-    dbar(DASH_MARGIN, DASH_CW-DASH_MARGIN, DASH_Y_SUN);      /* SUN & MOON     */
+    /* The three zone headers are grey now (Q5) and carry their own background
+     * from dash_zone_hdr(), built once in ui_show_lock(). Nothing is filled
+     * here: a dfill() under a grey label would only show as a black fringe
+     * wherever the two disagree by a pixel. */
 
     /* Shoulders + a closing rule turn each strip into a bounded block. The
      * weather zone is the tall one, so it is the one that most needs them. */
@@ -6425,12 +6452,14 @@ void ui_show_lock(void){
         DASH_DOW_L[ti_wday(now)], month_long(localtime_mon(now)), localtime_mday(now));
       dash_lbl(10,90,db,0); }
 
-    /* ---- the zone headings, sitting on the bars dash_paint() fills ----
-     * Reversed out of the ink. These are the only static furniture labels on
-     * the screen, and their y values must track the DASH_Y_* the bars use. */
-    dash_lbl_rev(DASH_MARGIN+4, DASH_Y_WX,     "CONDITIONS");
-    dash_lbl_rev(DASH_MARGIN+4, DASH_Y_AGENDA, "AHEAD");
-    dash_lbl_rev(DASH_MARGIN+4, DASH_Y_SUN,    "SUN & MOON");
+    /* ---- the zone headings (Q5) ----
+     * Each one IS its own grey bar -- see dash_zone_hdr(). They are the only
+     * static furniture labels on the screen, and their y values are the same
+     * DASH_Y_* the shoulders and closing rules are drawn from, so the zone
+     * still lines up without the two having to agree twice. */
+    dash_zone_hdr(DASH_Y_WX,     "CONDITIONS");
+    dash_zone_hdr(DASH_Y_AGENDA, "AHEAD");
+    dash_zone_hdr(DASH_Y_SUN,    "SUN & MOON");
 
 
     /* ---- weather ---- */
