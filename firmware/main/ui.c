@@ -313,6 +313,10 @@ static void free_finds(void);
 static void gref_free(void);        /* Q4: the stroke sheet's heap canvas */
 static void wifi_scan_kill(void);   /* W5: the scan poll timer (see the wizard) */
 static lv_obj_t *g_listtbl;           /* current record table (partial rebuild) */
+/* The list top bar's field (list_top_bar). Kept in its own handle rather than
+ * read back off active_ta: active_ta is "where Graffiti writes", which a modal
+ * can legitimately move, and quick_add_cb must always mean THIS field. */
+static lv_obj_t *g_barta;
 static lv_obj_t *g_findtbl;           /* Find results table                     */
 /* Graffiti input hooks (the trainer). graf_char_hook: a recognized character goes
  * here instead of the active textarea (drill mode). graf_capture_hook: runs on
@@ -375,6 +379,7 @@ static void games_pause_clocks(void);
 static void kill_kb(void){
     games_pause_clocks();        /* BEFORE the active flags are cleared below */
     g_form=NULL; active_ta=NULL; edit_cat_lbl=NULL; g_listtbl=NULL; g_findtbl=NULL;
+    g_barta=NULL;
     graf_char_hook=NULL; graf_capture_hook=NULL;
     g_trainer_open=0; g_kana_open=0; g_ms_active=0; g_sd_active=0; g_zp_active=0;
     g_co_open=0; g_co_view=CO_VIEW_OTHER; g_co_reflect=0;
@@ -699,13 +704,25 @@ static void tbl_click_cb(lv_event_t *e){
  * handler always reads CELL_NONE and does nothing. VALUE_CHANGED is sent only on
  * a genuine tap (not a scroll drag), so it behaves like a click for our purpose. */
 
+/* Which apps get a top bar (see list_top_bar below), and how tall it is. One
+ * predicate and one number, shared by the builder and by the table sizing here,
+ * so the two can never disagree about whether there is a strip to leave room
+ * for. */
+#define LIST_BAR_H 30
+/* The longest record the quick-add bar will make. Well under the 256 a Todo
+ * description or a memo holds, because this is the one-line bar, not the form --
+ * anything longer wants the form, and New on an empty field opens it. */
+#define QUICK_ADD_MAX 128
+static int list_bar_app(const AppDef *ad){
+    return ad && (ad->app == APP_ADDR || ad->app == APP_TODO || ad->app == APP_MEMO);
+}
+
 /* (re)build just the record table for cur_app. Callers set the title / any
  * filter bar first; the Address Look Up field calls this on each keystroke. */
 static void build_record_table(void){
     free_rowuids();
     if(g_listtbl){ lv_obj_del(g_listtbl); g_listtbl=NULL; }
     int todo = (cur_app && cur_app->app==APP_TODO);
-    int addr = (cur_app && cur_app->app==APP_ADDR);
 
     int n = 0;
     cur_app->iter(tbl_count_cb, &n);          /* pass 1: count (filtered) */
@@ -721,9 +738,15 @@ static void build_record_table(void){
               lv_table_set_column_width(t, 1, LCD_W-46-LIST_DUE_W);
               lv_table_set_column_width(t, 2, LIST_DUE_W); }
     else    { lv_table_set_column_width(t, 0, LCD_W-8); }
-    /* Address reserves the top strip for the Look Up field; others fill content */
-    if(addr){ lv_obj_set_size(t, lv_pct(100), lv_pct(84)); lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, 0); }
-    else    { lv_obj_set_size(t, lv_pct(100), lv_pct(100)); }
+    /* Address, To Do and Memo all reserve the top strip for a bar (Look Up, or
+     * quick add); the Date Book list fills the content area. The height is in
+     * pixels rather than the percentage this used to be, because the bar's
+     * height is a fixed number and the table's job is "whatever is left" --
+     * lv_pct(84) only ever happened to equal that. */
+    if(list_bar_app(cur_app)){
+        lv_obj_set_size(t, lv_pct(100), (PDA_H - TITLE_H) - LIST_BAR_H);
+        lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, 0);
+    } else { lv_obj_set_size(t, lv_pct(100), lv_pct(100)); }
     lv_obj_add_event_cb(t, tbl_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     /* An empty list still has To Do's 34px box column, so the message has to be
@@ -770,6 +793,96 @@ static void lookup_ta_cb(lv_event_t *e){
     build_record_table();
 }
 
+/* ---- the record list's top bar (Q6, Q7, Q8) ------------------------------
+ * [ word ][ field ][ New ] across the top of a list, and ONE builder for all
+ * three apps that have one. Q8 asked for that explicitly and it is worth
+ * saying why: two bars that merely resemble each other drift, one gains a
+ * couple of pixels of padding, and a year later nobody can tell which is the
+ * right one. P10 was built to stop exactly that.
+ *
+ * The bar is the same everywhere; what differs is what the FIELD means, and
+ * that is a real difference, not drift:
+ *   Address -- the field is a FILTER (Palm's Look Up), so typing narrows the
+ *              list and New opens the blank form.
+ *   To Do   -- the field is the RECORD. Type, tap New, a row appears.
+ *   Memo    -- the same, via literally the same callback.
+ *
+ * Costs three pool objects per list (label, textarea, button+its label). The
+ * Address list already paid for two of them. */
+#define LIST_BAR_LBLW 60   /* the word's slot -- fixed, so the fields line up */
+#define LIST_BAR_NEWW 46   /* the New button                                  */
+
+/* How much the bar's field holds. These are NOT the same number and sharing one
+ * was a real bug: the quick-add bar inherited Look Up's 23 and silently clipped
+ * "Pick up the dry cleaning" to "...cleanin" -- saved, listed, and wrong, with
+ * nothing on screen to say so. A filter is bounded by the buffer it mirrors into
+ * (g_lookup); a record is bounded by what quick_add_cb can carry. */
+#define LIST_BAR_FIND_MAX ((int)sizeof g_lookup - 1)
+#define LIST_BAR_ADD_MAX  (QUICK_ADD_MAX - 1)
+
+static lv_obj_t *list_top_bar(const char *word, const char *seed, int maxlen,
+                              lv_event_cb_t on_type, lv_event_cb_t on_new){
+    lv_obj_t *l = lv_label_create(content);
+    lv_label_set_text(l, word);
+    lv_obj_set_pos(l, 4, 8);
+
+    lv_obj_t *nb = lv_button_create(content);
+    lv_obj_set_size(nb, LIST_BAR_NEWW, 28);
+    lv_obj_align(nb, LV_ALIGN_TOP_RIGHT, -2, 1);
+    lv_obj_t *nl = lv_label_create(nb); lv_label_set_text(nl, "New"); lv_obj_center(nl);
+    lv_obj_add_event_cb(nb, on_new, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *ta = lv_textarea_create(content);
+    lv_textarea_set_one_line(ta, true);
+    lv_textarea_set_max_length(ta, maxlen);
+    lv_textarea_set_text(ta, seed);       /* set BEFORE the cb so it doesn't fire */
+    /* From the word's slot to the button, so the field shrinks by exactly what
+     * the button takes -- Q6's "shorten the lookup box" is this subtraction. */
+    lv_obj_set_width(ta, LCD_W - LIST_BAR_LBLW - LIST_BAR_NEWW - 10);
+    lv_obj_set_pos(ta, LIST_BAR_LBLW, 2);
+    if(on_type) lv_obj_add_event_cb(ta, on_type, LV_EVENT_VALUE_CHANGED, NULL);
+    g_barta = ta;
+    return ta;
+}
+
+/* Quick add (Q7 and Q8): make a record out of whatever is in the field, clear
+ * it, and rebuild the list so the new row is visible immediately. To Do and
+ * Memo share this body rather than having one each.
+ *
+ * An EMPTY field opens the full form instead of doing nothing -- New is never
+ * a dead button, and the long way in is still one tap from here.
+ *
+ * The record is filed under the category the list is FILTERED to, not always
+ * Unfiled: adding a to do while looking at one category and having it land
+ * somewhere you cannot see is indistinguishable from the add having failed. */
+static void quick_add_cb(lv_event_t *e){ (void)e;
+    if(!cur_app || !g_barta) return;
+    char txt[QUICK_ADD_MAX]; snprintf(txt, sizeof txt, "%s", lv_textarea_get_text(g_barta));
+    /* trim -- a field holding only spaces is an empty field */
+    int a = 0, b = (int)strlen(txt);
+    while(txt[a] == ' ') a++;
+    while(b > a && txt[b-1] == ' ') b--;
+    txt[b] = 0;
+    if(!txt[a]){ show_edit(0); return; }              /* nothing typed -> the form */
+
+    int rc  = data_get_category();
+    int cat = rc < 0 ? 0 : rc;                        /* All -> Unfiled, as show_edit does */
+    if(cur_app->app == APP_TODO){
+        Todo t; memset(&t, 0, sizeof t);
+        t.priority = 1;                               /* Palm's default for a new to do */
+        snprintf(t.description, sizeof t.description, "%s", txt + a);
+        data_save_todo(0, cat, &t);
+    } else {
+        data_save_memo(0, cat, txt + a);
+    }
+    lv_textarea_set_text(g_barta, "");
+    build_record_table();
+}
+
+/* New on the Address bar: the blank edit form. The field there is a filter, so
+ * there is nothing to seed the record with. */
+static void list_new_cb(lv_event_t *e){ (void)e; if(cur_app) show_edit(0); }
+
 /* scrolling list of records for one app (virtualized lv_table + per-app lens) */
 static void list_view(const AppDef *ad){
     kill_kb();
@@ -779,19 +892,17 @@ static void list_view(const AppDef *ad){
     g_listtbl = NULL;
     lv_label_set_text(title_lbl, ad->name);
 
+    /* The top bar. Graffiti writes into whichever field the bar put there --
+     * the Look Up filter on Address, the new record on To Do and Memo. */
     if(ad->app == APP_ADDR){
-        lv_obj_t *lb = lv_label_create(content);
-        lv_label_set_text(lb, "Look Up:"); lv_obj_set_pos(lb, 4, 8);
-        lv_obj_t *ta = lv_textarea_create(content);
-        lv_textarea_set_one_line(ta, true);
-        lv_textarea_set_max_length(ta, sizeof g_lookup - 1);
-        lv_textarea_set_text(ta, g_lookup);           /* set BEFORE the cb so it doesn't fire */
-        lv_obj_set_width(ta, LCD_W - 72);
-        lv_obj_set_pos(ta, 66, 2);
-        lv_obj_add_event_cb(ta, lookup_ta_cb, LV_EVENT_VALUE_CHANGED, NULL);
-        active_ta = ta;                                /* Graffiti types into Look Up */
+        active_ta = list_top_bar("Look Up:", g_lookup, LIST_BAR_FIND_MAX,
+                                 lookup_ta_cb, list_new_cb);
     } else {
         g_lookup[0] = 0;                               /* filter only applies to Address */
+        if(ad->app == APP_TODO)
+            active_ta = list_top_bar("To Do:", "", LIST_BAR_ADD_MAX, NULL, quick_add_cb);
+        else if(ad->app == APP_MEMO)
+            active_ta = list_top_bar("Memo:",  "", LIST_BAR_ADD_MAX, NULL, quick_add_cb);
     }
 
     build_record_table();
@@ -6018,11 +6129,11 @@ static void dfill(int x,int y,int w,int h){
  * the background, which is why dash_lbl() grew a `rev` variant below. */
 static void drule(int x0,int x1,int y){ for(int x=x0;x<=x1;x++) dpx(x,y); }
 
-/* A section header: a filled strip the width of the zone. The label goes on top
- * in reverse. `h` is the bar height -- 13 clears the Palm font's cap height with
- * a pixel to spare top and bottom. */
+/* A section header's height: 13 clears the Palm font's cap height with a pixel
+ * to spare top and bottom. The strip itself used to be a dfill() on this canvas;
+ * since Q5 it is the heading label's own grey background (dash_zone_hdr), so
+ * only the measurement is still shared. */
 #define DASH_BAR_H 13
-static void dbar(int x0,int x1,int y){ dfill(x0,y,x1-x0+1,DASH_BAR_H); }
 
 /* The zone's left and right shoulders: a short vertical tick dropping from the
  * header bar, which is what makes a band read as a bounded block rather than as
@@ -6195,10 +6306,36 @@ static lv_obj_t *dash_lbl(int x,int y,const char *txt,int bold){
 
 /* The same label, recoloured to sit on top of a filled bar. Knocked out of the
  * ink rather than drawn in it -- which is the whole reason the section headings
- * read as headings and not as more data. */
+ * read as headings and not as more data. Still used by the top status strip,
+ * which stays reversed black. */
 static lv_obj_t *dash_lbl_rev(int x,int y,const char *txt){
     lv_obj_t *l = dash_lbl(x,y,txt,1);
     lv_obj_set_style_text_color(l, COL_BODY, 0);
+    return l;
+}
+
+/* ---- a zone heading (Q5) -------------------------------------------------
+ * The three zone bars are GREY with plain black text, not black with reversed
+ * bold: three solid black bars on a 240x320 panel read as three horizon lines
+ * and the eye lands on the furniture instead of the data.
+ *
+ * The grey CANNOT come off the canvas -- it is I1, two palette entries, and
+ * index 1 is already every other mark on the screen (clock, moon, rain bars,
+ * shoulders, rules). So the bar is a background on the heading label that was
+ * there anyway: full zone width, DASH_BAR_H tall, which costs NOTHING from the
+ * pool. dash_paint() no longer dfill()s under these three.
+ *
+ * The grey is COL_RULE, deliberately NOT a new one. The hairlines are already
+ * that value, so the screen gains a grey AREA without gaining a grey -- which
+ * matters because P9 is still asking whether COL_RULE and COL_DIM are
+ * distinguishable on the real panel, and a third grey would widen that question
+ * instead of leaving it alone. */
+static lv_obj_t *dash_zone_hdr(int y,const char *txt){
+    lv_obj_t *l = dash_lbl(DASH_MARGIN, y, txt, 0);     /* 0 = not bold */
+    lv_obj_set_size(l, DASH_CW - 2*DASH_MARGIN, DASH_BAR_H);
+    lv_obj_set_style_bg_color(l, COL_RULE, 0);
+    lv_obj_set_style_bg_opa(l, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_left(l, 4, 0);
     return l;
 }
 
@@ -6268,9 +6405,10 @@ static void dash_paint(void){
      * here, the word that sits on it is created there. */
     dfill(0,0,DASH_CW,DASH_TOPBAR_H);              /* status strip, reversed   */
 
-    dbar(DASH_MARGIN, DASH_CW-DASH_MARGIN, DASH_Y_WX);       /* CONDITIONS     */
-    dbar(DASH_MARGIN, DASH_CW-DASH_MARGIN, DASH_Y_AGENDA);   /* AHEAD          */
-    dbar(DASH_MARGIN, DASH_CW-DASH_MARGIN, DASH_Y_SUN);      /* SUN & MOON     */
+    /* The three zone headers are grey now (Q5) and carry their own background
+     * from dash_zone_hdr(), built once in ui_show_lock(). Nothing is filled
+     * here: a dfill() under a grey label would only show as a black fringe
+     * wherever the two disagree by a pixel. */
 
     /* Shoulders + a closing rule turn each strip into a bounded block. The
      * weather zone is the tall one, so it is the one that most needs them. */
@@ -6425,12 +6563,14 @@ void ui_show_lock(void){
         DASH_DOW_L[ti_wday(now)], month_long(localtime_mon(now)), localtime_mday(now));
       dash_lbl(10,90,db,0); }
 
-    /* ---- the zone headings, sitting on the bars dash_paint() fills ----
-     * Reversed out of the ink. These are the only static furniture labels on
-     * the screen, and their y values must track the DASH_Y_* the bars use. */
-    dash_lbl_rev(DASH_MARGIN+4, DASH_Y_WX,     "CONDITIONS");
-    dash_lbl_rev(DASH_MARGIN+4, DASH_Y_AGENDA, "AHEAD");
-    dash_lbl_rev(DASH_MARGIN+4, DASH_Y_SUN,    "SUN & MOON");
+    /* ---- the zone headings (Q5) ----
+     * Each one IS its own grey bar -- see dash_zone_hdr(). They are the only
+     * static furniture labels on the screen, and their y values are the same
+     * DASH_Y_* the shoulders and closing rules are drawn from, so the zone
+     * still lines up without the two having to agree twice. */
+    dash_zone_hdr(DASH_Y_WX,     "CONDITIONS");
+    dash_zone_hdr(DASH_Y_AGENDA, "AHEAD");
+    dash_zone_hdr(DASH_Y_SUN,    "SUN & MOON");
 
 
     /* ---- weather ---- */
@@ -8079,6 +8219,22 @@ static int         g_co_flash_left;      /* phases still to run                 
  * wake-poll leave it alone -- otherwise a tap during a dark phase reads as a wake
  * and the two fight over the same LEDC duty. */
 int ui_owns_backlight(void){ return g_co_flash != NULL; }
+
+#ifdef UI_DEVTOOLS
+/* See ui.h: let the smoke script write into the focused field. One character at
+ * a time through lv_textarea_add_char() -- literally the call the Graffiti
+ * recogniser makes once it has settled on a letter (graf_commit, below). Going
+ * character by character rather than setting the whole string is the point: the
+ * field's VALUE_CHANGED fires per keystroke exactly as it does on the glass,
+ * which is what makes the Address Look Up filter testable and not just the
+ * quick-add bars. */
+void ui_test_type(const char *text){
+    if(!active_ta) return;
+    if(!text){ lv_textarea_set_text(active_ta, ""); return; }   /* clear */
+    for(const unsigned char *p = (const unsigned char *)text; *p; p++)
+        lv_textarea_add_char(active_ta, (uint32_t)*p);
+}
+#endif
 
 static void co_flash_stop(void){
     if(g_co_flash){ lv_timer_delete(g_co_flash); g_co_flash = NULL; }

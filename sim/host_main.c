@@ -137,6 +137,17 @@ int main(int argc, char **argv){
             sim_touch(x, y, 1); sim_step(80);
             sim_touch(x, y, 0); sim_step(200);
         }
+        /* k <text> -- write into the focused field, as Graffiti would. The
+         * script can tap and drag but it could not WRITE, so any screen whose
+         * behaviour depends on what is IN a field (the Address Look Up filter,
+         * the To Do / Memo quick-add bars) could only ever be photographed
+         * empty. Takes the rest of the line, spaces and all. */
+        else if(line[0] == 'k' && (line[1] == ' ' || line[1] == '\n' || !line[1])){
+            char *t = line[1] == ' ' ? line + 2 : NULL;
+            if(t){ char *nl = strchr(t, '\n'); if(nl) *nl = 0; }
+            ui_test_type(t);            /* NULL (a bare `k`) empties the field */
+            sim_step(60);
+        }
         else if(sscanf(line, "s %127s", name) == 1)   { if(shot(name)) rc = 1; }
         else if(line[0] == 'q') break;
         else { fprintf(stderr, "script: bad line: %s", line); rc = 1; }

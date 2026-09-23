@@ -215,6 +215,21 @@ t 300
 c 120 55
 t 400
 s address_list
+# Q6: the Look Up box is shorter now to make room for New at its right. Type a
+# prefix and the list must narrow -- the filter runs off VALUE_CHANGED, so this
+# also proves `k` is going through the same per-keystroke path Graffiti does.
+# "Ch" matches exactly one seeded contact, so the shot proves it filters DOWN TO
+# something; an empty result would look the same whether the filter worked or
+# the table simply failed to build.
+k Ch
+t 300
+s q6_lookup_filtered
+# A bare `k` empties the field, so the rest of the Address walk sees a full
+# list. The filter is deliberately sticky across app opens, so leaving it set
+# here would quietly change every later shot.
+k
+t 300
+s q6_lookup_ready
 # C4 Edit Categories: category trigger -> picker -> "Edit Categories" tail row ->
 # New -> tap keyboard (one key) -> Save (writes AppInfo) -> Done. A pool-safe
 # editor (list + one textarea + one button-matrix); a regression here would HANG.
@@ -288,6 +303,15 @@ s launcher_after_about
 c 195 56
 t 400
 s todo_list
+# Q7 quick add: the same helper as Q8's, so this proves the shared one and not a
+# second copy of it. A to do quick-added while a category filter is on must land
+# in THAT category -- filing it under Unfiled would make it vanish from the list
+# that was open, which is indistinguishable from the add having failed.
+k Call the dentist
+t 200
+c 215 40
+t 500
+s q7_todo_added
 # To Do due-date picker: open the first record -> Edit -> the Due trigger -> pick
 # a day off the calendar. This walk exists because tapping a calendar day used to
 # SEGFAULT here (exit 139, so this gate would have caught it): the calendar's
@@ -295,7 +319,15 @@ s todo_list
 # button matrix and lv_calendar_get_pressed_date() cast it to a calendar. The
 # shot is the point -- due_picked must read a real date (9/14/2026, the Monday
 # tapped below), not "No Date" and not a junk one. See due_cal_cb.
-c 120 40
+#
+# y=64 is the FIRST ROW, which the Q7 bar pushed down by LIST_BAR_H. This tap
+# was y=40 and it silently became a tap on the quick-add field: no record
+# opened, the next two taps landed on the list and on a detail button, and
+# due_popup.ppm became a picture of a To Do detail with the run still green.
+# The row it opens is now "Call the dentist" -- the record quick-added six lines
+# up -- which is the better target anyway: it proves a quick-added record is a
+# full record and not a stub that cannot be edited.
+c 120 64
 t 400
 c 200 186
 t 500
@@ -317,6 +349,16 @@ t 300
 c 40 110
 t 400
 s memo_list
+# Q8 quick add: write into the bar, tap New, and the row must APPEAR. This is
+# the shot that matters -- a bar that renders but does not save looks identical
+# to one that works until someone taps it on glass. `k` types into the focused
+# field one character at a time, the way the recogniser does (host_main.c).
+k Pick up the dry cleaning
+t 200
+s q8_memo_typed
+c 215 40
+t 500
+s q8_memo_added
 c 18 225
 t 300
 # HotSync -- launcher row 2 col 2, back in the middle where it is findable

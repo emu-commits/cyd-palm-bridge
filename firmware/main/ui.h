@@ -17,4 +17,19 @@ void ui_show_lock(void);
  * during a dark phase is not mistaken for a wake. */
 int  ui_owns_backlight(void);
 
+#ifdef UI_DEVTOOLS
+/* Put text into the focused field, as if it had been written in Graffiti.
+ * A NULL `text` empties the field instead, which the script needs in order to
+ * leave a filter box the way it found it.
+ *
+ * The smoke script can tap and drag but it cannot WRITE, and a quick-add bar
+ * whose whole point is "type, tap New, a row appears" is untestable without
+ * this -- the gate could only ever photograph the empty bar and call it done.
+ * Stroking the letters through the recogniser instead would be testing the
+ * recogniser, which has its own gate.
+ *
+ * Simulator only: the firmware never defines UI_DEVTOOLS. */
+void ui_test_type(const char *text);
+#endif
+
 #endif
