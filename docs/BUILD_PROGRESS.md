@@ -16,6 +16,30 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-23 — flash from the browser
+
+**The Pages site has an Install page** (`sim/web/flash.html`, linked from the
+emulator) with an ESP Web Tools button (pinned at 10.4.0). CI's firmware job now
+packages what it just built (`tools/package_firmware.py`): a `manifest.json` and
+the three images, with offsets read from the build's `flasher_args.json`, the
+file `idf.py flash` uses. The deploy job puts the emulator and the firmware
+together into one Pages artifact. A `v*` tag creates a GitHub release with one
+merged image for `esptool.py write_flash 0x0`.
+
+**Three parts, not one image, because of NVS.** The passwords live in NVS at
+0x9000, between the partition table and the app. `merge_bin` pads that gap with
+0xFF, so a merged image erases them on every update. The manifest writes the
+three parts and skips the gap. The packager refuses any part that overlaps NVS.
+That refusal was tested by moving the partition table onto 0x9000: it fails.
+The merged image is only for releases, where it is a clean install.
+
+**CI's build is the device's build.** CI never sees the local `sdkconfig`, so a
+clean worktree was built from `sdkconfig.defaults` alone and diffed against the
+bench `sdkconfig`: no `CONFIG_` line differs. The packaged parts, written with
+esptool at the manifest's offsets and without an erase, boot cleanly on the bench.
+The clock and touch calibration come back from NVS, so an update keeps it. The
+browser path itself (Web Serial, esptool-js) still needs a person at Chrome.
+
 ### 2026-09-23 — bench follow-ups, and the robustness list worked through
 
 **Fast typing lost keys, and the cause was the sample rate.** The panel was read

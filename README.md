@@ -15,13 +15,16 @@
 - An **iCloud account** with an **app-specific password** — create one at
   appleid.apple.com → *Sign-In & Security → App-Specific Passwords* (needs 2FA).
   It's scoped and revocable, and never exposes your main Apple ID password.
-- To build & flash: **ESP-IDF v5.5** + a USB cable. *(There's no prebuilt binary
-  yet — you flash it yourself.)*
+- A USB cable, and **Chrome or Edge** to install it from the browser at
+  <https://emu-commits.github.io/cyd-palm-bridge/flash.html>. (Or build it
+  yourself with **ESP-IDF v5.5**.)
 
 ## Set it up
 
-1. **Build & flash the firmware** — see
-   [Build + flash the firmware](#build--flash-the-firmware) below. On first boot
+1. **Install the firmware** from
+   [the Install page](https://emu-commits.github.io/cyd-palm-bridge/flash.html),
+   or build and flash it yourself (see
+   [Build + flash the firmware](#build--flash-the-firmware) below). On first boot
    the device seeds a few demo records so the apps aren't empty.
 2. **Make your config** — copy [`firmware/config.ini.example`](firmware/config.ini.example)
    onto the SD card as `config.ini` and edit the Wi-Fi + iCloud lines (SSID,
