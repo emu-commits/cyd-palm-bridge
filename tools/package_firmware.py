@@ -35,6 +35,7 @@ def main():
     if len(sys.argv) != 4:
         sys.exit(__doc__)
     build, out, version = sys.argv[1:]
+    build, out = os.path.abspath(build), os.path.abspath(out)   # merge_bin runs in build/
     with open(os.path.join(build, 'flasher_args.json')) as f:
         fa = json.load(f)
     chip = fa['extra_esptool_args']['chip']
