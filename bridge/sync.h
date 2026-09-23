@@ -15,6 +15,14 @@ typedef struct {
     int pushNew, pushMod, pushDel;
     int pullNew, pullMod, pullDel;
     int conflicts, unchanged;
+    /* Deleted on BOTH sides since the last sync: the map entry is simply
+     * dropped and NO NETWORK CALL IS MADE. It used to be counted as a pushDel,
+     * so the status line reported deletions that were never sent -- "-3 push"
+     * for three records the server had already lost. It is its own number
+     * because it is neither a push nor "unchanged": nothing was transmitted,
+     * and the record is gone. Deliberately outside the ops sums the gates use
+     * for idempotency, since no operation happened. */
+    int bothDel;
 } SyncStats;
 
 /* full-sync primitives (initial seed / debugging). kind: KIND_CAL/CARD/TODO. */

@@ -47,5 +47,6 @@
 /sim/build/
 /break_test
 /geoip_test
+/massdel
 /toobig
 __pycache__/

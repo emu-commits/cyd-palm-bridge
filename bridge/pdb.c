@@ -21,23 +21,53 @@
  * PSRAM. Real Palm PIM databases are a few hundred to a few thousand records. */
 #define PDB_MAX_RECS 20000
 
+/* ---- failing loudly ------------------------------------------------------
+ * pdb_read returns -1 for every kind of failure, and NEARLY EVERY CALLER IN
+ * THIS TREE IGNORES THE RETURN VALUE -- they hand in a callback and read what
+ * lands. That turns "the card is unreadable" into "the database is empty", and
+ * an empty local database is precisely what the sync engine pushes to the
+ * server AS DELETIONS. The mass-delete guard catches the worst of it, but a
+ * guard that fires is the second line of defence; this is the first.
+ *
+ * So every exit from the read path now says which one it was, once, on stderr
+ * (the UART on device). Nothing else changes: the return value is the same, and
+ * a caller that already checks it keeps working. */
+static int pdb_fail(FILE *f, const char *path, const char *why){
+    if(f) fclose(f);
+    fprintf(stderr, "[pdb] %s UNREADABLE: %s. Treat this as \"cannot tell\", "
+                    "NOT as \"no records\".\n", path, why);
+    return -1;
+}
+
 int pdb_read(const char *path, pdb_rec_cb cb, void *ctx){
     FILE *f = fopen(path, "rb");
+    /* A missing file is the one quiet case, and deliberately: first boot has no
+     * databases yet and data_seed_if_empty() asks about each of them in turn. */
     if(!f){ return -1; }
     uint8_t H[PDB_HDR];
-    if(fread(H,1,PDB_HDR,f)!=PDB_HDR){ fclose(f); return -1; }
+    if(fread(H,1,PDB_HDR,f)!=PDB_HDR) return pdb_fail(f,path,"shorter than a 78-byte PDB header");
     int nrec = be16(H + 0x4C);
-    if(nrec < 0 || nrec > PDB_MAX_RECS){ fclose(f); return -1; }
+    if(nrec < 0) return pdb_fail(f,path,"header declares a negative record count");
+    if(nrec > PDB_MAX_RECS){
+        /* Not a corruption check that can be relaxed: the index alloc below is
+         * 9 bytes a record, and this device has no PSRAM. Say the number. */
+        fprintf(stderr,"[pdb] %s UNREADABLE: header declares %d records, over the "
+                       "%d cap. Treat this as \"cannot tell\", NOT as \"no records\".\n",
+                path, nrec, PDB_MAX_RECS);
+        fclose(f); return -1;
+    }
 
     /* read the whole record index first (8 bytes each is tiny) so we can
      * compute each record's length from the next offset / EOF.             */
     uint32_t *off = malloc(sizeof(uint32_t)*(nrec+1));
     uint8_t  *att = malloc((size_t)nrec+1);
     uint32_t *uid = malloc(sizeof(uint32_t)*(nrec+1));
-    if(!off||!att||!uid){ free(off);free(att);free(uid); fclose(f); return -1; }
+    if(!off||!att||!uid){ free(off);free(att);free(uid);
+        return pdb_fail(f,path,"out of memory for the record index"); }
     for(int i=0;i<nrec;i++){
         uint8_t e[PDB_ENTRY];
-        if(fread(e,1,PDB_ENTRY,f)!=PDB_ENTRY){ free(off);free(att);free(uid); fclose(f); return -1; }
+        if(fread(e,1,PDB_ENTRY,f)!=PDB_ENTRY){ free(off);free(att);free(uid);
+            return pdb_fail(f,path,"record index is truncated"); }
         off[i]=be32(e);
         att[i]=e[4];
         uid[i]=((uint32_t)e[5]<<16)|((uint32_t)e[6]<<8)|e[7];
@@ -47,16 +77,27 @@ int pdb_read(const char *path, pdb_rec_cb cb, void *ctx){
 
     uint8_t buf[PALM_REC_MAX];
     int count=0;
+    int shortRead=0;
     for(int i=0;i<nrec;i++){
         long len = (long)off[i+1]-(long)off[i];
         if(len<0) len=0;
         if(len>PALM_REC_MAX) len=PALM_REC_MAX;
         fseek(f,off[i],SEEK_SET);
-        if(len && fread(buf,1,(size_t)len,f)!=(size_t)len){ break; }
+        if(len && fread(buf,1,(size_t)len,f)!=(size_t)len){ shortRead=1; break; }
         PdbRec rec = { .attr=att[i], .uniqueID=uid[i], .data=buf, .len=(int)len };
         count++;
         if(cb && cb(&rec,i,ctx)) break;
     }
+    /* A file that stops mid-record returns a POSITIVE partial count, which no
+     * caller can distinguish from a genuinely shorter database -- and the sync
+     * engine would read the difference as records the user deleted. It still
+     * returns the partial (some callers only display), but it does not do it
+     * silently. app_main.c's boot-time "DATABASE IS SHORT" check exists for the
+     * same reason and compares this count against the header. */
+    if(shortRead)
+        fprintf(stderr,"[pdb] %s IS SHORT: header declares %d records, only %d are "
+                       "readable. The %d missing are NOT deletions.\n",
+                path, nrec, count, nrec-count);
     free(off);free(att);free(uid);
     fclose(f);
     return count;
@@ -75,7 +116,11 @@ int pdb_read_one(const char *path, int want, uint8_t *buf, int cap,
     uint8_t H[PDB_HDR];
     if(fread(H,1,PDB_HDR,f)!=PDB_HDR){ fclose(f); return -1; }
     int nrec = be16(H + 0x4C);
-    if(nrec > PDB_MAX_RECS || want >= nrec){ fclose(f); return -1; }
+    /* `want >= nrec` is an ordinary end-of-database answer and stays quiet; the
+     * cap is a broken file and says so, for the reason pdb_fail() explains. */
+    if(nrec > PDB_MAX_RECS)
+        return pdb_fail(f,path,"header declares more records than the cap allows");
+    if(want >= nrec){ fclose(f); return -1; }
 
     /* we only need offsets[want] and offsets[want+1] (or EOF). Read the index
      * up to want+1; the entry for `want` also carries attr + uid.            */

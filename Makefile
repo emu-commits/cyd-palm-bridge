@@ -5,7 +5,7 @@ CORE    = bridge/pdb.c bridge/datebook.c bridge/address.c bridge/ical.c bridge/v
           bridge/find.c bridge/dav_break.c
 
 all: roundtrip bridge_cli incremental synctoken category bigsync multiapp \
-     uidmatch idempotent streamparse find_test calc_test config_test rss_test news_test wx_test \
+     uidmatch idempotent massdel streamparse find_test calc_test config_test rss_test news_test wx_test \
      feeds_test break_test geoip_test toobig
 
 dirs:
@@ -18,6 +18,13 @@ bridge_cli: bridge/main.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
 incremental: tests/incremental.c bridge/dav.c bridge/sync.c $(CORE) | dirs
+	$(CC) $(CFLAGS) -o $@ $^
+
+# the mass-delete guard's POSITIVE path -- it fires, deletions are held back,
+# and the next sync heals the local database. Plus the negative control (a small
+# deletion must still push) without which a guard stuck on would pass. The
+# other gates covered this only by staying silent, which is not coverage.
+massdel: tests/massdel.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
 synctoken: tests/synctoken.c bridge/dav.c bridge/sync.c $(CORE) | dirs
@@ -135,7 +142,8 @@ mtest: multiapp
 
 clean:
 	rm -f roundtrip bridge_cli incremental synctoken category bigsync multiapp \
-	      uidmatch idempotent streamparse find_test calc_test config_test fuzz_test \
-	      rss_test rss_asan news_test feeds_test pdb/_rt_*.pdb
+	      uidmatch idempotent massdel streamparse find_test calc_test config_test fuzz_test \
+	      rss_test rss_asan news_test feeds_test break_test geoip_test toobig \
+	      pdb/_rt_*.pdb
 
 .PHONY: all dirs test itest stest ctest btest mtest clean
