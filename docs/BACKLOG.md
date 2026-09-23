@@ -17,19 +17,33 @@ mostly away from the bench via the browser simulator).
 
 ---
 
-## RESUME HERE — state at 2026-09-22 (end of session)
+## RESUME HERE — state at 2026-09-22 (second session)
 
-**ALL OF IT IS MERGED TO `main`** (PR #59, 2026-09-22, 27 commits) **and the web
-emulator is redeployed from it.** `feat/settings-screen` is merged; start the
-next group on a fresh branch off `main`.
+**PR #59 (W1–W10, Q1–Q4) IS MERGED TO `main` and the web emulator is redeployed
+from it.** The work after it is on **`feat/q5-q8-quick-entry`**: Q5–Q8 and
+tidy-ups 14–17.
 
-**THE W PHASE IS DONE (`W1`–`W10`) AND `Q1`–`Q4` ARE DONE.** Settings is a
-nine-tile grid, every tile is a real screen, the Assistant explains each one from
-the Graffiti strip, Wi-Fi remembers four networks and finds them by scanning, the
-clock can be set by hand, Accounts discovers collections by name, a sync no
-longer implies iCloud, **the device works out where it is instead of asking**,
-the Date Book's date and time are picked rather than typed, and every Graffiti
-stroke is on one sheet. **`Q5`–`Q8` are what is left of the phase.**
+**THE W PHASE AND THE Q PHASE ARE BOTH CODE COMPLETE (`W1`–`W10`, `Q1`–`Q8`).**
+Settings is a nine-tile grid, every tile is a real screen, the Assistant explains
+each one from the Graffiti strip, Wi-Fi remembers four networks and finds them by
+scanning, the clock can be set by hand, Accounts discovers collections by name, a
+sync no longer implies iCloud, **the device works out where it is instead of
+asking**, the Date Book's date and time are picked rather than typed, every
+Graffiti stroke is on one sheet, the lock screen's zone bars are grey, and
+Address / To Do / Memo share **one** top bar. What is left of both phases is
+`[d]` boxes — things only the glass can answer.
+
+**THE SMOKE CAN TYPE NOW.** `k <text>` writes into the focused field one
+character at a time through `lv_textarea_add_char` (the call the recogniser
+makes), and a bare `k` empties it. Before this the script could tap and drag but
+not write, so any screen whose behaviour depends on what is IN a field could only
+ever be photographed empty — which is exactly how a quick-add bar that clipped
+its input at 23 characters would have shipped.
+
+**NEXT, IN ORDER OF VALUE:** the `[d]` bench checks (nothing in Q5–Q8 has been
+seen on glass); then §Engine items 11–13, of which **13 is the small one** —
+three named correctness bugs, all host-testable. Item 9 ("About this screen" on
+every screen) is the next real feature.
 
 **FOUR THINGS THIS SESSION LEARNED THE HARD WAY.** Each cost a bench round-trip;
 none is discoverable from the code:
