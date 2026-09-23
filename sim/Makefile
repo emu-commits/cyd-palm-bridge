@@ -47,7 +47,7 @@ CFLAGS := -O2 -g -Wall $(SIMDEF) $(INC)
 APP_SRCS := \
     $(FW)/ui.c $(FW)/data.c $(FW)/graffiti.c $(FW)/appcfg.c $(FW)/clock.c \
     $(FW)/lv_font_palm.c $(FW)/lv_font_palm_bold.c $(FW)/lv_font_kana.c $(FW)/palm_icons.c \
-    $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(FW)/dash.c $(FW)/minesweeper.c $(FW)/wordie.c $(FW)/sudoku.c $(FW)/zip.c $(FW)/coach.c $(FW)/guru.c $(FW)/guru_pool.c $(FW)/gurupool.c \
+    $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(BR)/dash.c $(FW)/minesweeper.c $(FW)/wordie.c $(FW)/sudoku.c $(FW)/zip.c $(FW)/coach.c $(FW)/guru.c $(FW)/guru_pool.c $(FW)/gurupool.c \
     $(BR)/pdb.c $(BR)/datebook.c $(BR)/address.c $(BR)/todo.c $(BR)/appinfo.c \
     $(BR)/ical.c $(BR)/vcard.c $(BR)/tz.c $(BR)/charset.c \
     $(BR)/find.c $(BR)/calc.c $(BR)/config.c $(BR)/rss.c $(BR)/news.c $(BR)/feeds.c \
@@ -230,9 +230,9 @@ build/gurupool_test: tests/gurupool_test.c $(FW)/gurupool.c $(FW)/guru.c \
 dash: build/dash_test
 	./build/dash_test
 
-build/dash_test: tests/dash_test.c $(FW)/dash.c $(FW)/dash.h
+build/dash_test: tests/dash_test.c $(BR)/dash.c $(BR)/dash.h
 	mkdir -p build
-	$(CC) -O2 -Wall -I$(FW) tests/dash_test.c $(FW)/dash.c -o $@ -lm
+	$(CC) -O2 -Wall -I$(BR) tests/dash_test.c $(BR)/dash.c -o $@ -lm
 
 # ---- games: every game's logic gate in one go (what CI runs). ----
 games: poolparity mines wordie sudoku zip clock coach guru gurupool dash

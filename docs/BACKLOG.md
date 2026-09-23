@@ -170,14 +170,32 @@ Concise index. Detail for each is below, or in the named doc.
     §Engine.
 
 ### C. Tidy-ups (small, known, not urgent)
-14. **Move `dash.c` / `dash.h` into `bridge/`** — removes the backwards include path
-    at `firmware/components/bridge/CMakeLists.txt:35`. **Verified still open.**
-15. **CI simulator-smoke has no `timeout-minutes`.** One line; it hung 1h55m once.
-    **Verified still open — there is no `timeout-minutes` anywhere in `ci.yml`.**
-16. **Delete or fix the dead boot-SNTP code** at `app_main.c:289-292` — it sits
-    below `lvgl_port_run()`'s `while(1)` and can never execute. §Stubbed.
-17. **Gate the `[dav]` firmware telemetry** behind a flag, as the host `[sync]`
-    lines already are. Needs an ESP-IDF compile to confirm no unused-var warnings.
+14. ~~Move `dash.c` / `dash.h` into `bridge/`~~ **DONE 2026-09-22.** The
+    backwards `../../main` include path is gone from the bridge component; four
+    build files knew where `dash.c` lived and all four now agree.
+15. ~~CI simulator-smoke has no `timeout-minutes`~~ **DONE 2026-09-22.** Every
+    job has a ceiling now, not just that one. The smoke gets 15: it drives a
+    real UI, so a live-lock in LVGL does not crash — it spins, and the default
+    is six hours.
+16. ~~Delete or fix the dead boot-SNTP code~~ **DONE 2026-09-22**, and it was
+    not four lines: `lvgl_port_run()` never returns, so the whole tail below it
+    was unreachable — Wi-Fi association, SNTP, host resolution and a
+    one-collection sync, ~150 lines that read like the boot path and were not
+    the boot path, including a **second copy of the effective-host and
+    absolute-href logic that had drifted from the live one**. `hotsync.c` does
+    all of it from `config.ini`, so `app_main.c` no longer includes
+    `secrets.h` either.
+17. ~~Gate the `[dav]` firmware telemetry~~ **CLOSED 2026-09-22 — nothing to
+    do, and the version of it that still looks tempting should NOT be done.**
+    `dav_esp.c` (`TAG = "dav"`) has **zero** `ESP_LOGI`: its six log lines are
+    all warnings and errors, which is what the item was asking for. The chatty
+    `ESP_LOGI` lines are in `hotsync.c` under `TAG = "hotsync"`, and **gating
+    those would be a mistake.** This board has no debugger and no screen worth
+    logging to; the serial line is the only way to see inside a sync. The geoip
+    bug that cost three bench round-trips this month was found by exactly one of
+    those lines (`geoip: HTTP %d, reply: %s`) after the two runs without it had
+    proved nothing. They cost UART bandwidth during a sync and no RAM. Leave
+    them on.
 18. **iCloud data hygiene** — one-time removal of seed contacts / duplicate events
     left in the real account from the broken-sync era.
 19. **`heap[wifi-up]` is ~13 KB lower after a session of app use** than after a
