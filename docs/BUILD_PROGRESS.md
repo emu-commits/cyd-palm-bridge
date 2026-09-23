@@ -16,6 +16,57 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-23 — phase R: the speakers step aside, and the week becomes a score
+
+Fifteen refinements from one request (`BACKLOG.md` §R), on
+`feat/r-phase-polish`. The ones worth remembering:
+
+- **R4 — the week screens are a score now, not a report.** This week against
+  last ("3 to beat last week" rather than "-2"), a seven-day chart with the
+  target as a dashed line (solid bar = reached it, outline = did not, today
+  underlined), the streak against the best streak, and the split as
+  proportional bars — Guru shows all five categories and an empty one is a
+  dotted track, because the gap is the point. One heap canvas plus labels;
+  days are bucketed by LOCAL day (`cal_window_slot()` in `daycal.h`, gated in
+  `guru_test`), so the columns are Monday, Tuesday... rather than 24-hour
+  slices starting at the current time of day.
+- **R3 — Coach and Guru greet from the strip**, portrait on the right, over a
+  landing page that is live underneath (`speaker_aside_ex()`). The stacked
+  portrait-over-balloon layout and its scrolling page are gone.
+- **R12 — swipes: measured, then fixed.** A new harness set draws hurried
+  swipes; the old rule caught **76.8 %** of them, the new one **99.5 %**, with
+  letters, digits and punctuation unchanged at every size tried.
+- **R8/R9 — fields know what they are for.** A per-field mode decides
+  auto-capitalisation (Each Word / first letter) and whether a tap opens the
+  phone keypad. The smoke's `k` goes through the same rule, so it is gated.
+- **R11 — the lock over the Calculator**, and a harness verb `L` that raises
+  the lock the way a screen sleep does, which made it testable at all.
+
+**`lv_layer_top()` inherits nothing, and twelve modals had been drawing in
+montserrat_14 for months.** The Options menu, the Calculator, About, every
+confirmation and picker — which is why "Remove demo data" clipped in a menu
+sized for the Palm font. The fix is one line on the layer; the one widget that
+needs montserrat (a calendar's `LV_SYMBOL` arrows) now asks for it on its two
+buttons only — setting it on the whole header made "September 2026" clip.
+**The cost of the fix was every scripted menu tap**: Palm rows are shorter, so
+each item moved up a few pixels per row and the smoke's taps (absolute
+coordinates) landed on the wrong rows. The run stayed green throughout; the
+screenshots are what showed it.
+
+**`lv_pct(100) - 20` is 80 %, not 100 % minus 20 px.** A percentage is a tagged
+coordinate, and arithmetic on it moves the percentage. That was the whole of
+R1's "blank row" — 17 px nobody chose, under Guru's header.
+
+**Making something non-modal changes what every scripted tap does.** The old
+greetings blocked the screen, so the smoke dismissed them by tapping anywhere.
+Once the greeting stood aside, that same tap landed on the live list and opened
+a habit — and every later Guru shot drifted, still green.
+
+**Also fixed on the way:** `gu_build_header()` created a new streak label on
+every tick (a pool object per habit ticked); the About text had hard line breaks
+tuned for montserrat; and every top-layer modal other than the Calculator now
+closes when the lock rises, instead of floating over it.
+
 ### 2026-09-22 — Q5–Q8, the engine's correctness items, and a guard that never restored
 
 - **Q5 — the lock screen's zone bars are grey.** The grey could not come off the
@@ -1002,6 +1053,11 @@ drift apart — the gate is the authority, not prose.)*
 - **Size a fixed container to the WORST string it can hold, and measure it** with
   `lv_text_get_size()` against the real font, over every string the code can produce.
   Guessing yields either a clipped balloon or one that resizes per verdict.
+- **`lv_layer_top()` inherits NOTHING from the screen** — not the font, not
+  anything. Set what it needs on the layer itself (the Palm font is set there
+  in `ui_init()`), or every modal silently falls back to `LV_FONT_DEFAULT`.
+- **Arithmetic on `lv_pct()` moves the percentage.** `lv_pct(100) - 20` is 80 %.
+  Compute pixels from the constants you built the neighbours from.
 - **Scroll the page, not a panel inside it.** A scrolling sub-panel with fixed furniture
   around it puts a scrollbar down the middle of a 240 px screen. Put the whole screen on
   one scrollable child of `content` (never on `content` itself — it is shared and

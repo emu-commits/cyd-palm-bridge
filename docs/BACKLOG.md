@@ -24,9 +24,9 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 
 ## RESUME HERE — 2026-09-23
 
-**§R is the active phase** (below): fifteen refinements requested on 2026-09-23,
-on branch `feat/r-phase-polish`. Read its design notes before you touch the
-Coach/Guru screens.
+**§R is code complete** (below): fifteen refinements requested on 2026-09-23,
+built and sim-verified on branch `feat/r-phase-polish` — **not yet merged, not
+yet flashed**. R15's review is in §Proposals, and nothing in it is approved.
 
 **Before that, everything was on `main` (`97874fc`)**: the W phase (Settings and
 its nine wizards) and the Q phase (quick entry) are both code-complete, the web
@@ -46,10 +46,13 @@ and §Engine 2 (shrink the sync working set), then §Next 1 ("About this screen"
 
 ---
 
-## §R — PHASE: refinements (requested 2026-09-23, ACTIVE)
+## §R — PHASE: refinements (requested 2026-09-23, CODE COMPLETE — `[s]` all)
 
-Fifteen items from one request. Each is small on its own; the one that is a real
-design job is **R4**, the week screens. Design rules from the W phase still apply
+**All fifteen are built and sim-verified** on `feat/r-phase-polish`; the
+on-glass checks are in §Bench ▸ *Unseen: the R phase*. What was learned is in
+`BUILD_PROGRESS.md`. The items below are kept as they were asked, until the
+phase is merged and seen on glass. Each is small on its own; the one that was a
+real design job is **R4**, the week screens. Design rules from the W phase still apply
 everywhere: **tap to pick, don't type; scroll-to-read is fine, scroll-to-select
 is not; Home is the way out; pool-safe widgets only** (no `lv_bar`, `lv_slider`,
 `lv_arc`, `lv_meter` — they allocate draw layers and live-lock the 31 KB pool).
@@ -61,23 +64,23 @@ a screen that stays finished and live underneath. It costs the four silkscreen
 buttons until tapped away.
 
 ### Coach and Guru
-- [ ] **R1 — Guru's blank header row gets a job `[s]`.** The row under
+- [x] **R1 — Guru's blank header row gets a job `[s]`.** The row under
       "x of y today" is empty because the list is sized as `lv_pct(100) - 20`,
       which LVGL reads as *80 %*, not *100 % minus 20 px*. Use it for a one-line
       "what to do here" fragment on the left and a **Week** button on the right;
       the button may span both header rows, with the streak ("day x") moved left
       of it. The list's height becomes explicit pixels.
-- [ ] **R2 — Guru's menu says "This week", not "Her week" `[s]`.** The report's
+- [x] **R2 — Guru's menu says "This week", not "Her week" `[s]`.** The report's
       title bar too, so the menu entry and the screen it opens agree — and it
       matches Coach's entry for the same screen.
-- [ ] **R3 — the Coach and Guru greetings stand in the strip `[s]`.** Today the
+- [x] **R3 — the Coach and Guru greetings stand in the strip `[s]`.** Today the
       hello *replaces* the landing page (it is drawn over the week screen) and
       the tap that dismisses it rebuilds the app. Change: the landing page is
       built and live, and the speaker stands in the Graffiti strip the way the
       Assistant does — **but with the portrait on the right**, as it is today,
       not on the left like hers. Nothing is blocked any more, so there is no
       reason to show the week screen at that moment.
-- [ ] **R4 — the week screens: speaker in the strip, and a real design `[s]`.**
+- [x] **R4 — the week screens: speaker in the strip, and a real design `[s]`.**
       The verdict moves into the strip (as R3), which gives the stats the whole
       content area and should end the scrolling. Then redesign the stats, which
       today are a monospace column of `#` bars. The brief: **clear at a glance,
@@ -90,51 +93,51 @@ buttons until tapped away.
       one canvas (buffer from outside the pool) plus labels.
 
 ### System
-- [ ] **R5 — "Lock" in the Applications screen's Options menu `[s]`.** Launcher
+- [x] **R5 — "Lock" in the Applications screen's Options menu `[s]`.** Launcher
       only: locking from inside an app would throw away whatever the content
       area holds (the lock calls `content_clear()`), including a half-edited
       record.
-- [ ] **R6 — the lock screen's "swipe up to unlock" is the thing you see `[s]`.**
+- [x] **R6 — the lock screen's "swipe up to unlock" is the thing you see `[s]`.**
       Bold, with an up arrow, and visually distinct enough to catch a new user.
       The font has no arrow glyph, so the arrow is drawn on the dash canvas.
-- [ ] **R11 — the lock goes over the Calculator, and gives it back `[s]`.** The
+- [x] **R11 — the lock goes over the Calculator, and gives it back `[s]`.** The
       calculator lives on `lv_layer_top()`, above the lock (which is on the
       screen), so the lock came up *underneath* it. Hide it while locked, show
       it again on unlock, expression intact.
 
 ### PIM apps
-- [ ] **R7 — To Do: pick the priority `[s]`.** Four tap targets, 1–4, below the
+- [x] **R7 — To Do: pick the priority `[s]`.** Four tap targets, 1–4, below the
       Due date on the edit form. One `lv_buttonmatrix` (one object). A record
       that arrives from a sync with priority 5 shows nothing selected and keeps
       its 5 unless you pick.
-- [ ] **R8 — Address: a phone keypad for Phone and Zip `[s]`.** Tapping either
+- [x] **R8 — Address: a phone keypad for Phone and Zip `[s]`.** Tapping either
       field opens a modal 3×4 keypad, read across: `1 2 3 / 4 5 6 / 7 8 9 /
       * 0+ #`. The `0+` key types `0`, and `+` when held (as on a phone).
-- [ ] **R9 — Graffiti auto-capitalises by field `[s]`.** Address Last, First,
+- [x] **R9 — Graffiti auto-capitalises by field `[s]`.** Address Last, First,
       Title, Company, Address, City, State: **Each Word**. First letter of the
       field only: Address Note; Date Book Description and Note; To Do quick-add,
       Description and Note; Memo quick-add and the memo text. A shift the user
       armed still wins; Look Up and Find are not touched (they are filters).
 
 ### Accessories and Graffiti
-- [ ] **R10 — Calculator: grey digit keys `[s]`.** Grey separates the numbers
+- [x] **R10 — Calculator: grey digit keys `[s]`.** Grey separates the numbers
       from the operators and functions, the way a real calculator does.
-- [ ] **R12 — Graffiti: forgiving space and backspace swipes `[s]`.** Today a
+- [x] **R12 — Graffiti: forgiving space and backspace swipes `[s]`.** Today a
       swipe must be 24 px wide and 2.5× wider than tall. Loosen both, and add a
       straightness test in their place so that loosening does not start eating
       letters — gated by `make -C sim graf`, which must not lose accuracy.
-- [ ] **R13 — Graffiti: a way out of punctuation mode `[s]`.** A stray tap on the
+- [x] **R13 — Graffiti: a way out of punctuation mode `[s]`.** A stray tap on the
       pane arms punctuation, and the only way out today is to write something.
       Three exits, none of which types anything: tap the `PUNC` marker, swipe
       backspace, or wait (it lapses after a few seconds).
-- [ ] **R14 — News rotates between sources `[s]`.** The store is written feed by
+- [x] **R14 — News rotates between sources `[s]`.** The store is written feed by
       feed, so the reader shows all of one source before the next. Interleave
       the index round-robin by feed when a fetch commits — records are
       self-contained, so reordering the index moves no body text. Host-gated in
       `news_test`.
 
 ### The repo
-- [ ] **R15 — a review of the whole project** for user experience, robustness,
+- [x] **R15 — a review of the whole project** for user experience, robustness,
       and repo/code cleanliness as an open-source project. The findings go in
       §Proposals below, **as proposals** — nothing there is approved.
 - [x] **R0 — this file cleaned up.** DONE 2026-09-23. The finished P, W and Q
@@ -146,6 +149,23 @@ buttons until tapped away.
 
 **Re-flash before reasoning about what is on the device.** The bench is only as
 current as the last flash (`958a979`, 2026-09-22, which holds W and Q but not R).
+
+### Unseen: the R phase (flash `feat/r-phase-polish` first)
+- [ ] **R12 — the swipes on real glass.** The harness says 99.5 % of hurried
+      swipes now register (was 76.8 %) with no letter lost; a thumb on a
+      resistive panel is the real test. Also: does a sideways flick ever eat a
+      letter you meant?
+- [ ] **R4 — the week charts.** Legible at 18 px bars? Does the dashed target
+      line read as a line? Coach's day goal (6) dwarfs a normal day's bars —
+      honest, or discouraging?
+- [ ] **R3/R4 — the speakers in the strip**, portraits right. Same question as
+      the Assistant's pane below, now for three speakers.
+- [ ] **R8 — the keypad under a thumb**: 44 px keys, and whether the 0+ hold
+      (LVGL's 400 ms long press) feels like a phone's.
+- [ ] **R10 — the grey calculator keys**, which join the greys question below.
+- [ ] **R6 — the unlock band**: does it catch the eye without shouting?
+- [ ] **R13 — the PUNC chip** is a small target at the top of the strip, and
+      4 s may be too short or too long.
 
 ### Unseen: the Q phase (in rough order of how likely the emulator lied)
 - [ ] **Q5's greys, and P9's with them.** The zone bars and the list hairlines
@@ -279,7 +299,91 @@ current as the last flash (`958a979`, 2026-09-22, which holds W and Q but not R)
 
 ## §Proposals — from the R15 review, NOT approved
 
-*(Filled in by R15.)*
+A review of the whole project on 2026-09-23 for user experience, robustness,
+and fitness as an open-source repo. **Nothing here is approved.** Ranked within
+each heading by value for effort.
+
+### Robustness
+1. **Crash-safe writes for every durable file. THE ONE TO DO FIRST.** Every
+   record save rewrites the whole PDB in place (`pdb_write_ai` opens the live
+   path with `"wb"`), and so do `config.ini`, `feeds`, the weather cache and
+   every `.sav`. A power cut or watchdog reset mid-write truncates the file.
+   For Date Book, To Do and Address the mass-delete guard now pulls the
+   server's copy back — **but Memo is device-only, so a truncated MemoDB is
+   simply gone.** Fix: write `<path>.tmp`, `fflush` + `fsync`, `remove`, then
+   `rename` (FatFs will not rename over an existing file); on boot, a missing
+   `<path>` beside a `.tmp` is promoted. Host-gate it with a fault-injection
+   test that stops between the two steps.
+2. **Keep deleted records as tombstones until they have synced.** `data_delete()`
+   drops a record outright, which is why the engine cannot tell a user's delete
+   from a bad card read (§Engine, and the mass-delete guard's stated trade).
+   Palm's own `REC_ATTR_DELETE` bit is the fix, and it also makes an Undo
+   possible (UX 4).
+3. **Don't push the demo records.** The README tells new users that the first
+   sync pushes the seed records into their real iCloud and asks them to delete
+   them there by hand. The demo manifest already knows every seeded uid; skip
+   them on push.
+4. **A release build profile.** `UI_DEVTOOLS` is compiled into *every* firmware
+   build (`firmware/main/CMakeLists.txt`: "REMOVE this line for a release
+   build") — including Coach's invisible seal escape. Make it a Kconfig option,
+   default off, and have CI build both.
+5. **Retire compile-time `secrets.h`.** Settings can now enter Wi-Fi and the
+   account on the device, so the header's only remaining effect is to make it
+   possible to build — and share — a binary with credentials inside it.
+6. **Say when the pool runs out.** On the device `LV_ASSERT_MALLOC` ends in
+   `while(1)` and a watchdog reset. Log the pool's low-water mark per screen on
+   the UART (the simulator already measures it) so a field report can name the
+   screen.
+7. **`config.ini` holds the Wi-Fi and app-specific passwords in plain text** on
+   a removable card. At minimum say so plainly (SECURITY.md); better, keep the
+   secrets in NVS and leave the card holding only non-secret settings.
+
+### User experience
+1. **Flash from the browser.** "There's no prebuilt binary yet — you flash it
+   yourself" is the biggest barrier to the intended audience. CI already builds
+   the firmware: publish the `.bin` per release and put an ESP Web Tools
+   *Install* button on the Pages site beside the emulator.
+2. **A first-run path.** A fresh device boots to the lock screen and then a
+   launcher full of demo data; nothing points at Settings ▸ Wi-Fi and Accounts.
+   The Assistant could greet the first boot and say where to start (§Next 3).
+3. **"About this screen"** (§Next 1) and **a sync-failure explainer** (§Next 3)
+   remain the two highest-value features not yet built.
+4. **Undo a delete.** A "Deleted — Undo" toast for a few seconds; needs
+   tombstones (Robustness 2).
+5. **Menus that fit.** Coach's Options menu runs to the bottom edge of the
+   screen. Move the rarely used rows (Reset counters, Remove demo data) under
+   one "More..." or into Settings.
+6. **The public emulator shows developer items** ("Add test events" — the
+   Pages build defines `UI_SEED_TESTEVENTS`). Build the showcase without them.
+
+### Open-source readiness
+1. **README.** Lead with what it is, a photo or GIF, and the "try it in your
+   browser" link; then flashing; then setup through **Settings** (it still
+   says *Preferences → Discover collections*). Move the architecture and build
+   log (half the file) to `docs/ARCHITECTURE.md`. Fix the stale facts: "Status
+   (2026-07-09)", a 24 KB pool (it is 32 KB, `31100` bytes on hardware), and
+   "~$15" in one place and "$12" in another.
+2. **Split `ui.c`** (10.5k lines) into modules behind a private header —
+   lock/dashboard, PIM lists and forms, Settings, Coach, Guru, games, Graffiti,
+   overlays. It is the single largest barrier to a contributor, and it makes
+   every simulator rebuild recompile everything.
+3. **Comments that outsiders can read.** Many comments carry history ("used
+   to", "was tried and rejected") and internal ticket codes (R4, W3, Q5, P10)
+   that mean nothing outside this backlog. Keep the *why* in the code, move
+   the *story* to `BUILD_PROGRESS.md`, and name things instead of numbering them.
+4. **One `make check`.** The rule "every gate, not just the smoke" lives in
+   this file and in a maintainer's head. One target that runs the host gates,
+   the twelve sim gates, `smoke32` and (when available) the wasm and IDF builds
+   makes it a command. Ship the simulator's toolchain as a Dockerfile or
+   devcontainer — today the working recipe is not in the repo.
+5. **Contributor scaffolding.** `CONTRIBUTING.md` (the gates, the design rules,
+   the pool budget), `SECURITY.md` (the plaintext credentials; how to report),
+   issue templates, and tagged releases with a changelog.
+6. **Build output out of the root.** The root `Makefile` writes ~20 binaries
+   into the repo root, each needing its own `.gitignore` line (one was committed
+   by accident in September). Build into `build/`.
+7. **Static analysis in CI.** `-Wextra`, `cppcheck`, and ASan/UBSan over the
+   host gates (today only the RSS parser has an ASan run).
 
 ---
 
