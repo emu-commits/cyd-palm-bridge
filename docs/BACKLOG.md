@@ -177,9 +177,13 @@ R and the robustness work).
       ("Failed to initialize"). Holding BOOT, tapping RST, then pressing
       Install worked. The board ran touch calibration on its first boot. The
       page now covers the Snap step, the BOOT/RST sequence and the calibration.
-      Not yet reported: whether the saved Wi-Fi password survived. The
-      calibration running suggests NVS was erased, or the screen was held at
-      boot.
+      The Wi-Fi password did not survive: the user ticked "Erase device",
+      reading the page's "erase it the first time" as a first install from the
+      page. NVS read back fresh (only touch:cal and clock:clklost), which
+      matches a full erase. ESP Web Tools 10.4.0 erases only when that box is
+      ticked. The page now makes the test "is CYD Palm already on the board",
+      and says what erasing costs. Still unseen: an update with the box
+      clear, from the page.
 
 ### Unseen: the bench follow-ups and the robustness work (2026-09-23)
 - [ ] **Fast keypad entry.** Type quickly on the Calculator and the phone
