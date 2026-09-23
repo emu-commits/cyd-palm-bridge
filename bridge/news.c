@@ -244,15 +244,87 @@ int news_resume(void){
     return 1;
 }
 
+/* ---- interleave by source ---------------------------------------------------
+ * A fetch writes the store feed by feed, so the index came out as every article
+ * from the first source, then every article from the second -- and the reader,
+ * which walks the index in order, made you read all of one before it showed you
+ * anything from the next. Reorder the INDEX round-robin by feed instead: the
+ * first article of each source, then the second of each, and so on, keeping
+ * each source's own order and the sources in the order they were fetched.
+ *
+ * Only the index moves. A record carries its own offset into news.dat, so the
+ * bodies never need rewriting -- this is a permutation of fixed 176-byte
+ * records, applied in place by following its cycles with two record buffers.
+ * The working set is 8 bytes per article for the length of the call, and if
+ * that allocation fails the store is simply left in fetch order, which is
+ * still a correct store. */
+static void interleave(void){
+    int n = news_count();
+    if(n < 3) return;                           /* nothing to interleave */
+    uint32_t *key  = (uint32_t *)malloc(sizeof(uint32_t) * (size_t)n);
+    uint16_t *rank = (uint16_t *)malloc(sizeof(uint16_t) * (size_t)n);
+    uint16_t *src  = (uint16_t *)malloc(sizeof(uint16_t) * (size_t)n);
+    uint8_t  *done = (uint8_t  *)calloc((size_t)n, 1);
+    FILE *f = (key && rank && src && done) ? fopen(s_idx, "r+b") : NULL;
+    if(!f) goto out;
+
+    /* pass 1: which source each record came from, and its place within it */
+    uint8_t rec[RECSZ], tmp[RECSZ];
+    if(fseek(f, HDR, SEEK_SET)!=0) goto out;
+    int maxrank = 0;
+    for(int i=0;i<n;i++){
+        if(fread(rec,1,RECSZ,f)!=RECSZ) goto out;
+        char feed[NEWS_FEED_CAP];
+        memcpy(feed, rec, NEWS_FEED_CAP); feed[NEWS_FEED_CAP-1]=0;
+        key[i] = id_hash(feed, "");
+        int r = 0;
+        for(int j=0;j<i;j++) if(key[j]==key[i]) r++;
+        rank[i] = (uint16_t)r;
+        if(r > maxrank) maxrank = r;
+    }
+
+    /* the order: every source's rank-0 article, then every rank-1, ... Within a
+     * rank the records are visited in index order, which is fetch order, so the
+     * sources keep the order they were fetched in. */
+    int k = 0;
+    for(int r=0;r<=maxrank;r++)
+        for(int i=0;i<n;i++) if(rank[i]==r) src[k++] = (uint16_t)i;
+
+    /* apply it: slot j must end up holding what was at src[j] */
+    #define AT(i) (HDR + (long)(i)*RECSZ)
+    for(int s0=0;s0<n;s0++){
+        if(done[s0] || src[s0]==s0){ done[s0]=1; continue; }
+        if(fseek(f, AT(s0), SEEK_SET)!=0 || fread(tmp,1,RECSZ,f)!=RECSZ) goto out;
+        int j = s0;
+        for(;;){
+            int from = src[j];
+            done[j] = 1;
+            if(from == s0){                      /* closes the cycle */
+                if(fseek(f, AT(j), SEEK_SET)!=0 || fwrite(tmp,1,RECSZ,f)!=RECSZ) goto out;
+                break;
+            }
+            if(fseek(f, AT(from), SEEK_SET)!=0 || fread(rec,1,RECSZ,f)!=RECSZ) goto out;
+            if(fseek(f, AT(j), SEEK_SET)!=0 || fwrite(rec,1,RECSZ,f)!=RECSZ) goto out;
+            j = from;
+        }
+    }
+    #undef AT
+out:
+    if(f) fclose(f);
+    free(key); free(rank); free(src); free(done);
+}
+
 int news_commit(void){
-    int ok = 1;
+    int ok = 1, wrote = 0;
     if(w_idx){
         uint8_t c[4]; put32(c, (uint32_t)w_count);
         if(fseek(w_idx, 4, SEEK_SET)!=0 || fwrite(c,1,4,w_idx)!=4) ok=0;   /* patch count */
         fclose(w_idx); w_idx=NULL;
+        wrote = 1;
     }
     if(w_dat){ fclose(w_dat); w_dat=NULL; }
     seen_free();
     w_count=0; w_off=0;
+    if(wrote && ok) interleave();
     return ok;
 }

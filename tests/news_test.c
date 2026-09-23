@@ -130,6 +130,44 @@ int main(void){
     CHECK(news_commit(), "identity: commit");
     CHECK(!news_is_read(0), "feed is part of the identity, so this one is unread");
 
+    /* --- R14: sources take turns ---------------------------------------------
+     * A fetch writes feed by feed. The reader walks the index in order, so
+     * without interleaving you read every BBC story before the first NPR one.
+     * After commit the index must go round-robin -- first of each, then second
+     * of each -- with each feed's own order kept, the feeds in fetch order,
+     * every body still behind its own title, and read state still attached. */
+    CHECK(news_begin(), "rotate: begin");
+    CHECK(news_add("BBC","b1","body b1",1)==1 && news_add("BBC","b2","body b2",2)==1
+       && news_add("BBC","b3","body b3",3)==1 && news_add("BBC","b4","body b4",4)==1
+       && news_add("NPR","n1","body n1",5)==1 && news_add("NPR","n2","body n2",6)==1
+       && news_add("AP","a1","body a1",7)==1, "rotate: seven articles, three feeds");
+    CHECK(news_commit(), "rotate: commit");
+    {
+        static const char *want[] = { "b1","n1","a1","b2","n2","b3","b4" };
+        int good = news_count()==7;
+        for(int i=0;i<7 && good;i++){
+            NewsMeta mm; char body[32], exp[32];
+            snprintf(exp, sizeof exp, "body %s", want[i]);
+            good = news_meta(i,&mm) && !strcmp(mm.title,want[i])
+                && news_read_text(i,body,sizeof body)>0 && !strcmp(body,exp);
+            if(!good) printf("  slot %d: wanted %s\n", i, want[i]);
+        }
+        CHECK(good, "rotate: round-robin order, bodies follow their titles");
+    }
+    /* read state is keyed by feed+title, so it must survive the reordering */
+    CHECK(news_mark_read(3), "rotate: mark b2 (slot 3) read");
+    CHECK(news_begin() && news_add("BBC","b1","x",1)==1 && news_add("BBC","b2","x",2)==1
+       && news_add("NPR","n1","x",3)==1 && news_commit(), "rotate: resync");
+    CHECK(!news_is_read(0) && !news_is_read(1) && news_is_read(2),
+          "rotate: b1 n1 b2, and b2 is still the one marked read");
+    /* a single source is left exactly as fetched */
+    CHECK(news_begin() && news_add("One","x1","1",1)==1 && news_add("One","x2","2",2)==1
+       && news_add("One","x3","3",3)==1 && news_commit(), "rotate: one feed");
+    { NewsMeta a,b,c;
+      CHECK(news_meta(0,&a) && news_meta(1,&b) && news_meta(2,&c)
+         && !strcmp(a.title,"x1") && !strcmp(b.title,"x2") && !strcmp(c.title,"x3"),
+            "rotate: one feed keeps its order"); }
+
     remove("pdb/_news.idx"); remove("pdb/_news.dat");
     printf(failures ? "\nNews gate: %d FAIL\n" : "\nNews gate: OK\n", failures);
     return failures ? 1 : 0;
