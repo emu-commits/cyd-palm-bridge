@@ -26,7 +26,10 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 
 **§R is code complete** (below): fifteen refinements requested on 2026-09-23,
 built and sim-verified on branch `feat/r-phase-polish` — **not yet merged, not
-yet flashed**. R15's review is in §Proposals, and nothing in it is approved.
+yet flashed**. R15's review is in §Proposals, and nothing in it is approved --
+except its **Robustness** list, which the user asked to have worked through and
+which is done. The bench follow-ups (fast keypad entry, the trainer prompt, sync
+with no Wi-Fi) are done too; their checks head §Bench.
 
 **Before that, everything was on `main` (`97874fc`)**: the W phase (Settings and
 its nine wizards) and the Q phase (quick entry) are both code-complete, the web
@@ -149,6 +152,26 @@ buttons until tapped away.
 
 **Re-flash before reasoning about what is on the device.** The bench is only as
 current as the last flash (`958a979`, 2026-09-22, which holds W and Q but not R).
+
+### Unseen: the bench follow-ups and the robustness work (2026-09-23)
+- [ ] **Fast keypad entry.** Type quickly on the Calculator and the phone
+      keypad; nothing should be missed now (10 ms touch reads, and a press that
+      jumps between keys is split into two taps). Also: does a deliberate slow
+      slide across keys ever type twice?
+- [ ] **The trainer and Kana prompts** on their own line — legible, not crowded?
+- [ ] **Sync with no Wi-Fi** lands on Settings ▸ Wi-Fi with the Assistant's
+      instructions: once with no network saved, once with a wrong password.
+- [ ] **FIRST BOOT AFTER THIS FLASH: the passwords move.** The boot log line
+      `appcfg: config: config.ini, N Wi-Fi network(s) (N with a password),
+      account set, password held; moved off the card` should appear once, and
+      then `config.ini` on the card must have empty password lines. Then a sync
+      must still work. If it says `password none`, the card never held the
+      Apple password -- it came from the retired compile-time secrets.h -- and
+      it has to be entered once in Settings ▸ Accounts.
+- [ ] **A delete syncs.** Delete an event, sync, and check it is gone from
+      iCloud (the tombstone path, end to end).
+- [ ] **The pool line.** `lvgl: pool low-water: ... on "<screen>"` lines on the
+      UART while using the device -- which screen is the tightest on hardware?
 
 ### Unseen: the R phase (flash `feat/r-phase-polish` first)
 - [ ] **R12 — the swipes on real glass.** The harness says 99.5 % of hurried
@@ -303,40 +326,12 @@ A review of the whole project on 2026-09-23 for user experience, robustness,
 and fitness as an open-source repo. **Nothing here is approved.** Ranked within
 each heading by value for effort.
 
-### Robustness
-1. **Crash-safe writes for every durable file. THE ONE TO DO FIRST.** Every
-   record save rewrites the whole PDB in place (`pdb_write_ai` opens the live
-   path with `"wb"`), and so do `config.ini`, `feeds`, the weather cache and
-   every `.sav`. A power cut or watchdog reset mid-write truncates the file.
-   For Date Book, To Do and Address the mass-delete guard now pulls the
-   server's copy back — **but Memo is device-only, so a truncated MemoDB is
-   simply gone.** Fix: write `<path>.tmp`, `fflush` + `fsync`, `remove`, then
-   `rename` (FatFs will not rename over an existing file); on boot, a missing
-   `<path>` beside a `.tmp` is promoted. Host-gate it with a fault-injection
-   test that stops between the two steps.
-2. **Keep deleted records as tombstones until they have synced.** `data_delete()`
-   drops a record outright, which is why the engine cannot tell a user's delete
-   from a bad card read (§Engine, and the mass-delete guard's stated trade).
-   Palm's own `REC_ATTR_DELETE` bit is the fix, and it also makes an Undo
-   possible (UX 4).
-3. **Don't push the demo records.** The README tells new users that the first
-   sync pushes the seed records into their real iCloud and asks them to delete
-   them there by hand. The demo manifest already knows every seeded uid; skip
-   them on push.
-4. **A release build profile.** `UI_DEVTOOLS` is compiled into *every* firmware
-   build (`firmware/main/CMakeLists.txt`: "REMOVE this line for a release
-   build") — including Coach's invisible seal escape. Make it a Kconfig option,
-   default off, and have CI build both.
-5. **Retire compile-time `secrets.h`.** Settings can now enter Wi-Fi and the
-   account on the device, so the header's only remaining effect is to make it
-   possible to build — and share — a binary with credentials inside it.
-6. **Say when the pool runs out.** On the device `LV_ASSERT_MALLOC` ends in
-   `while(1)` and a watchdog reset. Log the pool's low-water mark per screen on
-   the UART (the simulator already measures it) so a field report can name the
-   screen.
-7. **`config.ini` holds the Wi-Fi and app-specific passwords in plain text** on
-   a removable card. At minimum say so plainly (SECURITY.md); better, keep the
-   secrets in NVS and leave the card holding only non-secret settings.
+### Robustness — ALL SEVEN DONE 2026-09-23
+Crash-safe writes, tombstones, the demo seed held back from the push, a release
+build profile, `secrets.h` retired, the pool watched on the device, and the
+passwords moved off the card. What each does and how it is gated is in
+`BUILD_PROGRESS.md`; the on-glass checks are in §Bench ▸ *Unseen: the bench
+follow-ups*.
 
 ### User experience
 1. **Flash from the browser.** "There's no prebuilt binary yet — you flash it
@@ -377,8 +372,8 @@ each heading by value for effort.
    makes it a command. Ship the simulator's toolchain as a Dockerfile or
    devcontainer — today the working recipe is not in the repo.
 5. **Contributor scaffolding.** `CONTRIBUTING.md` (the gates, the design rules,
-   the pool budget), `SECURITY.md` (the plaintext credentials; how to report),
-   issue templates, and tagged releases with a changelog.
+   the pool budget), issue templates, and tagged releases with a changelog.
+   (`SECURITY.md` exists as of the robustness work.)
 6. **Build output out of the root.** The root `Makefile` writes ~20 binaries
    into the repo root, each needing its own `.gitignore` line (one was committed
    by accident in September). Build into `build/`.

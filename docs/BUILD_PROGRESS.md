@@ -16,6 +16,51 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-23 — bench follow-ups, and the robustness list worked through
+
+**Fast typing lost keys, and the cause was the sample rate.** The panel was read
+every 33 ms, so the lift between two quick taps could fall between samples;
+LVGL then saw one press sliding from one key to the next, and a button matrix
+cancels a press that slides off its key. The calculator lost the second digit;
+the phone keypad, which typed on release, lost both. Now: 10 ms reads, and while
+a keypad is up a press that jumps further than a finger moves in one read is
+split back into two taps (`tapsplit.h`, run by both the device and the simulator
+input paths, so the smoke reproduces it). Side effect worth knowing: a faster
+read rate changes how far a drag scrolls, and one smoke tap had to be re-aimed.
+
+**Sync with no Wi-Fi goes where it gets fixed** — Settings ▸ Wi-Fi, with the
+Assistant saying what happened and what to tap. `hotsync_wifi_problem()` says
+which failure; the simulator stub decides reachability from its pretend
+neighbourhood, so the flow is gated.
+
+**The robustness proposals, all seven:**
+- **Crash-safe writes** (`bridge/safefile.h`). Every durable file — the four
+  databases, `config.ini`, the feed list, the weather cache, the demo manifest,
+  the Graffiti templates, every `.sav` — is written to `.tmp`, fsynced, and
+  swapped in; every reader recovers first. `pdbw_commit()` had a second bug the
+  swap also fixes: a failed read-back left the half-built PDB as the database.
+  `tests/safefile_test.c` builds each crash state by hand, including a MemoDB
+  caught between remove and rename (Memo has no server copy).
+- **Tombstones.** The engine already understood Palm's delete bit; the device
+  never set it. A delete in an app that syncs now keeps the record, flagged,
+  until the sync pushes it; the UI's readers hide it (`live_read()`). Memo, and
+  apps with nothing to sync to, still delete outright, so tombstones cannot pile
+  up. The engine now pushes a tombstone even while the mass-delete guard is up,
+  because a flagged record can only be the user's delete — which finally lets
+  the guard tell a bulk delete from a bad card read. Gated in `massdel` (engine)
+  and the new `make -C sim data` (device).
+- **The demo seed is never pushed** (`sync_set_hold()`), and a user's new record
+  never takes a uid inside the seed's range, or it would never sync either.
+- **A release profile.** `UI_DEVTOOLS` was compiled into every firmware build;
+  it is `CONFIG_CYD_DEVTOOLS` now, off by default.
+- **`secrets.h` is gone.** Nothing is compiled in. It turned out to be the only
+  definition of `SYNC_PDB`, which the firmware build caught.
+- **The pool is watched on the device**: a UART line at each new low-water mark
+  naming the screen, and a warning under the smoke's 3 KB floor.
+- **The passwords are off the card** (`secretstore.[ch]`, NVS). A password found
+  in `config.ini` is moved on boot and the file rewritten; if the store refuses,
+  the file keeps it rather than losing it. Not encryption — see `SECURITY.md`.
+
 ### 2026-09-23 — phase R: the speakers step aside, and the week becomes a score
 
 Fifteen refinements from one request (`BACKLOG.md` §R), on
