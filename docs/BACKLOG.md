@@ -24,11 +24,12 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 
 ## RESUME HERE — 2026-09-23
 
-**Flash from the browser is built** on `feat/flash-from-browser` (§Proposals ▸
-User experience 1): an Install page beside the emulator
-(`/flash.html`), fed by CI, and a release job for `v*` tags. What is left is one
-check in a real browser, at the head of §Bench. No tag has been pushed, so no
-release exists yet — that is the user's call.
+**Flash from the browser is live** (PR #64; §Proposals ▸ User experience 1):
+an Install page beside the emulator (`/flash.html`), fed by CI, and a release
+job for `v*` tags. The user installed from it in Snap Chromium on 2026-09-23
+(see §Bench). It needed `snap connect` and a manual BOOT/RST, and the page now
+says so. No tag has been pushed, so no release exists yet — that is the
+user's call.
 
 **§R is merged** (PR #63, `243dedc`) **and on the bench device** (flashed
 2026-09-23 as the browser installer would write it), **not yet looked at**:
@@ -162,7 +163,7 @@ current as the last flash (2026-09-23: CI's installer artifact from
 R and the robustness work).
 
 ### Unseen: flash from the browser
-- [ ] **Install from the page, in Chrome or Edge** — once the branch is on
+- [x] **Install from the page, in Chrome or Edge** — once the branch is on
       `main` and Pages has deployed. Open `/flash.html`, press Install, pick the
       CH340 port, leave "erase" clear. It should finish, restart, and keep the
       saved Wi-Fi password (a sync works without re-entering it). What has
@@ -170,6 +171,19 @@ R and the robustness work).
       with esptool and no erase, boot cleanly on the bench, and the clock, the
       touch calibration and the password came back from NVS. What has not: the browser itself (Web
       Serial, the port picker, esptool-js) — nothing here can press that button.
+      **Done 2026-09-23 (user):** installed from the live page in the Ubuntu
+      App Center's Chromium (a Snap). It needed `sudo snap connect
+      chromium:raw-usb` before the port showed, and the automatic reset failed
+      ("Failed to initialize"). Holding BOOT, tapping RST, then pressing
+      Install worked. The board ran touch calibration on its first boot. The
+      page now covers the Snap step, the BOOT/RST sequence and the calibration.
+      The Wi-Fi password did not survive: the user ticked "Erase device",
+      reading the page's "erase it the first time" as a first install from the
+      page. NVS read back fresh (only touch:cal and clock:clklost), which
+      matches a full erase. ESP Web Tools 10.4.0 erases only when that box is
+      ticked. The page now makes the test "is CYD Palm already on the board",
+      and says what erasing costs. Still unseen: an update with the box
+      clear, from the page.
 
 ### Unseen: the bench follow-ups and the robustness work (2026-09-23)
 - [ ] **Fast keypad entry.** Type quickly on the Calculator and the phone
