@@ -29,6 +29,12 @@ void hotsync_cancel(void);           /* ask a running sync to stop; no-op if idl
 int  hotsync_cancel_pending(void);   /* 1 once asked, until the run actually ends */
 int  hotsync_cancelled(void);        /* 1 if the LAST finished run was cancelled  */
 
+/* Why the LAST finished run could not get online, so the UI can take the user
+ * to the one screen that fixes it instead of leaving "Wi-Fi failed" on the
+ * status line. Cleared when a run starts. */
+enum { HS_WIFI_OK, HS_WIFI_NONE_SAVED, HS_WIFI_NO_JOIN };
+int  hotsync_wifi_problem(void);
+
 /* ---- collection discovery (Preferences "Discover collections") -----------
  * Brings Wi-Fi up, walks the iCloud CalDAV + CardDAV homes, and collects the
  * account's calendars / reminders lists / address books so the user can pick

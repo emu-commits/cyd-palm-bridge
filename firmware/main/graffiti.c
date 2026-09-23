@@ -7,6 +7,7 @@
  * accept threshold needs tuning against the real resistive touch on-device.
  */
 #include "graffiti.h"
+#include "safefile.h"      /* the user's templates are replaced whole */
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
@@ -219,9 +220,36 @@ static char gesture(void){
         if(s_buf[i].y>maxy)maxy=s_buf[i].y;
     }
     float w=maxx-minx, h=maxy-miny;
-    if(w > 24.0f && w > 2.5f*h){                /* long & flat = swipe */
+    /* R12: a swipe is judged by being STRAIGHT and mostly sideways, not by
+     * being long and very flat. The old rule (wider than 24 px AND 2.5x wider
+     * than tall) let through only 77% of the hurried flicks the harness draws
+     * (sim/tests/graf_test.c, run_swipes): a short swipe, or one sloped by
+     * twenty degrees, fell through to the letter matcher and typed a letter
+     * where a correction was meant. Now: at least 16 px of net sideways travel
+     * (the tap size, so a tap can never qualify), up to ~30 degrees of slope,
+     * and no point straying far from the straight line joining the ends. That
+     * last test is what keeps letters out -- no Graffiti letter or digit is a
+     * straight sideways line; every one doubles back or turns a corner, and a
+     * corner is a point a long way off the chord.
+     *
+     * Path LENGTH was tried as the straightness test first and was worse than
+     * the old rule (58%): touch jitter adds length to a line without adding
+     * shape, so the shorter and more hurried the swipe, the more "crooked" it
+     * measured. Distance from the chord barely moves under jitter. */
+    {
         float dx = s_buf[s_n-1].x - s_buf[0].x;
-        return dx >= 0 ? ' ' : '\b';
+        float dy = s_buf[s_n-1].y - s_buf[0].y;
+        float adx = dx < 0 ? -dx : dx;
+        if(adx >= 16.0f && adx >= 0.75f*w && h <= 0.6f*w){
+            float len = sqrtf(dx*dx + dy*dy), dev = 0;
+            for(int i=1;i<s_n-1;i++){
+                float px = s_buf[i].x - s_buf[0].x, py = s_buf[i].y - s_buf[0].y;
+                float d = (px*dy - py*dx) / len;          /* signed distance off the chord */
+                if(d < 0) d = -d;
+                if(d > dev) dev = d;
+            }
+            if(dev <= 0.2f*len + 4.0f) return dx >= 0 ? ' ' : '\b';
+        }
     }
     if(h > 24.0f && h > 2.5f*w){                /* tall & narrow = vertical stroke */
         float dy = s_buf[s_n-1].y - s_buf[0].y;
@@ -315,14 +343,16 @@ int  graffiti_user_count(void){ int n=0; for(int i=0;i<26;i++) if(s_user_n[i]) n
 void graffiti_user_reset(void){ memset(s_user_n,0,sizeof s_user_n); }
 
 int graffiti_user_save(const char *path){
-    FILE *f = fopen(path, "wb"); if(!f) return 0;
+    SafeFile sf;
+    FILE *f = sf_open(&sf, path, "wb"); if(!f) return 0;
     uint32_t magic = GU_MAGIC;
     int ok = fwrite(&magic,4,1,f)==1
           && fwrite(s_user_n,1,26,f)==26
           && fwrite(s_user,1,sizeof s_user,f)==1;
-    fclose(f); return ok;
+    return sf_commit(&sf, ok) == 0;
 }
 int graffiti_user_load(const char *path){
+    sf_recover(path);
     FILE *f = fopen(path, "rb"); if(!f) return 0;
     uint32_t magic=0;
     int ok = fread(&magic,4,1,f)==1 && magic==GU_MAGIC
@@ -340,6 +370,13 @@ char graffiti_recognize(int digits){
      * is what lets '-' (a horizontal stroke) through instead of reading as a space. */
     if(s_punct){
         s_punct = 0;
+        /* R13: the backspace swipe is a way OUT. A stray tap on the pane arms
+         * this shift, and before, the only way to disarm it was to write some
+         * punctuation you did not want. A right-to-left swipe is what a person
+         * reaches for to undo, so while armed it undoes the ARMING and types
+         * nothing -- it does not also delete a character. Only right-to-left:
+         * '-' is drawn left to right and must still come through. */
+        if(gesture() == '\b'){ graffiti_clear(); return 0; }
         float w=0,h=0; int have = stroke_bbox(&w,&h);
         if(have && w < TAP_PX && h < TAP_PX){ graffiti_clear(); return '.'; }
         char pc = (s_n >= 4) ? match_set(PTMPL, NPTMPL, PNC_THRESH, "pnc") : 0;
@@ -366,6 +403,11 @@ char graffiti_recognize(int digits){
     graffiti_clear();
     return c;
 }
+
+/* R13: disarm the punctuation shift without reading a stroke -- the UI's other
+ * two ways out (tapping the PUNC marker, or leaving it alone for a few seconds). */
+void graffiti_punct_cancel(void){ s_punct = 0; }
+int  graffiti_punct_armed(void){ return s_punct; }
 
 /* runtime accessor: the ideal stroke for a lowercase letter a-z (control points,
  * grid ~0..10, y down), so the Graffiti trainer can draw a "how to write it"

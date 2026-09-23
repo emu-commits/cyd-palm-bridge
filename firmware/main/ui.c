@@ -36,6 +36,8 @@
 #include "coach.h"        /* Coach: ritual focus timer (pure logic + rule engine) */
 #include "guru.h"         /* Guru: daily longevity habits (pure logic + target)   */
 #include "gurupool.h"     /* ...and the editable habit list on the card           */
+#include "daycal.h"       /* local-day windows for the week charts (R4)           */
+#include "safefile.h"     /* crash-safe replacement of every durable file         */
 #include "lvgl.h"
 #include <string.h>
 #include <strings.h>      /* strncasecmp for the Address Look Up filter */
@@ -186,6 +188,18 @@ static void i1_clear(lv_draw_buf_t *db){          /* fill with palette index 0 *
 static void i1_obj_px(lv_obj_t *cv, int x, int y, int v){
     if(cv) i1_px(lv_canvas_get_draw_buf(cv), x, y, v);
 }
+/* A calendar's month arrows are LV_SYMBOL glyphs, which live in montserrat and
+ * not in lv_font_palm, so they need that font by name -- but ONLY the two
+ * buttons. Setting it on the whole header also turned the month label into
+ * montserrat, which is wider, and "September 2026" clipped between the arrows. */
+static void cal_arrows(lv_obj_t *cal){
+    lv_obj_t *hdr = lv_calendar_header_arrow_create(cal);
+    for(uint32_t i = 0; i < lv_obj_get_child_count(hdr); i++){
+        lv_obj_t *c = lv_obj_get_child(hdr, i);
+        if(lv_obj_check_type(c, &lv_button_class))
+            lv_obj_set_style_text_font(c, LV_FONT_DEFAULT, 0);
+    }
+}
 static void i1_obj_clear(lv_obj_t *cv){
     if(cv) i1_clear(lv_canvas_get_draw_buf(cv));
 }
@@ -311,12 +325,63 @@ static int disc_built;
 static void free_rowuids(void);
 static void free_finds(void);
 static void gref_free(void);        /* Q4: the stroke sheet's heap canvas */
+static void wk_free(void);          /* R4: the week chart's heap canvas   */
 static void wifi_scan_kill(void);   /* W5: the scan poll timer (see the wizard) */
 static lv_obj_t *g_listtbl;           /* current record table (partial rebuild) */
 /* The list top bar's field (list_top_bar). Kept in its own handle rather than
  * read back off active_ta: active_ta is "where Graffiti writes", which a modal
  * can legitimately move, and quick_add_cb must always mean THIS field. */
 static lv_obj_t *g_barta;
+
+/* ---- what a text field is FOR (R8, R9) ---------------------------------------
+ * A handful of fields want more than "Graffiti writes here": a name should come
+ * out Capitalised Word By Word, a note should start with a capital, and a phone
+ * number should not be written at all when a keypad can be tapped. The mode is
+ * kept beside the field rather than guessed from its label, and looked up by
+ * the Graffiti path and the tap path both. content_clear() empties it with the
+ * screen, so a stale entry can never outlive the textarea it names. */
+enum { TA_PLAIN, TA_CAP_FIRST, TA_CAP_WORDS, TA_KEYPAD };
+#define TA_MODES_MAX 16
+static struct { lv_obj_t *ta; uint8_t mode; const char *name; } g_tamode[TA_MODES_MAX];
+static int g_ntamode;
+static void ta_mode_set(lv_obj_t *ta, int mode, const char *name){
+    if(!ta || g_ntamode >= TA_MODES_MAX) return;
+    g_tamode[g_ntamode].ta = ta;
+    g_tamode[g_ntamode].mode = (uint8_t)mode;
+    g_tamode[g_ntamode].name = name;
+    g_ntamode++;
+}
+static int ta_mode(lv_obj_t *ta, const char **name){
+    for(int i = 0; i < g_ntamode; i++)
+        if(g_tamode[i].ta == ta){ if(name) *name = g_tamode[i].name; return g_tamode[i].mode; }
+    return TA_PLAIN;
+}
+
+/* R9: should the letter about to land at the cursor be a capital?
+ * FIRST: only if nothing but spaces comes before it -- the first letter of the
+ * field. WORDS: if it starts a word (the start, or after a space or newline).
+ * The cursor is a CHARACTER index and the text is UTF-8, so the walk to the
+ * byte before it steps whole characters rather than assuming one byte each. */
+static int ta_wants_cap(lv_obj_t *ta){
+    int m = ta_mode(ta, NULL);
+    if(m != TA_CAP_FIRST && m != TA_CAP_WORDS) return 0;
+    const char *t = lv_textarea_get_text(ta);
+    uint32_t cur = lv_textarea_get_cursor_pos(ta);
+    size_t b = 0, prev = (size_t)-1;
+    for(uint32_t i = 0; i < cur && t[b]; i++){
+        prev = b;
+        b++;
+        while(((unsigned char)t[b] & 0xC0) == 0x80) b++;     /* continuation bytes */
+    }
+    if(prev == (size_t)-1) return 1;                       /* at the very start */
+    if(m == TA_CAP_WORDS) return t[prev] == ' ' || t[prev] == '\n';
+    for(size_t i = 0; i < b; i++) if(t[i] != ' ' && t[i] != '\n') return 0;
+    return 1;
+}
+static char ta_autocap(lv_obj_t *ta, char c){
+    if(c >= 'a' && c <= 'z' && ta && ta_wants_cap(ta)) c = (char)(c - 'a' + 'A');
+    return c;
+}
 static lv_obj_t *g_findtbl;           /* Find results table                     */
 /* Graffiti input hooks (the trainer). graf_char_hook: a recognized character goes
  * here instead of the active textarea (drill mode). graf_capture_hook: runs on
@@ -359,6 +424,7 @@ static int  g_gu_loaded;             /* guru.sav has been read this boot        
 static int  g_gu_open;               /* a Guru screen is the live view (menu)    */
 static lv_obj_t *g_gu_tbl;           /* the habit list (one lv_table, see below) */
 static lv_obj_t *g_gu_cnt;           /* the "N of M today" header, retitled live */
+static lv_obj_t *g_gu_stk;           /* ...and the streak beside it, likewise    */
 /* Row -> task id for the list, 0 meaning "this row is a category heading". The
  * pool is bounded by GU_TASK_MAX, so this is a fixed array and the screen needs
  * no allocation at all -- unlike the record lists, which malloc per open. */
@@ -903,6 +969,10 @@ static void list_view(const AppDef *ad){
             active_ta = list_top_bar("To Do:", "", LIST_BAR_ADD_MAX, NULL, quick_add_cb);
         else if(ad->app == APP_MEMO)
             active_ta = list_top_bar("Memo:",  "", LIST_BAR_ADD_MAX, NULL, quick_add_cb);
+        /* R9: the quick-add field IS the record's first line, so it starts with
+         * a capital. Look Up (above) does not: it is a filter, not text. */
+        if(ad->app == APP_TODO || ad->app == APP_MEMO)
+            ta_mode_set(active_ta, TA_CAP_FIRST, NULL);
     }
 
     build_record_table();
@@ -1041,14 +1111,179 @@ static void show_detail(uint32_t uid){
 }
 
 /* ------------------------- edit form ------------------------- */
+
+/* ---- R8: the phone keypad ------------------------------------------------------
+ * Phone and Zip are digits, and writing digits one Graffiti stroke at a time is
+ * the slowest way there is to enter a phone number. Tapping either field opens
+ * this: the classic 3x4 phone pad, read across -- 1 2 3 / 4 5 6 / 7 8 9 /
+ * * 0+ # -- with a row underneath for the separators a number is written with
+ * and a delete.
+ *
+ * `0+` types 0 on a tap and + when held, as on a phone. Every key fires on
+ * RELEASE (CLICK_TRIG), which is what makes that possible: a key that typed on
+ * press would already have put the 0 down by the time the hold was recognised.
+ *
+ * It writes straight into the form's own textarea, so there is nothing to copy
+ * back and nothing to lose: Done just closes it. Full screen on lv_layer_top(),
+ * as the Calculator is -- which is why it names its own font (that layer
+ * inherits nothing from the screen). content_clear() closes it, so it cannot
+ * outlive the form it is typing into. The keys are painted by calc_draw_cb:
+ * digits grey, the rest white -- the same reading as the Calculator's. */
+static void calc_draw_cb(lv_event_t *e);
+static lv_obj_t *g_kp, *g_kp_disp, *g_kp_ta;
+static int g_kp_held;                       /* the hold on 0+ already typed '+' */
+static void kp_close(void){
+    if(g_kp){ lv_obj_del(g_kp); g_kp = NULL; }
+    g_kp_disp = NULL; g_kp_ta = NULL; g_kp_held = 0;
+}
+static void kp_refresh(void){
+    if(!g_kp_disp || !g_kp_ta) return;
+    const char *t = lv_textarea_get_text(g_kp_ta);
+    lv_label_set_text(g_kp_disp, t[0] ? t : "");
+}
+static void kp_type(const char *key){
+    if(!g_kp_ta || !key) return;
+    if(!strcmp(key, "Del"))        lv_textarea_delete_char(g_kp_ta);
+    else if(!strcmp(key, "Space")) lv_textarea_add_char(g_kp_ta, ' ');
+    else                           lv_textarea_add_char(g_kp_ta, (uint32_t)key[0]);
+    kp_refresh();
+}
+static void kp_bm_cb(lv_event_t *e){
+    lv_obj_t *bm = lv_event_get_target(e);
+    uint32_t id = lv_buttonmatrix_get_selected_button(bm);
+    if(id == LV_BUTTONMATRIX_BUTTON_NONE) return;
+    const char *txt = lv_buttonmatrix_get_button_text(bm, id);
+    if(lv_event_get_code(e) == LV_EVENT_LONG_PRESSED){
+        if(txt && txt[0] == '0'){ lv_textarea_add_char(g_kp_ta, '+'); kp_refresh(); g_kp_held = 1; }
+        return;
+    }
+    if(g_kp_held){ g_kp_held = 0; return; }    /* the release that ends the hold */
+    kp_type(txt);
+}
+static void kp_done_cb(lv_event_t *e){ (void)e; kp_close(); }
+
+static void kp_open(lv_obj_t *ta, const char *name){
+    kp_close();
+    g_kp_ta = ta;
+    lv_textarea_set_cursor_pos(ta, LV_TEXTAREA_CURSOR_LAST);
+
+    lv_obj_t *k = g_kp = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(k, LCD_W, LCD_H);
+    lv_obj_set_pos(k, 0, 0);
+    lv_obj_set_style_bg_color(k, COL_BODY, 0);
+    lv_obj_set_style_border_width(k, 0, 0);
+    lv_obj_set_style_radius(k, 0, 0);
+    lv_obj_set_style_pad_all(k, 4, 0);
+    lv_obj_set_style_pad_row(k, 4, 0);
+    lv_obj_set_style_text_font(k, &lv_font_palm, 0);
+    lv_obj_clear_flag(k, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(k, LV_FLEX_FLOW_COLUMN);
+
+    lv_obj_t *hdr = lv_obj_create(k);
+    lv_obj_set_size(hdr, lv_pct(100), 26);
+    lv_obj_set_style_bg_opa(hdr, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(hdr, 0, 0);
+    lv_obj_set_style_pad_all(hdr, 0, 0);
+    lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *ttl = lv_label_create(hdr);
+    lv_label_set_text(ttl, name ? name : "Number");
+    lv_obj_set_style_text_font(ttl, &lv_font_palm_bold, 0);
+    lv_obj_align(ttl, LV_ALIGN_LEFT_MID, 2, 0);
+    lv_obj_t *hint = lv_label_create(hdr);
+    lv_label_set_text(hint, "hold 0 for +");
+    lv_obj_set_style_text_color(hint, COL_DIM, 0);
+    lv_obj_align(hint, LV_ALIGN_CENTER, 6, 0);
+    lv_obj_t *done = lv_button_create(hdr);
+    lv_obj_set_size(done, 56, 26);
+    lv_obj_set_style_radius(done, 0, 0);
+    lv_obj_align(done, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_t *dl = lv_label_create(done);
+    lv_label_set_text(dl, "Done");
+    lv_obj_center(dl);
+    lv_obj_add_event_cb(done, kp_done_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *disp = lv_obj_create(k);
+    lv_obj_set_size(disp, lv_pct(100), 40);
+    lv_obj_set_style_bg_color(disp, COL_BODY, 0);
+    lv_obj_set_style_border_width(disp, 1, 0);
+    lv_obj_set_style_border_color(disp, COL_LINE, 0);
+    lv_obj_set_style_radius(disp, 0, 0);
+    lv_obj_set_style_pad_all(disp, 6, 0);
+    lv_obj_clear_flag(disp, LV_OBJ_FLAG_SCROLLABLE);
+    g_kp_disp = lv_label_create(disp);
+    lv_label_set_long_mode(g_kp_disp, LV_LABEL_LONG_CLIP);
+    lv_obj_set_width(g_kp_disp, lv_pct(100));
+    lv_obj_set_style_text_font(g_kp_disp, &lv_font_palm_bold, 0);
+    lv_obj_set_style_text_align(g_kp_disp, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_align(g_kp_disp, LV_ALIGN_RIGHT_MID, 0, 0);
+    kp_refresh();
+
+    static const char *km[] = {
+        "1", "2", "3", "\n",
+        "4", "5", "6", "\n",
+        "7", "8", "9", "\n",
+        "*", "0 +", "#", "\n",
+        "-", "Space", "Del", "" };
+    lv_obj_t *bm = lv_buttonmatrix_create(k);
+    lv_obj_set_width(bm, lv_pct(100));
+    lv_obj_set_flex_grow(bm, 1);
+    lv_buttonmatrix_set_map(bm, km);
+    /* on release, and no auto-repeat -- except Del, where holding to clear a
+     * wrong number is what a thumb expects */
+    /* Keys type on PRESS, as the Calculator's do: typing on release made fast
+     * entry feel late and doubled what a missed lift cost. The one exception is
+     * 0+, which has to wait for the release to know whether it was a tap (0)
+     * or a hold (+). No auto-repeat -- except Del, where holding to clear a
+     * wrong number is what a thumb expects. */
+    lv_buttonmatrix_set_button_ctrl_all(bm, LV_BUTTONMATRIX_CTRL_NO_REPEAT);
+    lv_buttonmatrix_set_button_ctrl(bm, 10, LV_BUTTONMATRIX_CTRL_CLICK_TRIG);
+    lv_buttonmatrix_clear_button_ctrl(bm, 14, LV_BUTTONMATRIX_CTRL_NO_REPEAT);
+    lv_obj_set_style_text_font(bm, &lv_font_palm_bold, 0);
+    lv_obj_set_style_radius(bm, 0, 0);
+    lv_obj_set_style_border_width(bm, 0, 0);
+    lv_obj_set_style_pad_all(bm, 0, 0);
+    lv_obj_set_style_pad_row(bm, 4, 0);
+    lv_obj_set_style_pad_column(bm, 4, 0);
+    lv_obj_set_style_radius(bm, 4, LV_PART_ITEMS);
+    lv_obj_set_style_border_width(bm, 1, LV_PART_ITEMS);
+    lv_obj_set_style_border_color(bm, COL_LINE, LV_PART_ITEMS);
+    lv_obj_set_style_bg_opa(bm, LV_OPA_COVER, LV_PART_ITEMS);
+    lv_obj_set_style_bg_color(bm, COL_BODY, LV_PART_ITEMS);
+    lv_obj_set_style_shadow_width(bm, 0, LV_PART_ITEMS);
+    lv_obj_add_flag(bm, LV_OBJ_FLAG_SEND_DRAW_TASK_EVENTS);
+    lv_obj_add_event_cb(bm, calc_draw_cb, LV_EVENT_DRAW_TASK_ADDED, NULL);
+    lv_obj_add_event_cb(bm, kp_bm_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(bm, kp_bm_cb, LV_EVENT_LONG_PRESSED, NULL);
+}
+
 /* tapping a field just makes it the Graffiti target (and shows its cursor);
- * there is no on-screen keyboard -- all text entry is via the Graffiti strip. */
+ * there is no on-screen keyboard -- all text entry is via the Graffiti strip.
+ * R8: except Phone and Zip, which open the keypad above as well. */
 static void ta_click_cb(lv_event_t *e){
     lv_obj_t *ta = (lv_obj_t *)lv_event_get_target(e);
     if(active_ta && active_ta != ta) lv_obj_clear_state(active_ta, LV_STATE_FOCUSED);
     active_ta = ta;
     lv_obj_add_state(ta, LV_STATE_FOCUSED);
     if(g_form) lv_obj_scroll_to_view(ta, LV_ANIM_ON);
+    const char *name = NULL;
+    if(ta_mode(ta, &name) == TA_KEYPAD) kp_open(ta, name);
+}
+
+/* R9/R8: give the field just added by form_field() its input mode. */
+static void field_mode(int mode, const char *name){
+    if(g_nfields > 0) ta_mode_set(g_fields[g_nfields - 1], mode, name);
+}
+
+/* ---- R7: To Do priority, tapped rather than typed ------------------------------
+ * Four targets, 1 to 4, in one button matrix (one object), one checked at a
+ * time. Palm allows 5; a record that arrives from a sync at 5 shows nothing
+ * picked and keeps its 5 unless a number is tapped -- the form must never
+ * rewrite a value it was not asked to change. */
+static int g_todo_pri;
+static void pri_cb(lv_event_t *e){
+    lv_obj_t *bm = lv_event_get_target(e);
+    uint32_t id = lv_buttonmatrix_get_selected_button(bm);
+    if(id != LV_BUTTONMATRIX_BUTTON_NONE && id < 4) g_todo_pri = (int)id + 1;
 }
 
 /* a labeled one-line textarea; advances *y and records the textarea */
@@ -1106,6 +1341,7 @@ static void save_cb(lv_event_t *e){
         Todo t; if(!data_get_todo(edit_uid,&t)) memset(&t,0,sizeof t);
         snprintf(t.description,sizeof t.description,"%s",fv(0));
         snprintf(t.note,sizeof t.note,"%s",fv(1));
+        if(g_todo_pri >= 1) t.priority = g_todo_pri;     /* R7 */
         t.hasDue = g_due_has;
         if(g_due_has){ t.dueY=g_due_y; t.dueM=g_due_m; t.dueD=g_due_d; }
         data_save_todo(edit_uid,edit_cat,&t);
@@ -1200,6 +1436,7 @@ static void show_edit(uint32_t uid){
         g_ev_h = a.hasTime ? a.sH : 9;
         g_ev_m = a.hasTime ? a.sM : 0;
         form_field(form,"Description",a.description,255,&y);
+        field_mode(TA_CAP_FIRST, NULL);
 
         lv_obj_t *dlab = lv_label_create(form);
         lv_label_set_text(dlab, "Date"); lv_obj_set_pos(dlab, 2, y);
@@ -1226,39 +1463,101 @@ static void show_edit(uint32_t uid){
         y += 52;
 
         form_field(form,"Note",a.note,500,&y);
+        field_mode(TA_CAP_FIRST, NULL);
     } else if(cur_app->app == APP_TODO){
         Todo t; if(!data_get_todo(uid,&t)) memset(&t,0,sizeof t);
         g_due_has=t.hasDue; g_due_y=t.dueY; g_due_m=t.dueM; g_due_d=t.dueD;
         g_due_optional = 1;                    /* a To Do may have no due date */
+        /* R7 reshaped this form. Description, then Due and Priority as compact
+         * rows with the label BESIDE the control -- the way Palm's own To Do
+         * Details laid them out -- then Note. Stacked label-over-field, four rows
+         * are 208 px against 146 of form, so Priority would have been below the
+         * fold of a scrolling form, which is design rule 2's complaint exactly.
+         * This way everything you PICK fits without scrolling; only the Note,
+         * the one optional thing here, is partly under the fold. Note is still
+         * the second textarea created, so it is still fv(1) in save_cb. */
         form_field(form,"Description",t.description,255,&y);
-        form_field(form,"Note",t.note,500,&y);
+        field_mode(TA_CAP_FIRST, NULL);
+
+        #define TD_ROW_X 64                            /* control column */
+        #define TD_ROW_W (LCD_W - 16 - (TD_ROW_X - 2))
         /* Due-date trigger (Palm's To Do due popup). A button, not a text field,
          * so it isn't in g_fields; the picked date lives in g_due_* until Save. */
         lv_obj_t *dlab = lv_label_create(form);
-        lv_label_set_text(dlab, "Due"); lv_obj_set_pos(dlab, 2, y);
+        lv_label_set_text(dlab, "Due"); lv_obj_set_pos(dlab, 2, y + 7);
         lv_obj_t *db = lv_button_create(form);
-        lv_obj_set_size(db, LCD_W - 16, 30);
-        lv_obj_set_pos(db, 2, y + 15);
+        lv_obj_set_size(db, TD_ROW_W, 30);
+        lv_obj_set_pos(db, TD_ROW_X, y);
         lv_obj_set_style_radius(db, 0, 0);
         g_due_lbl = lv_label_create(db);
         lv_obj_align(g_due_lbl, LV_ALIGN_LEFT_MID, 4, 0);
         lv_obj_add_event_cb(db, due_btn_cb, LV_EVENT_CLICKED, NULL);
         due_set_label();
-        y += 52;
+        y += 36;
+
+        /* R7: priority. A new to do starts at 1, which is what the quick-add
+         * bar has always filed it under and what Palm defaults to. */
+        g_todo_pri = uid ? t.priority : 1;
+        lv_obj_t *plab = lv_label_create(form);
+        lv_label_set_text(plab, "Priority"); lv_obj_set_pos(plab, 2, y + 7);
+        static const char *pm[] = { "1", "2", "3", "4", "" };
+        lv_obj_t *pb = lv_buttonmatrix_create(form);
+        lv_buttonmatrix_set_map(pb, pm);
+        lv_buttonmatrix_set_button_ctrl_all(pb, LV_BUTTONMATRIX_CTRL_CHECKABLE);
+        lv_buttonmatrix_set_one_checked(pb, true);
+        if(g_todo_pri >= 1 && g_todo_pri <= 4)
+            lv_buttonmatrix_set_button_ctrl(pb, (uint32_t)(g_todo_pri - 1),
+                                            LV_BUTTONMATRIX_CTRL_CHECKED);
+        lv_obj_set_size(pb, TD_ROW_W, 30);
+        lv_obj_set_pos(pb, TD_ROW_X, y);
+        lv_obj_set_style_text_font(pb, &lv_font_palm_bold, 0);
+        lv_obj_set_style_radius(pb, 0, 0);
+        lv_obj_set_style_border_width(pb, 0, 0);
+        lv_obj_set_style_bg_opa(pb, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_pad_all(pb, 0, 0);
+        lv_obj_set_style_pad_column(pb, 6, 0);
+        lv_obj_set_style_radius(pb, 0, LV_PART_ITEMS);
+        lv_obj_set_style_border_width(pb, 1, LV_PART_ITEMS);
+        lv_obj_set_style_border_color(pb, COL_LINE, LV_PART_ITEMS);
+        lv_obj_set_style_shadow_width(pb, 0, LV_PART_ITEMS);
+        lv_obj_set_style_bg_opa(pb, LV_OPA_COVER, LV_PART_ITEMS);
+        lv_obj_set_style_bg_color(pb, COL_BODY, LV_PART_ITEMS);
+        lv_obj_set_style_text_color(pb, COL_LINE, LV_PART_ITEMS);
+        lv_obj_set_style_bg_color(pb, COL_LINE, LV_PART_ITEMS | LV_STATE_CHECKED);
+        lv_obj_set_style_text_color(pb, COL_BODY, LV_PART_ITEMS | LV_STATE_CHECKED);
+        lv_obj_add_event_cb(pb, pri_cb, LV_EVENT_VALUE_CHANGED, NULL);
+        y += 36;
+        #undef TD_ROW_X
+        #undef TD_ROW_W
+
+        form_field(form,"Note",t.note,500,&y);
+        field_mode(TA_CAP_FIRST, NULL);
     } else if(cur_app->app == APP_ADDR){
         Addr a; if(!data_get_addr(uid,&a)) memset(&a,0,sizeof a);
         /* the scrollable form now exposes the common Palm Address fields (was just
          * 5); fv() indices below must stay in lock-step with save_cb's APP_ADDR arm */
+        /* R9: the name-like fields capitalise Each Word, the note only its first
+         * letter; R8: Phone and Zip open the keypad when tapped. */
         form_field(form,"Last",a.fields[F_name],40,&y);       /* fv0 */
+        field_mode(TA_CAP_WORDS, NULL);
         form_field(form,"First",a.fields[F_firstName],40,&y); /* fv1 */
+        field_mode(TA_CAP_WORDS, NULL);
         form_field(form,"Title",a.fields[F_title],40,&y);     /* fv2 */
+        field_mode(TA_CAP_WORDS, NULL);
         form_field(form,"Company",a.fields[F_company],60,&y); /* fv3 */
+        field_mode(TA_CAP_WORDS, NULL);
         form_field(form,"Phone",a.fields[F_phone1],40,&y);    /* fv4 */
+        field_mode(TA_KEYPAD, "Phone");
         form_field(form,"Address",a.fields[F_address],60,&y); /* fv5 */
+        field_mode(TA_CAP_WORDS, NULL);
         form_field(form,"City",a.fields[F_city],40,&y);       /* fv6 */
+        field_mode(TA_CAP_WORDS, NULL);
         form_field(form,"State",a.fields[F_state],20,&y);     /* fv7 */
+        field_mode(TA_CAP_WORDS, NULL);
         form_field(form,"Zip",a.fields[F_zip],20,&y);         /* fv8 */
+        field_mode(TA_KEYPAD, "Zip");
         form_field(form,"Note",a.fields[F_note],200,&y);      /* fv9 */
+        field_mode(TA_CAP_FIRST, NULL);
     } else if(cur_app->app == APP_MEMO){
         static char mtext[1200];
         if(!data_get_memo(uid, mtext, sizeof mtext)) mtext[0]=0;
@@ -1269,6 +1568,7 @@ static void show_edit(uint32_t uid){
         lv_obj_set_pos(ta, 2, 2);
         lv_obj_add_event_cb(ta, ta_click_cb, LV_EVENT_CLICKED, NULL);
         g_fields[g_nfields++] = ta;
+        field_mode(TA_CAP_FIRST, NULL);
     }
 
     /* focus the first field so Graffiti has a target immediately */
@@ -1296,9 +1596,12 @@ static void hs_btn_sync(void){
     else         lv_obj_remove_state(hs_btn, LV_STATE_DISABLED);
 }
 
+static void hs_check_done(void);
 static void hs_tick(lv_timer_t *t){
     (void)t;
     if(!hs_status) return;
+    hs_check_done();
+    if(!hs_status) return;                   /* it just left for the Wi-Fi panel */
     hs_btn_sync();
     int p = hotsync_progress();              /* -1 idle, else 0..100 */
     if(p >= 0 && p < 100)
@@ -1381,14 +1684,40 @@ static void hs_confirm_open(void){
     lv_obj_add_event_cb(yes, hs_confirm_yes_cb, LV_EVENT_CLICKED, NULL);
 }
 
+/* ---- no Wi-Fi: go where it gets fixed ---------------------------------------
+ * A sync that cannot get online used to end on "Wi-Fi failed" in the status
+ * line, which says what went wrong and nothing about what to do. Every sync
+ * needs Wi-Fi first, so the answer is always the same screen: open the Wi-Fi
+ * panel and have the Assistant say what happened and what to tap there.
+ *
+ * Only from the HotSync screen, and only for a run started there: a sync that
+ * fails while you are somewhere else does not get to pull you out of it. */
+static int g_hs_watch;                       /* a run started here is in flight */
+static void hs_to_wifi(int problem);        /* after the Settings panels */
+/* after a run ends: called from hs_tick on the device, and straight after
+ * hotsync_start() for the simulator, whose run has already finished */
+static void hs_check_done(void){
+    if(!g_hs_watch || hotsync_busy()) return;
+    g_hs_watch = 0;
+    int p = hotsync_wifi_problem();
+    if(p != HS_WIFI_OK) hs_to_wifi(p);
+}
+
 /* One button, three jobs -- see hs_btn_sync(). */
 static void hs_sync_cb(lv_event_t *e){ (void)e;
     if(hotsync_cancel_pending()) return;         /* already stopping */
     if(hotsync_busy()){ hs_confirm_open(); return; }
+    /* Nothing saved: there is no sync to try, so do not spend a "Connecting
+     * Wi-Fi..." on finding that out. */
+    int saved = 0;
+    for(int i = 0; i < CFG_WIFI_N; i++) if(appcfg()->wifi[i].ssid[0]) saved++;
+    if(!saved){ hs_to_wifi(HS_WIFI_NONE_SAVED); return; }
     /* The explanation has been read; from here the status line owns that space. */
     g_hs_ran = 1;
     if(g_hs_what) lv_obj_add_flag(g_hs_what, LV_OBJ_FLAG_HIDDEN);
+    g_hs_watch = 1;
     hotsync_start();
+    hs_check_done();
 }
 
 static void show_hotsync(void){
@@ -1748,6 +2077,14 @@ static void show_app(const char *name){
  * Input arrives through graf_char_hook (set on entry, cleared by kill_kb). */
 #define TR_GW 96
 #define TR_GH 96
+/* The prompt has a line of its own, centred over the guide box, because it is
+ * the one thing on the screen that says what to write -- and at the top-left
+ * it sat in the button row and ran under Strokes. The Kana screens share the
+ * same two constants so the family reads alike. The budget is tight on Kana's
+ * Write screen (a 104 px box): button row 2..28, prompt 29..43, box 45..150,
+ * feedback 153..167, score from 168. */
+#define TR_PROMPT_Y 29
+#define TR_BOX_Y    45
 #define TR_USER "/sdcard/graf_user.dat"
 static uint8_t   tr_guide_buf[LV_CANVAS_BUF_SIZE(TR_GW, TR_GH, 1, 1) + 16];
 static lv_obj_t *tr_guide, *tr_prompt, *tr_score, *tr_feedback, *tr_mode_lbl;
@@ -1783,6 +2120,7 @@ static void tr_reset_mem(void){
 }
 static void tr_load(void){
     tr_reset_mem();
+    sf_recover(TR_SAVE);
     FILE *f = fopen(TR_SAVE, "rb"); if(!f) return;
     uint32_t magic=0, tick=0;
     if(fread(&magic,4,1,f)==1 && magic==TR_MAGIC &&
@@ -1795,11 +2133,11 @@ static void tr_load(void){
     fclose(f);
 }
 static void tr_save(void){
-    FILE *f=fopen(TR_SAVE,"wb"); if(!f) return;
+    SafeFile sf_; FILE *f = sf_open(&sf_, TR_SAVE, "wb"); if(!f) return;
     uint32_t magic=TR_MAGIC;
     fwrite(&magic,4,1,f); fwrite(&tr_tick,4,1,f);
     fwrite(tr_lvl,1,TR_NG,f); fwrite(tr_due,4,TR_NG,f);
-    fclose(f);
+    sf_commit(&sf_, !ferror(f));   /* safefile.h: swap in whole, or not at all */
 }
 
 /* deterministic pick: the non-burned glyph with the smallest due tick (ties resolve
@@ -2145,7 +2483,7 @@ static void show_trainer(void){
 
     tr_prompt = lv_label_create(content);
     lv_obj_set_style_text_font(tr_prompt, &lv_font_palm_bold, 0);
-    lv_obj_align(tr_prompt, LV_ALIGN_TOP_LEFT, 6, 8);
+    lv_obj_align(tr_prompt, LV_ALIGN_TOP_MID, 0, TR_PROMPT_Y);
 
     /* mode toggle: Drill (quiz) <-> Train (record my own strokes) */
     lv_obj_t *mb = lv_button_create(content);
@@ -2181,13 +2519,13 @@ static void show_trainer(void){
     lv_canvas_set_buffer(tr_guide, tr_guide_buf, TR_GW, TR_GH, LV_COLOR_FORMAT_I1);
     lv_canvas_set_palette(tr_guide, 0, lv_color_to_32(COL_BODY, 0xFF));
     lv_canvas_set_palette(tr_guide, 1, lv_color_to_32(COL_LINE, 0xFF));
-    lv_obj_align(tr_guide, LV_ALIGN_TOP_MID, 0, 32);
+    lv_obj_align(tr_guide, LV_ALIGN_TOP_MID, 0, TR_BOX_Y);
     lv_obj_set_style_border_width(tr_guide, 1, 0);
     lv_obj_set_style_border_color(tr_guide, COL_LINE, 0);
 
     tr_feedback = lv_label_create(content);
     lv_obj_set_style_text_font(tr_feedback, &lv_font_palm, 0);
-    lv_obj_align(tr_feedback, LV_ALIGN_TOP_MID, 0, 32 + TR_GH + 6);
+    lv_obj_align(tr_feedback, LV_ALIGN_TOP_MID, 0, TR_BOX_Y + TR_GH + 4);
     lv_label_set_text(tr_feedback, "draw it in the strip below");
 
     tr_score = lv_label_create(content);
@@ -2257,6 +2595,7 @@ static void ka_reset_mem(void){
 }
 static void ka_load(void){
     ka_reset_mem();
+    sf_recover(KA_SAVE);
     FILE *f=fopen(KA_SAVE,"rb"); if(!f) return;
     uint32_t magic=0, tick=0; int n=ka_count();
     if(fread(&magic,4,1,f)==1 && magic==KA_MAGIC &&
@@ -2277,12 +2616,12 @@ static void ka_load(void){
     fclose(f);
 }
 static void ka_save(void){
-    FILE *f=fopen(KA_SAVE,"wb"); if(!f) return;
+    SafeFile sf_; FILE *f = sf_open(&sf_, KA_SAVE, "wb"); if(!f) return;
     uint32_t magic=KA_MAGIC; int n=ka_count();
     fwrite(&magic,4,1,f); fwrite(&ka_tick,4,1,f);
     fwrite(ka_lvl,1,n,f); fwrite(ka_due,4,n,f); fwrite(ka_intro,1,n,f);
     fwrite(kw_lvl,1,n,f); fwrite(kw_due,4,n,f);
-    fclose(f);
+    sf_commit(&sf_, !ferror(f));   /* safefile.h: swap in whole, or not at all */
 }
 /* deterministic pick within the ACTIVE mode: the non-burned kana with the
  * smallest due tick (ties by order). Returns -1 when every kana is burned. */
@@ -2509,7 +2848,7 @@ static void kana_build(int mode){
 
     ka_prompt = lv_label_create(content);
     lv_obj_set_style_text_font(ka_prompt, &lv_font_palm_bold, 0);
-    lv_obj_align(ka_prompt, LV_ALIGN_TOP_LEFT, 6, 8);
+    lv_obj_align(ka_prompt, LV_ALIGN_TOP_MID, 0, TR_PROMPT_Y);   /* see TR_PROMPT_Y */
 
     ka_feedback = lv_label_create(content);
     lv_obj_set_style_text_font(ka_feedback, &lv_font_palm, 0);
@@ -2521,34 +2860,35 @@ static void kana_build(int mode){
     if(mode==0){                                   /* SOUND layout */
         ka_kana = lv_label_create(content);
         lv_obj_set_style_text_font(ka_kana, &lv_font_kana, 0);
-        lv_obj_align(ka_kana, LV_ALIGN_TOP_MID, 0, 30);
+        lv_obj_align(ka_kana, LV_ALIGN_TOP_MID, 0, TR_BOX_Y);
 
         ka_answer = lv_label_create(content);
         lv_obj_set_style_text_font(ka_answer, &lv_font_palm, 0);
-        lv_obj_align(ka_answer, LV_ALIGN_TOP_MID, 0, 86);
+        lv_obj_align(ka_answer, LV_ALIGN_TOP_MID, 0, TR_BOX_Y + 56);
 
         ka_typed = lv_label_create(content);
         lv_obj_set_style_text_font(ka_typed, &lv_font_palm_bold, 0);
-        lv_obj_align(ka_typed, LV_ALIGN_TOP_MID, 0, 106);
+        lv_obj_align(ka_typed, LV_ALIGN_TOP_MID, 0, TR_BOX_Y + 76);
 
-        lv_obj_align(ka_feedback, LV_ALIGN_TOP_MID, 0, 128);
+        lv_obj_align(ka_feedback, LV_ALIGN_TOP_MID, 0, TR_BOX_Y + 98);
         lv_label_set_text(ka_feedback, "draw the romaji in the strip below");
 
         graf_capture_hook = NULL; graf_char_hook = ka_input;
     } else {                                       /* WRITE layout */
         ka_strokes_lbl = lv_label_create(content);
         lv_obj_set_style_text_font(ka_strokes_lbl, &lv_font_palm, 0);
-        lv_obj_align(ka_strokes_lbl, LV_ALIGN_TOP_RIGHT, -66, 10);
+        /* the top-left the prompt used to crowd: clear of the ABC button */
+        lv_obj_align(ka_strokes_lbl, LV_ALIGN_TOP_LEFT, 6, 8);
 
         ka_model = lv_canvas_create(content);
         lv_canvas_set_buffer(ka_model, ka_model_buf, KW_GW, KW_GH, LV_COLOR_FORMAT_I1);
         lv_canvas_set_palette(ka_model, 0, lv_color_to_32(COL_BODY, 0xFF));
         lv_canvas_set_palette(ka_model, 1, lv_color_to_32(COL_LINE, 0xFF));
-        lv_obj_align(ka_model, LV_ALIGN_TOP_MID, 0, 32);
+        lv_obj_align(ka_model, LV_ALIGN_TOP_MID, 0, TR_BOX_Y);
         lv_obj_set_style_border_width(ka_model, 1, 0);
         lv_obj_set_style_border_color(ka_model, COL_LINE, 0);
 
-        lv_obj_align(ka_feedback, LV_ALIGN_TOP_MID, 0, 32 + KW_GH + 6);
+        lv_obj_align(ka_feedback, LV_ALIGN_TOP_MID, 0, TR_BOX_Y + KW_GH + 4);
         lv_label_set_text(ka_feedback, "trace each numbered stroke below");
 
         graf_char_hook = NULL; graf_capture_hook = kw_capture;
@@ -3782,8 +4122,7 @@ static void show_set_date(void){
      * accidental reason that it sits on lv_layer_top(), which inherits nothing
      * and therefore falls back to montserrat. Same mechanism as the greeting
      * pane's font; see spk_pane.) The day numbers stay in the Palm font. */
-    lv_obj_t *hdr = lv_calendar_header_arrow_create(cal);
-    lv_obj_set_style_text_font(hdr, LV_FONT_DEFAULT, 0);
+    cal_arrows(cal);
     lv_obj_add_event_cb(cal, date_cal_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     lv_obj_t *cancel = lv_button_create(content);
@@ -4259,6 +4598,17 @@ static void show_set_panel(int tile){
                               "server that is not iCloud.");
 }
 
+/* See the no-Wi-Fi note by hs_check_done(). The Assistant's line REPLACES the
+ * panel's own caption: she says what happened and what to tap, here. */
+static void hs_to_wifi(int problem){
+    show_set_panel(SET_WIFI);
+    assist_say(problem == HS_WIFI_NONE_SAVED
+        ? "HotSync needs Wi-Fi, and no network is saved yet. Tap 1, pick "
+          "yours from the list, and type its password."
+        : "HotSync could not join any network saved here. If yours is in "
+          "range, tap it and check the password.");
+}
+
 static void show_settings(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
@@ -4606,32 +4956,31 @@ static void act_about(lv_event_t *e){ (void)e;
         char gbuf[480], src[200];
         const char *err = gurupool_error();
         if(gurupool_from_sd())
-            snprintf(src, sizeof src, "The habits come from\nguru.txt on the card.");
+            snprintf(src, sizeof src, "The habits come from guru.txt on the card.");
         else if(err[0])      /* edited, and rejected -- say which line and why */
-            snprintf(src, sizeof src, "Your guru.txt was not used:\n%s", err);
+            snprintf(src, sizeof src, "Your guru.txt was not used: %s", err);
         else                 /* no file on the card: the ordinary case */
-            snprintf(src, sizeof src, "Menu > Export habit list puts\n"
+            snprintf(src, sizeof src, "Menu > Export habit list puts "
                                       "guru.txt on the card to edit.");
         snprintf(gbuf, sizeof gbuf,
-                 "Guru keeps a list of small daily\n"
-                 "habits and counts the ones you\n"
-                 "did.\n\n"
-                 "Your target is your own average\n"
-                 "over the last week, never less\n"
-                 "than one a day.\n\n"
+                 /* paragraphs only: the label wraps at its own width, and hard
+                  * breaks tuned for one font break wrongly in another (these
+                  * were written while the top layer drew in montserrat) */
+                 "Guru keeps a list of small daily habits and counts the ones "
+                 "you did.\n\n"
+                 "Your target is your own average over the last week, never "
+                 "less than one a day.\n\n"
                  "%s\n\n"
-                 "These are popular wellness\n"
-                 "habits, not medical advice.\n\n"
+                 "These are popular wellness habits, not medical advice.\n\n"
                  "v0.3 - tap to close", src);
         lv_label_set_text(body, gbuf);
     }
     else
-        lv_label_set_text(body, "A pocket PDA that syncs to iCloud.\n"
-                                "Offline by default. HotSync when\n"
-                                "you want to. No feed. No ads.\n\n"
-                                "Memos stay on this device.\n"
-                                "To Dos sync as CalDAV tasks,\n"
-                                "not the Reminders app.\n\n"
+        lv_label_set_text(body, "A pocket PDA that syncs to iCloud. Offline "
+                                "by default. HotSync when you want to. No feed. "
+                                "No ads.\n\n"
+                                "Memos stay on this device. To Dos sync as "
+                                "CalDAV tasks, not the Reminders app.\n\n"
                                 "v0.3 - tap to close");
     lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 20);
 }
@@ -4824,6 +5173,10 @@ static void show_power(void){
     lv_obj_t *rl = lv_label_create(rf); lv_label_set_text(rl, "Refresh"); lv_obj_center(rl);
 }
 static void act_power(lv_event_t *e){ (void)e; menu_close(); show_power(); }
+/* R5: lock by hand. Offered on the launcher only: the lock clears the content
+ * area on the way up, so from inside an app it would throw away whatever was on
+ * screen -- a half-edited record included. The grid has nothing to lose. */
+static void act_lock(lv_event_t *e){ (void)e; menu_close(); ui_show_lock(); }
 
 /* Palm menu: tap Menu (silkscreen) -> pull-down of the context's commands,
  * grouped by Palm's menu categories (Record / Options). */
@@ -4866,12 +5219,13 @@ static void menu_open(void){
     }
     menu_item(panel, "Settings", act_prefs);
     menu_item(panel, "Power", act_power);
+    if(g_on_launcher) menu_item(panel, "Lock", act_lock);
     if(g_trainer_open)
         menu_item(panel, "Reset progress", act_tr_reset);   /* Graffiti trainer only */
     if(g_kana_open)
         menu_item(panel, "Reset progress", act_ka_reset);   /* Kana trainer only */
     if(g_gu_open){                                          /* Guru only */
-        menu_item(panel, "Her week", act_gu_week);
+        menu_item(panel, "This week", act_gu_week);
         menu_item(panel, "Export habit list", act_gu_export);
     }
     if(g_co_open){                                          /* Coach only */
@@ -5029,6 +5383,36 @@ static void calc_bm_cb(lv_event_t *e){
     if(!txt) return;
     calc_apply(txt[0]=='<' ? '<' : txt[0]);
 }
+/* R10: the keys painted by kind, the way a real calculator separates them --
+ * digits grey, operators and functions white, "=" solid black. All from a draw
+ * hook over the one button matrix, so the grouping costs no objects: a grey
+ * digit is a fill colour, not a widget. A pressed key inverts, whatever its
+ * kind, so the press still shows (overriding the fill would otherwise hide it).
+ * Same descriptor-driven pattern as list_draw_cb. */
+#define CALC_DIGIT_BG lv_color_hex(0xD6D6D6)      /* the strip's grey: one grey, not a new one */
+static void calc_draw_cb(lv_event_t *e){
+    lv_draw_task_t *task = lv_event_get_draw_task(e);
+    lv_draw_dsc_base_t *b = lv_draw_task_get_draw_dsc(task);
+    if(!b || b->part != LV_PART_ITEMS || !b->obj) return;
+    lv_obj_t *bm = b->obj;
+    const char *txt = lv_buttonmatrix_get_button_text(bm, b->id1);
+    if(!txt) return;
+    int digit   = (txt[0] >= '0' && txt[0] <= '9') || txt[0] == '.';
+    int equals  = txt[0] == '=';
+    int pressed = lv_obj_has_state(bm, LV_STATE_PRESSED)
+               && lv_buttonmatrix_get_selected_button(bm) == b->id1;
+    int dark    = equals != pressed;                 /* "=" inverts back to white */
+    if(lv_draw_task_get_type(task) == LV_DRAW_TASK_TYPE_FILL){
+        lv_draw_fill_dsc_t *fd = lv_draw_task_get_fill_dsc(task);
+        if(!fd) return;
+        fd->opa   = LV_OPA_COVER;
+        fd->color = dark ? COL_LINE : digit ? CALC_DIGIT_BG : COL_BODY;
+        return;
+    }
+    lv_draw_label_dsc_t *ld = lv_draw_task_get_label_dsc(task);
+    if(ld) ld->color = dark ? COL_BODY : COL_LINE;
+}
+
 static void calc_open(void){
     if(g_calc) return;
     calc_expr[0]=0; calc_isresult=0;
@@ -5094,11 +5478,28 @@ static void calc_open(void){
     lv_buttonmatrix_set_map(bm, km);
     lv_obj_set_style_text_font(bm, &lv_font_palm_bold, 0);
     lv_obj_set_style_radius(bm, 0, 0);
-    lv_obj_set_style_radius(bm, 0, LV_PART_ITEMS);
+    lv_obj_set_style_border_width(bm, 0, 0);
     lv_obj_set_style_pad_all(bm, 0, 0);
+    lv_obj_set_style_pad_row(bm, 4, 0);          /* a gutter between keys reads as */
+    lv_obj_set_style_pad_column(bm, 4, 0);       /* a keypad, not a spreadsheet     */
+    /* every key: a hairline frame and a small radius; the fill is calc_draw_cb's.
+     * An opaque bg is what guarantees the FILL task the hook hangs off. */
+    lv_obj_set_style_radius(bm, 4, LV_PART_ITEMS);
+    lv_obj_set_style_border_width(bm, 1, LV_PART_ITEMS);
+    lv_obj_set_style_border_color(bm, COL_LINE, LV_PART_ITEMS);
+    lv_obj_set_style_bg_opa(bm, LV_OPA_COVER, LV_PART_ITEMS);
+    lv_obj_set_style_bg_color(bm, COL_BODY, LV_PART_ITEMS);
+    lv_obj_set_style_shadow_width(bm, 0, LV_PART_ITEMS);
+    lv_obj_add_flag(bm, LV_OBJ_FLAG_SEND_DRAW_TASK_EVENTS);
+    lv_obj_add_event_cb(bm, calc_draw_cb, LV_EVENT_DRAW_TASK_ADDED, NULL);
     lv_obj_add_event_cb(bm, calc_bm_cb, LV_EVENT_VALUE_CHANGED, NULL);
 }
 static void calc_cb(lv_event_t *e){ (void)e; calc_open(); }
+
+/* see ui.h: the Calculator (when not hidden under the lock) or the keypad */
+int ui_discrete_taps(void){
+    return (g_calc && !lv_obj_has_flag(g_calc, LV_OBJ_FLAG_HIDDEN)) || g_kp != NULL;
+}
 
 /* ------------------------- F2: category picker ------------------------- */
 static lv_obj_t *cat_trigger, *cat_label, *g_catpop;
@@ -5512,7 +5913,7 @@ void due_open(void){
         if(!g_due_has){ sy = tmv.tm_year + 1900; sm = tmv.tm_mon + 1; sd = tmv.tm_mday; }
     }
     lv_calendar_set_showed_date(cal, sy, sm);
-    lv_calendar_header_arrow_create(cal);
+    cal_arrows(cal);          /* LV_SYMBOL arrows: see cal_arrows() */
     lv_obj_add_event_cb(cal, due_cal_cb, LV_EVENT_VALUE_CHANGED, NULL);
     (void)sd;
 }
@@ -5850,10 +6251,39 @@ static void show_case(void){
             graf_case==CASE_NONE ? "abc" : graf_case==CASE_SHIFT ? "Abc" : "ABC");
 }
 /* punctuation-shift indicator: a tap arms "the next stroke is punctuation", shown
- * here so the user knows the mode is active (like PalmOS's shift dot). */
-static lv_obj_t *graf_punct_lbl;
+ * here so the user knows the mode is active (like PalmOS's shift dot).
+ *
+ * R13: it is also a way OUT. A stray tap on the pane arms the shift, and there
+ * was no way to disarm it short of writing punctuation you did not want. Now
+ * there are three, none of which types anything: tap this marker (it reads
+ * "PUNC x" in a black chip, so it looks like the thing you tap), swipe
+ * backspace (graffiti_recognize treats that as "cancel" while armed), or leave
+ * it -- it lapses after GRAF_PUNCT_MS. The timeout is the one that catches the
+ * person who never noticed the mode was on at all. */
+#define GRAF_PUNCT_MS 4000
+static lv_obj_t   *graf_punct_lbl;
+static lv_timer_t *graf_punct_tmr;
+static void show_punct(int on);
+static void graf_punct_lapse_cb(lv_timer_t *t){ (void)t;
+    graf_punct_tmr = NULL;                       /* one-shot: LVGL deletes it */
+    graffiti_punct_cancel();
+    show_punct(0);
+}
+static void graf_punct_tap_cb(lv_event_t *e){ (void)e;
+    graffiti_punct_cancel();
+    show_punct(0);
+}
 static void show_punct(int on){
-    if(graf_punct_lbl) lv_label_set_text(graf_punct_lbl, on ? "PUNC" : "");
+    if(graf_punct_tmr){ lv_timer_delete(graf_punct_tmr); graf_punct_tmr = NULL; }
+    if(!graf_punct_lbl) return;
+    if(on){
+        lv_label_set_text(graf_punct_lbl, "PUNC  x");
+        lv_obj_clear_flag(graf_punct_lbl, LV_OBJ_FLAG_HIDDEN);
+        graf_punct_tmr = lv_timer_create(graf_punct_lapse_cb, GRAF_PUNCT_MS, NULL);
+        lv_timer_set_repeat_count(graf_punct_tmr, 1);
+    } else {
+        lv_obj_add_flag(graf_punct_lbl, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 /* user_data: 0 = letters (abc pad), 1 = digits (123 pad) */
 static void graf_up_cb(lv_event_t *e){
@@ -5878,6 +6308,7 @@ static void graf_up_cb(lv_event_t *e){
         return;
     }
     if(graf_case != CASE_NONE && c >= 'a' && c <= 'z') c = c - 'a' + 'A';
+    else c = ta_autocap(active_ta, c);                 /* R9: the field's own rule */
     lv_textarea_add_char(active_ta, c);                /* letter, digit, punct, space, '\n' */
     if(graf_case == CASE_SHIFT){ graf_case = CASE_NONE; show_case(); }
 }
@@ -6046,6 +6477,14 @@ static void clock_tick(lv_timer_t *t){
                                          /* clears. Shrinking the bars was   */
                                          /* the price of that clearance.     */
 static lv_obj_t *g_lock;                 /* the overlay root, or NULL when unlocked */
+
+/* see ui.h: which screen is up, for the pool monitor (lvgl_port.c) */
+const char *ui_screen_name(void){
+    if(g_lock) return "Lock";
+    if(g_calc && !lv_obj_has_flag(g_calc, LV_OBJ_FLAG_HIDDEN)) return "Calculator";
+    return title_lbl ? lv_label_get_text(title_lbl) : "?";
+}
+
 static lv_obj_t *g_dash_cv;              /* the I1 graphics canvas */
 static lv_obj_t *g_dash_time_ap;         /* AM/PM label (repositioned to the clock width) */
 static WxCache   g_wx;                    /* weather snapshot for this lock session */
@@ -6296,6 +6735,23 @@ static int dash_next_due(char *out,int cap){
 }
 
 /* a small left-aligned label on the overlay at (x,y), Palm font, optional bold. */
+/* R6: the unlock band. Its chevrons are painted in dash_paint() at x positions
+ * worked out once from the label widths in ui_show_lock() (0 = none), because
+ * where they go depends on the owner's name and the text's real width. */
+#define DASH_UNLOCK_Y 306
+static int g_dash_chev_x[2];
+/* two stacked up-chevrons, 11 px wide and 2 px thick, in the BODY colour so they
+ * read knocked out of the black band. `cx` is the centre, `y` the top apex. */
+static void dchevron_up(int cx, int y){
+    for(int c = 0; c < 2; c++)
+        for(int i = 0; i < 6; i++)
+            for(int t = 0; t < 2; t++){
+                int yy = y + c * 5 + i + t;
+                i1_px(g_dash_db, cx - i, yy, 0);
+                i1_px(g_dash_db, cx + i, yy, 0);
+            }
+}
+
 static lv_obj_t *dash_lbl(int x,int y,const char *txt,int bold){
     lv_obj_t *l = lv_label_create(g_lock);
     lv_obj_set_style_text_font(l, bold?&lv_font_palm_bold:&lv_font_palm, 0);
@@ -6354,6 +6810,8 @@ static void lock_release_cb(lv_event_t *e){ (void)e;
          * up, so it is the one place that defines an "unlock session" -- see the
          * greeting block for why that is the right window. */
         g_greet_due = 0xFF;
+        /* R11: a calculator the lock went over comes back exactly as it was. */
+        if(g_calc) lv_obj_clear_flag(g_calc, LV_OBJ_FLAG_HIDDEN);
         /* the launcher is built lazily on the FIRST unlock (at boot the content area
          * is empty behind the lock, so the launcher grid and the dashboard never share
          * the 24 KB pool). Later wakes re-lock over whatever app is showing, so only
@@ -6425,8 +6883,15 @@ static void dash_paint(void){
     dshoulder(DASH_MARGIN,        DASH_Y_SUN, DASH_H_SUN);
     dshoulder(DASH_CW-DASH_MARGIN,DASH_Y_SUN, DASH_H_SUN);
 
-    /* unlock chevron */
-    for(int i=0;i<6;i++){ dpx(DASH_CW/2-6+i,306-i); dpx(DASH_CW/2+6-i,306-i); }
+    /* R6: the way in. A solid band across the foot of the screen with the
+     * instruction knocked out of it in bold, and a double chevron pointing the
+     * way the finger has to go. It was a 1 px caret and a line of plain text --
+     * the quietest thing on the screen, and the only thing on it a new user
+     * actually NEEDS to read. Painted, not built: the band, the arrows and the
+     * word cost the canvas nothing and the pool one label. */
+    dfill(0, DASH_UNLOCK_Y, DASH_CW, DASH_CH - DASH_UNLOCK_Y);
+    for(int k = 0; k < 2; k++)
+        if(g_dash_chev_x[k] > 0) dchevron_up(g_dash_chev_x[k], DASH_UNLOCK_Y + 2);
 
     /* ---- the weather, stepped to the current hour ------------------------
      * The snapshot holds a day of hourly rows and is refreshed about once a day,
@@ -6492,6 +6957,30 @@ void ui_show_lock(void){
      * "how did it go" on the way past. */
     if(co_owns_screen()) return;
     if(g_lock){ dash_paint(); return; }             /* already showing -> just refresh */
+    /* R11: the lock is a child of the SCREEN, and the Calculator (like every
+     * modal) lives on lv_layer_top(), which LVGL always draws above the screen
+     * -- so the lock used to come up UNDERNEATH an open calculator. Hide it
+     * rather than close it: calc_expr is a static, so the sum in progress is
+     * still there when the unlock shows it again.
+     *
+     * Every OTHER modal on that layer has the same problem and the opposite
+     * answer. The menus, About, the confirmations, the pickers and the
+     * one-shot alerts all belong to the screen underneath, which the
+     * content_clear() below is about to delete -- so they close with it
+     * rather than float over the lock (and over a launcher, after the unlock)
+     * describing a screen that no longer exists. br_close() saves the
+     * brightness on the way out, as it does when tapped away. */
+    if(g_calc) lv_obj_add_flag(g_calc, LV_OBJ_FLAG_HIDDEN);
+    menu_close();
+    catpop_close();
+    about_close();
+    confirm_close();
+    alert_close();
+    rolepop_close();
+    details_close();
+    due_close();
+    br_close();
+    hs_confirm_close();
     /* Free whatever app view is in the content area first. The lock covers the whole
      * screen anyway, and this keeps the 24 KB LVGL pool holding only the chrome + the
      * dashboard at once (never chrome + an app + the dashboard). The content area is
@@ -6644,13 +7133,25 @@ void ui_show_lock(void){
      * centred position it has always had, because a line that shifts depending
      * on a setting you cannot see from here looks like a bug. */
     { const char *own = appcfg()->owner;
-      lv_obj_t *o = dash_lbl(0,308,"swipe up to unlock",0);
+      lv_obj_t *o = dash_lbl_rev(0, DASH_UNLOCK_Y, "Swipe up to unlock");
+      g_dash_chev_x[0] = g_dash_chev_x[1] = 0;
       if(own[0]){
-          lv_obj_align(o, LV_ALIGN_BOTTOM_RIGHT, -6, -2);
-          lv_obj_t *n = dash_lbl(0,308,own,0);
-          lv_obj_align(n, LV_ALIGN_BOTTOM_LEFT, 6, -2);
+          /* the name keeps the left, the instruction the right, and ONE chevron
+           * sits between them, against the words it belongs to. */
+          lv_obj_align(o, LV_ALIGN_BOTTOM_RIGHT, -6, 0);
+          lv_obj_t *n = dash_lbl_rev(0, DASH_UNLOCK_Y, own);
+          lv_obj_set_style_text_font(n, &lv_font_palm, 0);
+          lv_obj_align(n, LV_ALIGN_BOTTOM_LEFT, 6, 0);
+          lv_obj_update_layout(o);
+          lv_obj_update_layout(n);
+          int gap_l = lv_obj_get_x(n) + lv_obj_get_width(n);
+          int gap_r = lv_obj_get_x(o);
+          if(gap_r - gap_l >= 20) g_dash_chev_x[0] = gap_r - 10;
       } else {
-          lv_obj_align(o, LV_ALIGN_BOTTOM_MID, 0, -2);
+          lv_obj_align(o, LV_ALIGN_BOTTOM_MID, 0, 0);
+          lv_obj_update_layout(o);
+          g_dash_chev_x[0] = lv_obj_get_x(o) - 14;
+          g_dash_chev_x[1] = lv_obj_get_x(o) + lv_obj_get_width(o) + 13;
       } }
 
     dash_paint();
@@ -6775,7 +7276,7 @@ static void ms_new_game(void){
 #define MS_SAV       "/sdcard/mines.sav"
 #define MS_SAV_MAGIC 0x4D534733u                 /* "MSG3" (bumped: pausable PlayClock) */
 static void ms_save(void){
-    FILE *f = fopen(MS_SAV, "wb"); if(!f) return;
+    SafeFile sf_; FILE *f = sf_open(&sf_, MS_SAV, "wb"); if(!f) return;
     uint32_t magic = MS_SAV_MAGIC;
     /* store a PAUSED snapshot: a reboot must never charge for time powered off */
     PlayClock clk = pc_snapshot(&g_ms_clk, (uint32_t)time(NULL));
@@ -6783,9 +7284,10 @@ static void ms_save(void){
     fwrite(&g_ms, sizeof g_ms, 1, f);
     fwrite(&clk,  sizeof clk,  1, f);
     fwrite(&g_ms_best, sizeof g_ms_best, 1, f);
-    fclose(f);
+    sf_commit(&sf_, !ferror(f));   /* safefile.h: swap in whole, or not at all */
 }
 static int ms_load(void){
+    sf_recover(MS_SAV);
     FILE *f = fopen(MS_SAV, "rb"); if(!f) return 0;
     uint32_t magic = 0; MsGame tmp; int ok = 0;
     if(fread(&magic, sizeof magic, 1, f) == 1 && magic == MS_SAV_MAGIC &&
@@ -6979,14 +7481,15 @@ static const char *WD_KROW[3] = { "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM" };
 #define WD_SAV       "/sdcard/wordie.sav"
 #define WD_SAV_MAGIC 0x57444732u                 /* "WDG2" (bumped: now carries the streak) */
 static void wd_save(void){
-    FILE *f = fopen(WD_SAV, "wb"); if(!f) return;
+    SafeFile sf_; FILE *f = sf_open(&sf_, WD_SAV, "wb"); if(!f) return;
     uint32_t magic = WD_SAV_MAGIC;
     fwrite(&magic, sizeof magic, 1, f);
     fwrite(&g_wd, sizeof g_wd, 1, f);
     fwrite(&g_wd_streak, sizeof g_wd_streak, 1, f);
-    fclose(f);
+    sf_commit(&sf_, !ferror(f));   /* safefile.h: swap in whole, or not at all */
 }
 static int wd_load(void){
+    sf_recover(WD_SAV);
     FILE *f = fopen(WD_SAV, "rb"); if(!f) return 0;
     uint32_t magic = 0; WdGame tmp; int ok = 0;
     if(fread(&magic, sizeof magic, 1, f) == 1 && magic == WD_SAV_MAGIC &&
@@ -7291,7 +7794,7 @@ static void sd_tick(lv_timer_t *t){ (void)t;
 #define SD_SAV       "/sdcard/sudoku.sav"
 #define SD_SAV_MAGIC 0x53444B33u                 /* "SDK3" (bumped: pausable PlayClock) */
 static void sd_save(void){
-    FILE *f = fopen(SD_SAV, "wb"); if(!f) return;
+    SafeFile sf_; FILE *f = sf_open(&sf_, SD_SAV, "wb"); if(!f) return;
     uint32_t magic = SD_SAV_MAGIC;
     PlayClock clk = pc_snapshot(&g_sd_clk, (uint32_t)time(NULL));   /* paused snapshot */
     fwrite(&magic, sizeof magic, 1, f);
@@ -7299,9 +7802,10 @@ static void sd_save(void){
     fwrite(&g_sd_sel, sizeof g_sd_sel, 1, f);
     fwrite(&clk, sizeof clk, 1, f);
     fwrite(&g_sd_best, sizeof g_sd_best, 1, f);
-    fclose(f);
+    sf_commit(&sf_, !ferror(f));   /* safefile.h: swap in whole, or not at all */
 }
 static int sd_load(void){
+    sf_recover(SD_SAV);
     FILE *f = fopen(SD_SAV, "rb"); if(!f) return 0;
     uint32_t magic = 0; SdGame tmp; int ok = 0;
     if(fread(&magic, sizeof magic, 1, f) == 1 && magic == SD_SAV_MAGIC &&
@@ -7488,13 +7992,17 @@ static void content_clear(void){
     time_close(); g_time_lbl = NULL;
     for(int i = 0; i < 12; i++) g_fields[i] = NULL;
     g_nfields = 0;
+    g_ntamode = 0;        /* R8/R9: the modes named fields that are gone */
+    kp_close();           /* the keypad is on lv_layer_top(): not in `content` */
     /* record + search tables */
     g_listtbl = NULL; g_findtbl = NULL;
     /* HotSync / discovery status lines */
     hs_status = NULL; hs_btn = hs_btn_lbl = NULL; disc_status = NULL;
+    g_hs_watch = 0;       /* a run left behind must not pull you back later */
     /* Graffiti + Kana trainers */
     tr_guide = tr_prompt = tr_score = tr_feedback = tr_mode_lbl = NULL;
     gref_free();          /* Q4: the sheet's canvas is heap, not a static buffer */
+    wk_free();            /* R4: so is the week chart's */
     ka_kana = ka_prompt = ka_answer = ka_typed = ka_feedback = ka_score = NULL;
     ka_strokes_lbl = ka_model = ka_modelbl = NULL;
     /* News reader */
@@ -7511,7 +8019,7 @@ static void content_clear(void){
      * what keeps a session sealed while the shell changes underneath it. */
     g_co_cv = g_co_time = g_co_sub = g_co_status = g_co_hold_lbl = NULL;
     /* Guru */
-    g_gu_tbl = g_gu_cnt = NULL;
+    g_gu_tbl = g_gu_cnt = g_gu_stk = NULL;
 }
 static uint32_t  g_zp_seq;                  /* varies the board each New */
 static PlayClock g_zp_clk;                  /* pausable solve timer (playclock.h) */
@@ -7628,16 +8136,17 @@ static void zp_tick(lv_timer_t *t){ (void)t;
 #define ZP_SAV       "/sdcard/zip.sav"
 #define ZP_SAV_MAGIC 0x5A495031u                  /* "ZIP1" */
 static void zp_save(void){
-    FILE *f = fopen(ZP_SAV, "wb"); if(!f) return;
+    SafeFile sf_; FILE *f = sf_open(&sf_, ZP_SAV, "wb"); if(!f) return;
     uint32_t magic = ZP_SAV_MAGIC;
     PlayClock clk = pc_snapshot(&g_zp_clk, (uint32_t)time(NULL));   /* paused snapshot */
     fwrite(&magic, sizeof magic, 1, f);
     fwrite(&g_zp, sizeof g_zp, 1, f);
     fwrite(&clk, sizeof clk, 1, f);
     fwrite(&g_zp_best, sizeof g_zp_best, 1, f);
-    fclose(f);
+    sf_commit(&sf_, !ferror(f));   /* safefile.h: swap in whole, or not at all */
 }
 static int zp_load(void){
+    sf_recover(ZP_SAV);
     FILE *f = fopen(ZP_SAV, "rb"); if(!f) return 0;
     uint32_t magic = 0; ZpGame tmp; int ok = 0;
     /* zp_valid() is the real guard: without it a corrupt blob could carry a path
@@ -7883,11 +8392,11 @@ static int ui_tz(void){
 
 /* ------------------------------------------------------------- persistence */
 static void co_save(void){
-    FILE *f = fopen(CO_SAV, "wb"); if(!f) return;
+    SafeFile sf_; FILE *f = sf_open(&sf_, CO_SAV, "wb"); if(!f) return;
     g_co.magic = CO_SAV_MAGIC;
     fwrite(&g_co, sizeof g_co, 1, f);
     fwrite(&g_co_sig, sizeof g_co_sig, 1, f);
-    fclose(f);
+    sf_commit(&sf_, !ferror(f));   /* safefile.h: swap in whole, or not at all */
 }
 
 static void co_finish(int result, int blocker);
@@ -7914,6 +8423,7 @@ static void co_load(void){
     if(g_co_loaded) return;
     coach_state_init(&g_co);
     memset(&g_co_sig, 0, sizeof g_co_sig);
+    sf_recover(CO_SAV);
     FILE *f = fopen(CO_SAV, "rb");
     if(f){
         CoachState t;
@@ -8232,7 +8742,7 @@ void ui_test_type(const char *text){
     if(!active_ta) return;
     if(!text){ lv_textarea_set_text(active_ta, ""); return; }   /* clear */
     for(const unsigned char *p = (const unsigned char *)text; *p; p++)
-        lv_textarea_add_char(active_ta, (uint32_t)*p);
+        lv_textarea_add_char(active_ta, (uint32_t)(unsigned char)ta_autocap(active_ta, (char)*p));
 }
 #endif
 
@@ -8782,12 +9292,16 @@ static void spk_tail_line(lv_draw_buf_t *db, int x0, int y0, int x1, int y1){
  * avoid. The base row is the bubble's own border, continued across the canvas
  * except where the wedge opens into it, which is what makes the tail read as a
  * hole in the balloon rather than a sticker on it. */
+/* side = 2 (R3) mirrors side 1: base along the LEFT column, apex to the right,
+ * for a speaker standing at the right-hand end of the strip. */
 static void spk_tail_plot(lv_draw_buf_t *db, int u, int v, int side){
-    i1_px(db, side ? v : u, side ? u : v, 1);
+    if(side == 2) i1_px(db, SPK_TAIL_H - 1 - v, u, 1);
+    else          i1_px(db, side ? v : u, side ? u : v, 1);
 }
 static void spk_tail_wedge(lv_draw_buf_t *db, int u0, int v0, int u1, int v1, int side){
-    if(side) spk_tail_line(db, v0, u0, v1, u1);
-    else     spk_tail_line(db, u0, v0, u1, v1);
+    if(side == 2)  spk_tail_line(db, SPK_TAIL_H - 1 - v0, u0, SPK_TAIL_H - 1 - v1, u1);
+    else if(side)  spk_tail_line(db, v0, u0, v1, u1);
+    else           spk_tail_line(db, u0, v0, u1, v1);
 }
 static void spk_tail_paint_dir(lv_obj_t *cv, int side){
     lv_draw_buf_t *db = lv_canvas_get_draw_buf(cv);
@@ -8800,29 +9314,10 @@ static void spk_tail_paint_dir(lv_obj_t *cv, int side){
     lv_obj_invalidate(cv);                      /* exactly one, for the whole tail */
 }
 
-/* ---- geometry, in `content` coordinates (240 x 184 visible) ----
- * A speaker screen is ONE scrolling page, not a scrolling sub-panel with fixed
- * furniture around it: the content, the portrait and the bubble move together,
- * and the only scrollbar that can ever appear is the page's own, at the far
- * right and clear of the portrait. A quiet page fits with no scrollbar at all. */
-#define SPK_BUB_X    2
-#define SPK_BUB_W    230                         /* clear of the page scrollbar   */
-#define SPK_FACE_R   232                         /* portrait's right edge, inside
-                                                    the page scrollbar            */
-#define SPK_FACE_TOP 4                           /* its y with nothing above it    */
-#define SPK_CHIN_GAP 4                           /* portrait's bottom edge to the
-                                                    tip of the tail. That edge was
-                                                    the Coach's chin until he grew
-                                                    a neck and shoulders; on all
-                                                    three it is now the shoulder
-                                                    line, so the tail rises to the
-                                                    shoulder                       */
-
-/* The highest the balloon may sit for a given portrait: any higher and the face
- * would be pushed off the top of the page. Callers that place the bubble from
- * their own content (Coach's stats column) clamp to this. */
-#define SPK_BUB_MIN(face) (SPK_FACE_TOP + (int)(face)->header.h \
-                           + SPK_CHIN_GAP + (SPK_TAIL_H - 1))
+/* R3/R4 retired the arrangement that stood a speaker ABOVE a balloon on a
+ * scrolling page (the greeting over the week, and the week's own verdict). All
+ * three speakers now stand in the Graffiti strip -- speaker_aside() below -- so
+ * the geometry that page needed is gone with it. */
 
 /* ---- the three pieces every speaker screen is built from ----
  * Pulled out of speaker_say() when the Assistant needed the same portrait and
@@ -8872,32 +9367,6 @@ static void spk_tail(lv_obj_t *par, int x, int y, int side){
     spk_tail_paint_dir(tail, side);
 }
 
-/* Stand `face` on `page` saying `text`, with the tail joining them. `bub_y` is
- * the balloon's top edge; the portrait hangs above it, so a caller that pushes
- * the balloon down (a long week) moves the pair down together and the tail stays
- * the short hop from the shoulder to the balloon instead of stretching into a
- * wire. Returns the y just past the balloon, for whatever comes next.
- *
- * The face's size is read off the descriptor rather than restated, so a
- * regenerated portrait at a different height still lands correctly
- * (tools/gen_faces.py). */
-static int speaker_say(lv_obj_t *page, const lv_image_dsc_t *face,
-                       const char *text, int bub_y, int bub_h){
-    const int face_w = (int)face->header.w;
-    const int face_h = (int)face->header.h;
-    const int face_x = SPK_FACE_R - face_w;
-    const int face_y = bub_y - (SPK_TAIL_H - 1) - SPK_CHIN_GAP - face_h;
-
-    spk_portrait(page, face, face_x, face_y);
-    spk_bubble(page, SPK_BUB_X, bub_y, SPK_BUB_W, bub_h, text);
-
-    /* the tail last, so it paints over the bubble's top border -- the border it
-     * replaces. */
-    spk_tail(page, face_x + face_w / 2 - SPK_TAIL_APX, bub_y - (SPK_TAIL_H - 1), 0);
-
-    return bub_y + bub_h;
-}
-
 /* Make the whole page one tap target, and hand every tap on it to `cb`.
  *
  * "Anywhere" has to mean anywhere. An lv_obj is clickable by default, so the
@@ -8915,17 +9384,6 @@ static void tap_anywhere(lv_obj_t *page, lv_event_cb_t cb){
     lv_obj_add_event_cb(page, cb, LV_EVENT_CLICKED, NULL);
     for(uint32_t i = 0; i < lv_obj_get_child_count(page); i++)
         lv_obj_clear_flag(lv_obj_get_child(page, i), LV_OBJ_FLAG_CLICKABLE);
-}
-
-/* What a speaker screen says instead of showing a "back" button, standing where
- * that button used to: on the page, under the balloon, scrolling with the rest
- * of it. A label rather than a control, because there is nothing left to aim at
- * -- it describes the screen's behaviour instead of being the screen's only way
- * out. */
-static void speaker_hint(lv_obj_t *page, const char *text, int y){
-    lv_obj_t *h = lv_label_create(page);
-    lv_label_set_text(h, text);
-    lv_obj_align(h, LV_ALIGN_TOP_MID, 0, y);
 }
 
 /* ==== greetings: what a speaker says when you walk in ======================
@@ -8953,28 +9411,6 @@ static const char *greet_pick(const char *const *lines, int n, uint8_t *last){
     if(i >= *last) i++;             /* skip the repeat, keeping the draw uniform */
     *last = (uint8_t)i;
     return lines[i];
-}
-
-#define SPK_GREET_BUB_H 58          /* 3 * 14 text + pad + border, as the report */
-
-/* The greeting: the speaker's OWN WEEK SCREEN, with a hello in the balloon where
- * the verdict normally goes. `page` is that screen already built -- stat column
- * and all -- and `bub_y` is where it wants the balloon; the caller builds it
- * through co_week_page() / gu_week_page() so hello and the report cannot drift
- * apart into two different layouts.
- *
- * Standing the speaker alone in an empty frame made hello a screen of its own to
- * be got through, and it threw away the one moment you are certain to be looking
- * at them. On the week, the numbers they are talking about are already in front
- * of you while they talk, and the tap that dismisses the greeting is the same
- * tap that leaves the week -- one gesture, learned once.
- *
- * `on_tap` is responsible for clearing the greeting bit and showing what's next. */
-static void speaker_greet(lv_obj_t *page, const lv_image_dsc_t *face,
-                          const char *line, int bub_y, lv_event_cb_t on_tap){
-    int after = speaker_say(page, face, line, bub_y, SPK_GREET_BUB_H);
-    speaker_hint(page, "tap anywhere to continue", after + 4);
-    tap_anywhere(page, on_tap);
 }
 
 /* ==== a greeting that does NOT take the screen away (W3) ====================
@@ -9045,22 +9481,38 @@ static lv_obj_t *spk_pane(int x, int y, int w, int h){
 #define SPK_AS_TOP    6                        /* strip top to the portrait       */
 #define SPK_AS_BUB_Y  4
 #define SPK_AS_BUB_H  86                       /* 5 * 14 text + pad + border      */
-static void speaker_aside(const lv_image_dsc_t *face, const char *line,
-                          const char *hint, lv_event_cb_t on_tap){
+/* `right` stands the portrait at the RIGHT end of the strip with the balloon to
+ * its left -- where Coach and Guru have always stood, beside what they are
+ * talking about (R3). The Assistant stands at the left. One function, mirrored,
+ * rather than two arrangements that merely resemble each other. */
+static void speaker_aside_ex(const lv_image_dsc_t *face, const char *line,
+                             const char *hint, lv_event_cb_t on_tap, int right){
     const int fw = (int)face->header.w;
     lv_obj_t *pane = spk_pane(0, PDA_H, LCD_W, GRAFFITI_H);
 
-    /* the tail's base column lands ON the balloon's left border, which is the
-     * border it replaces -- so the balloon starts a whole tail to her right. */
-    const int tail_x = SPK_AS_PAD + fw + 1;
-    const int bub_x  = tail_x + (SPK_TAIL_H - 1);
-    const int bub_w  = LCD_W - bub_x - SPK_AS_PAD - 2;
+    int face_x, tail_x, bub_x, bub_w;
+    if(!right){
+        /* the tail's base column lands ON the balloon's left border, which is
+         * the border it replaces -- so the balloon starts a whole tail to her
+         * right. */
+        face_x = SPK_AS_PAD;
+        tail_x = SPK_AS_PAD + fw + 1;
+        bub_x  = tail_x + (SPK_TAIL_H - 1);
+        bub_w  = LCD_W - bub_x - SPK_AS_PAD - 2;
+    } else {
+        /* mirrored: the apex stops a pixel short of the face, and the tail's
+         * base column is the balloon's RIGHT border */
+        face_x = LCD_W - SPK_AS_PAD - fw;
+        tail_x = face_x - SPK_TAIL_H - 1;
+        bub_x  = SPK_AS_PAD + 2;
+        bub_w  = tail_x - bub_x + 1;
+    }
 
-    spk_portrait(pane, face, SPK_AS_PAD, SPK_AS_TOP);
+    spk_portrait(pane, face, face_x, SPK_AS_TOP);
     spk_bubble(pane, bub_x, SPK_AS_BUB_Y, bub_w, SPK_AS_BUB_H, line);
-    /* apex level with her head rather than her middle: the wedge is pointing at
+    /* apex level with the head rather than the middle: the wedge is pointing at
      * the person talking, and on all three portraits that is the top third. */
-    spk_tail(pane, tail_x, SPK_AS_BUB_Y + 4, 1);
+    spk_tail(pane, tail_x, SPK_AS_BUB_Y + 4, right ? 2 : 1);
 
     /* The hint is for the GREETING, which is a thing to get past. A step
      * explanation has nowhere to continue to -- the screen it describes is
@@ -9077,6 +9529,10 @@ static void speaker_aside(const lv_image_dsc_t *face, const char *line,
      * this the one place you would naturally aim -- her own speech bubble --
      * swallows the tap and she cannot be dismissed at all. */
     tap_anywhere(pane, on_tap);
+}
+static void speaker_aside(const lv_image_dsc_t *face, const char *line,
+                          const char *hint, lv_event_cb_t on_tap){
+    speaker_aside_ex(face, line, hint, on_tap, 0);
 }
 
 /* Her hellos. They say what the SCREEN is for, not what to do next -- the tiles
@@ -9128,101 +9584,189 @@ static void assistant_greet(void){
                   "tap to continue", as_greet_tap_cb);
 }
 
-/* ---- the weekly report's own geometry ----
- * The bubble is sized to the WORST CASE of co_advice_text(): all six strings
- * wrap to at most three lines at this width (measured against lv_font_palm,
- * 14 px a line), so the balloon is a fixed height whatever the coach says, and
- * short advice is centred in it rather than left rattling at the top. */
-#define CO_BUB_H    58                           /* 3 * 14 text + pad + border    */
-#define CO_STAT_W   168                          /* stats column, clear of the face */
-#define CO_STAT_ROW 164                          /* every row fits without wrapping */
-
-/* The week screen's furniture: the scrolling page, the stat column standing on
- * it, and the y the balloon wants underneath. The report and the greeting are
- * the same screen with a different line in the balloon, so both are built from
- * here -- which is what stops them drifting into two layouts that only look
- * alike. `a` comes back out for the caller that has to reach a verdict from it;
- * the greeting has nothing to say about it and ignores it.
+/* ==== R4: the week screens =================================================
+ * Coach and Guru each have a "this week" screen, and both used to be a column
+ * of monospace text with '#' bars, standing beside a portrait on a scrolling
+ * page. The brief was that it be clear at a glance, intuitive, and sticky --
+ * the screen should make you want to beat it. What that became:
  *
- * The caller owns content_clear(), the title and the app-state flags: what those
- * should say differs between walking in (still "Coach") and asking for the
- * report ("This week"), and guessing here would get one of them wrong. */
-static lv_obj_t *co_week_page(CoachAgg *a, int *bub_y){
-    uint32_t now = (uint32_t)time(NULL);
-    uint32_t since = now > 7u * 86400u ? now - 7u * 86400u : 0;
-    co_fold(a, since);
+ *   - THIS WEEK AGAINST LAST WEEK in the headline. A total on its own is a
+ *     number; a total against the last one is a score. Behind, it names the
+ *     gap as a target ("3 to beat last week") rather than as a deficit.
+ *   - A SEVEN-DAY CHART, one column per local day, today on the right and
+ *     marked. The day's target is a dashed line across it; a day that reached
+ *     it is a solid bar and a day that did not is an outline -- so the chart
+ *     reads as a row of days you either filled in or did not.
+ *   - THE STREAK AGAINST THE BEST STREAK, because an unbroken run is the most
+ *     motivating number a habit screen can show, and "best 9" beside "5" is a
+ *     reason to come back tomorrow.
+ *   - The split -- Guru's five categories, Coach's domains -- as proportional
+ *     bars. Guru shows ALL five, and an empty one is a dotted track: the gap is
+ *     the thing she wants you to notice, so it has to be visible.
+ *
+ * The speaker says the verdict from the Graffiti strip (speaker_aside_ex),
+ * which hands the whole content area to the numbers: no more scrolling, and
+ * nothing is below the fold. Tap anywhere -- the page or the speaker -- to go
+ * back, as before.
+ *
+ * Pool cost: one I1 canvas (its buffer is plain malloc, NOT the pool -- see the
+ * stroke sheet for what lv_malloc did there) plus labels. The chart, the bars
+ * and the rules are painted pixels. content_clear() frees the buffer. */
+#define WK_N        14           /* days a log is folded into: last week + this */
+#define WK_CV_Y     36           /* the canvas's top, in content coordinates    */
+#define WK_CV_H     (PDA_H - TITLE_H - WK_CV_Y)
+#define WK_BASE     46           /* the chart's baseline, canvas y              */
+#define WK_BAR_MAX  30           /* the tallest bar                             */
+#define WK_COL0     8            /* first column's left edge                    */
+#define WK_PITCH    32           /* 7 x 32 = 224 = the width between margins    */
+#define WK_BAR_W    18
+#define WK_ROW_Y    (WK_CV_Y + 66)   /* first bar row below the chart          */
+#define WK_ROW_H    16
+#define WK_TRK_X    92           /* a row's bar track: x..x+WK_TRK_W            */
+#define WK_TRK_W    110
 
-    /* the page: everything below lives on this, so a heavy week scrolls as one
-     * piece. `content` itself is left alone -- it is shared with every other
-     * screen in the app and content_clear() does not reset its flags. */
+static uint8_t  *g_wk_buf;
+static lv_obj_t *g_wk_cv;
+static void wk_free(void){
+    g_wk_cv = NULL;
+    if(g_wk_buf){ free(g_wk_buf); g_wk_buf = NULL; }
+}
+static void wk_px(int x, int y){ i1_obj_px(g_wk_cv, x, y - WK_CV_Y, 1); }  /* content coords */
+static void wk_fill(int x, int y, int w, int h){
+    for(int j = 0; j < h; j++) for(int i = 0; i < w; i++) wk_px(x + i, y + j);
+}
+static void wk_frame(int x, int y, int w, int h){
+    for(int i = 0; i < w; i++){ wk_px(x + i, y); wk_px(x + i, y + h - 1); }
+    for(int j = 0; j < h; j++){ wk_px(x, y + j); wk_px(x + w - 1, y + j); }
+}
+static lv_obj_t *wk_lbl(lv_obj_t *par, int x, int y, int bold, const char *txt){
+    lv_obj_t *l = lv_label_create(par);
+    if(bold) lv_obj_set_style_text_font(l, &lv_font_palm_bold, 0);
+    lv_label_set_text(l, txt);
+    lv_obj_set_pos(l, x, y);
+    return l;
+}
+static lv_obj_t *wk_lbl_r(lv_obj_t *par, int y, const char *txt){  /* right margin */
+    lv_obj_t *l = lv_label_create(par);
+    lv_label_set_text(l, txt);
+    lv_obj_align(l, LV_ALIGN_TOP_RIGHT, -8, y);
+    return l;
+}
+
+/* the page every week screen is built on: fixed, not scrolling, with the canvas
+ * standing on it. NULL if the canvas buffer could not be had -- the caller
+ * still has a page, just no chart, which is better than no screen. */
+static lv_obj_t *wk_page(void){
+    wk_free();
     lv_obj_t *page = lv_obj_create(content);
     lv_obj_set_size(page, lv_pct(100), lv_pct(100));
     lv_obj_set_style_radius(page, 0, 0);
     lv_obj_set_style_border_width(page, 0, 0);
     lv_obj_set_style_bg_color(page, COL_BODY, 0);
     lv_obj_set_style_pad_all(page, 0, 0);
-    lv_obj_set_scroll_dir(page, LV_DIR_VER);
+    lv_obj_clear_flag(page, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* ---- the statistics, in a column narrow enough to leave the coach a margin.
-     * Height is its content and it does not scroll itself; it just makes the page
-     * taller, which is what puts the one scrollbar in the one right place. */
-    lv_obj_t *box = lv_obj_create(page);
-    lv_obj_set_size(box, CO_STAT_W, LV_SIZE_CONTENT);
-    lv_obj_set_pos(box, 0, 0);
-    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_radius(box, 0, 0);
-    lv_obj_set_style_border_width(box, 0, 0);
-    lv_obj_set_style_bg_color(box, COL_BODY, 0);
-    lv_obj_set_style_pad_all(box, 3, 0);
-    lv_obj_set_style_pad_left(box, 4, 0);
-    lv_obj_set_style_pad_row(box, 1, 0);
-    lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
-
-    #define CO_ROW(...) do{ lv_obj_t *l_ = lv_label_create(box); \
-                            lv_label_set_long_mode(l_, LV_LABEL_LONG_WRAP); \
-                            lv_obj_set_width(l_, CO_STAT_ROW); \
-                            lv_label_set_text_fmt(l_, __VA_ARGS__); }while(0)
-
-    CO_ROW("Pomodoros   %d", (int)a->n);
-    CO_ROW("Focus time  %uh %02um",
-           (unsigned)(a->focus_min / 60), (unsigned)(a->focus_min % 60));
-
-    /* only the domains that were actually used. With six of them, printing the
-     * empty ones pushed the advice -- the point of the screen -- off the bottom.
-     * The bar caps at 6 rather than 12: "Relationships" plus twelve '#' is 205 px
-     * and no longer fits the narrowed column, and six cells still rank the week. */
-    for(int d = 0; d < CO_NDOM; d++){
-        if(!a->dom[d]) continue;
-        char bar[7];
-        int nb = a->dom[d] > 6 ? 6 : a->dom[d];
-        for(int i = 0; i < nb; i++) bar[i] = '#';
-        bar[nb] = 0;
-        CO_ROW("%-13s %-6s %d", coach_domain_name(d), bar, (int)a->dom[d]);
+    g_wk_buf = malloc(LV_CANVAS_BUF_SIZE(LCD_W, WK_CV_H, 1, 1) + 16);
+    if(g_wk_buf){
+        g_wk_cv = lv_canvas_create(page);
+        lv_canvas_set_buffer(g_wk_cv, g_wk_buf, LCD_W, WK_CV_H, LV_COLOR_FORMAT_I1);
+        lv_canvas_set_palette(g_wk_cv, 0, lv_color_to_32(COL_BODY, 0xFF));
+        lv_canvas_set_palette(g_wk_cv, 1, lv_color_to_32(COL_LINE, 0xFF));
+        lv_obj_set_pos(g_wk_cv, 0, WK_CV_Y);
+        i1_obj_clear(g_wk_cv);
     }
-
-    int bs = coach_best_slot(a);
-    if(bs >= 0) CO_ROW("Best time   %s, %d%%", coach_slot_name(bs),
-                       coach_slot_ok_pct(a, bs));
-    int tb = coach_top_blocker(a);
-    if(tb != CO_BLK_NONE) CO_ROW("Top blocker %s (%d)", coach_blocker_name(tb),
-                                 (int)a->blk[tb]);
-    int hi = coach_energy_great_pct(a, CO_ENERGY_HIGH);
-    int lo = coach_energy_great_pct(a, CO_ENERGY_LOW);
-    /* "High .. / Low .." is 183 px and would wrap in the narrowed column */
-    if(hi >= 0 && lo >= 0) CO_ROW("Energy      Hi %d%% Lo %d%%", hi, lo);
-    #undef CO_ROW
-
-    /* Where the bubble lands: below the stats, but never so high that it eats into
-     * the portrait's spot at the top of the page. The coach then hangs off the
-     * bubble rather than off the top of the screen -- a long week pushes the pair
-     * down together, so the tail stays the short hop from his shoulder to the
-     * balloon instead of stretching into a wire. He is beside the stat column
-     * either way; on a heavy week it is the lower half of it. */
-    lv_obj_update_layout(box);
-    int y = lv_obj_get_height(box) + 6;
-    if(y < SPK_BUB_MIN(&coach_face)) y = SPK_BUB_MIN(&coach_face);
-    *bub_y = y;
     return page;
+}
+
+/* "+5 on last week", "level with last week", "3 to beat last week". The gap
+ * behind is written as the number that would WIN, which is last week's total
+ * minus this week's, plus one. Nothing at all when both weeks are empty -- a
+ * comparison of two zeros is noise on a first day. */
+static void wk_delta(char *b, size_t n, int now_, int last){
+    if(!now_ && !last)   b[0] = 0;
+    else if(now_ > last) snprintf(b, n, "+%d on last week", now_ - last);
+    else if(now_ == last)snprintf(b, n, "level with last week");
+    else                 snprintf(b, n, "%d to beat last week", last - now_ + 1);
+}
+
+/* The seven days. `d7[6]` is today; `target` is the line a day has to reach
+ * (0 = no line, every non-empty day solid). `today` is its local day number,
+ * for the weekday letters. */
+static void wk_chart(lv_obj_t *page, const int *d7, int target, int32_t today){
+    static const char *DOW[7] = { "S", "M", "T", "W", "T", "F", "S" };
+    int scale = target > 0 ? target : 1;
+    for(int i = 0; i < 7; i++) if(d7[i] > scale) scale = d7[i];
+
+    int base = WK_CV_Y + WK_BASE;
+    for(int x = 4; x < LCD_W - 4; x++) wk_px(x, base);                  /* baseline */
+    if(target > 0){                                                     /* the bar to reach */
+        int ty = base - target * WK_BAR_MAX / scale;
+        for(int x = 4; x < LCD_W - 4; x++) if((x / 3) & 1) wk_px(x, ty);
+    }
+    for(int i = 0; i < 7; i++){
+        int cx = WK_COL0 + WK_PITCH / 2 + i * WK_PITCH;
+        int n  = d7[i];
+        int h  = n * WK_BAR_MAX / scale;
+        if(n > 0 && h < 3) h = 3;
+        int x  = cx - WK_BAR_W / 2;
+        if(n > 0){
+            if(target <= 0 || n >= target) wk_fill (x, base - h, WK_BAR_W, h);
+            else                           wk_frame(x, base - h, WK_BAR_W, h + 1);
+            char nb[12]; snprintf(nb, sizeof nb, "%d", n);
+            lv_obj_t *l = wk_lbl(page, 0, base - h - 15, 0, nb);
+            lv_obj_update_layout(l);
+            lv_obj_set_x(l, cx - lv_obj_get_width(l) / 2);
+        }
+        lv_obj_t *dl = wk_lbl(page, 0, base + 2, i == 6, DOW[cal_weekday(today - (6 - i))]);
+        lv_obj_update_layout(dl);
+        lv_obj_set_x(dl, cx - lv_obj_get_width(dl) / 2);
+    }
+    /* today, underlined: the one column that can still change */
+    int tcx = WK_COL0 + WK_PITCH / 2 + 6 * WK_PITCH;
+    wk_fill(tcx - 7, base + 17, 14, 2);
+}
+
+/* One row of a split: name, a proportional bar, the count at the margin. An
+ * EMPTY row is a dotted track rather than nothing, because on these screens
+ * the empty one is the point. */
+static void wk_row(lv_obj_t *page, int y, const char *name, int n, int max){
+    wk_lbl(page, 8, y, 0, name);
+    char nb[12]; snprintf(nb, sizeof nb, "%d", n);
+    wk_lbl_r(page, y, nb);
+    int by = y + 4;
+    if(n > 0){
+        int w = max > 0 ? n * WK_TRK_W / max : 0;
+        if(w < 3) w = 3;
+        wk_fill(WK_TRK_X, by, w, 7);
+    } else {
+        for(int x = WK_TRK_X; x < WK_TRK_X + WK_TRK_W; x += 3) wk_px(x, by + 3);
+    }
+}
+
+/* "Focus 1h 05m" and friends */
+static void wk_hm(char *b, size_t n, const char *lead, uint32_t min){
+    snprintf(b, n, "%s%uh %02um", lead, (unsigned)(min / 60), (unsigned)(min % 60));
+}
+
+/* ---- Coach's week ---------------------------------------------------------
+ * Sessions per local day over a fortnight, and the focus minutes of each week,
+ * in one pass over the log. The fold that feeds the advice reads the same seven
+ * days (cal_window_start), so the verdict and the chart describe one week. */
+static void co_days(int d[WK_N], uint32_t mins[2], uint32_t now, int tz){
+    memset(d, 0, sizeof(int) * WK_N);
+    mins[0] = mins[1] = 0;
+    FILE *f = fopen(CO_LOG, "rb");
+    if(!f) return;
+    uint32_t m = 0;
+    if(fread(&m, 4, 1, f) != 1 || m != CO_LOG_MAGIC){ fclose(f); return; }
+    CoachRec r;
+    while(fread(&r, sizeof r, 1, f) == 1){
+        int k = cal_window_slot(r.start, now, tz, WK_N);
+        if(k < 0) continue;
+        d[k]++;
+        mins[k >= WK_N - 7] += r.actual_min;
+    }
+    fclose(f);
 }
 
 static void show_coach_report(void){
@@ -9232,14 +9776,63 @@ static void show_coach_report(void){
     lv_label_set_text(title_lbl, "This week");
     update_cat_trigger();
 
+    uint32_t now = (uint32_t)time(NULL);
+    int tz = ui_tz();
     CoachAgg a;
-    int bub_y;
-    lv_obj_t *page = co_week_page(&a, &bub_y);
+    co_fold(&a, cal_window_start(now, tz, 7));
+    int d[WK_N]; uint32_t mins[2];
+    co_days(d, mins, now, tz);
+    int wk = 0, last = 0;
+    for(int i = 0; i < 7; i++){ last += d[i]; wk += d[7 + i]; }
 
-    int after = speaker_say(page, &coach_face, co_advice_text(coach_advise(&a)),
-                            bub_y, CO_BUB_H);
-    speaker_hint(page, "tap anywhere to go back", after + 4);
+    lv_obj_t *page = wk_page();
+    char b[48];
+    snprintf(b, sizeof b, "%d session%s", wk, wk == 1 ? "" : "s");
+    wk_lbl(page, 8, 2, 1, b);
+    wk_delta(b, sizeof b, wk, last);
+    if(b[0]) wk_lbl_r(page, 2, b);
+    wk_hm(b, sizeof b, "Focus ", mins[1]);
+    wk_lbl(page, 8, 18, 0, b);
+    int streak = coach_streak_now(&g_co, now, tz);
+    snprintf(b, sizeof b, "streak %d \xC2\xB7 best %d", streak,
+             (int)(g_co.best_streak > streak ? g_co.best_streak : streak));
+    wk_lbl_r(page, 18, b);
+
+    if(g_wk_cv){
+        wk_chart(page, d + 7, g_co.day_goal ? g_co.day_goal : 6, cal_day_index(now, tz));
+
+        /* the domains the week went to, most first, at most three -- six rows
+         * would leave no room for the two lines that say something about HOW
+         * the week went. Scaled to the busiest, so the top one fills the track. */
+        int y = WK_ROW_Y, shown = 0, used[CO_NDOM] = {0};
+        int top = 0;
+        for(int k = 0; k < CO_NDOM; k++) if(a.dom[k] > top) top = a.dom[k];
+        while(shown < 3){
+            int best = -1;
+            for(int k = 0; k < CO_NDOM; k++)
+                if(!used[k] && a.dom[k] && (best < 0 || a.dom[k] > a.dom[best])) best = k;
+            if(best < 0) break;
+            used[best] = 1;
+            wk_row(page, y, coach_domain_name(best), a.dom[best], top);
+            y += WK_ROW_H; shown++;
+        }
+        if(!shown){ wk_lbl(page, 8, y, 0, "No sessions yet this week."); y += WK_ROW_H; }
+        int bs = coach_best_slot(&a);
+        if(bs >= 0){
+            snprintf(b, sizeof b, "Best time: %s, %d%% good", coach_slot_name(bs),
+                     coach_slot_ok_pct(&a, bs));
+            wk_lbl(page, 8, y + 2, 0, b); y += WK_ROW_H;
+        }
+        int tb = coach_top_blocker(&a);
+        if(tb != CO_BLK_NONE && y + 14 <= PDA_H - TITLE_H){
+            snprintf(b, sizeof b, "Most in the way: %s", coach_blocker_name(tb));
+            wk_lbl(page, 8, y + 2, 0, b);
+        }
+    }
+
     tap_anywhere(page, co_home_cb);
+    speaker_aside_ex(&coach_face, co_advice_text(coach_advise(&a)),
+                     "tap anywhere to go back", co_home_cb, 1);
 }
 
 /* ------------------------------------------------------------------ the home */
@@ -9262,10 +9855,10 @@ static void co_week_cb(lv_event_t *e){ (void)e; show_coach_report(); }
 #define GU_LOG_MAGIC  0x47554C31u        /* "GUL1" */
 
 static void gu_save(void){
-    FILE *f = fopen(GU_SAV, "wb"); if(!f) return;
+    SafeFile sf_; FILE *f = sf_open(&sf_, GU_SAV, "wb"); if(!f) return;
     g_gu.magic = GU_SAV_MAGIC;
     fwrite(&g_gu, sizeof g_gu, 1, f);
-    fclose(f);
+    sf_commit(&sf_, !ferror(f));   /* safefile.h: swap in whole, or not at all */
 }
 
 /* Append one check (or one undo). The log is the record the week analysis reads;
@@ -9304,6 +9897,7 @@ static void gu_load(void){
     gurupool_load(GURUPOOL_PATH);
 
     guru_state_init(&g_gu);
+    sf_recover(GU_SAV);
     FILE *f = fopen(GU_SAV, "rb");
     if(f){
         GuruState t;
@@ -9339,12 +9933,9 @@ static const char *const GU_GREETINGS[] = {
 };
 #define GU_NGREET ((int)(sizeof(GU_GREETINGS) / sizeof(GU_GREETINGS[0])))
 
-/* The tap that dismisses her re-enters the app, which now finds the greeting
- * spent and builds the home screen -- the same trick as Coach's. */
-static void gu_greet_tap_cb(lv_event_t *e){ (void)e;
-    greet_done(GREET_GURU);
-    show_guru();
-}
+/* R3: she greets you from the strip, over a home screen that is already built
+ * and live, so the tap that dismisses her only puts her away. */
+static void gu_greet_tap_cb(lv_event_t *e){ (void)e; spk_pane_close(); }
 
 static void gu_build_header(void);
 static void gu_build_list(void);
@@ -9355,7 +9946,16 @@ static void gu_tbl_click_cb(lv_event_t *e);
  * Rebuilt in place on every tick rather than by reopening the screen, so the
  * list does not lose its scroll position when you check something off halfway
  * down it. That is the whole reason this is its own function. */
-#define GU_HDR_H 20
+/* R1: two rows now. The list used to be sized `lv_pct(100) - GU_HDR_H`, which
+ * LVGL reads as 80 PERCENT (a percentage is a tagged value, and subtracting
+ * from it moves the percentage, not the pixels) -- so it started 37 px down
+ * under a 20 px header, and the 17 px between was a blank row nobody chose.
+ * That row now says what the app is for, and the Week button sits at the right
+ * across both rows, with the streak moved left to make room. The list's height
+ * is plain pixels computed from the same constant. */
+#define GU_HDR_H  38
+#define GU_WEEK_W 54
+static void gu_week_btn_cb(lv_event_t *e){ (void)e; show_guru_report(); }
 
 static void gu_build_header(void){
     uint32_t now = (uint32_t)time(NULL);
@@ -9368,6 +9968,27 @@ static void gu_build_header(void){
         g_gu_cnt = lv_label_create(content);
         lv_obj_set_style_text_font(g_gu_cnt, &lv_font_palm_bold, 0);
         lv_obj_align(g_gu_cnt, LV_ALIGN_TOP_LEFT, 8, 2);
+
+        /* built once with the header, like the count: what to DO here */
+        lv_obj_t *hint = lv_label_create(content);
+        lv_label_set_text(hint, "Tick off what you did today.");
+        lv_obj_align(hint, LV_ALIGN_TOP_LEFT, 8, 19);
+
+        lv_obj_t *wb = lv_button_create(content);
+        lv_obj_set_size(wb, GU_WEEK_W, 32);
+        lv_obj_set_style_radius(wb, 0, 0);
+        lv_obj_align(wb, LV_ALIGN_TOP_RIGHT, -4, 3);
+        lv_obj_add_event_cb(wb, gu_week_btn_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_t *wl = lv_label_create(wb);
+        lv_label_set_text(wl, "Week");
+        lv_obj_center(wl);
+
+        /* ONE streak label, retitled like the count. It used to be created on
+         * every call -- that is, on every tick -- so each habit ticked stacked
+         * another label on the last one and cost the pool another object for
+         * as long as the screen was up. */
+        g_gu_stk = lv_label_create(content);
+        lv_obj_align(g_gu_stk, LV_ALIGN_TOP_RIGHT, -(4 + GU_WEEK_W + 8), 2);
     }
     /* "done" rather than "3 of 3" once it is cleared: the target has been met and
      * the number stops being the thing worth reading. Anything past it still
@@ -9375,11 +9996,9 @@ static void gu_build_header(void){
     if(today >= target) lv_label_set_text_fmt(g_gu_cnt, "%d today -- done", today);
     else                lv_label_set_text_fmt(g_gu_cnt, "%d of %d today", today, target);
 
-    lv_obj_t *stk = lv_label_create(content);
-    lv_obj_align(stk, LV_ALIGN_TOP_RIGHT, -8, 2);
-    if(streak > 1)      lv_label_set_text_fmt(stk, "%d days", streak);
-    else if(streak == 1) lv_label_set_text(stk, "day 1");
-    else                 lv_label_set_text(stk, "--");
+    if(streak > 1)       lv_label_set_text_fmt(g_gu_stk, "%d days", streak);
+    else if(streak == 1) lv_label_set_text(g_gu_stk, "day 1");
+    else                 lv_label_set_text(g_gu_stk, "--");
 }
 
 /* ---- the list ------------------------------------------------------------
@@ -9404,7 +10023,7 @@ static void gu_build_list(void){
     list_table_style(t);
     lv_table_set_column_width(t, 0, 34);
     lv_table_set_column_width(t, 1, LCD_W - 46);
-    lv_obj_set_size(t, lv_pct(100), lv_pct(100) - GU_HDR_H);
+    lv_obj_set_size(t, lv_pct(100), (PDA_H - TITLE_H) - GU_HDR_H);
     lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_add_event_cb(t, gu_tbl_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
@@ -9565,10 +10184,6 @@ static void gu_show_task(int id){
  * holds exactly one week of counts -- streaming the log to recompute those would
  * be a second implementation of the same arithmetic. The log supplies only the
  * thing the ring cannot: which CATEGORY each check belonged to. */
-#define GU_STAT_W   168                  /* stats column, clear of her face */
-#define GU_STAT_ROW 164                  /* every row fits without wrapping */
-#define GU_BUB_H    58                   /* 3 * 14 text + pad + border      */
-
 /* Stream the log into the fold. Records are read one at a time -- the history is
  * never resident, only the ~14-byte aggregate. */
 static int gu_fold(GuruAgg *a, uint32_t since){
@@ -9624,93 +10239,70 @@ static void gu_advice_text(char *buf, size_t n, int code, const GuruAgg *a){
 
 static void gu_week_back_cb(lv_event_t *e){ (void)e; show_guru(); }
 
-/* Her half of co_week_page(), and shared for the same reason: her hello stands
- * on this screen too, so there is one layout and one set of numbers rather than
- * two that merely resemble each other. `a` and `days` come back out because the
- * verdict needs both; the greeting wants neither. The caller owns gu_load(), the
- * title and the flags. */
-static lv_obj_t *gu_week_page(GuruAgg *a, int *days_out, int *bub_y){
-    uint32_t now   = (uint32_t)time(NULL);
-    int      tz    = ui_tz();
-    uint32_t since = now > (uint32_t)GU_WIN * 86400u ? now - (uint32_t)GU_WIN * 86400u : 0;
-
-    gu_fold(a, since);
-
-    int total  = guru_window_total(&g_gu, now, tz);
-    int days   = guru_window_days_active(&g_gu, now, tz);
-    int best   = guru_window_best(&g_gu, now, tz);
-    int streak = guru_streak_now(&g_gu, now, tz);
-
-    lv_obj_t *page = lv_obj_create(content);
-    lv_obj_set_size(page, lv_pct(100), lv_pct(100));
-    lv_obj_set_style_radius(page, 0, 0);
-    lv_obj_set_style_border_width(page, 0, 0);
-    lv_obj_set_style_bg_color(page, COL_BODY, 0);
-    lv_obj_set_style_pad_all(page, 0, 0);
-    lv_obj_set_scroll_dir(page, LV_DIR_VER);
-
-    lv_obj_t *box = lv_obj_create(page);
-    lv_obj_set_size(box, GU_STAT_W, LV_SIZE_CONTENT);
-    lv_obj_set_pos(box, 0, 0);
-    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_radius(box, 0, 0);
-    lv_obj_set_style_border_width(box, 0, 0);
-    lv_obj_set_style_bg_color(box, COL_BODY, 0);
-    lv_obj_set_style_pad_all(box, 3, 0);
-    lv_obj_set_style_pad_left(box, 4, 0);
-    lv_obj_set_style_pad_row(box, 1, 0);
-    lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
-
-    #define GU_ROW(...) do{ lv_obj_t *l_ = lv_label_create(box); \
-                            lv_label_set_long_mode(l_, LV_LABEL_LONG_WRAP); \
-                            lv_obj_set_width(l_, GU_STAT_ROW); \
-                            lv_label_set_text_fmt(l_, __VA_ARGS__); }while(0)
-
-    GU_ROW("Ticked off  %d", total);
-    GU_ROW("Days        %d of %d", days, GU_WIN);
-    if(best > 0)   GU_ROW("Best day    %d", best);
-    if(streak > 0) GU_ROW("Streak      %d day%s", streak, streak == 1 ? "" : "s");
-
-    /* Only the categories that saw something. Printing the empty ones pushed the
-     * verdict -- the point of the screen -- off the bottom, which is the same
-     * lesson Coach's domain list learned. The empty one gets named in the bubble
-     * instead, where it reads as advice rather than as a row of zero. */
-    for(int c = 0; c < GU_NCAT; c++){
-        if(!a->cat[c]) continue;
-        char bar[7];
-        int nb = a->cat[c] > 6 ? 6 : a->cat[c];
-        for(int i = 0; i < nb; i++) bar[i] = '#';
-        bar[nb] = 0;
-        GU_ROW("%-9s %-6s %d", guru_cat_name(c), bar, (int)a->cat[c]);
+/* Net checks per local day over a fortnight, read off the log -- the same log
+ * the category fold reads, so the chart, the totals and the split cannot
+ * disagree about what happened. An undo is a row in the log and nets out. */
+static void gu_days(int d[WK_N], uint32_t now, int tz){
+    memset(d, 0, sizeof(int) * WK_N);
+    FILE *f = fopen(GU_LOG, "rb");
+    if(!f) return;
+    uint32_t m = 0;
+    if(fread(&m, 4, 1, f) != 1 || m != GU_LOG_MAGIC){ fclose(f); return; }
+    GuruRec r;
+    while(fread(&r, sizeof r, 1, f) == 1){
+        int k = cal_window_slot(r.when, now, tz, WK_N);
+        if(k >= 0) d[k] += (r.flags & GU_F_UNDO) ? -1 : 1;
     }
-    #undef GU_ROW
-
-    lv_obj_update_layout(box);
-    int y = lv_obj_get_height(box) + 6;
-    if(y < SPK_BUB_MIN(&guru_face)) y = SPK_BUB_MIN(&guru_face);
-
-    *days_out = days;
-    *bub_y    = y;
-    return page;
+    fclose(f);
+    for(int i = 0; i < WK_N; i++) if(d[i] < 0) d[i] = 0;
 }
 
+/* Her week. See the R4 block by show_coach_report for the design; what is
+ * hers is the target line, which is the same rolling average the home screen
+ * asks you to reach today, and the split, which shows all five categories so
+ * that an empty one is visible as a gap rather than silently absent. */
 static void show_guru_report(void){
     kill_kb(); cur_app = NULL; cur_uid = 0;
     content_clear();
     gu_load();
     g_gu_open = 1;
-    lv_label_set_text(title_lbl, "Her week");
+    lv_label_set_text(title_lbl, "This week");
     update_cat_trigger();
 
+    uint32_t now = (uint32_t)time(NULL);
+    int tz = ui_tz();
     GuruAgg a;
-    int days, bub_y;
-    lv_obj_t *page = gu_week_page(&a, &days, &bub_y);
+    gu_fold(&a, cal_window_start(now, tz, 7));
+    int d[WK_N];
+    gu_days(d, now, tz);
+    int wk = 0, last = 0, days = 0;
+    for(int i = 0; i < 7; i++){ last += d[i]; wk += d[7 + i]; if(d[7 + i]) days++; }
+
+    lv_obj_t *page = wk_page();
+    char b[48];
+    snprintf(b, sizeof b, "%d ticked off", wk);
+    wk_lbl(page, 8, 2, 1, b);
+    wk_delta(b, sizeof b, wk, last);
+    if(b[0]) wk_lbl_r(page, 2, b);
+    int streak = guru_streak_now(&g_gu, now, tz);
+    snprintf(b, sizeof b, "streak %d \xC2\xB7 best %d", streak,
+             (int)(g_gu.best_streak > streak ? g_gu.best_streak : streak));
+    wk_lbl(page, 8, 18, 0, b);
+    snprintf(b, sizeof b, "%d of 7 days", days);
+    wk_lbl_r(page, 18, b);
+
+    if(g_wk_cv){
+        wk_chart(page, d + 7, guru_target(&g_gu, now, tz), cal_day_index(now, tz));
+        int top = 0;
+        for(int c = 0; c < GU_NCAT; c++) if(a.cat[c] > top) top = a.cat[c];
+        for(int c = 0; c < GU_NCAT; c++)
+            wk_row(page, WK_ROW_Y + c * WK_ROW_H, guru_cat_name(c), a.cat[c], top);
+    }
 
     char say[160];
     gu_advice_text(say, sizeof say, guru_advise(&a, days, GU_WIN), &a);
-    int after = speaker_say(page, &guru_face, say, bub_y, GU_BUB_H);
-    speaker_hint(page, "tap anywhere to go back", after + 4);
     tap_anywhere(page, gu_week_back_cb);
+    speaker_aside_ex(&guru_face, say, "tap anywhere to go back", gu_week_back_cb, 1);
 }
 
 static void show_guru(void){
@@ -9721,20 +10313,21 @@ static void show_guru(void){
     lv_label_set_text(title_lbl, "Guru");
     update_cat_trigger();
 
-    /* first time in since the lock came up: she says something over her own week,
-     * and the tap that clears her lands on the home screen. */
-    if(greet_due(GREET_GURU)){
-        GuruAgg a;
-        int days, bub_y;
-        lv_obj_t *page = gu_week_page(&a, &days, &bub_y);
-        speaker_greet(page, &guru_face,
-                      greet_pick(GU_GREETINGS, GU_NGREET, &g_greet_last[GREET_GURU]),
-                      bub_y, gu_greet_tap_cb);
-        return;
-    }
-
     gu_build_header();
     gu_build_list();
+
+    /* R3: first time in since the lock came up, she says hello FROM THE STRIP,
+     * over the list -- which is built and live underneath her. Her greeting used
+     * to replace the screen with her week, so hello was a screen to be got
+     * through before you could tick anything; there is nothing to block now.
+     * Spent when shown, as the Assistant's is: you can tick a habit without
+     * ever tapping her, and she should not come back because you did. */
+    if(greet_due(GREET_GURU)){
+        greet_done(GREET_GURU);
+        speaker_aside_ex(&guru_face,
+                         greet_pick(GU_GREETINGS, GU_NGREET, &g_greet_last[GREET_GURU]),
+                         "tap to continue", gu_greet_tap_cb, 1);
+    }
 }
 
 /* His hellos. Light and short, and never about what you failed to do -- the week
@@ -9750,13 +10343,9 @@ static const char *const CO_GREETINGS[] = {
 };
 #define CO_NGREET ((int)(sizeof(CO_GREETINGS) / sizeof(CO_GREETINGS[0])))
 
-/* The tap that dismisses him re-enters the app, which now finds the greeting
- * spent and builds the home screen. Deleting the greeting out from under its own
- * click is the same thing the launcher does when a cell opens an app. */
-static void co_greet_tap_cb(lv_event_t *e){ (void)e;
-    greet_done(GREET_COACH);
-    show_coach();
-}
+/* R3: as Guru's -- he stands in the strip over a finished home screen, so the
+ * tap only puts him away. */
+static void co_greet_tap_cb(lv_event_t *e){ (void)e; spk_pane_close(); }
 
 static void show_coach(void){
     kill_kb(); cur_app = NULL; cur_uid = 0;
@@ -9772,17 +10361,6 @@ static void show_coach(void){
     if(g_co.phase == CO_PH_RUNNING){ co_seal(); return; }
     if(g_co.phase == CO_PH_REFLECT){ co_show_reflect(); return; }
 
-    /* first time in since the lock came up: he says something over his own week,
-     * and the tap that clears him lands on the home screen. */
-    if(greet_due(GREET_COACH)){
-        CoachAgg a;
-        int bub_y;
-        lv_obj_t *page = co_week_page(&a, &bub_y);
-        speaker_greet(page, &coach_face,
-                      greet_pick(CO_GREETINGS, CO_NGREET, &g_greet_last[GREET_COACH]),
-                      bub_y, co_greet_tap_cb);
-        return;
-    }
     g_co_view = CO_VIEW_HOME;
 
     uint32_t now = (uint32_t)time(NULL);
@@ -9864,12 +10442,33 @@ static void show_coach(void){
     lv_obj_align(wk, LV_ALIGN_BOTTOM_RIGHT, -10, -6);
     lv_obj_add_event_cb(wk, co_week_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *wl = lv_label_create(wk); lv_label_set_text(wl, "Week"); lv_obj_center(wl);
+
+    /* R3: first time in since the lock came up, he says hello from the strip,
+     * over this screen -- built and live underneath him. (A running or
+     * reflecting session returned above: a live Pomodoro is not a thing to
+     * interrupt with hello.) Spent when shown. */
+    if(greet_due(GREET_COACH)){
+        greet_done(GREET_COACH);
+        speaker_aside_ex(&coach_face,
+                         greet_pick(CO_GREETINGS, CO_NGREET, &g_greet_last[GREET_COACH]),
+                         "tap to continue", co_greet_tap_cb, 1);
+    }
 }
 
 void ui_init(void){
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, COL_BODY, 0);
     lv_obj_set_style_text_font(scr, &lv_font_palm, 0);   /* authentic Palm font, inherited */
+    /* ...and the same on the TOP LAYER, which is not a child of the screen and
+     * so inherited nothing: every modal on it -- the Options menu, the
+     * Calculator, About, the confirmations, the category and date pop-ups --
+     * was silently drawing in montserrat_14, a wider face at a different
+     * weight. It is how "Remove demo data" came to be clipped in a menu sized
+     * for the Palm font. The two overlays that had noticed (the greeting pane
+     * and the Coach seal) name their own font and are unaffected; the one
+     * widget that NEEDS montserrat -- the due-date calendar's LV_SYMBOL month
+     * arrows -- now asks for it by name, as the Date & Time calendar does. */
+    lv_obj_set_style_text_font(lv_layer_top(), &lv_font_palm, 0);
     lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
     /* per-device Graffiti calibration (trainer's training mode): if the user has
@@ -9965,7 +10564,19 @@ void ui_init(void){
     graf_punct_lbl = lv_label_create(graf);
     lv_label_set_text(graf_punct_lbl, "");
     lv_obj_set_style_text_font(graf_punct_lbl, &lv_font_palm_bold, 0);
-    lv_obj_align(graf_punct_lbl, LV_ALIGN_TOP_MID, 0, 1);
+    /* R13: a black chip, because it is a button while it shows. Hidden rather
+     * than empty when off, so it can never swallow a stroke that starts there. */
+    lv_obj_set_style_bg_color(graf_punct_lbl, COL_LINE, 0);
+    lv_obj_set_style_bg_opa(graf_punct_lbl, LV_OPA_COVER, 0);
+    lv_obj_set_style_text_color(graf_punct_lbl, COL_BODY, 0);
+    lv_obj_set_style_radius(graf_punct_lbl, 3, 0);
+    lv_obj_set_style_pad_hor(graf_punct_lbl, 6, 0);
+    lv_obj_set_style_pad_ver(graf_punct_lbl, 2, 0);
+    lv_obj_set_ext_click_area(graf_punct_lbl, 6);
+    lv_obj_add_flag(graf_punct_lbl, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(graf_punct_lbl, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(graf_punct_lbl, graf_punct_tap_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_align(graf_punct_lbl, LV_ALIGN_TOP_MID, 0, 2);
 
     /* recognized-character echo (bottom-centre; flashes for ~600 ms per stroke) */
     graf_echo_lbl = lv_label_create(graf);

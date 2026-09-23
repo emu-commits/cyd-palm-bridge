@@ -16,6 +16,140 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-23 — bench follow-ups, and the robustness list worked through
+
+**Fast typing lost keys, and the cause was the sample rate.** The panel was read
+every 33 ms, so the lift between two quick taps could fall between samples;
+LVGL then saw one press sliding from one key to the next, and a button matrix
+cancels a press that slides off its key. The calculator lost the second digit;
+the phone keypad, which typed on release, lost both. Now: 10 ms reads, and while
+a keypad is up a press that jumps further than a finger moves in one read is
+split back into two taps (`tapsplit.h`, run by both the device and the simulator
+input paths, so the smoke reproduces it). Side effect worth knowing: a faster
+read rate changes how far a drag scrolls, and one smoke tap had to be re-aimed.
+
+**Sync with no Wi-Fi goes where it gets fixed** — Settings ▸ Wi-Fi, with the
+Assistant saying what happened and what to tap. `hotsync_wifi_problem()` says
+which failure; the simulator stub decides reachability from its pretend
+neighbourhood, so the flow is gated.
+
+**The robustness proposals, all seven:**
+- **Crash-safe writes** (`bridge/safefile.h`). Every durable file — the four
+  databases, `config.ini`, the feed list, the weather cache, the demo manifest,
+  the Graffiti templates, every `.sav` — is written to `.tmp`, fsynced, and
+  swapped in; every reader recovers first. `pdbw_commit()` had a second bug the
+  swap also fixes: a failed read-back left the half-built PDB as the database.
+  `tests/safefile_test.c` builds each crash state by hand, including a MemoDB
+  caught between remove and rename (Memo has no server copy).
+- **Tombstones.** The engine already understood Palm's delete bit; the device
+  never set it. A delete in an app that syncs now keeps the record, flagged,
+  until the sync pushes it; the UI's readers hide it (`live_read()`). Memo, and
+  apps with nothing to sync to, still delete outright, so tombstones cannot pile
+  up. The engine now pushes a tombstone even while the mass-delete guard is up,
+  because a flagged record can only be the user's delete — which finally lets
+  the guard tell a bulk delete from a bad card read. Gated in `massdel` (engine)
+  and the new `make -C sim data` (device).
+- **The demo seed is never pushed** (`sync_set_hold()`), and a user's new record
+  never takes a uid inside the seed's range, or it would never sync either.
+- **A release profile.** `UI_DEVTOOLS` was compiled into every firmware build;
+  it is `CONFIG_CYD_DEVTOOLS` now, off by default.
+- **`secrets.h` is gone.** Nothing is compiled in. It turned out to be the only
+  definition of `SYNC_PDB`, which the firmware build caught.
+- **The pool is watched on the device**: a UART line at each new low-water mark
+  naming the screen, and a warning under the smoke's 3 KB floor.
+- **The passwords are off the card** (`secretstore.[ch]`, NVS). A password found
+  in `config.ini` is moved on boot and the file rewritten; if the store refuses,
+  the file keeps it rather than losing it. Not encryption — see `SECURITY.md`.
+
+### 2026-09-23 — phase R: the speakers step aside, and the week becomes a score
+
+Fifteen refinements from one request (`BACKLOG.md` §R), on
+`feat/r-phase-polish`. The ones worth remembering:
+
+- **R4 — the week screens are a score now, not a report.** This week against
+  last ("3 to beat last week" rather than "-2"), a seven-day chart with the
+  target as a dashed line (solid bar = reached it, outline = did not, today
+  underlined), the streak against the best streak, and the split as
+  proportional bars — Guru shows all five categories and an empty one is a
+  dotted track, because the gap is the point. One heap canvas plus labels;
+  days are bucketed by LOCAL day (`cal_window_slot()` in `daycal.h`, gated in
+  `guru_test`), so the columns are Monday, Tuesday... rather than 24-hour
+  slices starting at the current time of day.
+- **R3 — Coach and Guru greet from the strip**, portrait on the right, over a
+  landing page that is live underneath (`speaker_aside_ex()`). The stacked
+  portrait-over-balloon layout and its scrolling page are gone.
+- **R12 — swipes: measured, then fixed.** A new harness set draws hurried
+  swipes; the old rule caught **76.8 %** of them, the new one **99.5 %**, with
+  letters, digits and punctuation unchanged at every size tried.
+- **R8/R9 — fields know what they are for.** A per-field mode decides
+  auto-capitalisation (Each Word / first letter) and whether a tap opens the
+  phone keypad. The smoke's `k` goes through the same rule, so it is gated.
+- **R11 — the lock over the Calculator**, and a harness verb `L` that raises
+  the lock the way a screen sleep does, which made it testable at all.
+
+**`lv_layer_top()` inherits nothing, and twelve modals had been drawing in
+montserrat_14 for months.** The Options menu, the Calculator, About, every
+confirmation and picker — which is why "Remove demo data" clipped in a menu
+sized for the Palm font. The fix is one line on the layer; the one widget that
+needs montserrat (a calendar's `LV_SYMBOL` arrows) now asks for it on its two
+buttons only — setting it on the whole header made "September 2026" clip.
+**The cost of the fix was every scripted menu tap**: Palm rows are shorter, so
+each item moved up a few pixels per row and the smoke's taps (absolute
+coordinates) landed on the wrong rows. The run stayed green throughout; the
+screenshots are what showed it.
+
+**`lv_pct(100) - 20` is 80 %, not 100 % minus 20 px.** A percentage is a tagged
+coordinate, and arithmetic on it moves the percentage. That was the whole of
+R1's "blank row" — 17 px nobody chose, under Guru's header.
+
+**Making something non-modal changes what every scripted tap does.** The old
+greetings blocked the screen, so the smoke dismissed them by tapping anywhere.
+Once the greeting stood aside, that same tap landed on the live list and opened
+a habit — and every later Guru shot drifted, still green.
+
+**Also fixed on the way:** `gu_build_header()` created a new streak label on
+every tick (a pool object per habit ticked); the About text had hard line breaks
+tuned for montserrat; and every top-layer modal other than the Calculator now
+closes when the lock rises, instead of floating over it.
+
+### 2026-09-22 — Q5–Q8, the engine's correctness items, and a guard that never restored
+
+- **Q5 — the lock screen's zone bars are grey.** The grey could not come off the
+  canvas: it is I1, two palette entries, and index 1 is every other mark on the
+  screen. So the bar is a background on the heading label that was there anyway
+  (`dash_zone_hdr()`), which costs nothing from the pool. The fill is
+  `COL_RULE`, the hairlines' value — no third grey.
+- **Q6/Q7/Q8 — one top bar for Address, To Do and Memo** (`list_top_bar()` +
+  `quick_add_cb()`, one predicate `list_bar_app()`, one height `LIST_BAR_H`).
+  On Address the field is a filter and `New` opens a blank form; on To Do and
+  Memo the field *is* the record. `New` on an empty field opens the full form,
+  and a quick-added record is filed under the category the list is showing.
+  **Sharing went one step too far and the gate caught it:** the field inherited
+  Look Up's 23-character cap and clipped "Pick up the dry cleaning" to
+  "…cleanin". The cap is a parameter now.
+- **The smoke can type.** `k <text>` writes into the focused field through
+  `lv_textarea_add_char`, one character at a time, as the recogniser does. The
+  clipped quick-add was invisible until then: a screen whose behaviour depends
+  on what is IN a field could only be photographed empty.
+- **Tidy-ups.** `dash.c` moved to `bridge/` (the backwards `../../main` include
+  is gone); every CI job has a `timeout-minutes`; ~150 lines of unreachable boot
+  code below `lvgl_port_run()` deleted, including a drifted second copy of the
+  effective-host logic, so `app_main.c` no longer includes `secrets.h`.
+  The `[dav]` telemetry was left ON deliberately: the serial line is the only
+  window into a sync, and one of those lines found the geoip bug.
+- **Engine.** `pdb_read` names every failure on stderr instead of reading as an
+  empty database; deleted-on-both-sides counts as `bothDel`, not a push.
+- **THE MASS-DELETE GUARD NEVER RESTORED ANYTHING.** It declined to delete and
+  wrote nothing for the missing records, so a device whose card read short
+  stayed empty and every later sync reached the identical conclusion — server
+  keeps everything, device keeps nothing, forever. Its comment promised a
+  restore it had never performed. It survived months of green CI because it
+  had **no test**; `tests/massdel.c` failed on its first run. The guard now
+  pulls the server's copies back in the guarded run. **The trade:**
+  `data_delete()` drops a record rather than tombstoning it, so a real bulk
+  delete and a bad card read look the same from inside the engine, and
+  restoring undoes a genuine bulk delete. That is the right way round.
+
 ### 2026-09-22 — Q1–Q4: the Date Book stops asking you to type, and the
 ### strokes get a reference sheet
 
@@ -964,6 +1098,11 @@ drift apart — the gate is the authority, not prose.)*
 - **Size a fixed container to the WORST string it can hold, and measure it** with
   `lv_text_get_size()` against the real font, over every string the code can produce.
   Guessing yields either a clipped balloon or one that resizes per verdict.
+- **`lv_layer_top()` inherits NOTHING from the screen** — not the font, not
+  anything. Set what it needs on the layer itself (the Palm font is set there
+  in `ui_init()`), or every modal silently falls back to `LV_FONT_DEFAULT`.
+- **Arithmetic on `lv_pct()` moves the percentage.** `lv_pct(100) - 20` is 80 %.
+  Compute pixels from the constants you built the neighbours from.
 - **Scroll the page, not a panel inside it.** A scrolling sub-panel with fixed furniture
   around it puts a scrollbar down the middle of a 240 px screen. Put the whole screen on
   one scrollable child of `content` (never on `content` itself — it is shared and

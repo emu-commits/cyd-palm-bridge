@@ -13,6 +13,12 @@
  * follows the shift -- i.e. two taps, exactly as on PalmOS. */
 #define GRAF_PUNCT '\x02'
 
+/* R13: disarm a punctuation shift without reading a stroke (tap-to-cancel and the
+ * timeout in the UI; a right-to-left swipe while armed also cancels, inside
+ * graffiti_recognize, and returns 0 rather than a backspace). */
+void graffiti_punct_cancel(void);
+int  graffiti_punct_armed(void);
+
 void graffiti_clear(void);              /* start a new stroke */
 void graffiti_add_point(int x, int y);  /* add a sampled point during the stroke */
 /* recognize the buffered stroke against the letter set (digits==0, lowercase a-z)

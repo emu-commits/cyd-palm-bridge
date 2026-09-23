@@ -6,7 +6,7 @@ CORE    = bridge/pdb.c bridge/datebook.c bridge/address.c bridge/ical.c bridge/v
 
 all: roundtrip bridge_cli incremental synctoken category bigsync multiapp \
      uidmatch idempotent massdel streamparse find_test calc_test config_test rss_test news_test wx_test \
-     feeds_test break_test geoip_test toobig
+     feeds_test break_test geoip_test toobig safefile_test
 
 dirs:
 	@mkdir -p pdb state
@@ -87,6 +87,10 @@ rss_test: tests/rss_test.c bridge/rss.c | dirs
 news_test: tests/news_test.c bridge/news.c | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
+# every durable file is replaced whole: the crash states, and the PDB on top
+safefile_test: tests/safefile_test.c $(CORE) | dirs
+	$(CC) $(CFLAGS) -o $@ $^
+
 feeds_test: tests/feeds_test.c bridge/feeds.c | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
@@ -104,7 +108,7 @@ fuzz_test: tests/fuzz_test.c $(CORE) | dirs
 rss_asan: tests/rss_test.c bridge/rss.c | dirs
 	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -o $@ $^
 
-test: roundtrip find_test calc_test config_test streamparse rss_test news_test wx_test feeds_test break_test geoip_test
+test: roundtrip find_test calc_test config_test streamparse rss_test news_test wx_test feeds_test break_test geoip_test safefile_test
 	./roundtrip
 	./find_test
 	./calc_test
@@ -113,6 +117,7 @@ test: roundtrip find_test calc_test config_test streamparse rss_test news_test w
 	./streamparse
 	./rss_test
 	./news_test
+	./safefile_test
 	cd tests && ../wx_test
 	./feeds_test
 	./break_test
@@ -143,7 +148,7 @@ mtest: multiapp
 clean:
 	rm -f roundtrip bridge_cli incremental synctoken category bigsync multiapp \
 	      uidmatch idempotent massdel streamparse find_test calc_test config_test fuzz_test \
-	      rss_test rss_asan news_test feeds_test break_test geoip_test toobig \
+	      rss_test rss_asan news_test feeds_test break_test geoip_test toobig safefile_test \
 	      pdb/_rt_*.pdb
 
 .PHONY: all dirs test itest stest ctest btest mtest clean

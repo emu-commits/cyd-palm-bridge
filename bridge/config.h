@@ -1,8 +1,7 @@
 /* config.h -- runtime device configuration (the Preferences app backend).
  *
- * Today Wi-Fi + iCloud + per-app collections are compile-time (secrets.h), so
- * changing them means a reflash. This parses/serialises a plain `key = value`
- * file on the SD card so Preferences can edit them at runtime. Format: one
+ * This parses/serialises a plain `key = value` file on the SD card, which is
+ * how the device's settings persist (Settings edits them at runtime). Format: one
  * `key = value` per line, surrounding whitespace ignored, unknown keys skipped,
  * malformed lines skipped (robust against a hand-edited file).
  *
@@ -10,8 +9,9 @@
  * FOLLOWS whitespace ends the value ("timezone = UTC   # note"). A '#' with no
  * space before it is an ordinary character, so a password may contain one.
  *
- * NOTE: this file holds the Wi-Fi and app-specific passwords, exactly like
- * secrets.h did -- treat it as sensitive; never log the password fields.
+ * NOTE: the Config struct holds the Wi-Fi and app-specific passwords -- never
+ * log the password fields. On the device they are NOT written to the file:
+ * appcfg keeps them in its own flash (firmware/main/secretstore.h).
  */
 #ifndef CONFIG_H
 #define CONFIG_H

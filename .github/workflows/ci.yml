@@ -51,9 +51,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: Mark workspace safe for git (container runs as root)
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - name: Provide a placeholder secrets.h (real creds live only on the SD card)
-        working-directory: firmware
-        run: cp main/secrets.h.example main/secrets.h
       - name: idf.py build
         working-directory: firmware
         shell: bash
@@ -77,13 +74,14 @@ jobs:
         run: sudo mkdir -p /sdcard && sudo chmod 777 /sdcard
       - name: LVGL pool parity (sim/lv_conf.h vs the device's sdkconfig)
         run: make -C sim poolparity
-      # Passes trivially here -- secrets.h is gitignored, so CI has no
-      # credentials to leak and never did. It is in CI to keep the build flag
-      # that does the real work from being dropped; it EARNS its keep on the
-      # developer machines that do have a secrets.h, where it is the only thing
-      # watching. Reports field names and lengths, never values.
+      # There is no compile-time credential seed any more (see appcfg.c), so this
+      # passes; it is here so that one never comes back. It earned its place on
+      # developer machines, where a gitignored secrets.h used to be compiled into
+      # the simulator. Reports field names and lengths, never values.
       - name: No compile-time credentials in a simulator build
         run: make -C sim nosecrets
+      - name: Data layer gate (tombstones, the demo seed's uids)
+        run: make -C sim data
       - name: Graffiti recognizer accuracy gate
         run: make -C sim graf
       - name: Minesweeper board-logic gate

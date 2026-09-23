@@ -54,6 +54,7 @@ typedef struct { int app; const char *query; find_hit_cb cb; void *ctx; int n; }
 
 static int recCb(const PdbRec *r, int i, void *ctx){
     (void)i; FindCtx *f=ctx;
+    if(r->attr & REC_ATTR_DELETE) return 0;   /* deleted, awaiting its sync */
     FindHit h; memset(&h,0,sizeof h); h.app=f->app; h.uid=r->uniqueID;
     int matched=0;
 

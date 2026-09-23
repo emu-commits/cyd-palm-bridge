@@ -16,6 +16,12 @@ void ui_show_lock(void);
  * The port layer's idle blank and wake-poll stand down for the duration, so a tap
  * during a dark phase is not mistaken for a wake. */
 int  ui_owns_backlight(void);
+/* 1 while a screen of discrete keys (the Calculator, the phone keypad) is up:
+ * the input layer may then split a jumping press into two taps (tapsplit.h). */
+int  ui_discrete_taps(void);
+/* the screen on show, by the name in its title bar ("Lock" for the lock
+ * screen): lets the port's pool monitor say WHERE memory ran low. */
+const char *ui_screen_name(void);
 
 #ifdef UI_DEVTOOLS
 /* Put text into the focused field, as if it had been written in Graffiti.
@@ -28,7 +34,8 @@ int  ui_owns_backlight(void);
  * Stroking the letters through the recogniser instead would be testing the
  * recogniser, which has its own gate.
  *
- * Simulator only: the firmware never defines UI_DEVTOOLS. */
+ * The simulator always defines UI_DEVTOOLS; the firmware only with
+ * CONFIG_CYD_DEVTOOLS (menuconfig, off by default). */
 void ui_test_type(const char *text);
 #endif
 

@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <strings.h>   /* strcasecmp */
 #include "config.h"
+#include "safefile.h"      /* config.ini is replaced whole, never rewritten in place */
 
 static void setstr(char *dst, int cap, const char *val){
     snprintf(dst, cap, "%s", val);
@@ -111,6 +112,7 @@ static void apply(Config *c, const char *key, const char *val){
 }
 
 int config_load(const char *path, Config *c){
+    sf_recover(path);
     FILE *f=fopen(path,"r");
     if(!f) return -1;
     char line[512];
@@ -131,9 +133,11 @@ int config_load(const char *path, Config *c){
 }
 
 int config_save(const char *path, const Config *c){
-    FILE *f=fopen(path,"w");
+    SafeFile sf;
+    FILE *f=sf_open(&sf,path,"w");
     if(!f) return -1;
-    fprintf(f,"# CYD Palm device config. Holds Wi-Fi + iCloud passwords -- keep private.\n");
+    fprintf(f,"# CYD Palm device config. The device keeps its passwords in its own flash,\n");
+    fprintf(f,"# not here; a password typed into this file is moved there on the next boot.\n");
     fprintf(f,"# `key = value`, one per line. '#' starts a comment.\n\n");
     /* In try order, most recently connected first -- so the file reads the way
      * the device behaves, and an empty slot writes as an empty value rather than
@@ -164,6 +168,5 @@ int config_save(const char *path, const Config *c){
     fprintf(f,"backlight_sec = %d\n", c->backlight_sec);
     fprintf(f,"clock24 = %d\n",       c->clock24);
     fprintf(f,"policy = %s\n",        config_policy_to_str(c->policy));
-    fclose(f);
-    return 0;
+    return sf_commit(&sf, !ferror(f));
 }

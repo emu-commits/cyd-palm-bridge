@@ -1,14 +1,16 @@
 # CYD Palm runtime config -- copy to the SD card as /sdcard/config.ini
 #
-# Parsed by bridge/config.c (config_load). This is the runtime alternative to
-# the compile-time secrets.h: the Preferences app reads/writes these values so
-# Wi-Fi, iCloud, and per-app collections can change without reflashing.
+# Parsed by bridge/config.c (config_load). Settings on the device reads and
+# writes these values, so Wi-Fi, iCloud and the per-app collections can change
+# without reflashing -- and most people never need to open this file at all.
 #
 # Format: `key = value`, one per line. '#' starts a comment. Surrounding
 # whitespace is ignored; unknown keys and malformed lines are skipped.
 #
-# SENSITIVE: holds the Wi-Fi password and the iCloud app-specific password.
-# Keep the card private; the firmware never logs these fields.
+# PASSWORDS: you may type the Wi-Fi and iCloud app-specific passwords here, but
+# they do not stay: on its next boot the device moves them into its own flash
+# and rewrites this file without them, so the card never carries them for long.
+# The firmware never logs them.
 
 wifi_ssid = your-ssid
 wifi_pass = your-wifi-password

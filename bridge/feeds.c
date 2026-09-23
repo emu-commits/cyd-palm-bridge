@@ -4,6 +4,7 @@
  * time (a bounded stack buffer, no whole-file load). Robust against a hand-edited
  * file: blank/`#` lines and malformed rows are skipped, every copy length-bounded.
  */
+#include "safefile.h"
 #include "feeds.h"
 #include <stdio.h>
 #include <string.h>
@@ -124,6 +125,7 @@ static int truthy(const char *s){
 }
 
 int feeds_load(const char *path){
+    sf_recover(path);
     FILE *f = fopen(path,"r");
     if(!f) return -1;
     feeds_clear();
@@ -156,14 +158,14 @@ int feeds_load(const char *path){
 }
 
 int feeds_save(const char *path){
-    FILE *f = fopen(path,"w");
+    SafeFile sf;                       /* replaced whole (safefile.h) */
+    FILE *f = sf_open(&sf, path, "w");
     if(!f) return -1;
     fprintf(f, "# CYD News feeds. One per line:  <on|off> <TAB> name <TAB> url\n");
     for(int i=0;i<s_n;i++)
         fprintf(f, "%s\t%s\t%s\n", s_feeds[i].enabled ? "on" : "off",
                 s_feeds[i].name, s_feeds[i].url);
-    fclose(f);
-    return 0;
+    return sf_commit(&sf, !ferror(f));
 }
 
 int feeds_load_or_seed(const char *path){

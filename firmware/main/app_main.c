@@ -6,7 +6,7 @@
  *
  * Discovery/category-routing and a UI are deliberately out of scope for this
  * first flash: the point is to prove the codec + reconcile + TLS DAV + SD stack
- * end-to-end on hardware. Collection path comes from secrets.h for now.
+ * end-to-end on hardware.
  */
 #include <string.h>
 #include <time.h>
@@ -52,9 +52,8 @@ static const char *TAG = "app";
  * effective-host and absolute-href logic that had drifted from the live one.
  *
  * hotsync.c does all of it now, on a background task, from config.ini rather
- * than compiled-in credentials, which is also why this file no longer includes
- * secrets.h: a build carrying credentials should be one file's business, not
- * two. git log -- firmware/main/app_main.c has the old version if the early
+ * than compiled-in credentials. (There is no compile-time secrets.h at all any
+ * more -- see appcfg.c.) git log -- firmware/main/app_main.c has the old version if the early
  * bring-up sequence is ever wanted for reference. */
 
 

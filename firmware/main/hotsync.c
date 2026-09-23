@@ -8,6 +8,8 @@
  * validate on-device -- if it's tight, tear down the LVGL draw buffer first.
  */
 #include "hotsync.h"
+#include "data.h"       /* data_demo_count(): the seed is never pushed */
+#include "safefile.h"     /* weather.dat is replaced whole */
 #include "dav.h"
 #include "sync.h"
 #include "rss.h"          /* RSS reader: feed parser */
@@ -15,7 +17,6 @@
 #include "feeds.h"        /* RSS reader: the enabled feed sources */
 #include "dash.h"         /* lock-screen dashboard: the WxCache it renders from */
 #include "wxfetch.h"      /* Open-Meteo CSV -> WxCache */
-#include "secrets.h"
 #include "appcfg.h"
 #include "geoip.h"
 #include "clock.h"
@@ -66,6 +67,8 @@ static volatile int s_busy;
 static volatile int s_cancel;
 static volatile int s_was_cancelled;
 static char s_status[208] = "Ready";
+static volatile int s_wifi_problem;       /* HS_WIFI_*, for the last run */
+int hotsync_wifi_problem(void){ return s_wifi_problem; }
 static void setst(const char *s){ snprintf(s_status, sizeof s_status, "%s", s); }
 
 void hotsync_cancel(void){ if(s_busy) s_cancel = 1; }
@@ -173,15 +176,14 @@ static void hs_prog_cb(int done,int total,void *ctx){
 /* ---- per-app sync targets ------------------------------------------------
  * HotSync walks this table, syncing each configured app to its own iCloud
  * collection. The PDB/map paths and kinds are device-local constants; the
- * COLLECTION for each app is now runtime config (appcfg(): config.ini over the
- * secrets.h seed), so an app with an empty collection stays off until it's
- * configured -- exactly the old back-compat behaviour, now editable on-device. */
-#ifndef SYNC_TODO_PDB
+ * COLLECTION for each app is runtime config (appcfg(), from config.ini), so an
+ * app with an empty collection stays off until it's configured. */
+/* These three used to come from the compile-time secrets.h (the Date Book one
+ * ONLY from there), which is gone -- see appcfg.c. They are the same paths the
+ * data layer uses. */
+#define SYNC_PDB      "/sdcard/DatebookDB.pdb"
 #define SYNC_TODO_PDB "/sdcard/ToDoDB.pdb"
-#endif
-#ifndef SYNC_CARD_PDB
 #define SYNC_CARD_PDB "/sdcard/AddressDB.pdb"
-#endif
 
 typedef struct {
     const char *name;     /* label for the status line            */
@@ -197,6 +199,13 @@ static const SyncApp s_apps[] = {
     { "Address",   SYNC_CARD_PDB, KIND_CARD, "/sdcard/state/card.map", 1 },
 };
 #define N_APPS ((int)(sizeof s_apps / sizeof s_apps[0]))
+
+/* The demo seed is held back from every push: it is sample data, and the first
+ * sync used to copy it into the user's real account (the README had to tell
+ * people to delete it there by hand). The seed is uids 1..n per app. */
+static int s_demo_n;
+static int hold_demo(uint32_t uid, void *ctx){ (void)ctx; return uid >= 1 && (int)uid <= s_demo_n; }
+static int app_of(int i){ return i==0 ? APP_CAL : i==1 ? APP_TODO : APP_ADDR; }
 
 /* the configured collection for app i (index matches s_apps order). */
 static const char* app_coll(const Config *c, int i){
@@ -666,14 +675,15 @@ static void fetch_weather(const Config *cfg){
         remove(WX_TMP);
     }
 
-    FILE *f = fopen(WX_PATH, "wb");
+    SafeFile sf;
+    FILE *f = sf_open(&sf, WX_PATH, "wb");
     if(!f){
         snprintf(s_wx_why,sizeof s_wx_why,"could not write %s", WX_PATH);
         ESP_LOGE(TAG,"weather: cannot open %s", WX_PATH);
         return;
     }
     size_t n = fwrite(&w, 1, sizeof w, f);
-    fclose(f);
+    if(sf_commit(&sf, n == sizeof w) != 0) n = 0;
     if(n != sizeof w){
         snprintf(s_wx_why,sizeof s_wx_why,"short write");
         ESP_LOGE(TAG,"weather: short write to %s (%u of %u)", WX_PATH,
@@ -701,7 +711,16 @@ static void hotsync_task(void *arg){
     power_note_sync();
 
     setst("Connecting Wi-Fi...");
-    if(!wifi_up()){ setst("Wi-Fi failed"); wifi_down(); s_busy=0; vTaskDelete(NULL); return; }
+    if(!wifi_up()){
+        /* Say which failure it was: the UI sends the user to the Wi-Fi panel
+         * either way, but "nothing saved" and "nothing answered" need
+         * different words there. */
+        int saved = 0;
+        for(int i = 0; i < CFG_WIFI_N; i++) if(appcfg()->wifi[i].ssid[0]) saved++;
+        s_wifi_problem = saved ? HS_WIFI_NO_JOIN : HS_WIFI_NONE_SAVED;
+        setst(saved ? "Wi-Fi failed" : "No Wi-Fi network saved");
+        wifi_down(); s_busy=0; vTaskDelete(NULL); return;
+    }
     hs_heap("wifi-up");    /* Mode B baseline: Wi-Fi+lwIP paid for, no TLS yet */
     net_probe();           /* lease + DNS, before anything can blame the server */
     setst("Setting clock...");
@@ -713,7 +732,7 @@ static void hotsync_task(void *arg){
     if(!clock_ok()){ setst("Clock unset - nothing can sync"); wifi_down(); s_busy=0; vTaskDelete(NULL); return; }
 
     const Config *cfg = appcfg();
-    ESP_LOGI(TAG,"config source: %s", appcfg_from_sd() ? "/sdcard/config.ini" : "secrets.h (no config.ini)");
+    ESP_LOGI(TAG,"config source: %s", appcfg_from_sd() ? "/sdcard/config.ini" : "defaults (no config.ini)");
     /* Say out loud what the file actually yielded. "no location set" was true but
      * unfalsifiable from here -- it could not distinguish a config.ini without the
      * keys from one whose values failed to parse. Coordinates are not secret. */
@@ -872,7 +891,12 @@ static void hotsync_task(void *arg){
         sync_set_check(hs_heap_check);
         dav_set_check(hs_heap_check);
         SyncStats st={0};
+        s_demo_n = data_demo_count(app_of(i));
+        sync_set_hold(s_demo_n ? hold_demo : NULL, NULL);
         int n = sync_collection(ctx, t->pdb, t->pdb, coll, t->kind, t->map, pol, &st);
+        sync_set_hold(NULL, NULL);
+        if(st.held) ESP_LOGI(TAG,"%s: %d demo record(s) kept on the device, not pushed",
+                             t->name, st.held);
         /* n == -2: guard refused to overwrite a non-empty PDB with an empty result
          * (data was protected). n == -1: local out-of-memory. n == -3: the output
          * temp would not open (SD full, absent or read-only). n == -4: the
@@ -1028,7 +1052,7 @@ int hotsync_discover_count(void){ return s_disc_n; }
 const DiscColl *hotsync_discover_get(int i){ return (i>=0 && i<s_disc_n) ? &s_disc[i] : NULL; }
 
 /* dav_list_collections callback: keep calendars + address books, normalise the
- * href to the "no leading/trailing slash" form sync expects (secrets.h note). */
+ * href to the "no leading/trailing slash" form sync expects (config.h). */
 static void disc_add(const char *href, int kind, const char *dn, void *ctx){
     (void)ctx;
     if((kind!='c' && kind!='a') || !href || !href[0]) return;
@@ -1197,6 +1221,7 @@ void hotsync_start(void){
     s_busy = 1;
     s_cancel = 0;              /* a fresh run is never born cancelled */
     s_was_cancelled = 0;
+    s_wifi_problem = HS_WIFI_OK;
     setst("Starting...");
     /* 32 KB stack. The task stack is malloc'd from the DRAM heap, so an overflow
      * corrupts adjacent heap metadata -> a later alloc crashes deep in tlsf

@@ -394,6 +394,26 @@ int main(void){
         #undef FOLD
     }
 
+    /* ------------------------------- R4: the week screens' day window (daycal.h) */
+    {
+        /* T0 is a Monday. "Now" is Sunday 09:00 UTC, six days on. */
+        uint32_t now = AT(6);
+        CK(cal_window_slot(now, now, 0, 7) == 6,             "today is the last slot");
+        CK(cal_window_slot(AT(0), now, 0, 7) == 0,           "six days ago is the first");
+        CK(cal_window_slot(AT(0) - DAY, now, 0, 7) == -1,    "a week ago is outside");
+        CK(cal_window_slot(now + DAY, now, 0, 7) == -1,      "tomorrow is outside");
+        CK(cal_window_slot(AT(0) - DAY, now, 0, 14) == 6,    "and slot 6 of a fortnight");
+        /* a local-day window, not 168 hours: 00:30 on the first day is IN it */
+        CK(cal_window_slot(T0 + 1800u, now, 0, 7) == 0,      "the whole first day counts");
+        CK(cal_window_start(now, 0, 7) == T0,                "the window starts at its midnight");
+        /* EDT: 02:00 UTC Monday is still Sunday evening locally */
+        CK(cal_window_slot(T0 + 2 * HOUR, AT(1), -240, 7) == 4, "EDT files 22:00 Sunday under Sunday (Tuesday is 6)");
+        CK(cal_window_start(AT(6), -240, 7) == T0 + 4 * HOUR, "an EDT window starts at 04:00 UTC");
+        CK(cal_weekday(cal_day_index(T0, 0)) == 1,            "T0 is a Monday");
+        CK(cal_weekday(cal_day_index(now, 0)) == 0,           "and six days on is a Sunday");
+        CK(cal_weekday(0) == 4 && cal_weekday(-1) == 3,       "1970-01-01 was a Thursday, before it a Wednesday");
+    }
+
     printf(fails ? "== guru: %d FAILURE(S) ==\n" : "== guru: all passed ==\n", fails);
     return fails ? 1 : 0;
 }

@@ -47,4 +47,27 @@ static inline int cal_mod(int32_t a, int m){
     return r < 0 ? r + m : r;
 }
 
+/* ---- a window of whole local days ending today (the week screens, R4) ----
+ * Which slot of an `n`-day window ending on the local day of `now` does `epoch`
+ * fall on? 0 is the oldest day, n-1 is today, -1 is outside the window (earlier,
+ * or later than today). Bucketing by local DAY rather than by "the last n*86400
+ * seconds" is what makes a chart's columns mean Monday, Tuesday...: a 168-hour
+ * window starts at this time of day a week ago and splits that day in two. */
+static inline int cal_window_slot(uint32_t epoch, uint32_t now, int tz_off_min, int n){
+    int32_t k = cal_day_index(now, tz_off_min) - cal_day_index(epoch, tz_off_min);
+    return (k < 0 || k >= n) ? -1 : n - 1 - (int)k;
+}
+
+/* The epoch of local midnight at the START of that window -- the `since` to
+ * hand a log fold so it reads the same days the chart draws. */
+static inline uint32_t cal_window_start(uint32_t now, int tz_off_min, int n){
+    int64_t d0 = (int64_t)cal_day_index(now, tz_off_min) - (n - 1);
+    int64_t s  = d0 * 86400 - (int64_t)tz_off_min * 60;
+    return s < 0 ? 0u : (uint32_t)s;
+}
+
+/* Day of the week of a local day number, 0 = Sunday. Day 0 (1970-01-01) was a
+ * Thursday; cal_mod keeps days before the epoch in range. */
+static inline int cal_weekday(int32_t day){ return cal_mod(day + 4, 7); }
+
 #endif

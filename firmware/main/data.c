@@ -5,6 +5,8 @@
 #include "data.h"
 #include "palm.h"
 #include "appinfo.h"
+#include "safefile.h"
+#include "appcfg.h"       /* which apps sync: decides whether a delete tombstones */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +24,28 @@ static const char *db_path(int app){
     return app==APP_CAL?DB_CAL : app==APP_ADDR?DB_ADDR : app==APP_TODO?DB_TODO : DB_MEMO;
 }
 const char *data_db_path(int app){ return db_path(app); }
+/* ---- tombstones --------------------------------------------------------------
+ * A record deleted in an app that SYNCS is not dropped from its database: it
+ * stays, with the Palm delete bit set, until the next sync has pushed the
+ * deletion (the engine then leaves it out). That is what lets the sync engine
+ * tell a user's delete -- still present, flagged -- from a card that read short,
+ * where the record is simply absent; before this the two were the same shape,
+ * and the mass-delete guard had to guess.
+ *
+ * Every reader the UI uses goes through live_read(), which hides them. Only the
+ * rewriters (which must carry tombstones through a save) and the sync engine
+ * see the raw database. */
+typedef struct { pdb_rec_cb cb; void *ctx; } Live;
+static int liveCb(const PdbRec *r, int i, void *ctx){
+    Live *l = ctx;
+    if(r->attr & REC_ATTR_DELETE) return 0;
+    return l->cb(r, i, l->ctx);
+}
+static int live_read(const char *path, pdb_rec_cb cb, void *ctx){
+    Live l = { cb, ctx };
+    return pdb_read(path, liveCb, &l);
+}
+
 static int file_exists(const char *path){
     FILE *f = fopen(path, "rb");
     if(f){ fclose(f); return 1; }
@@ -184,6 +208,12 @@ int data_set_categories(int app, const CatTable *t){
 }
 
 void data_seed_if_empty(void){
+    /* Finish any swap a crash interrupted BEFORE asking whether a database
+     * exists: on the card, the one state a crash mid-swap can leave is "no
+     * DatebookDB.pdb, a complete DatebookDB.pdb.tmp" -- and "does not exist"
+     * is exactly what would reseed it with demo rows over the user's own. */
+    sf_recover(DB_CAL); sf_recover(DB_ADDR); sf_recover(DB_TODO); sf_recover(DB_MEMO);
+    sf_recover(DEMO_MANIFEST);
     /* only seed a DB that doesn't exist yet, so edits + synced data persist */
     int seeded[4] = { -1, -1, -1, -1 };
     if(!file_exists(DB_CAL))  seeded[APP_CAL]  = seed_datebook();
@@ -195,10 +225,11 @@ void data_seed_if_empty(void){
     int any = 0;
     for(int i=0;i<4;i++) if(seeded[i] > 0) any = 1;
     if(any){
-        FILE *f = fopen(DEMO_MANIFEST, "wb");
+        SafeFile sf;
+        FILE *f = sf_open(&sf, DEMO_MANIFEST, "wb");
         if(f){
             for(int i=0;i<4;i++) if(seeded[i] > 0) fprintf(f, "%d %d\n", i, seeded[i]);
-            fclose(f);
+            sf_commit(&sf, !ferror(f));
         }
     }
     /* backfill categories into PDBs from older builds that lacked AppInfo */
@@ -319,6 +350,15 @@ int data_remove_test_events(void){
  * manifest -- ONE rewrite per app, not per record), then drop the manifest.
  * Returns the number of records removed. User-added / synced records
  * (uniqueID > nr) are never touched. */
+int data_demo_count(int app){
+    FILE *f = fopen(DEMO_MANIFEST, "rb");
+    if(!f) return 0;
+    int a, nr, got = 0;
+    while(fscanf(f, "%d %d", &a, &nr) == 2) if(a == app && nr > 0) got = nr;
+    fclose(f);
+    return got;
+}
+
 int data_remove_demo(void){
     FILE *f = fopen(DEMO_MANIFEST, "rb");
     if(!f) return 0;
@@ -345,7 +385,7 @@ static int cbCal(const PdbRec *r, int i, void *ctx){
     it->cb(r->uniqueID, pri, NULL, it->ctx);
     return 0;
 }
-void data_datebook(data_row_cb cb, void *ctx){ It it={cb,ctx}; pdb_read(DB_CAL,cbCal,&it); }
+void data_datebook(data_row_cb cb, void *ctx){ It it={cb,ctx}; live_read(DB_CAL,cbCal,&it); }
 
 /* one day's appointments (PalmOS Day view). Primary is "HH:MM  desc" (zero-padded
  * so a lexical sort == chronological; untimed events use "--:--" which sorts to
@@ -363,7 +403,7 @@ static int cbCalDay(const PdbRec *r, int i, void *ctx){
     return 0;
 }
 void data_cal_day(int y,int m,int d, data_row_cb cb, void *ctx){
-    DayIt it={cb,ctx,y,m,d}; pdb_read(DB_CAL,cbCalDay,&it);
+    DayIt it={cb,ctx,y,m,d}; live_read(DB_CAL,cbCalDay,&it);
 }
 
 /* mark which day-of-month (1..31) has >=1 appointment in month y/m (Month view
@@ -377,7 +417,7 @@ static int cbCalMark(const PdbRec *r, int i, void *ctx){
 }
 void data_cal_month_marks(int y,int m, uint8_t marks[32]){
     for(int i=0;i<32;i++) marks[i]=0;
-    MarkIt mk={y,m,marks}; pdb_read(DB_CAL,cbCalMark,&mk);
+    MarkIt mk={y,m,marks}; live_read(DB_CAL,cbCalMark,&mk);
 }
 
 static int cbAddr(const PdbRec *r, int i, void *ctx){
@@ -393,7 +433,7 @@ static int cbAddr(const PdbRec *r, int i, void *ctx){
     it->cb(r->uniqueID, pri, a.fields[F_phone1], it->ctx);
     return 0;
 }
-void data_address(data_row_cb cb, void *ctx){ It it={cb,ctx}; pdb_read(DB_ADDR,cbAddr,&it); }
+void data_address(data_row_cb cb, void *ctx){ It it={cb,ctx}; live_read(DB_ADDR,cbAddr,&it); }
 
 static int cbTodo(const PdbRec *r, int i, void *ctx){
     (void)i; It *it=ctx; Todo t;
@@ -409,7 +449,7 @@ static int cbTodo(const PdbRec *r, int i, void *ctx){
     it->cb(r->uniqueID, pri, sec, it->ctx);
     return 0;
 }
-void data_todo(data_row_cb cb, void *ctx){ It it={cb,ctx}; pdb_read(DB_TODO,cbTodo,&it); }
+void data_todo(data_row_cb cb, void *ctx){ It it={cb,ctx}; live_read(DB_TODO,cbTodo,&it); }
 
 /* ------------------------- detail (by uid) ------------------------- */
 typedef struct { uint32_t uid; char *out; int cap; int found; } Det;
@@ -459,10 +499,10 @@ int data_detail(int app, uint32_t uid, char *out, int cap){
     if(cap>0) out[0]=0;
     Det d = { uid, out, cap, 0 };
     switch(app){
-        case APP_CAL:  pdb_read(DB_CAL,  detCal,  &d); break;
-        case APP_ADDR: pdb_read(DB_ADDR, detAddr, &d); break;
-        case APP_TODO: pdb_read(DB_TODO, detTodo, &d); break;
-        case APP_MEMO: pdb_read(DB_MEMO, getMemo, &d); break;
+        case APP_CAL:  live_read(DB_CAL,  detCal,  &d); break;
+        case APP_ADDR: live_read(DB_ADDR, detAddr, &d); break;
+        case APP_TODO: live_read(DB_TODO, detTodo, &d); break;
+        case APP_MEMO: live_read(DB_MEMO, getMemo, &d); break;
     }
     return d.found;
 }
@@ -483,19 +523,23 @@ static int getTodo(const PdbRec *r,int i,void *ctx){ (void)i; Get*g=ctx;
     if(ToDoUnpack(r->data,r->len,(Todo*)g->out)==0) g->found=1;
     return 1; }
 
-int data_get_cal(uint32_t uid, Appt *out){ Get g={uid,out,0}; pdb_read(DB_CAL,getCal,&g); return g.found; }
-int data_get_addr(uint32_t uid, Addr *out){ Get g={uid,out,0}; pdb_read(DB_ADDR,getAddr,&g); return g.found; }
-int data_get_todo(uint32_t uid, Todo *out){ Get g={uid,out,0}; pdb_read(DB_TODO,getTodo,&g); return g.found; }
+int data_get_cal(uint32_t uid, Appt *out){ Get g={uid,out,0}; live_read(DB_CAL,getCal,&g); return g.found; }
+int data_get_addr(uint32_t uid, Addr *out){ Get g={uid,out,0}; live_read(DB_ADDR,getAddr,&g); return g.found; }
+int data_get_todo(uint32_t uid, Todo *out){ Get g={uid,out,0}; live_read(DB_TODO,getTodo,&g); return g.found; }
 
 /* ------------------------- rewrite (replace/append one record) ------------------------- */
-typedef struct { uint32_t uid; const uint8_t *nd; int nl; int cat; uint8_t *arena; int used; PdbRec *recs; int nr; int done; } RW;
+typedef struct { uint32_t uid; const uint8_t *nd; int nl; int cat; uint8_t *arena; int used; PdbRec *recs; int nr; int done; int tomb; } RW;
 static int rwCb(const PdbRec *r,int i,void *ctx){ (void)i; RW*w=ctx;
     const uint8_t *src=r->data; int len=r->len; uint8_t attr=r->attr;
     if(r->uniqueID==w->uid){
-        if(!w->nd){ w->done=1; return 0; }             /* delete: drop this record */
+        if(!w->nd && !w->tomb){ w->done=1; return 0; }  /* delete: drop this record */
+        if(!w->nd){                                     /* delete: keep a tombstone */
+            attr |= REC_ATTR_DELETE | REC_ATTR_DIRTY; w->done=1;
+        } else {
         src=w->nd; len=w->nl;
         if(w->cat>=0) attr=(attr & ~0x0F) | (uint8_t)(w->cat & 0x0F);   /* recategorize */
         attr|=REC_ATTR_DIRTY; w->done=1;
+        }
     }
     if(w->used+len>RW_ARENA || w->nr>=RW_MAX) return 1;
     memcpy(w->arena+w->used, src, len);
@@ -504,13 +548,21 @@ static int rwCb(const PdbRec *r,int i,void *ctx){ (void)i; RW*w=ctx;
 }
 /* replace/append/delete one record, preserving the PDB's AppInfo (categories).
  * nd==NULL => delete; cat<0 => keep the record's current category. */
-static int rewrite(const char *path,const char *nm,uint32_t type,uint32_t creator,
-                   uint32_t uid,const uint8_t *nd,int nl,int cat){
+static int rewrite_ex(const char *path,const char *nm,uint32_t type,uint32_t creator,
+                      uint32_t uid,const uint8_t *nd,int nl,int cat,int tomb){
     uint8_t ai[512]; int al=pdb_read_appinfo(path,ai,sizeof ai); if(al<0)al=0;
-    RW w={uid,nd,nl,cat,g_arena,0,g_recs,0,0};
+    RW w={uid,nd,nl,cat,g_arena,0,g_recs,0,0,tomb};
     pdb_read(path,rwCb,&w);
     if(!w.done && nd){                /* new record (uid==0 or not found): append */
         uint32_t nu=1; for(int i=0;i<w.nr;i++) if(g_recs[i].uniqueID>=nu) nu=g_recs[i].uniqueID+1;
+        /* Never inside the demo seed's uid range (1..n): HotSync holds those
+         * back from the push, so a user's record that landed there -- after
+         * every sample was deleted, say -- would silently never sync. */
+        for(int a = 0; a < 4; a++)
+            if(db_path(a) == path || !strcmp(db_path(a), path)){
+                uint32_t dn = (uint32_t)data_demo_count(a);
+                if(nu <= dn) nu = dn + 1;
+            }
         if(w.used+nl<=RW_ARENA && w.nr<RW_MAX){
             memcpy(g_arena+w.used,nd,nl);
             uint8_t na=REC_ATTR_DIRTY | (cat>=0 ? (uint8_t)(cat & 0x0F) : 0);
@@ -519,6 +571,10 @@ static int rewrite(const char *path,const char *nm,uint32_t type,uint32_t creato
         }
     }
     return pdb_write_ai(path,nm,type,creator, al?ai:NULL, al, g_recs, w.nr);
+}
+static int rewrite(const char *path,const char *nm,uint32_t type,uint32_t creator,
+                   uint32_t uid,const uint8_t *nd,int nl,int cat){
+    return rewrite_ex(path,nm,type,creator,uid,nd,nl,cat,0);
 }
 
 int data_save_cal(uint32_t uid, int cat, const Appt *in){
@@ -534,13 +590,29 @@ int data_save_todo(uint32_t uid, int cat, const Todo *in){
     return rewrite(DB_TODO,"ToDoDB",0x44415441,0x746F646F,uid,pk,l,cat)>=0;
 }
 
-/* remove a record (rewrite the PDB without it). the map still lists it, so the
- * next sync propagates the delete to the server. */
-int data_delete(int app, uint32_t uid){
+/* Does this app's database sync anywhere? Only then is a tombstone worth
+ * keeping: Memo never syncs, and an app with no account or no collection has no
+ * sync to carry the deletion to -- a tombstone there would sit forever. */
+static int app_syncs(int app){
+    const Config *c = appcfg();
+    if(!c->dav_user[0]) return 0;
     switch(app){
-        case APP_CAL:  return rewrite(DB_CAL, "DatebookDB",0x44415441,0x64617465,uid,NULL,0,-1)>=0;
-        case APP_ADDR: return rewrite(DB_ADDR,"AddressDB", 0x44415441,0x61646472,uid,NULL,0,-1)>=0;
-        case APP_TODO: return rewrite(DB_TODO,"ToDoDB",    0x44415441,0x746F646F,uid,NULL,0,-1)>=0;
+        case APP_CAL:  return c->cal_coll[0]  != 0;
+        case APP_TODO: return c->todo_coll[0] != 0;
+        case APP_ADDR: return c->card_coll[0] != 0;
+    }
+    return 0;
+}
+
+/* Delete a record. In an app that syncs it becomes a tombstone (see live_read)
+ * and the next sync pushes the deletion and drops it; elsewhere it is removed
+ * outright, as it always was. */
+int data_delete(int app, uint32_t uid){
+    int t = app_syncs(app);
+    switch(app){
+        case APP_CAL:  return rewrite_ex(DB_CAL, "DatebookDB",0x44415441,0x64617465,uid,NULL,0,-1,t)>=0;
+        case APP_ADDR: return rewrite_ex(DB_ADDR,"AddressDB", 0x44415441,0x61646472,uid,NULL,0,-1,t)>=0;
+        case APP_TODO: return rewrite_ex(DB_TODO,"ToDoDB",    0x44415441,0x746F646F,uid,NULL,0,-1,t)>=0;
         case APP_MEMO: return rewrite(DB_MEMO,"MemoDB",    0x44415441,0x6D656D6F,uid,NULL,0,-1)>=0;
     }
     return 0;
@@ -558,7 +630,7 @@ static int cbMemo(const PdbRec *r, int i, void *ctx){
     it->cb(r->uniqueID, pri, NULL, it->ctx);
     return 0;
 }
-void data_memo(data_row_cb cb, void *ctx){ It it={cb,ctx}; pdb_read(DB_MEMO,cbMemo,&it); }
+void data_memo(data_row_cb cb, void *ctx){ It it={cb,ctx}; live_read(DB_MEMO,cbMemo,&it); }
 
 static int getMemo(const PdbRec *r, int i, void *ctx){
     (void)i; Det *g=ctx; if(r->uniqueID!=g->uid) return 0;
@@ -567,7 +639,7 @@ static int getMemo(const PdbRec *r, int i, void *ctx){
 }
 int data_get_memo(uint32_t uid, char *out, int cap){
     if(cap>0) out[0]=0;
-    Det g={uid,out,cap,0}; pdb_read(DB_MEMO,getMemo,&g); return g.found;
+    Det g={uid,out,cap,0}; live_read(DB_MEMO,getMemo,&g); return g.found;
 }
 int data_save_memo(uint32_t uid, int cat, const char *text){
     int l=(int)strlen(text)+1;
@@ -586,5 +658,5 @@ typedef struct { uint32_t uid; int cat; } CatOf;
 static int catCb(const PdbRec *r,int i,void *ctx){ (void)i; CatOf*c=ctx;
     if(r->uniqueID==c->uid){ c->cat=r->attr & 0x0F; return 1; } return 0; }
 int data_record_category(int app, uint32_t uid){
-    CatOf c={uid,-1}; pdb_read(db_path(app),catCb,&c); return c.cat;
+    CatOf c={uid,-1}; live_read(db_path(app),catCb,&c); return c.cat;
 }

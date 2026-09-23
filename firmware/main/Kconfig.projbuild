@@ -1,0 +1,13 @@
+menu "CYD Palm"
+
+config CYD_DEVTOOLS
+    bool "Developer tools in the UI"
+    default n
+    help
+        Compiles in the hooks the simulator's scripted tests use (UI_DEVTOOLS):
+        typing into a field from a script, and Coach's invisible corner target
+        that skips a running session to its end. Useful on a bench device that
+        is being driven by a test; never wanted on a device someone uses --
+        Coach's whole premise is that a session cannot be escaped.
+
+endmenu

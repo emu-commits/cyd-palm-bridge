@@ -13,6 +13,10 @@ void data_seed_if_empty(void);
  * (never user-added / synced ones) and returns how many it removed. */
 int  data_demo_present(void);
 int  data_remove_demo(void);
+/* How many records of `app` were seeded as demo data (their uids are 1..n), or 0
+ * once the seed has been removed. HotSync holds exactly these back from the
+ * push, so the samples never reach a real account. */
+int  data_demo_count(int app);
 
 /* Delete the appointments seeded by the devtools "Add test events" item, matched
  * on the exact marker they carry in their note. Returns the number removed, 0 if
