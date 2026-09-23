@@ -8,6 +8,8 @@ name: CI
 on:
   push:
     branches: [ main, "claude/**" ]
+    # A `v*` tag publishes a GitHub release with the firmware attached.
+    tags: [ "v*" ]
   pull_request:
   workflow_dispatch:
 
@@ -58,6 +60,21 @@ jobs:
           . "$IDF_PATH/export.sh"
           idf.py set-target esp32
           idf.py build
+      # The browser Install page (sim/web/flash.html) and a release both take
+      # the firmware from here: the build that just compiled, from
+      # sdkconfig.defaults alone -- the same config the bench device runs.
+      - name: Package for the browser installer (manifest + images)
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then ver="$GITHUB_REF_NAME"
+          else ver="$(git rev-parse --short HEAD)"; fi
+          python tools/package_firmware.py firmware/build firmware-web "$ver"
+      - name: Upload the firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: firmware-web/
 
   simulator-smoke:
     name: Simulator smoke (native headless)
@@ -132,18 +149,16 @@ jobs:
         with:
           name: palm-simulator-web
           path: sim/build/web/
-      - name: Upload as a Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: sim/build/web/
 
-  # Publishes the simulator to a public URL on every push (and on manual
-  # dispatch). Requires GitHub Pages enabled with Source: "GitHub Actions" in
-  # the repo settings; misconfigured, it fails softly without failing the run.
+  # Publishes the simulator, and the Install page with the firmware beside it,
+  # to a public URL on every push (and on manual dispatch). Requires GitHub
+  # Pages enabled with Source: "GitHub Actions" in the repo settings;
+  # misconfigured, it fails softly without failing the run. Tags don't deploy:
+  # the site follows main, and the github-pages environment only allows main.
   simulator-deploy:
     name: Deploy simulator to Pages (needs Pages source = GitHub Actions)
-    if: github.event_name != 'pull_request'
-    needs: simulator-wasm
+    if: github.event_name != 'pull_request' && github.ref_type != 'tag'
+    needs: [ simulator-wasm, firmware-build ]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     continue-on-error: true
@@ -154,5 +169,43 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: palm-simulator-web
+          path: site/
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: site/firmware/
+      # The single merged image is for releases (esptool users); the page
+      # flashes the three parts, which leave NVS and its passwords alone.
+      - name: Drop the merged image from the site
+        run: rm -f site/firmware/*-full.bin && ls -l site site/firmware
+      - name: Upload as a Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # `git tag v1.2 && git push origin v1.2` -> a release with the merged image
+  # (`esptool.py --chip esp32 write_flash 0x0 cyd-palm-v1.2-full.bin`). That
+  # image covers NVS, so it is a clean install: it erases saved passwords.
+  release:
+    name: Release the firmware (tags only)
+    if: github.ref_type == 'tag'
+    needs: firmware-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: firmware/
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "$GITHUB_REF_NAME" firmware/*-full.bin --verify-tag --generate-notes

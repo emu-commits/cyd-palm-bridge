@@ -245,7 +245,7 @@ games: poolparity mines wordie sudoku zip clock coach guru gurupool dash
 # the Palm at module init; JS drives frames and blits the exported framebuffer. ----
 WASM_CFLAGS := $(filter-out -g,$(CFLAGS)) -g0
 
-build/web/index.html: lvgl/src $(APP_SRCS) wasm_main.c web/index.html lv_conf.h sim_heap.h
+build/web/index.html: lvgl/src $(APP_SRCS) wasm_main.c web/index.html web/flash.html lv_conf.h sim_heap.h
 	mkdir -p build/web
 	$(EMCC) $(WASM_CFLAGS) \
 	    $(LVGL_SRCS) $(APP_SRCS) wasm_main.c \
@@ -256,7 +256,8 @@ build/web/index.html: lvgl/src $(APP_SRCS) wasm_main.c web/index.html lv_conf.h 
 	    -sALLOW_MEMORY_GROWTH=1 -sASSERTIONS=0 \
 	    -sMODULARIZE=1 -sEXPORT_NAME=PalmSim
 	cp web/index.html build/web/index.html
-	@echo "wasm: build/web/ ready (index.html + palm.js + palm.wasm)"
+	cp web/flash.html build/web/flash.html   # the Install page; CI adds build/web/firmware/
+	@echo "wasm: build/web/ ready (index.html + flash.html + palm.js + palm.wasm)"
 
 clean:
 	rm -rf build

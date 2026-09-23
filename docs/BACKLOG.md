@@ -24,9 +24,15 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 
 ## RESUME HERE — 2026-09-23
 
-**§R is code complete** (below): fifteen refinements requested on 2026-09-23,
-built and sim-verified on branch `feat/r-phase-polish` — **not yet merged, not
-yet flashed**. R15's review is in §Proposals, and nothing in it is approved --
+**Flash from the browser is built** on `feat/flash-from-browser` (§Proposals ▸
+User experience 1): an Install page beside the emulator
+(`/flash.html`), fed by CI, and a release job for `v*` tags. What is left is one
+check in a real browser, at the head of §Bench. No tag has been pushed, so no
+release exists yet — that is the user's call.
+
+**§R is merged** (PR #63, `243dedc`) **and on the bench device** (flashed
+2026-09-23 as the browser installer would write it), **not yet looked at**:
+fifteen refinements requested on 2026-09-23, built and sim-verified. R15's review is in §Proposals, and nothing in it is approved --
 except its **Robustness** list, which the user asked to have worked through and
 which is done. The bench follow-ups (fast keypad entry, the trainer prompt, sync
 with no Wi-Fi) are done too; their checks head §Bench.
@@ -151,7 +157,19 @@ buttons until tapped away.
 ## §Bench — needs the device `[d]`
 
 **Re-flash before reasoning about what is on the device.** The bench is only as
-current as the last flash (`958a979`, 2026-09-22, which holds W and Q but not R).
+current as the last flash (2026-09-23: CI's installer artifact from
+`feat/flash-from-browser` `86f7077`, whose firmware is `main` after #63, so W, Q,
+R and the robustness work).
+
+### Unseen: flash from the browser
+- [ ] **Install from the page, in Chrome or Edge** — once the branch is on
+      `main` and Pages has deployed. Open `/flash.html`, press Install, pick the
+      CH340 port, leave "erase" clear. It should finish, restart, and keep the
+      saved Wi-Fi password (a sync works without re-entering it). What has
+      already been checked: CI's own images, written at the manifest's offsets
+      with esptool and no erase, boot cleanly on the bench, and the clock, the
+      touch calibration and the password came back from NVS. What has not: the browser itself (Web
+      Serial, the port picker, esptool-js) — nothing here can press that button.
 
 ### Unseen: the bench follow-ups and the robustness work (2026-09-23)
 - [ ] **Fast keypad entry.** Type quickly on the Calculator and the phone
@@ -168,12 +186,15 @@ current as the last flash (`958a979`, 2026-09-22, which holds W and Q but not R)
       must still work. If it says `password none`, the card never held the
       Apple password -- it came from the retired compile-time secrets.h -- and
       it has to be entered once in Settings ▸ Accounts.
+      *2026-09-23:* the first boot's line was not captured; the second boot
+      says `1 Wi-Fi network(s) (1 with a password), account set, password
+      held`. So the store holds a password. The card still needs looking at.
 - [ ] **A delete syncs.** Delete an event, sync, and check it is gone from
       iCloud (the tombstone path, end to end).
 - [ ] **The pool line.** `lvgl: pool low-water: ... on "<screen>"` lines on the
       UART while using the device -- which screen is the tightest on hardware?
 
-### Unseen: the R phase (flash `feat/r-phase-polish` first)
+### Unseen: the R phase (on the device since 2026-09-23)
 - [ ] **R12 — the swipes on real glass.** The harness says 99.5 % of hurried
       swipes now register (was 76.8 %) with no letter lost; a thumb on a
       resistive panel is the real test. Also: does a sideways flick ever eat a
@@ -334,10 +355,8 @@ passwords moved off the card. What each does and how it is gated is in
 follow-ups*.
 
 ### User experience
-1. **Flash from the browser.** "There's no prebuilt binary yet — you flash it
-   yourself" is the biggest barrier to the intended audience. CI already builds
-   the firmware: publish the `.bin` per release and put an ESP Web Tools
-   *Install* button on the Pages site beside the emulator.
+1. ~~**Flash from the browser.**~~ Built 2026-09-23 (`feat/flash-from-browser`);
+   its check heads §Bench, and it leaves this list when that is done.
 2. **A first-run path.** A fresh device boots to the lock screen and then a
    launcher full of demo data; nothing points at Settings ▸ Wi-Fi and Accounts.
    The Assistant could greet the first boot and say where to start (§Next 3).
