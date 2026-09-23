@@ -39,8 +39,8 @@
     <li>An <b>ESP32-2432S028R</b>, the base CYD without PSRAM, with 4 MB of flash.</li>
     <li>A USB cable that carries data, not just power.</li>
     <li>A microSD card. Your records are stored on it.</li>
-    <li><b>Chrome or Edge on a computer.</b> The page talks to the board over
-      Web Serial, which Firefox, Safari and phones don't have.</li>
+    <li><b>Chrome, Edge or Chromium on a computer.</b> The page talks to the
+      board over Web Serial, which Firefox, Safari and phones don't have.</li>
   </ul>
 
   <div id="install">
@@ -62,10 +62,18 @@
       time, when the board still has its factory demo on it. When you're
       updating CYD Palm, leave the box clear so your saved Wi-Fi and account
       passwords stay on the board.</li>
-    <li>The install takes about a minute. The board restarts when it's done.</li>
+    <li>The install takes about a minute. The board restarts when it's done.
+      If the screen stays dark, press the <b>RST</b> button on the back.</li>
   </ol>
 
   <h2>After it starts</h2>
+  <p>The first time it starts, the board asks you to <b>calibrate the touch
+    screen</b>, so that a tap lands where you touched. It shows three white
+    crosshairs, one at a time, in the corners. Tap the centre of each one with
+    a stylus or a fingernail. The board remembers the result. If taps ever
+    land in the wrong place, hold a finger on the screen while the board
+    starts and it will ask again. It also asks again after an install with
+    <b>erase</b> ticked.</p>
   <p>Put the microSD card in. The first time it starts, the device adds a few
     sample records so the apps aren't empty. Open <b>Settings</b> and set up
     <b>Wi-Fi</b>, then <b>Accounts</b>. Accounts needs your Apple ID and an
@@ -78,8 +86,21 @@
     <li>Try another cable. Many USB cables only carry power.</li>
     <li>Windows and macOS may need the CH340 USB driver from WCH, the
       company that makes the board's USB chip.</li>
-    <li>If it connects but won't write, hold the board's <b>BOOT</b> button
-      while you press Install.</li>
+    <li>On Linux, a browser installed as a Snap (the Ubuntu App Center's
+      Chromium, for example) can't see USB ports until you allow it. Run
+      <code>sudo snap connect chromium:raw-usb</code>, then restart the
+      browser.</li>
+  </ul>
+  <h2>If it says "Failed to initialize"</h2>
+  <p>The installer couldn't switch the board into its flashing mode by itself.
+    This is common with the CH340 chip. Do it by hand instead:</p>
+  <ol>
+    <li>Reload this page.</li>
+    <li>On the back of the board, hold <b>BOOT</b>. Press and release
+      <b>RST</b>, then let go of <b>BOOT</b>. The screen stays dark while
+      the board waits.</li>
+    <li>Press <b>Install</b> and pick the port again.</li>
+    <li>When it's done, press <b>RST</b> to start CYD Palm.</li>
   </ul>
 
   <p style="margin-top:32px"><a href="./">Try it in your browser first →</a></p>
