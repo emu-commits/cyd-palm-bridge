@@ -148,6 +148,11 @@ int main(int argc, char **argv){
             ui_test_type(t);            /* NULL (a bare `k`) empties the field */
             sim_step(60);
         }
+        /* L -- raise the lock screen over whatever is showing, exactly as the
+         * port layer does when the screen sleeps. The lock's relationship to
+         * the screens and overlays under it (R11: an open Calculator) was
+         * otherwise untestable: the script has no way to let the device sleep. */
+        else if(line[0] == 'L' && (line[1] == '\n' || !line[1])){ ui_show_lock(); sim_step(100); }
         else if(sscanf(line, "s %127s", name) == 1)   { if(shot(name)) rc = 1; }
         else if(line[0] == 'q') break;
         else { fprintf(stderr, "script: bad line: %s", line); rc = 1; }

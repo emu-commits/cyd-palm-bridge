@@ -16,6 +16,91 @@ t 30
 u
 t 400
 s launcher
+# R10 + R11: the Calculator, which no walk opened before. Grey digit keys,
+# white operators, a black "=". Type 12+3, then raise the lock the way a screen
+# sleep does (`L`): the lock must come up OVER the calculator -- it used to come
+# up underneath it, because the calculator is on lv_layer_top() -- and the
+# unlock must hand the calculator back with 12+3 still in it.
+c 222 302
+t 300
+c 31 246
+c 90 246
+c 208 294
+c 149 246
+t 200
+s r10_calc_typed
+L
+t 300
+s r11_lock_over_calc
+d 120 275
+t 30
+m 120 210
+t 30
+m 120 140
+t 30
+m 120 90
+t 30
+u
+t 400
+s r11_calc_restored
+c 149 294
+t 200
+s r10_calc_result
+c 208 16
+t 300
+# R13: a stray tap on the writing pane arms punctuation. The marker is a chip
+# now, and tapping it disarms without typing anything; left alone it lapses.
+c 80 262
+t 200
+s r13_punct_armed
+c 120 219
+t 200
+s r13_punct_cancelled
+c 80 262
+t 4500
+s r13_punct_lapsed
+# R5: Lock is on the Applications screen's Options menu. Open the menu, tap it,
+# and unlock again -- a lock with a way in and no way back is not a feature.
+c 18 300
+t 300
+s r5_launcher_menu
+c 60 112
+t 400
+s r5_locked
+d 120 275
+t 30
+m 120 210
+t 30
+m 120 140
+t 30
+m 120 90
+t 30
+u
+t 400
+s r5_unlocked
+# R11's other half: a modal that belongs to the screen underneath (About, here)
+# must CLOSE when the lock comes up, not float over it -- only the Calculator,
+# which has state of its own, is kept. After the unlock, a bare launcher.
+c 18 300
+t 300
+c 60 190
+t 300
+s r11_about_open
+L
+t 300
+s r11_lock_over_about
+d 120 275
+t 30
+m 120 210
+t 30
+m 120 140
+t 30
+m 120 90
+t 30
+u
+t 400
+s r11_about_gone
+t 300
 # Graffiti Trainer (roadmap #2): now inside the Games folder -- it opens
 # the drill (target letter + a stroke guide on an I1 canvas + a graded score). On a
 # fresh box file the first target is 'm'; draw it -> "Nice! NN%" + advance. Then tap
@@ -269,10 +354,41 @@ t 30
 u
 t 300
 s edit_form_fields
+# R8: Phone opens the keypad. Tap 1, hold 0 (which types +), then delete both,
+# leaving the number exactly as it was -- the form is saved below.
+c 120 114
+t 400
+s r8_keypad
+c 41 100
+d 120 244
+t 700
+u
+t 200
+s r8_keypad_typed
+c 199 292
+t 100
+c 199 292
+t 100
+c 208 17
+t 300
+s r8_keypad_done
 # tap Done (bottom-left) -> saves -> transient "Saved" toast (I4)
 c 36 190
 t 150
 s address_saved
+# R9: a new contact, written in lower case. Last and First capitalise Each Word,
+# so "van der berg" must read "Van Der Berg". Cancelled, so nothing is saved and
+# the list the next walk expects is unchanged.
+c 215 40
+t 400
+k van der berg
+c 120 108
+t 300
+k anna
+t 200
+s r9_words
+c 204 190
+t 400
 t 900
 # Options menu -> About: the C6 honesty lines (Memo device-only, To Do = CalDAV)
 # NOTE: y here tracks the Options list. Adding a row above About moves this tap;
@@ -281,7 +397,7 @@ t 900
 c 18 300
 t 400
 s addr_menu
-c 60 250
+c 60 236
 t 400
 s about_box
 # Dismissing the modal CONSUMES the tap, so this one only closes the box and we
@@ -331,12 +447,20 @@ c 120 64
 t 400
 c 200 186
 t 500
-c 120 157
+s r7_todo_form
+# R7 moved Due and Priority onto compact rows with the label beside the control
+# (Palm's own To Do Details layout), so the Due trigger is the first of them now.
+c 145 93
 t 500
 s due_popup
 c 61 218
 t 500
 s due_picked
+# R7: priority is tapped, 1-4. The quick-added record starts at 1; tap 3, and
+# due_saved below must show a 3 beside the box.
+c 166 129
+t 300
+s r7_priority
 # Save it, and land back on the list: due_saved is the shot that proves the To Do
 # row layout end to end -- box, priority digit against the box column's right
 # edge, description, and the due date (9/14) at the right margin.
@@ -353,7 +477,7 @@ s memo_list
 # the shot that matters -- a bar that renders but does not save looks identical
 # to one that works until someone taps it on glass. `k` types into the focused
 # field one character at a time, the way the recogniser does (host_main.c).
-k Pick up the dry cleaning
+k pick up the dry cleaning
 t 200
 s q8_memo_typed
 c 215 40
@@ -386,7 +510,7 @@ t 300
 # wording is the part that can regress silently.
 c 18 300
 t 400
-c 60 91
+c 60 86
 t 400
 s power_screen
 c 18 225
@@ -991,9 +1115,11 @@ t 400
 # (it is scoped to the unlock, not to boot). On a fresh card the column reads
 # zeroes, which is the correct thing for it to say and not a missing fold.
 s coach_greet
-# the tap lands on the BALLOON, which is an lv_obj and would have swallowed it
-# before tap_anywhere started dropping the flag on every child of the page
-c 120 150
+# R3: he greets from the Graffiti strip now, over a home screen that is already
+# built and live -- so dismissing him means tapping HIM (the balloon, which
+# would swallow the tap if tap_anywhere had not dropped the flag on it). A tap
+# on the content would land on the live screen underneath, which is the point.
+c 60 250
 t 400
 s coach_today
 # Start -> Energy? -> High. Every ritual step now carries a line of explanatory
@@ -1098,40 +1224,18 @@ t 600
 s coach_marks_hollow
 c 18 225
 t 300
-# The weekly report: counts, the domain histogram, the best/worst read-outs, and
-# the deterministic advice line (coach_advise, gated by `make -C sim coach`) --
-# which now reads as the coach SAYING it: his portrait sits right of the stat
-# column and a speech bubble hangs off his chin. coach_week must show the face,
-# the tail joining it to the balloon, and no scrollbar beside the portrait.
+# R4: the weekly report. The headline compares this week with last, the chart
+# is one column per local day with the day goal as a dashed line (a day that
+# reached it is solid, one that did not is an outline), and the domains are
+# proportional bars. He says the verdict from the strip, so the numbers have
+# the whole content area and the page does not scroll.
 c 194 160
 t 400
 c 186 188
 t 600
 s coach_week
-# The report is ONE scrolling page, not a scrolling stat panel inside fixed
-# furniture: stats, coach and bubble all move together. Dragging further than the
-# 14 px of travel simply clamps at the end, and coach_week_scrolled is the
-# evidence the page moved at all.
-#
-# The drag also gates the half of tap_anywhere that is easy to get wrong. The
-# whole page leaves this screen on a tap, so a scroll gesture that LVGL followed
-# with a CLICKED would make the report impossible to read to the bottom: you
-# would be thrown back to Coach's home the moment you tried. Reaching
-# coach_week_scrolled at all proves the drag did not count as a tap.
-d 60 190
-t 40
-m 60 170
-t 40
-m 60 140
-t 40
-m 60 130
-t 40
-u
-t 500
-s coach_week_scrolled
-# ...and then a tap on the STAT COLUMN goes back. There is no "back" button here
-# any more: the column is an lv_obj and used to eat the tap, so landing on it and
-# still arriving at Coach's home is the proof that "anywhere" means anywhere.
+# A tap on the numbers goes back: the whole page is the target, and the labels
+# on it have had their clickable flag dropped so they cannot eat the tap.
 c 60 60
 t 400
 s coach_week_back
@@ -1142,10 +1246,10 @@ s coach_week_back
 c 18 300
 t 400
 s coach_menu
-c 79 110
+c 79 132
 t 400
 s coach_menu_len
-c 79 136
+c 79 158
 t 400
 s coach_menu_goal
 c 200 60
@@ -1168,13 +1272,14 @@ c 18 225
 t 300
 c 120 160
 t 400
-# Same greeting rule as Coach, and the same screen behind it: her week, with one
-# line from her pool in the balloon where the verdict goes. The whole content
-# area is the target. guru_greet showing the home screen instead would mean the
-# per-speaker bit is being cleared by the wrong app (they share one bitmask --
-# see g_greet_due).
+# Same greeting rule as Coach: first time in after an unlock she says one line
+# from her pool, from the strip, over her live home screen (R3). guru_greet
+# without her would mean the per-speaker bit is being cleared by the wrong app
+# (they share one bitmask -- see g_greet_due).
 s guru_greet
-c 120 150
+# R3: dismiss her by tapping HER -- the list under her is live, and the old tap
+# at (120,150) now opens a habit instead, which is the whole point of R3.
+c 60 250
 t 400
 # ...and the tap lands on the home screen: the habit list, grouped by category,
 # over a header reading "0 of 1 today" on a fresh card -- nothing checked off, and
@@ -1223,15 +1328,16 @@ s guru_six
 # detail screen scrolls its own box rather than hiding copy behind the button)
 # was verified by temporarily moving the longest why onto a first-screen habit;
 # see the note in gu_show_task().
-# Options -> Her week. The menu item only exists while a Guru screen is up.
+# Options -> This week (R2: it said "Her week"). The menu item only exists
+# while a Guru screen is up.
 c 18 300
 t 400
 s guru_menu
-# "Her week" is the third row (Preferences / Power / Her week). Her portrait and
-# a balloon over a stats column, mirroring Coach's report -- the per-day figures
-# come from the saved ring, the category rows from the log. With six checks all
-# in Gut this MUST read as the narrow-week verdict, not the "not enough yet" one.
-c 70 118
+# "This week" is the third row (Settings / Power / This week). R4's layout: the
+# chart, all five categories with the empty four as dotted tracks, and her
+# verdict from the strip. With six checks all in Gut this MUST read as the
+# narrow-week verdict, not the "not enough yet" one.
+c 70 112
 t 500
 s guru_week
 # A tap on the balloon returns to her list, not to the launcher. Her week lost
@@ -1240,6 +1346,13 @@ s guru_week
 c 120 160
 t 400
 s guru_week_back
+# R1: the header's second row says what to do, and the Week button at its right
+# opens the same screen as the menu entry.
+c 213 43
+t 500
+s r1_guru_week_button
+c 120 100
+t 400
 c 18 225
 t 300
 # I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.
@@ -1248,7 +1361,7 @@ c 18 225
 t 300
 c 18 300
 t 400
-c 70 119
+c 70 138
 t 150
 s demo_removed
 t 900
