@@ -116,6 +116,72 @@ static int run_set(int which, int digits, int punct, const char *label, float si
     return ok;
 }
 
+/* ---- R12: the space and backspace swipes, drawn the way a hurried hand does --
+ * Short, sloped, slightly bowed and jittery. Each trial is a straight-ish
+ * horizontal flick of 18..80 px at up to +/-24 degrees, with a bow of up to 4 px
+ * at its middle; half go right (space), half go left (backspace). The swipe is
+ * the most frequent thing written after letters, and a missed backspace types a
+ * letter where a correction was meant -- so it has to land nearly every time.
+ *
+ * ALSO the other direction: the letters and digits sets above must not lose
+ * accuracy to a looser swipe. Both bars run in the same binary, so loosening the
+ * swipe until it eats a letter fails here rather than on glass. */
+static int run_swipes(float pass){
+    int ok_n = 0, total = 0, miss_sp = 0, miss_bs = 0;
+    for(int t=0;t<400;t++){
+        int dir = (t & 1) ? -1 : 1;
+        double L   = 18.0 + 62.0 * urand();
+        double ang = (urand()*2.0 - 1.0) * 24.0 * 3.14159265 / 180.0;
+        double bow = (urand()*2.0 - 1.0) * 4.0;
+        double x0 = dir > 0 ? 20 : 20 + L, y0 = 50;
+        int npt = 8 + (int)(L / 6.0);
+        graffiti_clear();
+        for(int k=0;k<=npt;k++){
+            double u = (double)k / npt;
+            double x = x0 + dir * L * u * cos(ang);
+            double y = y0 + L * u * sin(ang) + bow * 4.0 * u * (1.0 - u);
+            x += 1.5 * nrand(); y += 1.5 * nrand();
+            graffiti_add_point((int)lround(x), (int)lround(y));
+        }
+        char want = dir > 0 ? ' ' : '\b';
+        char c = graffiti_recognize(0);
+        if(c == GRAF_PUNCT) graffiti_recognize(0);   /* never leave it armed */
+        total++;
+        if(c == want) ok_n++;
+        else if(want == ' ') miss_sp++; else miss_bs++;
+    }
+    double r = (double)ok_n / total;
+    printf("\n== swipes (18-80 px, +/-24 deg, 4 px bow, sigma=1.5) ==\n");
+    printf("  recognised: %.1f%%  (missed %d spaces, %d backspaces of %d)\n",
+           100.0*r, miss_sp, miss_bs, total);
+    printf("  -> %s (need >=%.0f%%)\n", r >= pass ? "PASS" : "FAIL", 100.0*pass);
+    return r >= pass;
+}
+
+/* R13: the ways out of an accidental punctuation shift. A backspace swipe while
+ * armed must disarm and type NOTHING (not '.', not a backspace), and the stroke
+ * after it must read as an ordinary letter again. The explicit cancel the UI
+ * calls (tap the marker, or the timeout) must do the same. */
+static int run_punct_exit(void){
+    int ok = 1;
+    arm_punct();
+    ok &= graffiti_punct_armed() == 1;
+    graffiti_clear();
+    for(int x=80;x>=20;x-=5) graffiti_add_point(x, 50);   /* right to left */
+    ok &= graffiti_recognize(0) == 0;
+    ok &= graffiti_punct_armed() == 0;
+    /* and '-', drawn left to right, still comes through while armed */
+    arm_punct();
+    graffiti_clear();
+    for(int x=20;x<=80;x+=5) graffiti_add_point(x, 50);
+    ok &= graffiti_recognize(0) == '-';
+    arm_punct();
+    graffiti_punct_cancel();
+    ok &= graffiti_punct_armed() == 0;
+    printf("\n== punctuation exits ==\n  -> %s\n", ok ? "PASS" : "FAIL");
+    return ok;
+}
+
 int main(void){
     /* the recognizer logs one ESP_LOGI line per stroke to stderr; silence the
      * ~1500 lines so CI output is just the accuracy summary on stdout. */
@@ -131,6 +197,8 @@ int main(void){
      * members are single straight lines that only differ by orientation, so the
      * bar is a touch lower than letters/digits. */
     ok &= run_set(2, 0, 1, "punct",   3.0f, 0.70f, 0.85f);
+    ok &= run_swipes(0.97f);
+    ok &= run_punct_exit();
     printf("\n%s\n", ok ? "graf accuracy: OK" : "graf accuracy: FAIL");
     return ok ? 0 : 1;
 }
