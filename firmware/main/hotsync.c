@@ -66,6 +66,8 @@ static volatile int s_busy;
 static volatile int s_cancel;
 static volatile int s_was_cancelled;
 static char s_status[208] = "Ready";
+static volatile int s_wifi_problem;       /* HS_WIFI_*, for the last run */
+int hotsync_wifi_problem(void){ return s_wifi_problem; }
 static void setst(const char *s){ snprintf(s_status, sizeof s_status, "%s", s); }
 
 void hotsync_cancel(void){ if(s_busy) s_cancel = 1; }
@@ -701,7 +703,16 @@ static void hotsync_task(void *arg){
     power_note_sync();
 
     setst("Connecting Wi-Fi...");
-    if(!wifi_up()){ setst("Wi-Fi failed"); wifi_down(); s_busy=0; vTaskDelete(NULL); return; }
+    if(!wifi_up()){
+        /* Say which failure it was: the UI sends the user to the Wi-Fi panel
+         * either way, but "nothing saved" and "nothing answered" need
+         * different words there. */
+        int saved = 0;
+        for(int i = 0; i < CFG_WIFI_N; i++) if(appcfg()->wifi[i].ssid[0]) saved++;
+        s_wifi_problem = saved ? HS_WIFI_NO_JOIN : HS_WIFI_NONE_SAVED;
+        setst(saved ? "Wi-Fi failed" : "No Wi-Fi network saved");
+        wifi_down(); s_busy=0; vTaskDelete(NULL); return;
+    }
     hs_heap("wifi-up");    /* Mode B baseline: Wi-Fi+lwIP paid for, no TLS yet */
     net_probe();           /* lease + DNS, before anything can blame the server */
     setst("Setting clock...");
@@ -1197,6 +1208,7 @@ void hotsync_start(void){
     s_busy = 1;
     s_cancel = 0;              /* a fresh run is never born cancelled */
     s_was_cancelled = 0;
+    s_wifi_problem = HS_WIFI_OK;
     setst("Starting...");
     /* 32 KB stack. The task stack is malloc'd from the DRAM heap, so an overflow
      * corrupts adjacent heap metadata -> a later alloc crashes deep in tlsf

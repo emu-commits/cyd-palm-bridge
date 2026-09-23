@@ -1229,8 +1229,13 @@ static void kp_open(lv_obj_t *ta, const char *name){
     lv_buttonmatrix_set_map(bm, km);
     /* on release, and no auto-repeat -- except Del, where holding to clear a
      * wrong number is what a thumb expects */
-    lv_buttonmatrix_set_button_ctrl_all(bm, LV_BUTTONMATRIX_CTRL_CLICK_TRIG
-                                          | LV_BUTTONMATRIX_CTRL_NO_REPEAT);
+    /* Keys type on PRESS, as the Calculator's do: typing on release made fast
+     * entry feel late and doubled what a missed lift cost. The one exception is
+     * 0+, which has to wait for the release to know whether it was a tap (0)
+     * or a hold (+). No auto-repeat -- except Del, where holding to clear a
+     * wrong number is what a thumb expects. */
+    lv_buttonmatrix_set_button_ctrl_all(bm, LV_BUTTONMATRIX_CTRL_NO_REPEAT);
+    lv_buttonmatrix_set_button_ctrl(bm, 10, LV_BUTTONMATRIX_CTRL_CLICK_TRIG);
     lv_buttonmatrix_clear_button_ctrl(bm, 14, LV_BUTTONMATRIX_CTRL_NO_REPEAT);
     lv_obj_set_style_text_font(bm, &lv_font_palm_bold, 0);
     lv_obj_set_style_radius(bm, 0, 0);
@@ -1590,9 +1595,12 @@ static void hs_btn_sync(void){
     else         lv_obj_remove_state(hs_btn, LV_STATE_DISABLED);
 }
 
+static void hs_check_done(void);
 static void hs_tick(lv_timer_t *t){
     (void)t;
     if(!hs_status) return;
+    hs_check_done();
+    if(!hs_status) return;                   /* it just left for the Wi-Fi panel */
     hs_btn_sync();
     int p = hotsync_progress();              /* -1 idle, else 0..100 */
     if(p >= 0 && p < 100)
@@ -1675,14 +1683,40 @@ static void hs_confirm_open(void){
     lv_obj_add_event_cb(yes, hs_confirm_yes_cb, LV_EVENT_CLICKED, NULL);
 }
 
+/* ---- no Wi-Fi: go where it gets fixed ---------------------------------------
+ * A sync that cannot get online used to end on "Wi-Fi failed" in the status
+ * line, which says what went wrong and nothing about what to do. Every sync
+ * needs Wi-Fi first, so the answer is always the same screen: open the Wi-Fi
+ * panel and have the Assistant say what happened and what to tap there.
+ *
+ * Only from the HotSync screen, and only for a run started there: a sync that
+ * fails while you are somewhere else does not get to pull you out of it. */
+static int g_hs_watch;                       /* a run started here is in flight */
+static void hs_to_wifi(int problem);        /* after the Settings panels */
+/* after a run ends: called from hs_tick on the device, and straight after
+ * hotsync_start() for the simulator, whose run has already finished */
+static void hs_check_done(void){
+    if(!g_hs_watch || hotsync_busy()) return;
+    g_hs_watch = 0;
+    int p = hotsync_wifi_problem();
+    if(p != HS_WIFI_OK) hs_to_wifi(p);
+}
+
 /* One button, three jobs -- see hs_btn_sync(). */
 static void hs_sync_cb(lv_event_t *e){ (void)e;
     if(hotsync_cancel_pending()) return;         /* already stopping */
     if(hotsync_busy()){ hs_confirm_open(); return; }
+    /* Nothing saved: there is no sync to try, so do not spend a "Connecting
+     * Wi-Fi..." on finding that out. */
+    int saved = 0;
+    for(int i = 0; i < CFG_WIFI_N; i++) if(appcfg()->wifi[i].ssid[0]) saved++;
+    if(!saved){ hs_to_wifi(HS_WIFI_NONE_SAVED); return; }
     /* The explanation has been read; from here the status line owns that space. */
     g_hs_ran = 1;
     if(g_hs_what) lv_obj_add_flag(g_hs_what, LV_OBJ_FLAG_HIDDEN);
+    g_hs_watch = 1;
     hotsync_start();
+    hs_check_done();
 }
 
 static void show_hotsync(void){
@@ -2042,6 +2076,14 @@ static void show_app(const char *name){
  * Input arrives through graf_char_hook (set on entry, cleared by kill_kb). */
 #define TR_GW 96
 #define TR_GH 96
+/* The prompt has a line of its own, centred over the guide box, because it is
+ * the one thing on the screen that says what to write -- and at the top-left
+ * it sat in the button row and ran under Strokes. The Kana screens share the
+ * same two constants so the family reads alike. The budget is tight on Kana's
+ * Write screen (a 104 px box): button row 2..28, prompt 29..43, box 45..150,
+ * feedback 153..167, score from 168. */
+#define TR_PROMPT_Y 29
+#define TR_BOX_Y    45
 #define TR_USER "/sdcard/graf_user.dat"
 static uint8_t   tr_guide_buf[LV_CANVAS_BUF_SIZE(TR_GW, TR_GH, 1, 1) + 16];
 static lv_obj_t *tr_guide, *tr_prompt, *tr_score, *tr_feedback, *tr_mode_lbl;
@@ -2439,7 +2481,7 @@ static void show_trainer(void){
 
     tr_prompt = lv_label_create(content);
     lv_obj_set_style_text_font(tr_prompt, &lv_font_palm_bold, 0);
-    lv_obj_align(tr_prompt, LV_ALIGN_TOP_LEFT, 6, 8);
+    lv_obj_align(tr_prompt, LV_ALIGN_TOP_MID, 0, TR_PROMPT_Y);
 
     /* mode toggle: Drill (quiz) <-> Train (record my own strokes) */
     lv_obj_t *mb = lv_button_create(content);
@@ -2475,13 +2517,13 @@ static void show_trainer(void){
     lv_canvas_set_buffer(tr_guide, tr_guide_buf, TR_GW, TR_GH, LV_COLOR_FORMAT_I1);
     lv_canvas_set_palette(tr_guide, 0, lv_color_to_32(COL_BODY, 0xFF));
     lv_canvas_set_palette(tr_guide, 1, lv_color_to_32(COL_LINE, 0xFF));
-    lv_obj_align(tr_guide, LV_ALIGN_TOP_MID, 0, 32);
+    lv_obj_align(tr_guide, LV_ALIGN_TOP_MID, 0, TR_BOX_Y);
     lv_obj_set_style_border_width(tr_guide, 1, 0);
     lv_obj_set_style_border_color(tr_guide, COL_LINE, 0);
 
     tr_feedback = lv_label_create(content);
     lv_obj_set_style_text_font(tr_feedback, &lv_font_palm, 0);
-    lv_obj_align(tr_feedback, LV_ALIGN_TOP_MID, 0, 32 + TR_GH + 6);
+    lv_obj_align(tr_feedback, LV_ALIGN_TOP_MID, 0, TR_BOX_Y + TR_GH + 4);
     lv_label_set_text(tr_feedback, "draw it in the strip below");
 
     tr_score = lv_label_create(content);
@@ -2803,7 +2845,7 @@ static void kana_build(int mode){
 
     ka_prompt = lv_label_create(content);
     lv_obj_set_style_text_font(ka_prompt, &lv_font_palm_bold, 0);
-    lv_obj_align(ka_prompt, LV_ALIGN_TOP_LEFT, 6, 8);
+    lv_obj_align(ka_prompt, LV_ALIGN_TOP_MID, 0, TR_PROMPT_Y);   /* see TR_PROMPT_Y */
 
     ka_feedback = lv_label_create(content);
     lv_obj_set_style_text_font(ka_feedback, &lv_font_palm, 0);
@@ -2815,34 +2857,35 @@ static void kana_build(int mode){
     if(mode==0){                                   /* SOUND layout */
         ka_kana = lv_label_create(content);
         lv_obj_set_style_text_font(ka_kana, &lv_font_kana, 0);
-        lv_obj_align(ka_kana, LV_ALIGN_TOP_MID, 0, 30);
+        lv_obj_align(ka_kana, LV_ALIGN_TOP_MID, 0, TR_BOX_Y);
 
         ka_answer = lv_label_create(content);
         lv_obj_set_style_text_font(ka_answer, &lv_font_palm, 0);
-        lv_obj_align(ka_answer, LV_ALIGN_TOP_MID, 0, 86);
+        lv_obj_align(ka_answer, LV_ALIGN_TOP_MID, 0, TR_BOX_Y + 56);
 
         ka_typed = lv_label_create(content);
         lv_obj_set_style_text_font(ka_typed, &lv_font_palm_bold, 0);
-        lv_obj_align(ka_typed, LV_ALIGN_TOP_MID, 0, 106);
+        lv_obj_align(ka_typed, LV_ALIGN_TOP_MID, 0, TR_BOX_Y + 76);
 
-        lv_obj_align(ka_feedback, LV_ALIGN_TOP_MID, 0, 128);
+        lv_obj_align(ka_feedback, LV_ALIGN_TOP_MID, 0, TR_BOX_Y + 98);
         lv_label_set_text(ka_feedback, "draw the romaji in the strip below");
 
         graf_capture_hook = NULL; graf_char_hook = ka_input;
     } else {                                       /* WRITE layout */
         ka_strokes_lbl = lv_label_create(content);
         lv_obj_set_style_text_font(ka_strokes_lbl, &lv_font_palm, 0);
-        lv_obj_align(ka_strokes_lbl, LV_ALIGN_TOP_RIGHT, -66, 10);
+        /* the top-left the prompt used to crowd: clear of the ABC button */
+        lv_obj_align(ka_strokes_lbl, LV_ALIGN_TOP_LEFT, 6, 8);
 
         ka_model = lv_canvas_create(content);
         lv_canvas_set_buffer(ka_model, ka_model_buf, KW_GW, KW_GH, LV_COLOR_FORMAT_I1);
         lv_canvas_set_palette(ka_model, 0, lv_color_to_32(COL_BODY, 0xFF));
         lv_canvas_set_palette(ka_model, 1, lv_color_to_32(COL_LINE, 0xFF));
-        lv_obj_align(ka_model, LV_ALIGN_TOP_MID, 0, 32);
+        lv_obj_align(ka_model, LV_ALIGN_TOP_MID, 0, TR_BOX_Y);
         lv_obj_set_style_border_width(ka_model, 1, 0);
         lv_obj_set_style_border_color(ka_model, COL_LINE, 0);
 
-        lv_obj_align(ka_feedback, LV_ALIGN_TOP_MID, 0, 32 + KW_GH + 6);
+        lv_obj_align(ka_feedback, LV_ALIGN_TOP_MID, 0, TR_BOX_Y + KW_GH + 4);
         lv_label_set_text(ka_feedback, "trace each numbered stroke below");
 
         graf_char_hook = NULL; graf_capture_hook = kw_capture;
@@ -4552,6 +4595,17 @@ static void show_set_panel(int tile){
                               "server that is not iCloud.");
 }
 
+/* See the no-Wi-Fi note by hs_check_done(). The Assistant's line REPLACES the
+ * panel's own caption: she says what happened and what to tap, here. */
+static void hs_to_wifi(int problem){
+    show_set_panel(SET_WIFI);
+    assist_say(problem == HS_WIFI_NONE_SAVED
+        ? "HotSync needs Wi-Fi, and no network is saved yet. Tap 1, pick "
+          "yours from the list, and type its password."
+        : "HotSync could not join any network saved here. If yours is in "
+          "range, tap it and check the password.");
+}
+
 static void show_settings(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
@@ -5438,6 +5492,11 @@ static void calc_open(void){
     lv_obj_add_event_cb(bm, calc_bm_cb, LV_EVENT_VALUE_CHANGED, NULL);
 }
 static void calc_cb(lv_event_t *e){ (void)e; calc_open(); }
+
+/* see ui.h: the Calculator (when not hidden under the lock) or the keypad */
+int ui_discrete_taps(void){
+    return (g_calc && !lv_obj_has_flag(g_calc, LV_OBJ_FLAG_HIDDEN)) || g_kp != NULL;
+}
 
 /* ------------------------- F2: category picker ------------------------- */
 static lv_obj_t *cat_trigger, *cat_label, *g_catpop;
@@ -7925,6 +7984,7 @@ static void content_clear(void){
     g_listtbl = NULL; g_findtbl = NULL;
     /* HotSync / discovery status lines */
     hs_status = NULL; hs_btn = hs_btn_lbl = NULL; disc_status = NULL;
+    g_hs_watch = 0;       /* a run left behind must not pull you back later */
     /* Graffiti + Kana trainers */
     tr_guide = tr_prompt = tr_score = tr_feedback = tr_mode_lbl = NULL;
     gref_free();          /* Q4: the sheet's canvas is heap, not a static buffer */

@@ -6,7 +6,8 @@
 #include "power.h"
 #include "appcfg.h"
 #include "hotsync.h"
-#include "ui.h"           /* ui_show_lock() / ui_owns_backlight() */
+#include "ui.h"
+#include "tapsplit.h"     /* recover the lift between two fast taps */           /* ui_show_lock() / ui_owns_backlight() */
 #include "lv_font_palm.h"
 #include "lvgl.h"
 #include "esp_heap_caps.h"
@@ -52,9 +53,18 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
     lv_display_flush_ready(disp);
 }
 
+/* How often the panel is read, and how far a press may jump between two reads
+ * before it counts as a lift and a new tap (tapsplit.h). LVGL's default is the
+ * refresh period, 33 ms -- long enough that the lift between two quick taps on
+ * the Calculator fell between samples and the keys were lost. A read costs
+ * ~0.25 ms when nothing is touching the panel (one median-of-5 Z1). */
+#define TOUCH_READ_MS  10
+#define TOUCH_JUMP_PX  24          /* keys are >= 44 px apart; a finger moves ~3 */
+
 static void indev_cb(lv_indev_t *indev, lv_indev_data_t *data){
     (void)indev;
     static int32_t lx = 0, ly = 0;
+    static TapSplit ts;
     int x, y;
     if(tp_read(&x, &y)){
         lx = x; ly = y;
@@ -62,9 +72,13 @@ static void indev_cb(lv_indev_t *indev, lv_indev_data_t *data){
          * down, report RELEASED so it never activates a widget. */
         if(g_swallow_tap){ data->point.x = lx; data->point.y = ly;
                            data->state = LV_INDEV_STATE_RELEASED; return; }
-        data->point.x = x; data->point.y = y;
-        data->state = LV_INDEV_STATE_PRESSED;
+        int ox, oy;
+        int down = tapsplit_step(&ts, 1, x, y, ui_discrete_taps(), TOUCH_JUMP_PX, &ox, &oy);
+        data->point.x = ox; data->point.y = oy;
+        data->state = down ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
     } else {
+        int ox, oy;
+        tapsplit_step(&ts, 0, lx, ly, 0, TOUCH_JUMP_PX, &ox, &oy);
         g_swallow_tap = 0;               /* finger lifted -> next tap is real */
         data->point.x = lx; data->point.y = ly;
         data->state = LV_INDEV_STATE_RELEASED;
@@ -157,6 +171,7 @@ void lvgl_port_init(void){
     lv_indev_t *indev = lv_indev_create();
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(indev, indev_cb);
+    lv_timer_set_period(lv_indev_get_read_timer(indev), TOUCH_READ_MS);
 
     /* monochrome theme (black on white, flat, thin borders) = the PalmOS look */
     lv_display_set_theme(disp, lv_theme_mono_init(disp, false, &lv_font_palm));

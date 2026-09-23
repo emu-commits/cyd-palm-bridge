@@ -11,6 +11,7 @@
 #include "news.h"
 #include <stdio.h>
 #include <string.h>
+#include "appcfg.h"
 
 static char s_status[80] = "Tap Sync Now to fetch news";
 
@@ -39,7 +40,30 @@ static void sim_fetch_news(void){
     snprintf(s_status, sizeof s_status, "News updated: %d items from %d feeds", stored, en);
 }
 
-void        hotsync_start(void)    { sim_fetch_news(); }
+/* The sync needs Wi-Fi first, and the simulator decides whether it "got"
+ * any the way a radio would: a saved network is in range if it is in the
+ * pretend neighbourhood below. So the no-network flow -- nothing saved, or
+ * nothing saved that answers -- runs here and is gated, which it could not be
+ * while the stub's sync always succeeded. */
+static int s_wifi_problem;
+static int sim_in_range(const char *ssid);
+int hotsync_wifi_problem(void){ return s_wifi_problem; }
+void hotsync_start(void){
+    int saved = 0, reach = 0;
+    for(int i = 0; i < CFG_WIFI_N; i++){
+        const char *s = appcfg()->wifi[i].ssid;
+        if(!s[0]) continue;
+        saved++;
+        if(sim_in_range(s)) reach++;
+    }
+    s_wifi_problem = !saved ? HS_WIFI_NONE_SAVED : !reach ? HS_WIFI_NO_JOIN : HS_WIFI_OK;
+    if(s_wifi_problem){
+        snprintf(s_status, sizeof s_status, "%s",
+                 saved ? "Wi-Fi failed" : "No Wi-Fi network saved");
+        return;
+    }
+    sim_fetch_news();
+}
 int         hotsync_busy(void)     { return 0; }
 const char *hotsync_status(void)   { return s_status; }
 int         hotsync_progress(void) { return -1; }
@@ -73,6 +97,11 @@ static WifiAP s_aps[] = {
     { "VM8842273",      -81, 1 },
 };
 static int s_scanned;
+static int sim_in_range(const char *ssid){
+    for(unsigned i = 0; i < sizeof s_aps / sizeof s_aps[0]; i++)
+        if(!strcmp(s_aps[i].ssid, ssid)) return 1;
+    return 0;
+}
 
 void wifi_scan_start(void){
     s_scanned = 1;

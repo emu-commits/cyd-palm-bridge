@@ -3,6 +3,8 @@
 #include "lvgl.h"
 #include "lv_font_palm.h"   /* authentic Palm font -> same mono theme call as the device */
 #include <string.h>
+#include "ui.h"             /* ui_discrete_taps()                          */
+#include "tapsplit.h"       /* the device's fast-tap recovery, run here too */
 
 /* ---- rendered output: full RGBA framebuffer the frontends read ---- */
 static uint8_t s_fb[SIM_W * SIM_H * 4];
@@ -15,11 +17,17 @@ static uint32_t tick_cb(void){ return s_tick_ms; }
 /* ---- injected pointer ---- */
 static int32_t s_tx, s_ty, s_tdown;
 void sim_touch(int x, int y, int down){ s_tx = x; s_ty = y; s_tdown = down; }
+/* The same fast-tap recovery as the device (tapsplit.h), at the same read
+ * period, so a script can reproduce "the lift fell between two samples" by
+ * moving a held press straight to another key. */
 static void indev_cb(lv_indev_t *indev, lv_indev_data_t *data){
     (void)indev;
-    data->point.x = s_tx;
-    data->point.y = s_ty;
-    data->state   = s_tdown ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+    static TapSplit ts;
+    int ox, oy;
+    int down = tapsplit_step(&ts, s_tdown, s_tx, s_ty, ui_discrete_taps(), 24, &ox, &oy);
+    data->point.x = ox;
+    data->point.y = oy;
+    data->state   = down ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
 }
 
 /* Device-parity draw buffer: 40 rows of RGB565, PARTIAL render mode -- the same
@@ -58,6 +66,7 @@ void sim_init(void){
     lv_indev_t *indev = lv_indev_create();
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(indev, indev_cb);
+    lv_timer_set_period(lv_indev_get_read_timer(indev), 10);   /* as the device */
 
     /* same theme call as the device port: mono, Palm system font */
     lv_display_set_theme(disp, lv_theme_mono_init(disp, false, &lv_font_palm));
