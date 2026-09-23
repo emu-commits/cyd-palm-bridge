@@ -157,17 +157,18 @@ buttons until tapped away.
 ## §Bench — needs the device `[d]`
 
 **Re-flash before reasoning about what is on the device.** The bench is only as
-current as the last flash (`243dedc`, 2026-09-23: `main` after #63, so W, Q, R
-and the robustness work).
+current as the last flash (2026-09-23: CI's installer artifact from
+`feat/flash-from-browser` `86f7077`, whose firmware is `main` after #63, so W, Q,
+R and the robustness work).
 
 ### Unseen: flash from the browser
 - [ ] **Install from the page, in Chrome or Edge** — once the branch is on
       `main` and Pages has deployed. Open `/flash.html`, press Install, pick the
       CH340 port, leave "erase" clear. It should finish, restart, and keep the
       saved Wi-Fi password (a sync works without re-entering it). What has
-      already been checked: the images, written at the manifest's offsets with
-      esptool and no erase, boot cleanly on the bench, and the clock and touch
-      calibration came back from NVS. What has not: the browser itself (Web
+      already been checked: CI's own images, written at the manifest's offsets
+      with esptool and no erase, boot cleanly on the bench, and the clock, the
+      touch calibration and the password came back from NVS. What has not: the browser itself (Web
       Serial, the port picker, esptool-js) — nothing here can press that button.
 
 ### Unseen: the bench follow-ups and the robustness work (2026-09-23)

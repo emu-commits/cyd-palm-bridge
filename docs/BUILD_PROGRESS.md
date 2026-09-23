@@ -35,9 +35,12 @@ The merged image is only for releases, where it is a clean install.
 
 **CI's build is the device's build.** CI never sees the local `sdkconfig`, so a
 clean worktree was built from `sdkconfig.defaults` alone and diffed against the
-bench `sdkconfig`: no `CONFIG_` line differs. The packaged parts, written with
-esptool at the manifest's offsets and without an erase, boot cleanly on the bench.
-The clock and touch calibration come back from NVS, so an update keeps it. The
+bench `sdkconfig`: no `CONFIG_` line differs. The bytes still differ, because
+the container's IDF isn't the bench's v5.5 checkout (the bootloader is 26000 bytes
+against 26240). So the check that counts used CI's own artifact: its three parts,
+written with esptool at the manifest's offsets and without an erase, boot cleanly
+on the bench. The clock, the touch calibration and the saved password all come
+back from NVS, so an update keeps them. The
 browser path itself (Web Serial, esptool-js) still needs a person at Chrome.
 
 ### 2026-09-23 — bench follow-ups, and the robustness list worked through
