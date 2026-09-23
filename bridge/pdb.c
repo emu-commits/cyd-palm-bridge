@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "palm.h"
+#include "safefile.h"   /* write .tmp, swap in: a crash never leaves half a PDB */
 
 #define PDB_HDR   78
 #define PDB_ENTRY 8
@@ -40,6 +41,7 @@ static int pdb_fail(FILE *f, const char *path, const char *why){
 }
 
 int pdb_read(const char *path, pdb_rec_cb cb, void *ctx){
+    sf_recover(path);          /* finish a swap a crash interrupted (safefile.h) */
     FILE *f = fopen(path, "rb");
     /* A missing file is the one quiet case, and deliberately: first boot has no
      * databases yet and data_seed_if_empty() asks about each of them in turn. */
@@ -111,6 +113,7 @@ int pdb_read(const char *path, pdb_rec_cb cb, void *ctx){
 int pdb_read_one(const char *path, int want, uint8_t *buf, int cap,
                  uint8_t *attr, uint32_t *uid){
     if(want < 0) return -1;
+    sf_recover(path);
     FILE *f = fopen(path,"rb");
     if(!f) return -1;
     uint8_t H[PDB_HDR];
@@ -169,7 +172,10 @@ int pdb_write_ai(const char *path, const char *name,
                  uint32_t type, uint32_t creator,
                  const uint8_t *appinfo, int ailen,
                  const PdbRec *recs, int nrecs){
-    FILE *f = fopen(path,"wb");
+    /* written beside the live file and swapped in at the end (safefile.h):
+     * the database on the card is the old one or the new one, never half */
+    SafeFile sf;
+    FILE *f = sf_open(&sf, path, "wb");
     if(!f) return -1;
     if(ailen<0) ailen=0;
 
@@ -197,7 +203,7 @@ int pdb_write_ai(const char *path, const char *name,
     if(ailen) fwrite(appinfo,1,(size_t)ailen,f);
     for(int i=0;i<nrecs;i++)
         if(recs[i].len) fwrite(recs[i].data,1,(size_t)recs[i].len,f);
-    fclose(f);
+    if(sf_commit(&sf, !ferror(f)) != 0) return -1;     /* a full card, a bad write */
     return nrecs;
 }
 
@@ -268,7 +274,8 @@ int pdbw_commit(PdbW *w, const char *path, const char *name,
     int nrecs = w->nent;
     qsort(w->ent, nrecs, sizeof w->ent[0], pdbwCmp);
 
-    FILE *f = fopen(path,"wb");
+    SafeFile sf;                                   /* see pdb_write_ai */
+    FILE *f = sf_open(&sf, path, "wb");
     if(!f){ pdbw_abort(w); return -1; }
 
     uint32_t aiOff = PDB_HDR + (uint32_t)PDB_ENTRY*nrecs + 2;
@@ -298,20 +305,23 @@ int pdbw_commit(PdbW *w, const char *path, const char *name,
     fflush(w->tmp);
     for(int i=0;i<nrecs;i++){
         long remaining = w->ent[i].len;
-        if(fseek(w->tmp, w->ent[i].tmpoff, SEEK_SET)!=0){ fclose(f); pdbw_abort(w); return -1; }
+        /* a failure here used to fclose() the half-built PDB and leave it as
+         * THE database; now the live file is never touched unless it all worked */
+        if(fseek(w->tmp, w->ent[i].tmpoff, SEEK_SET)!=0){ sf_abort(&sf); pdbw_abort(w); return -1; }
         while(remaining>0){
             size_t chunk = remaining < (long)sizeof cbuf ? (size_t)remaining : sizeof cbuf;
-            if(fread(cbuf,1,chunk,w->tmp)!=chunk){ fclose(f); pdbw_abort(w); return -1; }
+            if(fread(cbuf,1,chunk,w->tmp)!=chunk){ sf_abort(&sf); pdbw_abort(w); return -1; }
             fwrite(cbuf,1,chunk,f);
             remaining -= (long)chunk;
         }
     }
-    fclose(f);
+    int rc = sf_commit(&sf, !ferror(f));
     pdbw_abort(w);   /* closes+removes temp, frees index */
-    return nrecs;
+    return rc == 0 ? nrecs : -1;
 }
 
 int pdb_read_appinfo(const char *path, uint8_t *buf, int cap){
+    sf_recover(path);
     FILE *f = fopen(path,"rb"); if(!f) return -1;
     uint8_t H[PDB_HDR];
     if(fread(H,1,PDB_HDR,f)!=PDB_HDR){ fclose(f); return -1; }

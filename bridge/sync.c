@@ -325,6 +325,10 @@ static void chk_n(const char *tag,int n){
 
 static int s_pull_only;
 void sync_set_pull_only(int on){ s_pull_only = on; }
+
+static SyncHoldFn s_hold;
+static void      *s_hold_ctx;
+void sync_set_hold(SyncHoldFn fn, void *ctx){ s_hold = fn; s_hold_ctx = ctx; }
 int  sync_pull_only(void){ return s_pull_only; }
 
 static int put_guard(const DavCtx*d,const char*coll,const char*name,const char*ctype,
@@ -914,11 +918,14 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
     /* ---- mass-delete guard --------------------------------------------------
      * "Present in the map, absent locally" means the user deleted it, and the
      * engine pushes that deletion to the server. That inference is only sound
-     * while the local database is intact. It is not always intact: a crash
-     * during kindCommit leaves the PDB truncated (it is opened "wb"), and the
-     * next boot reseeds an ABSENT database with demo rows -- after which every
-     * real record looks locally deleted and a two-way sync would erase the whole
-     * collection from the account. That is unrecoverable from this end.
+     * while the local database is intact. It was not always intact: a crash
+     * during kindCommit used to leave the PDB truncated (it was opened "wb"),
+     * and the next boot reseeded an ABSENT database with demo rows -- after
+     * which every real record looked locally deleted and a two-way sync would
+     * erase the whole collection from the account. Writes are swapped in whole
+     * now (safefile.h), and the device keeps tombstones, so the guard is the
+     * second line of defence rather than the only one; it stays, because a
+     * card can still read short for reasons no write discipline prevents.
      *
      * So when most of the mapped records have vanished at once, treat it as the
      * local side being wrong rather than the user having deleted everything, and
@@ -1037,6 +1044,18 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
                 else pushLocal(d,coll,kind,k,s,L,uid,srvName,NULL, mHref,mEtag,mHash, mObjuid);
             }
         }
+        else if(lcs==LNEW && scs==SABSENT && s_hold && s_hold(uid, s_hold_ctx)){
+            /* held back (the demo seed): carried through to the output exactly
+             * as it was -- still dirty, still unmapped -- so it stays on the
+             * device and is asked about again next time. Dropping it here would
+             * lose it: the output PDB only holds what the merge writes. */
+            if(locBytes(s,L,g_lrec,PALM_REC_MAX)==L->len){
+                if(pdbw_rec(k->w,uid,L->attr,g_lrec,L->len)!=0){
+                    fprintf(stderr,"[sync] OUTPUT FULL at held uid=%u\n",(unsigned)uid);
+                    s_too_big = 1;
+                } else st->held++;
+            } else fprintf(stderr,"[sync] lazy read failed for held uid=%u\n",(unsigned)uid);
+        }
         else if(lcs==LNEW && scs==SABSENT){
             int rc=pushLocal(d,coll,kind,k,s,L,uid,lname,NULL, NULL,NULL,0, NULL);
             if(rc>=200 && rc<300) st->pushNew++;
@@ -1064,13 +1083,19 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         } else if(lcs==LCLEAN && scs==SDEL){
             st->pullDel++;
         } else if(lcs==LDEL && scs==SCLEAN){
-            if(massGuard) guardedDel++;
-            else if(!s_pull_only){ dav_delete(d,coll,srvName,mEtag); st->pushDel++; }
+            /* A TOMBSTONE IS AN EXPLICIT DELETE, guard or no guard. The guard
+             * exists because a record that is merely ABSENT could be a user's
+             * delete or the card's loss; a record still in the database with
+             * the delete bit set can only be the user's. So this pushes even
+             * while the guard is holding back the absent ones below -- which
+             * is what the device keeping tombstones until they sync buys. */
+            if(!s_pull_only){ dav_delete(d,coll,srvName,mEtag); st->pushDel++; }
         } else if(lcs==LDEL && scs==SDEL){
             /* Gone from both sides. There is nothing to delete anywhere, so no
              * dav_delete is issued here -- and counting it as a pushDel (which
-             * this did) reported a deletion that never left the device. */
-            if(massGuard) guardedDel++; else st->bothDel++;
+             * this did) reported a deletion that never left the device. A
+             * tombstone is explicit, so the guard has nothing to say about it. */
+            st->bothDel++;
         } else if(lcs==LABSENT && scs==SNEW){
             if(keepFromServer(d,coll,kind,k,uid,srvName,sEtag)==0) st->pullNew++;
         } else if(lcs==LABSENT && scs==SCLEAN){

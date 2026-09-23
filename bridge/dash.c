@@ -1,5 +1,6 @@
 /* dash.c -- lock-screen dashboard data (see dash.h). Pure C + libm. */
 #include "dash.h"
+#include "safefile.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -9,6 +10,7 @@
 
 int dash_weather_load(WxCache *out){
     if(!out) return 0;
+    sf_recover(WX_PATH);
     FILE *f = fopen(WX_PATH, "rb");
     if(!f) return 0;
     WxCache w;

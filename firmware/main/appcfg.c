@@ -1,24 +1,18 @@
-/* appcfg.c -- see appcfg.h. Seeds from secrets.h, then overlays config.ini. */
+/* appcfg.c -- see appcfg.h. Defaults, then config.ini, then the passwords from
+ * the device's own flash (secretstore.h).
+ *
+ * THERE IS NO COMPILE-TIME SEED ANY MORE. A gitignored firmware/main/secrets.h
+ * used to be compiled in as the starting config, and it was a liability twice
+ * over: it put a developer's real Wi-Fi and Apple passwords into any binary they
+ * built -- the simulator's included, for months, because a quoted include
+ * resolves beside the including file before any -I path -- and it made it
+ * possible to hand someone a firmware image with credentials inside it. Every
+ * value it held can be set on the device now (Settings), so it is gone.
+ * `make -C sim nosecrets` still guards the property it protected. */
 #include "appcfg.h"
-#include "clock.h"   /* the built-in city table: see resolve_loc_auto */
-#ifndef SIM_NO_SECRETS
-#include "secrets.h"      /* compile-time seed (also .example in the repo)     */
-#endif
-/* SIM_NO_SECRETS (set by sim/Makefile) omits the seed header entirely, so every
- * WIFI_SSID / DAV_PASS macro below is simply undefined and seed_from_secrets()
- * compiles away to nothing.
- *
- * It must be done HERE, by not including the file, rather than by pointing the
- * include path at a stub. sim/include/secrets.h was exactly that stub and it
- * never once got used: this file lives in firmware/main, and a QUOTED include
- * is resolved relative to the including file's own directory before any -I path
- * is searched -- so firmware/main/secrets.h shadowed the stub unconditionally.
- * The result was a simulator binary carrying a developer's real Wi-Fi password
- * and Apple app-specific password, with the SSID and Apple ID legible in the
- * smoke screenshots. CI never saw it, because secrets.h is gitignored and CI
- * has no such file -- which is precisely why it survived so long.
- *
- * `make -C sim nosecrets` now fails if a seeded credential reaches the config. */
+#include "clock.h"        /* the built-in city table: see resolve_loc_auto */
+#include "secretstore.h"  /* the passwords, off the card                   */
+#include "esp_log.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -34,38 +28,26 @@ static Config g_cfg;
 static int    g_loaded  = 0;
 static int    g_from_sd = 0;
 
-/* copy a compile-time secrets.h macro into a field, only if the macro exists.
- * An older secrets.h may not define the To Do / Address collections or the
- * CardDAV host -- those stay at config_defaults() / empty, which just means the
- * app is skipped until configured (exactly the old behaviour). */
-static void seed_from_secrets(Config *c){
-#ifdef WIFI_SSID
-    snprintf(c->wifi[0].ssid, sizeof c->wifi[0].ssid, "%s", WIFI_SSID);
-#endif
-#ifdef WIFI_PASS
-    snprintf(c->wifi[0].pass, sizeof c->wifi[0].pass, "%s", WIFI_PASS);
-#endif
-#ifdef DAV_USER
-    snprintf(c->dav_user, sizeof c->dav_user, "%s", DAV_USER);
-#endif
-#ifdef DAV_PASS
-    snprintf(c->dav_pass, sizeof c->dav_pass, "%s", DAV_PASS);
-#endif
-#ifdef DAV_BASE
-    snprintf(c->dav_base, sizeof c->dav_base, "%s", DAV_BASE);
-#endif
-#ifdef DAV_CARD_BASE
-    snprintf(c->dav_card_base, sizeof c->dav_card_base, "%s", DAV_CARD_BASE);
-#endif
-#ifdef SYNC_COLL
-    snprintf(c->cal_coll, sizeof c->cal_coll, "%s", SYNC_COLL);
-#endif
-#ifdef SYNC_TODO_COLL
-    snprintf(c->todo_coll, sizeof c->todo_coll, "%s", SYNC_TODO_COLL);
-#endif
-#ifdef SYNC_CARD_COLL
-    snprintf(c->card_coll, sizeof c->card_coll, "%s", SYNC_CARD_COLL);
-#endif
+/* The passwords. config.ini is on a removable card, so the device keeps them in
+ * its own flash (secretstore.h) and the file keeps everything else.
+ *
+ * On LOAD, a password that IS in the file -- a card from before this, or one
+ * typed on a computer -- is moved into the store; a field the file leaves
+ * empty is filled from it. Returns how many were moved, so the caller can
+ * rewrite the file without them. A move that fails leaves the password where
+ * it was: better in the file than lost. */
+static int secrets_settle(Config *c, int *failed){
+    int moved = 0; char k[12];
+    *failed = 0;
+    for(int i = 0; i < CFG_WIFI_N; i++){
+        if(!c->wifi[i].ssid[0]) continue;
+        secret_wifi_key(c->wifi[i].ssid, k);
+        if(c->wifi[i].pass[0]){ if(secret_set(k, c->wifi[i].pass) == 0) moved++; else (*failed)++; }
+        else secret_get(k, c->wifi[i].pass, sizeof c->wifi[i].pass);
+    }
+    if(c->dav_pass[0]){ if(secret_set("dav", c->dav_pass) == 0) moved++; else (*failed)++; }
+    else secret_get("dav", c->dav_pass, sizeof c->dav_pass);
+    return moved;
 }
 
 /* Settle `loc_auto` for a card that predates it (config.h explains the three
@@ -97,19 +79,51 @@ static void resolve_loc_auto(Config *c){
 
 void appcfg_load(void){
     config_defaults(&g_cfg);
-    seed_from_secrets(&g_cfg);
     g_from_sd = (config_load(CFG_PATH, &g_cfg) == 0);
+    int failed = 0;
+    int moved = secrets_settle(&g_cfg, &failed);
     resolve_loc_auto(&g_cfg);
     g_loaded  = 1;
+    /* a password was found on the card: take it off again */
+    if(moved && !failed && g_from_sd) appcfg_save();
+
+    /* One line that says where the config came from and what it holds --
+     * COUNTS, never values. It is how a bench check can tell "no password
+     * saved" from "wrong password" without anyone opening config.ini. */
+    int nets = 0, keyed = 0;
+    for(int i = 0; i < CFG_WIFI_N; i++)
+        if(g_cfg.wifi[i].ssid[0]){ nets++; if(g_cfg.wifi[i].pass[0]) keyed++; }
+    ESP_LOGI("appcfg", "config: %s, %d Wi-Fi network(s) (%d with a password), "
+             "account %s, password %s%s", g_from_sd ? "config.ini" : "defaults (no config.ini)",
+             nets, keyed, g_cfg.dav_user[0] ? "set" : "unset",
+             g_cfg.dav_pass[0] ? "held" : "none",
+             moved ? (failed ? "; could NOT move them off the card" : "; moved off the card") : "");
 }
 
 const Config* appcfg(void){ if(!g_loaded) appcfg_load(); return &g_cfg; }
 Config*       appcfg_mut(void){ if(!g_loaded) appcfg_load(); return &g_cfg; }
 int           appcfg_from_sd(void){ if(!g_loaded) appcfg_load(); return g_from_sd; }
 
+/* The passwords go to the store and the file gets a copy with them blanked.
+ * If the store refuses any of them, the file keeps them all -- a password on
+ * the card is a privacy problem; a password nowhere is a device that cannot
+ * connect. */
 int appcfg_save(void){
     if(!g_loaded) appcfg_load();
-    int r = config_save(CFG_PATH, &g_cfg);
+    int stored = 1; char k[12];
+    for(int i = 0; i < CFG_WIFI_N; i++){
+        if(!g_cfg.wifi[i].ssid[0]) continue;
+        secret_wifi_key(g_cfg.wifi[i].ssid, k);
+        if(secret_set(k, g_cfg.wifi[i].pass) != 0) stored = 0;
+    }
+    if(secret_set("dav", g_cfg.dav_pass) != 0) stored = 0;
+
+    Config out = g_cfg;
+    if(stored){
+        for(int i = 0; i < CFG_WIFI_N; i++) out.wifi[i].pass[0] = 0;
+        out.dav_pass[0] = 0;
+    }
+    int r = config_save(CFG_PATH, &out);
     if(r == 0) g_from_sd = 1;
     return r;
 }

@@ -37,6 +37,7 @@
 #include "guru.h"         /* Guru: daily longevity habits (pure logic + target)   */
 #include "gurupool.h"     /* ...and the editable habit list on the card           */
 #include "daycal.h"       /* local-day windows for the week charts (R4)           */
+#include "safefile.h"     /* crash-safe replacement of every durable file         */
 #include "lvgl.h"
 #include <string.h>
 #include <strings.h>      /* strncasecmp for the Address Look Up filter */
@@ -2119,6 +2120,7 @@ static void tr_reset_mem(void){
 }
 static void tr_load(void){
     tr_reset_mem();
+    sf_recover(TR_SAVE);
     FILE *f = fopen(TR_SAVE, "rb"); if(!f) return;
     uint32_t magic=0, tick=0;
     if(fread(&magic,4,1,f)==1 && magic==TR_MAGIC &&
@@ -2131,11 +2133,11 @@ static void tr_load(void){
     fclose(f);
 }
 static void tr_save(void){
-    FILE *f=fopen(TR_SAVE,"wb"); if(!f) return;
+    SafeFile sf_; FILE *f = sf_open(&sf_, TR_SAVE, "wb"); if(!f) return;
     uint32_t magic=TR_MAGIC;
     fwrite(&magic,4,1,f); fwrite(&tr_tick,4,1,f);
     fwrite(tr_lvl,1,TR_NG,f); fwrite(tr_due,4,TR_NG,f);
-    fclose(f);
+    sf_commit(&sf_, !ferror(f));   /* safefile.h: swap in whole, or not at all */
 }
 
 /* deterministic pick: the non-burned glyph with the smallest due tick (ties resolve
@@ -2593,6 +2595,7 @@ static void ka_reset_mem(void){
 }
 static void ka_load(void){
     ka_reset_mem();
+    sf_recover(KA_SAVE);
     FILE *f=fopen(KA_SAVE,"rb"); if(!f) return;
     uint32_t magic=0, tick=0; int n=ka_count();
     if(fread(&magic,4,1,f)==1 && magic==KA_MAGIC &&
@@ -2613,12 +2616,12 @@ static void ka_load(void){
     fclose(f);
 }
 static void ka_save(void){
-    FILE *f=fopen(KA_SAVE,"wb"); if(!f) return;
+    SafeFile sf_; FILE *f = sf_open(&sf_, KA_SAVE, "wb"); if(!f) return;
     uint32_t magic=KA_MAGIC; int n=ka_count();
     fwrite(&magic,4,1,f); fwrite(&ka_tick,4,1,f);
     fwrite(ka_lvl,1,n,f); fwrite(ka_due,4,n,f); fwrite(ka_intro,1,n,f);
     fwrite(kw_lvl,1,n,f); fwrite(kw_due,4,n,f);
-    fclose(f);
+    sf_commit(&sf_, !ferror(f));   /* safefile.h: swap in whole, or not at all */
 }
 /* deterministic pick within the ACTIVE mode: the non-burned kana with the
  * smallest due tick (ties by order). Returns -1 when every kana is burned. */
@@ -6474,6 +6477,14 @@ static void clock_tick(lv_timer_t *t){
                                          /* clears. Shrinking the bars was   */
                                          /* the price of that clearance.     */
 static lv_obj_t *g_lock;                 /* the overlay root, or NULL when unlocked */
+
+/* see ui.h: which screen is up, for the pool monitor (lvgl_port.c) */
+const char *ui_screen_name(void){
+    if(g_lock) return "Lock";
+    if(g_calc && !lv_obj_has_flag(g_calc, LV_OBJ_FLAG_HIDDEN)) return "Calculator";
+    return title_lbl ? lv_label_get_text(title_lbl) : "?";
+}
+
 static lv_obj_t *g_dash_cv;              /* the I1 graphics canvas */
 static lv_obj_t *g_dash_time_ap;         /* AM/PM label (repositioned to the clock width) */
 static WxCache   g_wx;                    /* weather snapshot for this lock session */
@@ -7265,7 +7276,7 @@ static void ms_new_game(void){
 #define MS_SAV       "/sdcard/mines.sav"
 #define MS_SAV_MAGIC 0x4D534733u                 /* "MSG3" (bumped: pausable PlayClock) */
 static void ms_save(void){
-    FILE *f = fopen(MS_SAV, "wb"); if(!f) return;
+    SafeFile sf_; FILE *f = sf_open(&sf_, MS_SAV, "wb"); if(!f) return;
     uint32_t magic = MS_SAV_MAGIC;
     /* store a PAUSED snapshot: a reboot must never charge for time powered off */
     PlayClock clk = pc_snapshot(&g_ms_clk, (uint32_t)time(NULL));
@@ -7273,9 +7284,10 @@ static void ms_save(void){
     fwrite(&g_ms, sizeof g_ms, 1, f);
     fwrite(&clk,  sizeof clk,  1, f);
     fwrite(&g_ms_best, sizeof g_ms_best, 1, f);
-    fclose(f);
+    sf_commit(&sf_, !ferror(f));   /* safefile.h: swap in whole, or not at all */
 }
 static int ms_load(void){
+    sf_recover(MS_SAV);
     FILE *f = fopen(MS_SAV, "rb"); if(!f) return 0;
     uint32_t magic = 0; MsGame tmp; int ok = 0;
     if(fread(&magic, sizeof magic, 1, f) == 1 && magic == MS_SAV_MAGIC &&
@@ -7469,14 +7481,15 @@ static const char *WD_KROW[3] = { "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM" };
 #define WD_SAV       "/sdcard/wordie.sav"
 #define WD_SAV_MAGIC 0x57444732u                 /* "WDG2" (bumped: now carries the streak) */
 static void wd_save(void){
-    FILE *f = fopen(WD_SAV, "wb"); if(!f) return;
+    SafeFile sf_; FILE *f = sf_open(&sf_, WD_SAV, "wb"); if(!f) return;
     uint32_t magic = WD_SAV_MAGIC;
     fwrite(&magic, sizeof magic, 1, f);
     fwrite(&g_wd, sizeof g_wd, 1, f);
     fwrite(&g_wd_streak, sizeof g_wd_streak, 1, f);
-    fclose(f);
+    sf_commit(&sf_, !ferror(f));   /* safefile.h: swap in whole, or not at all */
 }
 static int wd_load(void){
+    sf_recover(WD_SAV);
     FILE *f = fopen(WD_SAV, "rb"); if(!f) return 0;
     uint32_t magic = 0; WdGame tmp; int ok = 0;
     if(fread(&magic, sizeof magic, 1, f) == 1 && magic == WD_SAV_MAGIC &&
@@ -7781,7 +7794,7 @@ static void sd_tick(lv_timer_t *t){ (void)t;
 #define SD_SAV       "/sdcard/sudoku.sav"
 #define SD_SAV_MAGIC 0x53444B33u                 /* "SDK3" (bumped: pausable PlayClock) */
 static void sd_save(void){
-    FILE *f = fopen(SD_SAV, "wb"); if(!f) return;
+    SafeFile sf_; FILE *f = sf_open(&sf_, SD_SAV, "wb"); if(!f) return;
     uint32_t magic = SD_SAV_MAGIC;
     PlayClock clk = pc_snapshot(&g_sd_clk, (uint32_t)time(NULL));   /* paused snapshot */
     fwrite(&magic, sizeof magic, 1, f);
@@ -7789,9 +7802,10 @@ static void sd_save(void){
     fwrite(&g_sd_sel, sizeof g_sd_sel, 1, f);
     fwrite(&clk, sizeof clk, 1, f);
     fwrite(&g_sd_best, sizeof g_sd_best, 1, f);
-    fclose(f);
+    sf_commit(&sf_, !ferror(f));   /* safefile.h: swap in whole, or not at all */
 }
 static int sd_load(void){
+    sf_recover(SD_SAV);
     FILE *f = fopen(SD_SAV, "rb"); if(!f) return 0;
     uint32_t magic = 0; SdGame tmp; int ok = 0;
     if(fread(&magic, sizeof magic, 1, f) == 1 && magic == SD_SAV_MAGIC &&
@@ -8122,16 +8136,17 @@ static void zp_tick(lv_timer_t *t){ (void)t;
 #define ZP_SAV       "/sdcard/zip.sav"
 #define ZP_SAV_MAGIC 0x5A495031u                  /* "ZIP1" */
 static void zp_save(void){
-    FILE *f = fopen(ZP_SAV, "wb"); if(!f) return;
+    SafeFile sf_; FILE *f = sf_open(&sf_, ZP_SAV, "wb"); if(!f) return;
     uint32_t magic = ZP_SAV_MAGIC;
     PlayClock clk = pc_snapshot(&g_zp_clk, (uint32_t)time(NULL));   /* paused snapshot */
     fwrite(&magic, sizeof magic, 1, f);
     fwrite(&g_zp, sizeof g_zp, 1, f);
     fwrite(&clk, sizeof clk, 1, f);
     fwrite(&g_zp_best, sizeof g_zp_best, 1, f);
-    fclose(f);
+    sf_commit(&sf_, !ferror(f));   /* safefile.h: swap in whole, or not at all */
 }
 static int zp_load(void){
+    sf_recover(ZP_SAV);
     FILE *f = fopen(ZP_SAV, "rb"); if(!f) return 0;
     uint32_t magic = 0; ZpGame tmp; int ok = 0;
     /* zp_valid() is the real guard: without it a corrupt blob could carry a path
@@ -8377,11 +8392,11 @@ static int ui_tz(void){
 
 /* ------------------------------------------------------------- persistence */
 static void co_save(void){
-    FILE *f = fopen(CO_SAV, "wb"); if(!f) return;
+    SafeFile sf_; FILE *f = sf_open(&sf_, CO_SAV, "wb"); if(!f) return;
     g_co.magic = CO_SAV_MAGIC;
     fwrite(&g_co, sizeof g_co, 1, f);
     fwrite(&g_co_sig, sizeof g_co_sig, 1, f);
-    fclose(f);
+    sf_commit(&sf_, !ferror(f));   /* safefile.h: swap in whole, or not at all */
 }
 
 static void co_finish(int result, int blocker);
@@ -8408,6 +8423,7 @@ static void co_load(void){
     if(g_co_loaded) return;
     coach_state_init(&g_co);
     memset(&g_co_sig, 0, sizeof g_co_sig);
+    sf_recover(CO_SAV);
     FILE *f = fopen(CO_SAV, "rb");
     if(f){
         CoachState t;
@@ -9839,10 +9855,10 @@ static void co_week_cb(lv_event_t *e){ (void)e; show_coach_report(); }
 #define GU_LOG_MAGIC  0x47554C31u        /* "GUL1" */
 
 static void gu_save(void){
-    FILE *f = fopen(GU_SAV, "wb"); if(!f) return;
+    SafeFile sf_; FILE *f = sf_open(&sf_, GU_SAV, "wb"); if(!f) return;
     g_gu.magic = GU_SAV_MAGIC;
     fwrite(&g_gu, sizeof g_gu, 1, f);
-    fclose(f);
+    sf_commit(&sf_, !ferror(f));   /* safefile.h: swap in whole, or not at all */
 }
 
 /* Append one check (or one undo). The log is the record the week analysis reads;
@@ -9881,6 +9897,7 @@ static void gu_load(void){
     gurupool_load(GURUPOOL_PATH);
 
     guru_state_init(&g_gu);
+    sf_recover(GU_SAV);
     FILE *f = fopen(GU_SAV, "rb");
     if(f){
         GuruState t;

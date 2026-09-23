@@ -39,8 +39,8 @@
 > sync surface for Notes. **To Do** syncs to iCloud's *CalDAV task lists*, which
 > the iPhone Reminders app shows only if you add iCloud as an external CalDAV
 > account (Settings → Calendar → Add CalDAV Account), not under the built-in
-> iCloud reminders. And the first sync will push the **demo seed records** to your
-> real iCloud — delete them there (or in the apps) once your own data is in.
+> iCloud reminders. The **demo records** the device starts with are never pushed
+> to your account; remove them with Menu ▸ Remove demo data whenever you like.
 
 ## What works today
 
@@ -313,8 +313,9 @@ moving the sync arenas to heap.
 - **Graffiti** (U6) — a `$1` unistroke recognizer + writing surface (framework;
   templates/threshold need on-device tuning).
 
-Config (WiFi + Apple app-specific password + calendar path) lives in
-`firmware/main/secrets.h` (gitignored; copy from `secrets.h.example`).
+Config lives in `config.ini` on the SD card and is edited on the device in
+**Settings**; nothing is compiled in. The passwords are the exception: the device
+keeps them in its own flash, not on the card (see [`SECURITY.md`](SECURITY.md)).
 
 ### Build + flash the firmware
 ```

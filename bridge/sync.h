@@ -23,7 +23,18 @@ typedef struct {
      * and the record is gone. Deliberately outside the ops sums the gates use
      * for idempotency, since no operation happened. */
     int bothDel;
+    /* New local records the caller asked to HOLD (sync_set_hold): kept in the
+     * local database as they are, never pushed and never mapped. Also outside
+     * the ops sums -- nothing was transmitted. */
+    int held;
 } SyncStats;
+
+/* Hold back new local records from the push. `fn(uid, ctx)` is asked about each
+ * record that exists only on the device; a nonzero answer keeps it local and
+ * unmapped for this run. The device uses it for the demo seed, which must never
+ * reach a real account. NULL (the default) holds nothing. */
+typedef int (*SyncHoldFn)(uint32_t uid, void *ctx);
+void sync_set_hold(SyncHoldFn fn, void *ctx);
 
 /* full-sync primitives (initial seed / debugging). kind: KIND_CAL/CARD/TODO. */
 int sync_push(const DavCtx*,const char*pdbpath,const char*coll,int kind);

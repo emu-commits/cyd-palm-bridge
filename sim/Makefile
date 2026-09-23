@@ -20,32 +20,25 @@ FW := ../firmware/main
 BR := ../bridge
 
 # sim/include provides the esp_log/nvs/esp_timer shims that let real firmware
-# sources compile here.
-#
-# It used to claim it also "shields the build from a real (gitignored)
-# secrets.h" by sitting first in the include path. IT NEVER DID, and could not:
-# appcfg.c lives in firmware/main and includes "secrets.h" in QUOTES, and a
-# quoted include is resolved relative to the INCLUDING FILE'S OWN DIRECTORY
-# before any -I path is consulted. firmware/main/secrets.h therefore won every
-# time, and on any machine with real credentials the simulator binary was built
-# with the Wi-Fi password and the Apple app-specific password inside it. The
-# shield is now -DSIM_NO_SECRETS below, which appcfg.c honours directly; an
-# include-order trick cannot beat the language's own lookup rule.
+# sources compile here. (It also used to hold a "shield" secrets.h stub, which
+# could never have worked -- a quoted include resolves beside the including file
+# first -- and a developer's real credentials were compiled into the simulator
+# for months. There is no compile-time secrets.h at all now; see appcfg.c.)
 INC    := -I. -Iinclude -Ilvgl -I$(FW) -I$(BR)
-# UI_DEVTOOLS: keep the "Add test events" dev menu item in sim builds (used to
-# mass-generate records against the heap/pool ceilings). Release firmware drops it.
-# SIM_NO_SECRETS: never seed credentials into a simulator build. Gated by
-# `make -C sim nosecrets`.
+# UI_DEVTOOLS: the scripted-test hooks (`k` typing, Coach's seal escape).
+# UI_SEED_TESTEVENTS: the "Add test events" menu item (mass-generates records
+# against the heap/pool ceilings). The firmware never defines the second, and
+# defines the first only with CONFIG_CYD_DEVTOOLS (firmware/main/Kconfig.projbuild).
 #
 # Defined ONCE, here, because smoke32 rebuilds CFLAGS from scratch and a second
 # hand-copied list is exactly how a build flag silently stops applying to half
 # the gates.
-SIMDEF := -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS -DUI_SEED_TESTEVENTS -DSIM_NO_SECRETS
+SIMDEF := -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS -DUI_SEED_TESTEVENTS
 CFLAGS := -O2 -g -Wall $(SIMDEF) $(INC)
 
 # the REAL firmware UI + data layer + portable modules, unchanged
 APP_SRCS := \
-    $(FW)/ui.c $(FW)/data.c $(FW)/graffiti.c $(FW)/appcfg.c $(FW)/clock.c \
+    $(FW)/ui.c $(FW)/data.c $(FW)/graffiti.c $(FW)/appcfg.c $(FW)/secretstore.c $(FW)/clock.c \
     $(FW)/lv_font_palm.c $(FW)/lv_font_palm_bold.c $(FW)/lv_font_kana.c $(FW)/palm_icons.c \
     $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(BR)/dash.c $(FW)/minesweeper.c $(FW)/wordie.c $(FW)/sudoku.c $(FW)/zip.c $(FW)/coach.c $(FW)/guru.c $(FW)/guru_pool.c $(FW)/gurupool.c \
     $(BR)/pdb.c $(BR)/datebook.c $(BR)/address.c $(BR)/todo.c $(BR)/appinfo.c \
@@ -60,7 +53,7 @@ WRAP_LD := -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free
 LVGL_SRCS := $(shell find lvgl/src -name '*.c' 2>/dev/null)
 LVGL_OBJS := $(patsubst lvgl/src/%.c,build/lvgl/%.o,$(LVGL_SRCS))
 
-.PHONY: host wasm smoke smoke32 poolparity graf mines wordie sudoku zip clock coach guru gurupool dash games clean lvgl-src
+.PHONY: host wasm smoke smoke32 poolparity data graf mines wordie sudoku zip clock coach guru gurupool dash games clean lvgl-src
 
 # LVGL_SRCS is evaluated when make parses this file, so on a clean checkout the
 # source must be fetched BEFORE the build graph is used: the entry points fetch,
@@ -119,13 +112,11 @@ smoke32: lvgl-src
 poolparity:
 	@python3 tools/check_pool_parity.py
 
-# ---- nosecrets: a simulator build must carry NO compile-time credentials.
-# CFG_PATH is pointed at a file that cannot exist, so config.ini can't overlay
-# the seed and any non-empty credential field can only have come from a
-# compile-time secrets.h. Passes trivially where there is no secrets.h (CI),
-# and fails loudly on the developer machines that actually have one -- which is
-# the whole point, because that is where the leak lived and where CI is blind.
-# Reports field names and lengths, never values. ----
+# ---- nosecrets: a simulator build must carry NO credentials of its own.
+# CFG_PATH is pointed at a file that cannot exist, so any non-empty credential
+# field can only have come from something compiled in. There is no compile-time
+# seed any more (appcfg.c); this keeps it that way. Reports field names and
+# lengths, never values. ----
 nosecrets: build/nosecrets
 	./build/nosecrets
 
@@ -134,10 +125,10 @@ nosecrets: build/nosecrets
 # the coordinates are EXACTLY a built-in city's -- which is a question only the
 # zone table can answer. The NVS/esp_* shims in sim/include are header-only, so
 # it links here as cleanly as it does in the host build.
-build/nosecrets: tests/nosecrets.c $(FW)/appcfg.c $(BR)/config.c $(FW)/clock.c $(FW)/appcfg.h $(BR)/config.h
+build/nosecrets: tests/nosecrets.c $(FW)/appcfg.c $(FW)/secretstore.c $(BR)/config.c $(FW)/clock.c $(FW)/appcfg.h $(BR)/config.h
 	@mkdir -p build
 	$(CC) -O2 -Wall $(SIMDEF) -DCFG_PATH='"/nonexistent/cyd-nosecrets.ini"' $(INC) \
-	    tests/nosecrets.c $(FW)/appcfg.c $(BR)/config.c $(FW)/clock.c -o $@
+	    tests/nosecrets.c $(FW)/appcfg.c $(FW)/secretstore.c $(BR)/config.c $(FW)/clock.c -o $@
 
 # ---- graf: offline Graffiti recognizer accuracy gate (no LVGL/display needed).
 # Synthesizes noisy strokes from the real templates and asserts recognition
@@ -147,7 +138,7 @@ graf: build/graf_test
 
 build/graf_test: tests/graf_test.c $(FW)/graffiti.c $(FW)/graffiti.h
 	@mkdir -p build
-	$(CC) -O2 -Wall -Iinclude -I$(FW) -DGRAF_TEST_HOOKS \
+	$(CC) -O2 -Wall -Iinclude -I$(FW) -I$(BR) -DGRAF_TEST_HOOKS \
 	    tests/graf_test.c $(FW)/graffiti.c -o $@ -lm
 
 # ---- mines: host gate for the pure Minesweeper board logic (no LVGL). ----
@@ -206,6 +197,18 @@ build/coach_test: tests/coach_test.c $(FW)/coach.c $(FW)/coach.h $(FW)/daycal.h
 # needs no LVGL and no sleeping. ----
 guru: build/guru_test
 	./build/guru_test
+
+# ---- data: the device's data layer (firmware/main/data.c) against a scratch
+# /sdcard -- tombstones, and the demo seed's uid range. ----
+DATA_SRCS := $(FW)/data.c $(FW)/appcfg.c $(FW)/secretstore.c $(FW)/clock.c $(BR)/config.c \
+    $(BR)/pdb.c $(BR)/datebook.c $(BR)/address.c $(BR)/todo.c $(BR)/appinfo.c \
+    $(BR)/ical.c $(BR)/vcard.c $(BR)/tz.c $(BR)/charset.c
+data: build/data_test
+	./build/data_test
+
+build/data_test: tests/data_test.c $(DATA_SRCS)
+	@mkdir -p build
+	$(CC) -O2 -Wall $(SIMDEF) $(INC) tests/data_test.c $(DATA_SRCS) -o $@
 
 build/guru_test: tests/guru_test.c $(FW)/guru.c $(FW)/guru_pool.c $(FW)/guru.h $(FW)/daycal.h
 	@mkdir -p build

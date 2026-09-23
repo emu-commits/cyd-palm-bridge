@@ -49,7 +49,7 @@ int main(void){
     /* EVERY Wi-Fi slot, not just the first. The device remembers four networks
      * now, and a check that only looked at slot 1 would pass a build carrying
      * three real passwords -- which is precisely the shape of the leak this
-     * gate was written for (see the sim Makefile's note on SIM_NO_SECRETS). */
+     * gate was written for (the history is at the top of appcfg.c). */
     for(int i = 0; i < CFG_WIFI_N; i++){
         if(c->wifi[i].ssid[0] || c->wifi[i].pass[0]){
             printf("nosecrets: FAIL -- wifi slot %d is seeded into this build "
@@ -60,9 +60,9 @@ int main(void){
     }
     if(bad){
         printf("nosecrets: a simulator build must never carry credentials.\n"
-               "  Check that sim/Makefile passes -DSIM_NO_SECRETS and that\n"
-               "  appcfg.c still honours it. Do NOT fix this by editing\n"
-               "  secrets.h -- the point is that the build ignores it.\n");
+               "  Something is compiling them in again. appcfg.c used to seed\n"
+               "  from a gitignored secrets.h; that path was removed on purpose\n"
+               "  and must not come back.\n");
         return 1;
     }
     printf("nosecrets: OK -- no compile-time credentials in a sim build\n");

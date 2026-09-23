@@ -6,8 +6,8 @@
 #include "power.h"
 #include "appcfg.h"
 #include "hotsync.h"
-#include "ui.h"
-#include "tapsplit.h"     /* recover the lift between two fast taps */           /* ui_show_lock() / ui_owns_backlight() */
+#include "ui.h"           /* ui_show_lock() / ui_owns_backlight() */
+#include "tapsplit.h"     /* recover the lift between two fast taps */
 #include "lv_font_palm.h"
 #include "lvgl.h"
 #include "esp_heap_caps.h"
@@ -195,9 +195,40 @@ void lvgl_port_init(void){
              (unsigned)mon.free_biggest_size);
 }
 
+/* ---- the pool, watched on the device (robustness 6) ---------------------------
+ * The LVGL object pool is fixed at 31 KB and running out of it does not fail
+ * politely: LV_ASSERT_MALLOC spins and the watchdog resets the device, and the
+ * UART says nothing about where. The simulator measures the pool at every
+ * screenshot and names the screen at the low-water mark; this is the same
+ * measurement on real hardware, where a field report is the only report there
+ * is. A line when the low-water mark drops by a meaningful step, naming the
+ * screen, and a warning under the same 3 KB floor the smoke gate enforces.
+ * Once a second: lv_mem_monitor walks the pool, which is not free. */
+#define POOL_FLOOR 3072
+#define POOL_STEP  512
+static void pool_watch(void){
+    static int64_t last;
+    static uint32_t low = UINT32_MAX;
+    int64_t now = esp_timer_get_time();
+    if(now - last < 1000000) return;
+    last = now;
+    lv_mem_monitor_t m;
+    lv_mem_monitor(&m);
+    uint32_t f = (uint32_t)m.free_size;
+    if(low != UINT32_MAX && f + POOL_STEP > low) return;   /* no new low worth a line */
+    low = f;
+    if(f < POOL_FLOOR)
+        ESP_LOGW(TAG, "pool LOW: %u bytes free (largest %u) on \"%s\"",
+                 (unsigned)f, (unsigned)m.free_biggest_size, ui_screen_name());
+    else
+        ESP_LOGI(TAG, "pool low-water: %u bytes free (largest %u) on \"%s\"",
+                 (unsigned)f, (unsigned)m.free_biggest_size, ui_screen_name());
+}
+
 void lvgl_port_run(void){
     while(1){
         uint32_t next = lv_timer_handler();      /* ms until next work */
+        pool_watch();
         /* the wake tap's repaint has now been flushed to the panel -- light it */
         if(g_wake_pending){ g_wake_pending = 0; power_backlight(1); }
 

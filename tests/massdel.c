@@ -199,6 +199,61 @@ static void deletedOnBothSides(void){
     CK(s1.bothDel==1,"it is counted as already-gone instead");
 }
 
+/* ---- a tombstone is not a bad read ------------------------------------- */
+/* The device keeps a deleted record as a Palm tombstone until it has synced.
+ * That is what lets the engine tell the two shapes apart: a record the USER
+ * deleted is still in the database, flagged; a record the CARD lost is simply
+ * absent. So even while the guard is up -- here 5 tombstones and 7 records
+ * missing out of 12 mapped, which is fewer than half -- the five explicit
+ * deletions must be pushed and only the seven silent losses restored. */
+static void tombstonesUnderTheGuard(void){
+    printf("== the guard fires, but tombstones are still deletions ==\n");
+    clearColl();
+    writeDB(NREC);
+    SyncStats s0={0}; sync_collection(&D,LPDB,LPDB,COLL,KIND_CAL,MAP,POL_SERVER,&s0);
+    CK(serverCount()==NREC,"seed is on the server");
+    static uint8_t arena[128*PALM_REC_MAX]; static PdbRec r[128]; int used=0;
+    const int NT = 5;
+    for(int i=0;i<NT;i++){
+        Appt a; memset(&a,0,sizeof a);
+        a.hasTime=1; a.sH=9; a.eH=10; a.year=2026; a.month=9; a.day=1+(i%28);
+        snprintf(a.description,sizeof a.description,"Event-%02d",i+1);
+        uint8_t*dst=arena+used; int l=ApptPack(dst,PALM_REC_MAX,&a);
+        r[i]=(PdbRec){ .attr=REC_ATTR_DELETE,.uniqueID=(uint32_t)(i+1),.data=dst,.len=l }; used+=l;
+    }
+    pdb_write(LPDB,"DatebookDB",0x44415441,0x64617465,r,NT);
+    SyncStats s1={0};
+    int n = sync_collection(&D,LPDB,LPDB,COLL,KIND_CAL,MAP,POL_SERVER,&s1);
+    printf("   rc=%d push -%d | pull +%d | server=%d local=%d\n",
+           n,s1.pushDel,s1.pullNew,serverCount(),localCount());
+    CK(s1.pushDel==NT,"every tombstone was pushed as a deletion, guard or no guard");
+    CK(serverCount()==NREC-NT,"so the server lost exactly those");
+    CK(localCount()==NREC-NT,"and the silently missing ones were restored");
+    CK(s1.pullNew==NREC-NT,"counted as pulls");
+}
+
+/* ---- held records (the demo seed) stay on the device ------------------ */
+/* The device holds its demo seed back from every push. A held record must be
+ * carried through the merge untouched -- the output PDB only contains what the
+ * merge writes, so "not pushed" must not turn into "dropped" -- and it must
+ * still be held on the next run, not pushed then. */
+static int holdLow(uint32_t uid, void *ctx){ (void)ctx; return uid <= 2; }
+static void heldStayLocal(void){
+    printf("== held records stay local, unpushed, run after run ==\n");
+    clearColl();
+    writeDB(4);                                  /* uids 1..4; 1 and 2 are "demo" */
+    sync_set_hold(holdLow, NULL);
+    SyncStats s1={0}; sync_collection(&D,LPDB,LPDB,COLL,KIND_CAL,MAP,POL_SERVER,&s1);
+    printf("   push +%d held %d | server=%d local=%d\n",s1.pushNew,s1.held,serverCount(),localCount());
+    CK(s1.pushNew==2 && s1.held==2,"two pushed, two held");
+    CK(serverCount()==2,"the held ones never reached the server");
+    CK(localCount()==4,"and all four are still on the device");
+    SyncStats s2={0}; sync_collection(&D,LPDB,LPDB,COLL,KIND_CAL,MAP,POL_SERVER,&s2);
+    CK(s2.pushNew==0 && s2.held==2 && serverCount()==2 && localCount()==4,
+       "the next run holds them again and changes nothing");
+    sync_set_hold(NULL, NULL);
+}
+
 int main(void){
     snprintf(D.base,sizeof D.base,"%s",
              getenv("DAV_BASE")?getenv("DAV_BASE"):"http://localhost:5232");
@@ -206,6 +261,8 @@ int main(void){
     guardFires();
     guardStaysOutOfTheWay();
     deletedOnBothSides();
+    tombstonesUnderTheGuard();
+    heldStayLocal();
     printf("\n%s (%d failures)\n", fails?"FAILURES":"ALL PASS", fails);
     return fails?1:0;
 }

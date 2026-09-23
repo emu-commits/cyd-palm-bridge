@@ -7,6 +7,7 @@
  * accept threshold needs tuning against the real resistive touch on-device.
  */
 #include "graffiti.h"
+#include "safefile.h"      /* the user's templates are replaced whole */
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
@@ -342,14 +343,16 @@ int  graffiti_user_count(void){ int n=0; for(int i=0;i<26;i++) if(s_user_n[i]) n
 void graffiti_user_reset(void){ memset(s_user_n,0,sizeof s_user_n); }
 
 int graffiti_user_save(const char *path){
-    FILE *f = fopen(path, "wb"); if(!f) return 0;
+    SafeFile sf;
+    FILE *f = sf_open(&sf, path, "wb"); if(!f) return 0;
     uint32_t magic = GU_MAGIC;
     int ok = fwrite(&magic,4,1,f)==1
           && fwrite(s_user_n,1,26,f)==26
           && fwrite(s_user,1,sizeof s_user,f)==1;
-    fclose(f); return ok;
+    return sf_commit(&sf, ok) == 0;
 }
 int graffiti_user_load(const char *path){
+    sf_recover(path);
     FILE *f = fopen(path, "rb"); if(!f) return 0;
     uint32_t magic=0;
     int ok = fread(&magic,4,1,f)==1 && magic==GU_MAGIC
