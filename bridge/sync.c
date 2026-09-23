@@ -921,13 +921,33 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
      * collection from the account. That is unrecoverable from this end.
      *
      * So when most of the mapped records have vanished at once, treat it as the
-     * local side being wrong rather than the user having deleted everything.
-     * Deletions are skipped for the run and said out loud; pulls still happen,
-     * which is exactly what repopulates a database that was lost. A genuine bulk
-     * delete by the user costs one extra sync to take effect. */
+     * local side being wrong rather than the user having deleted everything, and
+     * PULL THE SERVER'S COPIES BACK DOWN.
+     *
+     * That last part is new (2026-09-22) and it is the whole point. Until now
+     * the guard only DECLINED to delete: the mapped-but-locally-absent records
+     * were skipped and nothing was written for them, so the device stayed empty
+     * and the next sync reached exactly the same conclusion. The guard fired
+     * forever, the server kept its records, the device kept none, and NEITHER
+     * of this comment's two promises held -- nothing was restored, and a
+     * genuine bulk delete never took effect either. It was a permanent
+     * stalemate whose only symptom was a line on the UART. tests/massdel.c is
+     * the gate that found it; there was none before, which is how a guard that
+     * did half its job passed every suite for months.
+     *
+     * The trade this makes, stated plainly: on THIS device data_delete() drops
+     * a record outright rather than leaving a Palm tombstone, so a real user
+     * deletion and a bad card read are the same shape from in here. Restoring
+     * therefore undoes a genuine bulk delete and the user has to delete again.
+     * That is the right way round. Deleting half a collection through this UI
+     * means visiting half a collection one record at a time; a truncated PDB
+     * needs one bad write. And "my deleted events came back" is a bad hour,
+     * while "my device is empty and every sync agrees" is the data loss the
+     * guard exists to prevent. */
     int nLoc = countLines(LC_IDX), nMap = countLines(MP_IDX);
     int massGuard = (nMap >= MASSDEL_MIN) && (nLoc * 2 < nMap);
-    int guardedDel = 0;
+    int guardedDel = 0;       /* deletions held back (local tombstones)      */
+    int guardedBack = 0;      /* records pulled back down from the server    */
     if(massGuard)
         fprintf(stderr,"[sync] MASS-DELETE GUARD for %s: %d local records against %d "
                        "mapped. Not pushing deletions this run -- if the local database "
@@ -1047,11 +1067,25 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
             if(massGuard) guardedDel++;
             else if(!s_pull_only){ dav_delete(d,coll,srvName,mEtag); st->pushDel++; }
         } else if(lcs==LDEL && scs==SDEL){
-            if(massGuard) guardedDel++; else st->pushDel++;
+            /* Gone from both sides. There is nothing to delete anywhere, so no
+             * dav_delete is issued here -- and counting it as a pushDel (which
+             * this did) reported a deletion that never left the device. */
+            if(massGuard) guardedDel++; else st->bothDel++;
         } else if(lcs==LABSENT && scs==SNEW){
             if(keepFromServer(d,coll,kind,k,uid,srvName,sEtag)==0) st->pullNew++;
         } else if(lcs==LABSENT && scs==SCLEAN){
-            if(massGuard) guardedDel++;
+            /* Mapped, still on the server, GONE from the local database with no
+             * tombstone -- which is both "the user deleted it" and "the card
+             * read short". Under the guard it is the second, so take the
+             * server's copy back: this is the restore the guard promises, and
+             * without it the record is simply dropped from the output PDB and
+             * the device never heals. */
+            if(massGuard){
+                guardedDel++;
+                if(keepFromServer(d,coll,kind,k,uid,srvName,sEtag)==0){
+                    st->pullNew++; guardedBack++;
+                }
+            }
             else if(!s_pull_only){ dav_delete(d,coll,srvName,mEtag); st->pushDel++; }
         }
 
@@ -1063,8 +1097,9 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
     }
     CHK("merge-done");
     if(guardedDel)
-        fprintf(stderr,"[sync] MASS-DELETE GUARD held back %d deletion(s) for %s\n",
-                guardedDel, coll);
+        fprintf(stderr,"[sync] MASS-DELETE GUARD held back %d deletion(s) for %s "
+                       "and RESTORED %d record(s) from the server\n",
+                guardedDel, coll, guardedBack);
     if(flc){fclose(flc);} if(fmp){fclose(fmp);} if(fsv){fclose(fsv);}
 
     if(s_too_big){
@@ -1119,9 +1154,9 @@ int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
         pdbw_abort(w); return -4;
     }
     int nrec = pdbw_count(w);
-    SYNC_LOG("[sync] %s: out=%d push=%d/%d/%d pull=%d/%d/%d\n",
+    SYNC_LOG("[sync] %s: out=%d push=%d/%d/%d pull=%d/%d/%d gone=%d\n",
             coll,nrec,st->pushNew,st->pushMod,st->pushDel,
-            st->pullNew,st->pullMod,st->pullDel);
+            st->pullNew,st->pullMod,st->pullDel,st->bothDel);
     /* SAFETY: never overwrite a local PDB that HAD records with an empty result.
      * A read glitch, a parse failure, or an unexpectedly-empty server must not be
      * allowed to wipe the on-device data. Discard the streamed output, keep local. */

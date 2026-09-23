@@ -880,8 +880,13 @@ static void hotsync_task(void *arg){
          * the partial merge was discarded. n >= 0: records kept. They are counted
          * apart because the status line names the cause, and naming the wrong one
          * sends the next hour of debugging the wrong way. */
-        ESP_LOGI(TAG,"%s: rc=%d up +%d~%d-%d down +%d~%d-%d heap=%lu",t->name,n,
+        /* bothDel is logged separately from pushDel and only when non-zero: it
+         * is a record that was already gone on both sides, so nothing was sent.
+         * It used to be added to pushDel, which reported deletions this device
+         * never made. */
+        ESP_LOGI(TAG,"%s: rc=%d up +%d~%d-%d down +%d~%d-%d%s heap=%lu",t->name,n,
                  st.pushNew,st.pushMod,st.pushDel, st.pullNew,st.pullMod,st.pullDel,
+                 st.bothDel ? " (+already gone)" : "",
                  (unsigned long)esp_get_free_heap_size());
         if(n == -2) protec++;
         else if(n < 0){ failed++;
@@ -897,7 +902,8 @@ static void hotsync_task(void *arg){
             else             oomed++; }
         else { did++;
             tot.pushNew+=st.pushNew; tot.pushMod+=st.pushMod; tot.pushDel+=st.pushDel;
-            tot.pullNew+=st.pullNew; tot.pullMod+=st.pullMod; tot.pullDel+=st.pullDel; }
+            tot.pullNew+=st.pullNew; tot.pullMod+=st.pullMod; tot.pullDel+=st.pullDel;
+            tot.bothDel+=st.bothDel; }
     }
 
     sync_set_progress(NULL, NULL);                 /* detach the hook */

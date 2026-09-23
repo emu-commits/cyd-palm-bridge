@@ -179,9 +179,10 @@ Concise index. Detail for each is below, or in the named doc.
     account". §Engine.
 12. **Engine: shrink the sync working set** 23.5 KB → ~7 KB by streaming `g_objbuf`
     and `g_body`. §Engine.
-13. **Engine: three small correctness items** — `pdb_read` failing loudly, the
-    mass-delete guard's untested positive path, `st->pushDel` mislabelling.
-    §Engine.
+13. ~~Engine: three small correctness items~~ **DONE 2026-09-22 — and the gate
+    written for the third found a fourth that mattered far more: the mass-delete
+    guard never restored anything, so a device whose card read short stayed
+    empty on every subsequent sync, forever.** §Engine.
 
 ### C. Tidy-ups (small, known, not urgent)
 14. ~~Move `dash.c` / `dash.h` into `bridge/`~~ **DONE 2026-09-22.** The
@@ -762,15 +763,38 @@ merge — local data untouched, map not republished, status line says so.
   `PALM_REC_MAX`, a format limit — keep. `g_state` (3076) is two 1408-byte sync
   tokens, probably shrinkable. Then the budget in `hotsync.c` can be made honest —
   an honest reserve including the TLS handshake is ~29.7 KB — and left on.
-- **Three small correctness items.**
-  - `pdb_read` caps at `PDB_MAX_RECS` 20000 and returns -1 above it, which reads as
-    an empty local database. The mass-delete guard covers it, but it should fail
-    loudly on its own.
-  - The mass-delete guard's *positive* path (it fires and holds deletions back) has
-    no gate — it is covered only by the other checks staying silent. Forcing it needs
-    a fixture where the local PDB is emptied behind the map.
-  - `st->pushDel` is incremented on the "deleted on both sides" branch, which never
-    touches the network. It reads as a push in the status line; it is not one.
+- ~~**Three small correctness items.**~~ **ALL THREE DONE 2026-09-22, and the
+  third one uncovered a fourth that was much worse than any of them.**
+  - ~~`pdb_read` returns -1 for every failure and reads as an empty database~~
+    Every exit from the read path now names its reason on stderr, once. A file
+    that stops mid-record still returns its partial count — some callers only
+    display — but no longer does it silently, because the difference between
+    "the header says 40 and 12 are readable" and "there are 12 records" is the
+    difference between a bad block and 28 deletions. Nearly every caller in the
+    tree ignores the return value, which is *why* the log line is the fix.
+  - ~~The mass-delete guard's positive path has no gate~~ → **`tests/massdel.c`**,
+    in `run_gates.sh`. Three scenarios: the guard fires and heals; a deletion
+    below the threshold still pushes (the negative control — without it a guard
+    stuck permanently *on* passes everything); and deleted-on-both-sides is not
+    a push.
+  - ~~`st->pushDel` on the "deleted on both sides" branch~~ → its own
+    `st->bothDel`, deliberately outside the ops sums the idempotency gates use,
+    since no operation happens. `hotsync` logs it separately and only when
+    non-zero.
+  - **THE FOURTH, WHICH THE NEW GATE FOUND ON ITS FIRST RUN: the mass-delete
+    guard did not do what its own comment promised.** It only *declined* to
+    delete. The mapped-but-locally-absent records were skipped and nothing was
+    written for them, so the device stayed empty and the next sync reached the
+    identical conclusion — server keeps every record, device keeps none, guard
+    fires forever. Neither promise in the comment held: nothing was restored,
+    and a genuine bulk delete never took effect either. A permanent stalemate
+    whose only symptom was one line on the UART. The guard now pulls the
+    server's copies back down in the guarded run itself. **The trade, stated
+    plainly:** `data_delete()` drops a record rather than leaving a Palm
+    tombstone, so a real deletion and a bad card read are the same shape from
+    inside the engine — restoring therefore undoes a genuine bulk delete. That
+    is the right way round. Deleting half a collection through this UI takes
+    half a collection's worth of taps; truncating a PDB takes one bad write.
 
 ---
 

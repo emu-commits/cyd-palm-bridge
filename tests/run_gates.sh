@@ -90,6 +90,7 @@ run "synctoken (RFC 6578 delta)"       clean ./synctoken
 run "category (category->collection)"  clean ./category
 run "uidmatch (UID identity, reloc+foreign)" clean ./uidmatch
 run "idempotent (etag churn + unresolvable reloc)" clean ./idempotent
+run "massdel (guard fires, heals, and stays out of the way)" clean ./massdel
 run "bigsync (device-sized, 90 recs)"  clean ./bigsync
 run "multiapp (To Do + Address sync)"  clean ./multiapp
 run "toobig (refuses, changes nothing)" clean ./toobig
