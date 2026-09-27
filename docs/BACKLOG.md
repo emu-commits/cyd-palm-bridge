@@ -415,6 +415,11 @@ follow-ups*.
 
 ---
 
+### App platform
+Native C apps loaded from the SD card, with their own SDK, versioning and a
+validation pipeline before they reach the device: **`APP_PLATFORM_PLAN.md`**
+(phases 0–5, with the decisions it needs listed in its §11).
+
 ## Parked — offered, NOT approved (do not build without a yes)
 
 - **Opt-in CORS-proxy RSS fetch in the web emulator.** Feed servers send no
