@@ -1,7 +1,8 @@
 # App platform plan — native C apps from the SD card
 
-> **Status: PROPOSAL.** Nothing here is built. The decisions in §11 were
-> made on 2026-09-27; the v1 API list in §5 is proposed and awaits review.
+> **Status: Phases 0 and 1 approved to start (2026-09-27).** Nothing here
+> is built yet. The decisions in §11 were made on 2026-09-27; the v1 API list
+> in §5 is proposed and awaits review. How to resume: the root `CLAUDE.md`.
 > This plan follows the
 > MicroPython-versus-native measurement round (QEMU, ESP-IDF v5.5, this
 > firmware's own image). Its conclusion was: **compiled C apps, loaded from

@@ -22,6 +22,31 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 
 ---
 
+## RESUME HERE — app platform, Phases 0 and 1 (approved 2026-09-27)
+
+Native C apps from the SD card: `APP_PLATFORM_PLAN.md`. The step-by-step
+instructions, environment notes and decisions for these two phases are in
+the root **`CLAUDE.md`** ("Current work"). The plan's §10 has the exit
+criteria.
+
+**Phase 0 — loader spike** (throwaway code in a scratch copy; numbers go to
+`BUILD_PROGRESS.md`)
+- [ ] Baseline build in the IDF container matches CI (1,582,695 B) `[s]`
+- [ ] Hello pack loads from a flash partition in QEMU and calls back into the firmware `[s]`
+- [ ] Every Phase 0 exit criterion measured and recorded; `elf_loader` or custom loader decided `[s]`
+
+**Phase 1 — groundwork** (one commit each)
+- [ ] Passwords out of resident RAM, with a sim `secretscan` gate `[s]`
+- [ ] Wi-Fi join and an iCloud HotSync still work after that change `[d]`
+- [ ] Firmware version from `git describe`, shown in Settings ▸ About with the API version `[s]`
+- [ ] `sdk/palm_app.h` (API 0.1, unstable) with `abicheck` in CI `[s]`
+- [ ] MIT `sdk/LICENSE` and `apps/LICENSE`, and the `NOTICE` permission draft `[s]`
+- [ ] Games folder renamed More; smoke tour and screenshots updated `[s]`
+
+Then stop for the user's review of the API list before Phase 2.
+
+---
+
 ## RESUME HERE — 2026-09-23
 
 **Flash from the browser is live** (PR #64; §Proposals ▸ User experience 1):
