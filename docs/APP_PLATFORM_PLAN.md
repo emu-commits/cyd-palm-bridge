@@ -18,7 +18,7 @@
 4. [Splitting apps from the firmware: repos, versions, compatibility](#4-splitting-apps-from-the-firmware)
 5. [The app SDK (`palm_app.h`)](#5-the-app-sdk)
 6. [Palm C: the language profile, written for AI authors](#6-palm-c-the-language-profile)
-7. [The validation pipeline](#7-the-validation-pipeline)
+7. [The inspection process](#7-the-inspection-process)
 8. [Guards on the device](#8-guards-on-the-device)
 9. [Threat model](#9-threat-model)
 10. [Phases and exit criteria](#10-phases-and-exit-criteria)
@@ -38,9 +38,10 @@
 - **AI-authorable.** An AI with tools (like a Claude Code session) can write,
   build, test and package an app on its own. A chat-only AI can write the
   source, and a GitHub Action does the rest.
-- **Checked before it runs.** Every app passes a fixed series of memory-safety
-  and behaviour checks in CI before it is signed. By default the device loads
-  only signed apps.
+- **Inspected before it runs.** Before a pack goes on the card, one command
+  puts it through a fixed series of memory-safety and behaviour checks and
+  prints a plain-text report of any issues (§7). There is no signing; the
+  inspection is a manual step.
 
 **Non-goals (v1)**
 
@@ -73,10 +74,10 @@ it is marked as an estimate.
 | Shared game canvas | `game_cv_buf`, 240×164 at 1 bpp (≈5 KB, `ui.c`) | Apps draw into this buffer. Only one game, app or Coach sigil is on screen at a time, which already makes sharing safe. |
 | App image budget | 1.58 MB of the 3 MB `factory` partition | Flash isn't a constraint. The loader's size is still to be measured (Phase 0). |
 | Speed | C Sudoku board: 9.5 ms (Python: 2.19 s) | No performance workarounds are needed in the SDK. |
-| LVGL runs on | the **main task** (`lvgl_port.c`, 16 KB stack, about 3.5 KB spare at the `ui_init` peak) | Apps run inside LVGL callbacks on this stack, with no task of their own. Each app gets a **2 KB stack budget**, proven statically (§7, gate G2). |
-| Secrets | Wi-Fi and iCloud passwords in NVS, **not encrypted** (`secretstore.h`), **and copied into RAM for as long as the device is on** (`g_cfg` in `appcfg.c`, then into stack buffers in `hotsync.c` that are never wiped) | Native code could read them. Signing (§4.4) and the API-side protections (§8.2) cover this; the first of those protections takes the passwords out of resident RAM. |
+| LVGL runs on | the **main task** (`lvgl_port.c`, 16 KB stack, about 3.5 KB spare at the `ui_init` peak) | Apps run inside LVGL callbacks on this stack, with no task of their own. Each app gets a **2 KB stack budget**, proven statically (§7, stage G2). |
+| Secrets | Wi-Fi and iCloud passwords in NVS, **not encrypted** (`secretstore.h`), **and copied into RAM for as long as the device is on** (`g_cfg` in `appcfg.c`, then into stack buffers in `hotsync.c` that are never wiped) | Native code could read them. The API-side protections (§8.2) and the binary scan in the inspection (§7, G6) cover this; the first of those protections takes the passwords out of resident RAM. |
 | ESP32 IRAM access | 32-bit aligned access only | Only `.text` (and literals) can go in IRAM. `.rodata`, `.data` and `.bss` must go in DRAM. Byte loads from IRAM fault. |
-| Xtensa LX6 | Unaligned 32-bit loads raise `LoadStoreAlignment` | UBSan's alignment check runs in the host gates (G4). |
+| Xtensa LX6 | Unaligned 32-bit loads raise `LoadStoreAlignment` | UBSan's alignment check runs in the inspection (G4). |
 
 ---
 
@@ -90,7 +91,7 @@ it is marked as an estimate.
      icon.bin                        │   packs:     one tile per installed app   │
      data/…   ◀── pa_file_* API ───  │                                          │
      state.bin ◀─ pa_state_* API ──  │ apphost.c  verify → load → run → unload  │
-   crash.log                         │   ├─ packfmt.c   header + signature      │
+   crash.log                         │   ├─ packfmt.c   header + SHA-256        │
                                      │   ├─ loader      ELF relocation (IRAM)   │
                                      │   └─ guards      canaries, crash flag,   │
                                      │                  time/stack watermarks   │
@@ -104,9 +105,10 @@ it is marked as an estimate.
 1. The **More** folder lists the built-in games plus each `/sdcard/apps/*/app.pack`.
    To draw a tile it reads only the pack header (name, icon, API version).
    Nothing is loaded yet.
-2. On tap, `apphost` **verifies** the pack: magic, format version, API
-   compatibility, size limits, SHA-256, then the signature (§4.4). It also
-   refuses an app that is in quarantine (§8).
+2. On tap, `apphost` **checks** the pack: magic, format version, API
+   compatibility, size limits, and the SHA-256 (which catches a truncated or
+   corrupted copy). It also refuses an app that is in quarantine (§8). It
+   doesn't check whether the pack was inspected; that's the user's step (§7).
 3. It **loads** the pack. Code and literals go to IRAM (≤ 24 KB). Read-only
    data, data and bss go to one heap block with guard words at both ends
    (≤ 16 KB by default). It applies the relocations and frees the ELF buffer.
@@ -122,7 +124,7 @@ it is marked as an estimate.
 **Two binary-interface decisions, with the reasons:**
 
 - **A function table instead of linking against firmware symbols.** The app's
-  only import is the `pa_api` pointer it is given. The linter in gate G6 can
+  only import is the `pa_api` pointer it is given. The inspection's binary scan (G6) can
   then require **zero undefined symbols** (apart from a short list of compiler
   helpers the firmware exports: `memcpy`, `memset`, `memmove`, and 64-bit
   division/shift helpers). The table is also what versioning appends to, and
@@ -152,8 +154,8 @@ repo:
 | Path | Holds | Licence | CI | Releases |
 |---|---|---|---|---|
 | `firmware/`, `sim/`, `bridge/` | As today | As today (firmware GPLv3) | `ci.yml`, as today | `vX.Y.Z` tags |
-| `sdk/` | `palm_app.h`, linker script, build rules, `mkpack`, `packlint`, `stackcheck`, the ABI freeze file, the public signing key(s), `docs/` | **MIT** (§11) | `ci.yml` (ABI check) plus `apps.yml` | `sdk-vA.B` tags once frozen |
-| `apps/` | One folder per app, `AGENTS.md`/`CLAUDE.md` for AI authors, the examples | **MIT** (§11) | **`apps.yml`**, triggered only by changes under `apps/**` or `sdk/**`, calling the reusable `validate-app.yml` | **`app-<id>-vX.Y`** tags → a release carrying the signed `.pack` |
+| `sdk/` | `palm_app.h`, linker script, build rules, `mkpack`, `packlint`, `stackcheck`, `inspect.sh` and its container image, the ABI freeze file, `docs/` | **MIT** (§11) | `ci.yml` (ABI check) plus `apps.yml` | `sdk-vA.B` tags once frozen |
+| `apps/` | One folder per app, `AGENTS.md`/`CLAUDE.md` for AI authors, the examples | **MIT** (§11) | **`apps.yml`**, triggered only by changes under `apps/**` or `sdk/**`, running the inspection on changed apps | **`app-<id>-vX.Y`** tags → a release carrying the `.pack` and its `inspect-report.txt` |
 
 Two rules keep the later split cheap:
 - **Nothing in `apps/` includes anything outside `sdk/`.** `packlint`
@@ -164,8 +166,7 @@ Two rules keep the later split cheap:
 **At `sdk-v1.0`** (Phase 5), `apps/` moves to a new template repo,
 **`cyd-palm-apps`**, with its history (`git filter-repo --subdirectory-filter
 apps`). It gets a `palm-sdk.lock` file naming the `sdk-vA.B` tag, and its CI
-checks out this repo at that tag for the SDK, simulator and tools. The signing
-key moves with it (§4.4). Moving an app to a newer SDK then becomes a
+checks out this repo at that tag for the SDK, simulator and tools. Moving an app to a newer SDK then becomes a
 one-line PR that bumps the lock file.
 
 ### 4.2 Three version numbers, and what each one promises
@@ -215,31 +216,14 @@ offset  size  field
 88      32    SHA-256 of the ELF
 120     8     reserved (0)
 128     …     ELF (relocatable, Xtensa)
-end-72  72    signature: ECDSA P-256 over bytes [0, end-72), DER, zero-padded
 ```
 
-- **ECDSA P-256 over mbedTLS**, which is already linked for TLS, so verifying
-  costs close to nothing in flash. (mbedTLS doesn't provide Ed25519.)
-- **Signed from the first pack** (§11). The signing path exists before the
-  loader does: the first pack CI ever builds is signed, and the device has
-  never had a mode where unsigned packs load by default.
-- **The public key is compiled into the firmware** (`sdk/keys/release.pub`).
-  There are **two slots, current and next**, so the key can be rotated
-  without breaking installed packs: a firmware release adds the next key,
-  and packs are re-signed with it over time.
-- **The private key is a GitHub Actions secret in an environment called
-  `app-signing`**, limited to `app-*` tags and requiring approval. Today it
-  lives in this repo; at the split it moves to `cyd-palm-apps`. Only the
-  release job (G8) can read it, and only after every gate in §7 has passed on
-  the same commit. It never goes on a laptop.
-- **Developer Mode** (Settings ▸ About, behind a confirmation) also allows
-  unsigned packs, for trying a pack from `make pack` before it is released.
-  It's off by default, those packs are marked "Unverified" on their tile, and
-  the setting turns itself off after 24 hours.
-
-The pack format lets the device check the file cheaply before loading
-anything. The signature means "this passed our CI gates". It does not mean
-"this code is safe" (§9).
+- **No signature.** The SHA-256 is there to catch a truncated or corrupted
+  copy, and to give the pack an identity: the inspection report (§7.4) and
+  **About <app>** on the device both show it, so you can confirm the pack on
+  the card is the one you inspected. It proves nothing about who built it.
+- The pack format lets the device check the file cheaply before loading
+  anything.
 
 ---
 
@@ -321,7 +305,7 @@ int16_t x, y; uint32_t ch; }`:
 | 11 | `pa_err pa_buttons(const char *const *labels, uint8_t n)` | 0–4 buttons in the bottom strip, each label ≤ 10 bytes. `n = 0` removes them. |
 | 12 | `pa_err pa_button_label(uint8_t id, const char *label)` | Relabel one button, for toggles like Dig/Flag, without rebuilding the strip. |
 | 13 | `void pa_status(uint8_t slot, const char *s)` | Slot 0 is left-aligned and slot 1 right-aligned, on the line above the buttons (games put a status on the left and a time on the right). ≤ 24 bytes each. |
-| 14 | `pa_err pa_menu(const char *const *labels, uint8_t n)` | 0–6 app items at the top of Menu. The firmware always adds "About <app>", which shows the pack's id, version, API version and signature state. |
+| 14 | `pa_err pa_menu(const char *const *labels, uint8_t n)` | 0–6 app items at the top of Menu. The firmware always adds "About <app>", which shows the pack's id, version, API version, capabilities and the first 12 characters of its SHA-256. |
 | 15 | `void pa_alert(const char *s)` | Modal OK box, ≤ 160 bytes. |
 | 16 | `void pa_confirm(const char *s, uint8_t id)` | Yes/No box. The answer arrives as `PA_EV_CONFIRM`. |
 | 17 | `pa_err pa_graffiti(uint8_t mode)` | `PA_GRAF_OFF`, `PA_GRAF_LETTERS` or `PA_GRAF_DIGITS`. Shows the Graffiti strip; strokes arrive as `PA_EV_CHAR`. |
@@ -366,7 +350,7 @@ to improve between SDK versions): `pa_strlcpy`, `pa_strlcat`, `pa_fmt_int`,
 `PA_COUNTOF`, `pa_rng` (seeded xorshift32, so generators are reproducible and
 host-testable like `sd_new`), and `playclock.h` (unchanged from the firmware).
 
-### 5.4 Budgets (enforced by the gates and by the loader)
+### 5.4 Budgets (checked by the inspection, enforced by the loader and guards)
 
 | Resource | Limit |
 |---|---|
@@ -465,7 +449,7 @@ wrappers, and returns the descriptor. The title bar already reads "Dice"
 bugs AIs make most often in C**, and **documentation and tooling that an AI
 reads and runs without human help.**
 
-### 6.1 The rules (each one is enforced; none rely on the author's discipline)
+### 6.1 The rules (each one is checked by the inspection, not left to the author)
 
 | Rule | Why | Enforced by |
 |---|---|---|
@@ -493,51 +477,146 @@ In `apps/` (and, after the split, the `cyd-palm-apps` template):
   has a one-line contract saying what it clips, what it truncates, and what it
   returns on error (the §5.3 table, in the header's own words). The header is
   the authority, so the docs can't drift.
-- **Five example apps, from small to large**, each passing every gate:
+- **Five example apps, from small to large**, each inspected READY:
   `hello` (text and a button), `dice` (above), `counter` (state and a menu),
   `reader` (streams a text file from its folder a page at a time), and
   `sudoku` (a port of the built-in game, the reference for canvas grids,
   Graffiti digits and a play clock).
-- **`make new APP=<id>`** scaffolds a folder that already passes every gate.
-- **`make check APP=<id>`** runs G0–G5 locally in about a minute and prints
-  **one line per finding**, in compiler format (`file:line: gate: message`),
-  followed by `OK` or `FAIL gate G#`. It is built to be read by a tool loop.
+- **`make new APP=<id>`** scaffolds a folder that already inspects READY.
+- **`sdk/inspect.sh apps/<id> --quick`** runs G0–G5 in about a minute and
+  prints **one line per finding**, in compiler format
+  (`file:line: G#: message`), for the edit loop. The **full inspection**
+  (§7) is the last step: the AI runs it and hands you the report with the
+  pack. `AGENTS.md` says an app isn't done until the full report says READY.
 - **`make shots APP=<id>`** renders the app's tour to PNGs, so an AI can look
   at what it built.
 - **A chat-only path:** push only `app.c` (and optional `logic.*`) to a
-  branch. CI runs every gate and attaches screenshots and an unsigned test
-  pack to the run. Tagging `app-<id>-vX.Y` produces the signed pack.
+  branch. CI runs the full inspection and attaches the report, the
+  screenshots and the pack to the run.
 
 ---
 
-## 7) The validation pipeline
+## 7) The inspection process
 
-Every gate runs in CI through **one reusable workflow**,
-`.github/workflows/validate-app.yml` (`workflow_call`). `apps.yml` calls it
-today; after the split, `cyd-palm-apps` calls it pinned to its `sdk-vA.B`
-tag. All apps get the same checks. G0–G5
-also run locally with `make check`.
+There is no signing and no on-device switch. The check is a **manual
+inspection**: before copying a pack to the card, you (or the AI that wrote
+it) run one command. It puts the app through every check below and prints a
+**plain-text report** saying whether it's ready and, if not, exactly what is
+wrong, where, and how to fix it. The device doesn't check whether a pack was
+inspected. Loading it is your call, made with the report in front of you.
 
-| Gate | What it runs | What it catches | Fails when |
+### 7.1 Running it
+
+```
+sdk/inspect.sh apps/dice              # full inspection: source + pack, stages G0–G7
+sdk/inspect.sh apps/dice --quick      # G0–G5 only, about a minute: the edit loop
+sdk/inspect.sh dice.pack              # a pack without its source: G6–G7 only
+```
+
+- `inspect.sh` runs inside the SDK's container image, which holds ESP-IDF
+  5.5, clang, cppcheck and Espressif QEMU. The only thing to install is
+  Docker; the same image runs in CI.
+- The report goes to the terminal and to `inspect-report.txt` next to the
+  pack.
+- **Exit code:** 0 = READY, 1 = NOT READY, 2 = INCOMPLETE. That lets an AI
+  author, or a CI job on `apps/` pull requests, act on the result without
+  parsing the text.
+- `--quick` prints findings one per line in compiler format
+  (`app.c:41: G2: …`), so an editor or tool loop can jump to them. The full
+  report comes from the full run.
+
+### 7.2 The stages
+
+| Stage | What it runs | What it catches | Error when |
 |---|---|---|---|
-| **G0 Policy lint** | `packlint --source`: includes, banned identifiers, globals, required files, manifest sanity | Out-of-profile code (§6.1) | Any violation |
-| **G1 Strict compile, twice** | Host `clang -m32` (32-bit, like the device) **and** Xtensa `gcc` (the IDF 5.5 toolchain) with `-std=c11 -Wall -Wextra -Wconversion -Wshadow -Wvla -Wformat=2 -Wcast-align -Wstrict-prototypes -Werror` | Truncation, sign mixups, shadowed state, misalignment | Any warning on either compiler |
-| **G2 Static analysis + stack bound** | `gcc -fanalyzer`, `cppcheck --enable=warning,portability`, `clang-tidy` (`bugprone-*`, `cert-*`, `clang-analyzer-*`); `stackcheck.py` over `.su` and `.ci` files | Null dereferences, out-of-bounds indexes, uninitialised reads; recursion; stack over 2 KB | Any finding not waived in `app.toml` with a reason; any call cycle; stack > budget |
-| **G3 Logic tests** | `test_logic.c` built with ASan + UBSan, **`-m32`** so type sizes and struct layout match the device | Wrong game rules and edge cases, before the UI is involved | Any failed check or sanitizer report |
-| **G4 Simulator under sanitizers** | The real firmware UI (`sim/`, 32-bit, LVGL pool and heap cap at device values) with the app compiled in through the same `palm_api.c`; **ASan + UBSan** (including `-fsanitize=alignment`). Runs (a) the app's scripted `tour.txt`, (b) **a monkey run**: 20,000 random pen, button, menu and char events across 8 fixed seeds, with open/close cycles, (c) **a state-file fuzz**: truncated, oversized and bit-flipped `state.bin` and data files fed to `OPEN` | Out-of-bounds reads and writes on app state, overflow UB, unaligned access (a hard fault on LX6), crashes on unexpected input order, trust in on-disk bytes, pointers passed to the API from outside the app's memory | Any sanitizer report, crash or hang (10 s per event); **any `PA_E_ARG` from the pointer check (§8.2)** |
-| **G5 Resource checks** (same runs) | The simulator records heap and pool before open and after close, the arena high-water mark, file bytes written, and timer rate | Leaks through the API, runaway writes, timer abuse | Heap or pool not back to baseline; writes over quota; state over declared size |
-| **G6 Pack build + binary lint** | Xtensa build → `mkpack` → `packlint --elf`: sections are only `.text .literal .rodata .data .bss .pa_desc`; **no undefined symbols except the allowed helpers**; sizes within budget; **an instruction scan** that rejects privileged and special-register instructions (`wsr`, `xsr`, `rsr` except `ccount`, `wer`, `rer`, `rsil`, `waiti`, and others) and literal-pool constants that point into peripheral (`0x3FF0_0000`–`0x3FF7_FFFF`, `0x6000_0000`+), ROM or firmware code ranges | Hardware access and firmware calls that bypass the API, whether by accident or by an AI "helpfully" optimising | Any disallowed section, symbol, instruction or address constant |
-| **G7 QEMU on the real loader** | A devtools firmware build (`CONFIG_CYD_DEVTOOLS`) in Espressif QEMU. The pack is placed in a test-only FAT partition in flash (QEMU has no SD card). The app's tour is replayed through the devtools input hook. The run records heap before and after, IRAM use, the app's stack high-water mark, and `ccount` cycles per event | Relocation and loader bugs, IRAM placement faults (byte access to `.text`), real Xtensa behaviour, and events that are too slow | A panic or watchdog reset; heap not restored; stack > 2 KB; any event > 50 ms at 240 MHz |
-| **G8 Sign** (release job only) | Every gate above passed on this commit → sign with the release key → attach `<id>-vX.Y.pack` to a release | — | Only runs on a protected tag |
+| **G0 Rules** | `packlint --source`: includes, banned identifiers, globals, required files, manifest | Code outside the Palm C profile (§6.1) | Any rule broken |
+| **G1 Compile, twice** | Host `clang -m32` (32-bit, like the device) **and** Xtensa `gcc` (the IDF 5.5 toolchain) with `-std=c11 -Wall -Wextra -Wconversion -Wshadow -Wvla -Wformat=2 -Wcast-align -Wstrict-prototypes` | Truncation, sign mix-ups, shadowed state, misalignment | Any warning on either compiler |
+| **G2 Static analysis + stack bound** | `gcc -fanalyzer`, `cppcheck --enable=warning,portability`, `clang-tidy` (`bugprone-*`, `cert-*`, `clang-analyzer-*`); `stackcheck.py` over `.su` and `.ci` files | Null dereferences, out-of-bounds indexes, uninitialised reads; recursion; stack over 2 KB | Any finding not waived in `app.toml` with a reason (a waived one is a warning); any call cycle; stack over budget |
+| **G3 Logic tests** | `test_logic.c` with ASan + UBSan, `-m32` | Wrong rules and edge cases, before the UI is involved | Any failed check or sanitizer report |
+| **G4 Simulator run** | The real firmware UI (`sim/`, 32-bit, LVGL pool and heap cap at device values), with the app compiled in through the same `palm_api.c`, under **ASan + UBSan** (including `-fsanitize=alignment`). Runs: (a) the app's `tour.txt`; (b) **a monkey run**, 20,000 random pen, button, menu and character events across 8 fixed seeds, with open/close cycles; (c) **a file fuzz**, where truncated, oversized and bit-flipped `state.bin` and data files are fed to `OPEN` | Out-of-bounds access on app state, overflow UB, unaligned access (a hard fault on LX6), crashes on unexpected input order, trusting bytes on disk, pointers passed to the API from outside the app's memory | Any sanitizer report, crash or hang (10 s per event); **any `PA_E_ARG` from the pointer check (§8.2)** |
+| **G5 Resources** (same runs) | Heap and LVGL pool before open and after close; arena high-water mark; bytes written; timer rate | Leaks through the API, runaway writes, timer abuse | Heap or pool not back to baseline; any limit in §5.4 exceeded. **Warning** above 80 % of any limit |
+| **G6 Binary scan** | Xtensa build → `mkpack` → `packlint --elf`: sections limited to `.text .literal .rodata .data .bss .pa_desc`; **no undefined symbols beyond the allowed helpers**; sizes within budget; **an instruction scan** for privileged and special-register instructions (`wsr`, `xsr`, `rsr` other than `ccount`, `wer`, `rer`, `rsil`, `waiti`, …); literal-pool constants pointing into peripheral (`0x3FF0_0000`–`0x3FF7_FFFF`, `0x6000_0000`+), ROM, flash-mapped or firmware code ranges | Hardware access and firmware calls that bypass the API, whether by accident or by an AI "helpfully" optimising | Any disallowed section, symbol, instruction or address constant |
+| **G7 Emulator on the real loader** | A devtools firmware build (`CONFIG_CYD_DEVTOOLS`) in Espressif QEMU. The pack sits in a test-only FAT partition in flash, since QEMU has no SD card. The tour is replayed through the devtools input hook (a pack-only inspection uses a generic monkey tour). Records heap before and after, IRAM use, the stack high-water mark, and `ccount` cycles per event | Relocation and loader bugs, IRAM placement faults (byte access to `.text`), real Xtensa behaviour, slow events | A panic or watchdog reset; heap not restored; stack over 2 KB; any event over 50 ms at 240 MHz. **Warning** above 20 ms |
 
-**Why G4 and G7 are both needed.** The sanitizers work only on the host. They
-catch memory bugs in the app's own code, which is where AI-written C goes
-wrong. QEMU exercises the parts the host can't: the loader, relocations, IRAM
-rules and real Xtensa timing. Neither one alone is enough.
+**Why both G4 and G7 are needed.** The sanitizers only work on the host.
+They catch memory bugs in the app's own code, which is where AI-written C
+goes wrong. QEMU exercises what the host can't: the loader, relocations,
+IRAM rules and real Xtensa timing.
 
-**Things this pipeline can't prove, stated so nobody assumes it does:** that
-the app has no bug on an input path none of the tour, monkey or fuzz runs
-reached, and that a *deliberately* malicious pack is harmless (§9).
+### 7.3 Severities and verdicts
+
+| Severity | Meaning |
+|---|---|
+| **ERROR** | Would crash the app, corrupt memory or saved data, break a rule the device relies on, or exceed a limit the loader or the guards in §8 enforce. |
+| **WARNING** | Within the limits but close to one (over 80 %), a static-analysis finding waived with a reason, an event over 20 ms, or a tour that never reaches one of the app's buttons or menu items. |
+| **NOTE** | Information only, such as the measurements. |
+
+| Verdict | When | Exit |
+|---|---|---|
+| **READY** | Every stage ran; no errors or warnings. | 0 |
+| **READY, WITH WARNINGS** | Every stage ran; no errors. Read the warnings. | 0 |
+| **NOT READY** | At least one error. Don't copy the pack to the card. | 1 |
+| **INCOMPLETE** | A stage couldn't run: no source, a tool missing, QEMU unavailable. The report names each stage and the reason. Treat as not ready. | 2 |
+
+### 7.4 What a report looks like
+
+```
+PALM APP INSPECTION REPORT
+==========================
+App        com.example.dice  "Dice"  version 1.0   API 1.0
+Pack       apps/dice/dice.pack   18,432 bytes
+SHA-256    3f9a0c1e7b2d…c21e      (About Dice on the device shows 3f9a0c1e7b2d)
+Inspected  2026-10-02 14:31 UTC, SDK sdk-v1.0 (a1b2c3d), full run
+
+VERDICT: NOT READY -- 2 errors, 1 warning. Do not copy this pack to the card.
+
+STAGES
+  G0 Rules                  PASS
+  G1 Compile (host, ESP32)  PASS
+  G2 Static analysis        FAIL   1 error
+  G3 Logic tests            PASS   14 checks
+  G4 Simulator run          FAIL   1 error
+  G5 Resources              WARN   1 warning
+  G6 Binary scan            PASS
+  G7 Emulator (QEMU)        PASS   worst event 3.1 ms, stack 1,204 B
+
+ERRORS
+  E1  G2  app.c:41  Out-of-bounds write
+      S.face[i] is written with i up to 3; face has 3 elements (0..2).
+      Why it matters: it overwrites the next field of the state struct,
+      which is then saved to the card.
+      Fix: keep S.n <= 3 where it is set from the button id (app.c:52),
+      or size face[] to the largest n.
+
+  E2  G4  app.c:41  AddressSanitizer: global-buffer-overflow, WRITE of size 1
+      Monkey run, seed 5, event 1,882 (BUTTON id 3). Same cause as E1.
+      Reproduce: sdk/inspect.sh apps/dice --replay monkey:5:1882
+
+WARNINGS
+  W1  G5  Arena use 23.1 KB of 24 KB (96 %).
+      Fix: nothing needed now; a bigger board size would not fit.
+
+NOT CHECKED
+  (nothing -- every stage ran)
+
+MEASUREMENTS
+  code 3,140 B / 24 KB   data 212 B / 16 KB   arena 23.1 KB / 24 KB
+  stack 1,204 B / 2 KB   worst event 3.1 ms / 50 ms
+  files written 0 B / 256 KB   heap after close = heap before (0 B leaked)
+```
+
+Every finding has the same four parts: **where** (stage, file and line),
+**what** (one line), **why it matters on this device**, and **how to fix it**,
+or how to reproduce it when the cause isn't obvious. That's what makes the
+report usable by a person reading it and by an AI told to "fix what the
+report says". The SHA-256 lets you confirm that the pack on the card is the
+one that was inspected: **About <app>** on the device shows the first 12
+characters.
+
+**What the inspection can't prove:** that there's no bug on an input path the
+tour, monkey and fuzz runs never reached, or that a *deliberately* malicious
+pack is harmless (§9). The report states both on every run, under NOT
+CHECKED.
 
 ---
 
@@ -646,8 +725,10 @@ finding it. These are listed in the order they'd be built.
 *mistakes* can't leak a password: there is none in RAM to overrun into, and
 the API refuses to read from memory the app doesn't own. They don't stop a
 *deliberately* malicious pack from calling the flash-read routines at a
-computed address. For that, the only protection is signing (§4.4): CI signs
-only packs that passed G6, and the device loads only signed packs.
+computed address. Against that, the only line is the inspection's binary
+scan (G6), which looks for exactly those address constants and special
+instructions. It runs only if you run it, and a determined author can
+compute an address at run time rather than store it.
 
 ---
 
@@ -660,14 +741,16 @@ only packs that passed G6, and the device loads only signed packs.
 | App that fills the SD card or damages its own state | Yes | Write quota; `safefile`; `pa_state_*` CRC and version |
 | App that crashes at boot and leaves the device in a loop | Yes | Crash flag → quarantine → boot to launcher |
 | Firmware update that breaks an installed app | Yes | API versioning, ABI freeze file, app compatibility gate |
-| Tampered or corrupted pack on the card | Yes | SHA-256 plus signature; refused unless in Developer Mode |
+| Corrupted pack on the card | Yes | SHA-256 checked before loading |
+| Pack on the card isn't the one that was inspected | Yes, by the user | The report's SHA-256 against **About <app>** (§7.4) |
 | Buggy app leaking a password by accident (reading past its buffer, or handing the API a wild pointer) | Yes | Passwords out of resident RAM, the heap scrubbed before open, zeroed app memory, pointer checks on every API argument (§8.2) |
 | App tricking the user into typing a password | Yes | The firmware-owned title bar; no password-field widget in the API (§8.2) |
-| **Malicious pack reading the NVS passwords** | **No: mitigated, not prevented** | Signing (only CI-validated packs load by default), the G6 instruction and address scan, and §8.2 make it hard. A determined author can still compute flash-read addresses at run time. **The plain ESP32 can't isolate an app from the firmware, and flash encryption has been ruled out (§11).** |
+| **Malicious pack reading the NVS passwords** | **No: mitigated, not prevented** | The G6 instruction and address scan (if the pack is inspected) and §8.2 make it hard. The device loads any well-formed pack. A determined author can still compute flash-read addresses at run time. **The plain ESP32 can't isolate an app from the firmware, and flash encryption has been ruled out (§11).** |
 
-**The rule for users:** install only packs that you or your own AI wrote, or
-that come signed from the apps repo. The Developer Mode warning says the
-same thing.
+**The rule for users:** put a pack on the card only if you or your own AI
+wrote it **and** its full inspection report says READY (or READY, WITH
+WARNINGS, once you've read the warnings), and the SHA-256 in **About <app>**
+matches the report.
 
 ---
 
@@ -692,8 +775,8 @@ numbers are what we keep.
     (IRAM doesn't touch the data heap, confirming the earlier 16 KB result).
   - The data heap and IRAM are fully restored after unload across 50
     load/unload cycles.
-  - The time to verify an ECDSA P-256 signature is measured, as is the time
-    to load a 24 KB pack from flash (from SD is estimated).
+  - The time to hash and load a 24 KB pack from flash is measured (from SD
+    is estimated).
   - The main-task stack high-water mark during an app call is measured, which
     confirms or revises the 2 KB app budget.
 
@@ -706,9 +789,6 @@ numbers are what we keep.
   `0.x`), the ABI freeze script, and `abicheck` in CI.
 - **Licences:** `sdk/LICENSE` and `apps/LICENSE` (MIT), the additional
   permission for apps in `NOTICE` (§11), and SPDX headers in the new files.
-- **Signing keys:** generate the P-256 pair, put the public half in `sdk/keys/`,
-  and create the `app-signing` environment holding the private half.
-  `mkpack --sign` and `--verify` exist from here, before any loader.
 - **Secrets out of resident RAM** (§8.2, first item). This is firmware work
   that is worth doing whether or not apps ship, so it goes first; it has its
   own simulator and device checks.
@@ -723,40 +803,46 @@ numbers are what we keep.
 - A simulator "app host" mode: `make -C sim app APP=path/to/app`, which
   compiles the app into the simulator and opens it from More.
 - Tools: `mkpack.py`, `packlint.py` (source and ELF passes), `stackcheck.py`,
-  the monkey and fuzz drivers.
-- Examples in `apps/`: `hello`, `dice`, `counter`. `make check` passes on all
-  three, and `apps.yml` builds a **signed** pack of each on an `app-*` tag.
-- **Exit:** all three examples pass G0–G5 locally and in CI, and the Sudoku
-  port compiles against the API (it doesn't have to pass yet).
+  the monkey and fuzz drivers, and **`inspect.sh` with its report writer**
+  (§7.3–7.4). G7 shows as NOT CHECKED until Phase 3.
+- Examples in `apps/`: `hello`, `dice`, `counter`.
+- **A set of known-bad apps** in `sdk/tests/bad/` (an overrun, an off-by-one
+  string, a use of `double`, recursion, an infinite loop, an unaligned read,
+  a wild pointer passed to `pa_file_write`, a peripheral address constant).
+  Each one must make the inspection report the right error, at the right
+  file and line. This tests the inspector itself.
+- **Exit:** the three examples come back READY from G0–G6; every known-bad
+  app comes back NOT READY with the expected finding; the Sudoku port
+  compiles against the API (it doesn't have to pass yet).
 
 ### Phase 3 — Device app host
 
-- `apphost.c` and `packfmt.c`: verify, load, run, unload, the guards and
-  protections from §8, quarantine, crash log, Developer Mode, and the
-  release public keys.
+- `apphost.c` and `packfmt.c`: check, load, run, unload, the guards and
+  protections from §8, quarantine, the crash log, and the SHA-256 in
+  **About <app>**.
 - The More folder lists `/sdcard/apps/*/app.pack` tiles from their headers.
-- G7 (QEMU on the real loader) goes into CI.
+- G7 (QEMU on the real loader) goes into the inspection.
 - **Exit:** the three examples pass G7. A deliberately broken test pack (an
   overrun, an infinite loop, a null dereference) is **quarantined, and the
-  device boots to the launcher** in QEMU. A pack whose signature is wrong is
-  refused. Heap after 50 open/close cycles is equal to heap at boot. A test
+  device boots to the launcher** in QEMU. A pack with one byte changed
+  (SHA-256 mismatch) is refused. Heap after 50 open/close cycles is equal to heap at boot. A test
   pack that passes a firmware address to `pa_file_write` gets `PA_E_ARG` and
   is quarantined, and no file is written.
 
 ### Phase 4 — Prove the API, then freeze it
 
 - Add `reader` and the `sudoku` port to `apps/`, plus `AGENTS.md`,
-  `CLAUDE.md`, `make new`, `make check` and `make shots`.
+  `CLAUDE.md`, `make new` and `make shots`.
 - **Test the docs on AI authors:** a fresh Claude Code session, given only
   `apps/`, `sdk/` and a one-paragraph app idea, produces an app that passes
-  every gate **without human edits**. Try three different ideas. Any failure
+  a full inspection with a READY verdict **without human edits**. Try three different ideas. Any failure
   is a gap in the docs or SDK, and gets fixed there, not in the app.
 - Review §5.3 with what the five examples and three AI-written apps actually
   called. Drop unused slots, add anything that was missing, then freeze
   **`sdk-v1.0`**: API `1.0` and `abi/pa_api_v1.txt`. Add the app
   compatibility gate to `ci.yml`.
-- **Exit:** `sdk-v1.0` is tagged, and every app in `apps/` has a signed
-  release built against it.
+- **Exit:** `sdk-v1.0` is tagged, and every app in `apps/` has a release
+  built against it, with a READY report attached.
 
 ### Phase 5 — On glass, then split the repo
 
@@ -765,8 +851,7 @@ numbers are what we keep.
   quarantine path after a real panic, and the Sudoku port's speed next to
   the built-in game. Record them in `BUILD_PROGRESS.md`.
 - **Split:** move `apps/` to `cyd-palm-apps` with its history, add
-  `palm-sdk.lock` pinned to `sdk-v1.0`, move the `app-signing` secret there,
-  and point the compatibility gate at the new repo. `apps/` leaves this repo.
+  `palm-sdk.lock` pinned to `sdk-v1.0`, and point the compatibility gate at the new repo. `apps/` leaves this repo.
 - **Exit:** a pack released from `cyd-palm-apps` installs and runs on the
   bench device, and a firmware PR here runs that repo's apps in its
   compatibility gate.
@@ -794,9 +879,12 @@ numbers are what we keep.
    PumpkinOS-derived fonts and icons are data that apps never link against
    or receive. Have the exact wording checked before the first `app-*`
    release.
-3. **Signing from the first pack.** The keys and `mkpack --sign` come in
-   Phase 1, before the loader exists (§4.4). Developer Mode is still there
-   for testing, off by default, and turns itself off after 24 hours.
+3. **No signing, no Developer Mode.** *(Revised 2026-09-27; the first
+   answer was "signing from the first pack".)* Apps are checked by a
+   **manual inspection** that prints a text report of any issues (§7). The
+   device loads any well-formed pack. It checks the pack's structure,
+   SHA-256 and API version, and the guards in §8 still run, but it doesn't
+   know or care whether the pack was inspected.
 4. **API list:** proposed in §5.3 (36 slots) with budgets in §5.4 and
    exclusions in §5.5. **Still open for your review.** It is reviewed again
    against real use before the freeze (Phase 4).

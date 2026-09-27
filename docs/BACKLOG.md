@@ -417,7 +417,7 @@ follow-ups*.
 
 ### App platform
 Native C apps loaded from the SD card, with their own SDK, versioning and a
-validation pipeline before they reach the device: **`APP_PLATFORM_PLAN.md`**
+a manual inspection that reports any issues before they reach the device: **`APP_PLATFORM_PLAN.md`**
 (phases 0–5; decisions recorded 2026-09-27 in its §11, the v1 API list in §5
 awaiting review).
 
