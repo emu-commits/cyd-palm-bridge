@@ -37,7 +37,7 @@
   API's major version changes, and the device says so when it does.
 - **AI-authorable.** An AI with tools (like a Claude Code session) can write,
   build, test and package an app on its own. A chat-only AI can write the
-  source, and a GitHub Action does the rest.
+  source, and one local command does the rest (§7.1).
 - **Inspected before it runs.** Before a pack goes on the card, one command
   puts it through a fixed series of memory-safety and behaviour checks and
   prints a plain-text report of any issues (§7). There is no signing; the
@@ -155,20 +155,21 @@ repo:
 | Path | Holds | Licence | CI | Releases |
 |---|---|---|---|---|
 | `firmware/`, `sim/`, `bridge/` | As today | As today (firmware GPLv3) | `ci.yml`, as today | `vX.Y.Z` tags |
-| `sdk/` | `palm_app.h`, linker script, build rules, `mkpack`, `packlint`, `stackcheck`, `inspect.sh` and its container image, the ABI freeze file, `docs/` | **MIT** (§11) | `ci.yml` (ABI check) plus `apps.yml` | `sdk-vA.B` tags once frozen |
-| `apps/` | One folder per app, `AGENTS.md`/`CLAUDE.md` for AI authors, the examples | **MIT** (§11) | **`apps.yml`**, triggered only by changes under `apps/**` or `sdk/**`, running the inspection on changed apps | **`app-<id>-vX.Y`** tags → a release carrying the `.pack` and its `inspect-report.txt` |
+| `sdk/` | `palm_app.h`, linker script, build rules, `mkpack`, `packlint`, `stackcheck`, the `palm-inspect` wrapper and `inspector/Dockerfile`, the ABI freeze file, `docs/` | **MIT** (§11) | `ci.yml` (ABI check only) | `sdk-vA.B` tags once frozen, each with its inspector image digest |
+| `apps/` | One folder per app, `AGENTS.md`/`CLAUDE.md` for AI authors, the examples | **MIT** (§11) | **None.** Apps are inspected on your own computer with `palm-inspect` (§7.1) | **None needed.** An app's `out/` folder is what goes on the card. Keeping an app here is optional; if you do, commit its `inspect-report.txt` beside the source |
 
 Two rules keep the later split cheap:
 - **Nothing in `apps/` includes anything outside `sdk/`.** `packlint`
   enforces it (G0), so an app never picks up a firmware header by accident.
-- **`apps.yml` builds the SDK from `sdk/` and the simulator from the same
-  commit**, exactly as the external repo will do from a pinned tag.
+- **The inspector uses its own pinned copy of the SDK and simulator**, never
+  whatever happens to be checked out, so an app inspects the same way before
+  and after the split.
 
 **At `sdk-v1.0`** (Phase 5), `apps/` moves to a new template repo,
 **`cyd-palm-apps`**, with its history (`git filter-repo --subdirectory-filter
-apps`). It gets a `palm-sdk.lock` file naming the `sdk-vA.B` tag, and its CI
-checks out this repo at that tag for the SDK, simulator and tools. Moving an app to a newer SDK then becomes a
-one-line PR that bumps the lock file.
+apps`). Each app's `app.toml` already names its `sdk-vA.B`, and
+`palm-inspect` picks the inspector image for that version. Moving an app to
+a newer SDK means changing that one line and inspecting again.
 
 ### 4.2 Three version numbers, and what each one promises
 
@@ -193,9 +194,10 @@ system"), and the app isn't loaded.
   every public struct at compile time for Xtensa, so a layout drift fails the
   firmware build, not a user's app.
 - **App compatibility gate.** On any PR that touches `sdk/`, `palm_api.c` or
-  `apphost.c` (and nightly), CI builds every app at its latest `app-*` tag
-  (after the split: every app in `cyd-palm-apps` at its released tag), then
-  runs their tours against the new firmware in the simulator. This gate is what makes the split safe: a
+  `apphost.c` (and nightly), CI builds every app in `apps/` (after the
+  split: every app in `cyd-palm-apps`, fetched read-only), then runs their
+  tours against the new firmware in the simulator. It runs for **firmware**
+  changes only; nothing about writing or inspecting an app triggers it. This gate is what makes the split safe: a
   firmware change can't quietly break an installed app.
 - **Deprecation, not deletion.** A slot that is no longer wanted keeps working
   and is marked `PA_DEPRECATED` until the next major version.
@@ -602,16 +604,16 @@ In `apps/` (and, after the split, the `cyd-palm-apps` template):
 - **`make new APP=<id>`** scaffolds a folder that already inspects READY:
   `app.c`, `logic.c`/`logic.h`, `test_logic.c`, `tour.txt`, `app.toml`
   (description and waivers), a placeholder `icon.png` and an empty `data/`.
-- **`sdk/inspect.sh apps/<id> --quick`** runs G0–G5 in about a minute and
+- **`palm-inspect <folder> --quick`** runs G0–G5 in about a minute and
   prints **one line per finding**, in compiler format
   (`file:line: G#: message`), for the edit loop. The **full inspection**
   (§7) is the last step: the AI runs it and hands you the report with the
   pack. `AGENTS.md` says an app isn't done until the full report says READY.
 - **`make shots APP=<id>`** renders the app's tour to PNGs, so an AI can look
   at what it built.
-- **A chat-only path:** push only `app.c` (and optional `logic.*`) to a
-  branch. CI runs the full inspection and attaches the report, the
-  screenshots and the pack to the run.
+- **A chat-only path:** save the AI's files into a folder (or keep its zip)
+  and run `palm-inspect` on it. Nothing is committed or pushed; paste the
+  report back to the AI if it needs fixing.
 
 ---
 
@@ -624,26 +626,95 @@ it) run one command. It puts the app through every check below and prints a
 wrong, where, and how to fix it. The device doesn't check whether a pack was
 inspected. Loading it is your call, made with the report in front of you.
 
-### 7.1 Running it
+**The inspection runs on your own computer** (decided 2026-09-27). Checking
+an app never needs a commit, a push, or a GitHub Actions run in this repo.
+The app can live in any folder, including one that was never in git.
+
+### 7.1 The inspector
+
+The inspector is one container image, **`palm-inspect`**, holding everything
+the stages need, pinned to one SDK version:
+- ESP-IDF 5.5 and its Xtensa toolchain;
+- clang, cppcheck and clang-tidy;
+- Espressif QEMU;
+- the simulator source and LVGL at the SDK's tag;
+- a **prebuilt devtools firmware image** for G7.
+
+Nothing is fetched while an inspection runs.
 
 ```
-sdk/inspect.sh apps/dice              # full inspection: source + pack, stages G0–G7
-sdk/inspect.sh apps/dice --quick      # G0–G5 only, about a minute: the edit loop
-sdk/inspect.sh dice.pack              # a pack without its source: G6–G7 only
+palm-inspect ~/apps/dice              # full inspection, G0–G7; writes ~/apps/dice/out/
+palm-inspect ~/apps/dice --quick      # G0–G5, about a minute: the edit loop
+palm-inspect ~/apps/dice.zip          # the same, from a zip (for example, from a chat)
+palm-inspect --check dice.pack        # an existing pack: header, SHA-256, G6, G7
+palm-inspect --verify ~/apps/dice out/com.example.dice/app.pack
+                                      # rebuild from source; does it match this pack?
 ```
 
-- `inspect.sh` runs inside the SDK's container image, which holds ESP-IDF
-  5.5, clang, cppcheck and Espressif QEMU. The only thing to install is
-  Docker; the same image runs in CI.
-- The report goes to the terminal and to `inspect-report.txt`. The pack and
-  a copy of the app's `data/` go to `out/<app-id>/`, the folder you copy to
-  `/sdcard/apps/` (§5.7).
-- **Exit code:** 0 = READY, 1 = NOT READY, 2 = INCOMPLETE. That lets an AI
-  author, or a CI job on `apps/` pull requests, act on the result without
-  parsing the text.
-- `--quick` prints findings one per line in compiler format
-  (`app.c:41: G2: …`), so an editor or tool loop can jump to them. The full
-  report comes from the full run.
+`palm-inspect` is a small wrapper script (`sdk/palm-inspect` for macOS and
+Linux, `sdk/palm-inspect.ps1` for Windows). It runs the image with the
+settings below, so nobody has to remember them. The only thing to install is
+**Docker**.
+
+**What makes it foolproof:**
+
+| Property | How |
+|---|---|
+| **No repo, no Actions** | The app folder is mounted into a local container. Nothing is committed, pushed or uploaded. |
+| **Can't change your files** | The app folder is mounted **read-only**. The only thing written is a new `out/` folder beside it. |
+| **Nothing leaves the machine** | The container runs with **networking off** (`--network none`). An app's build can't download anything, and your code can't be sent anywhere. |
+| **Same answer every time, on every machine** | Everything is pinned inside the image. The report names the image's digest and SDK version, so two reports can be compared. |
+| **The pack is the one that was inspected** | **Only a full inspection writes a pack.** `--quick` doesn't, and the SDK has no separate "just build a pack" command. The pack is written only if the verdict is READY or READY WITH WARNINGS. A NOT READY run writes its report and no pack. |
+| **Reproducible packs** | The build is deterministic (fixed paths, fixed timestamps, sorted inputs), so the same source and inspector always give the **same SHA-256**. `--verify` rebuilds and compares, so anyone can confirm a pack came from that source. |
+| **The report can't be mixed up** | The report records the inspector's image digest, the SDK version, a hash of every input file, and the pack's SHA-256. **About <app>** on the device shows the same SHA-256. |
+| **Hard to run the wrong version** | The app's `app.toml` names its SDK version, and the wrapper refuses to inspect with a different one. It says which image to use instead. |
+
+**Output:**
+
+```
+~/apps/dice/out/
+  inspect-report.txt        the report (§7.4)
+  com.example.dice/         copy this whole folder to /sdcard/apps/
+    app.pack
+    data/…
+  shots/                    PNGs of the tour, to see what was tested
+```
+
+**Exit code:** 0 = READY (with or without warnings), 1 = NOT READY,
+2 = INCOMPLETE. An AI author can act on the result without parsing the text.
+`--quick` prints findings one per line in compiler format
+(`app.c:41: G2: …`) so an editor or tool loop can jump to them. The full
+report comes from the full run.
+
+**Getting the image** doesn't involve Actions either:
+- **Build it locally:** `make -C sdk inspector` builds the image from
+  `sdk/inspector/Dockerfile` at the checked-out SDK tag. It needs a network
+  connection once, for the ESP-IDF base image and LVGL. It takes about half
+  an hour and a few GB of disk (the ESP-IDF image alone is several GB).
+- **Or pull a published one:** the maintainer builds it locally once per SDK
+  release and pushes it by hand to the GitHub container registry as
+  `ghcr.io/emu-commits/palm-inspect:sdk-vA.B`. Pulling a public image uses
+  no Actions minutes. The digest is recorded in the release notes, and the
+  wrapper checks it.
+- **Either way the result is the same image** (built from the same
+  Dockerfile at the same tag). Every report says which digest produced it.
+
+**Where it runs:**
+- Any Mac, Linux or Windows machine with Docker. The image is built for both
+  `amd64` and `arm64`, so Apple Silicon runs it natively. Phase 2 confirms
+  that Espressif's QEMU and toolchain run on `arm64`.
+- **An AI coding session with Docker**, like a Claude Code session, can run
+  it in its own sandbox. It writes the app, inspects it, fixes what the
+  report says, and hands over the report and the `out/` folder. This session
+  has Docker, so that path is available here.
+- **A chat-only AI:** save its files into a folder (or its zip) and run
+  `palm-inspect` on it yourself.
+
+**The browser "check a pack" page** stays a useful extra: it's static, it
+runs entirely in your browser, and nothing is uploaded. It checks a pack's
+header, icon, sizes and SHA-256, and runs the G6 binary scan. It can tell you
+whether a pack matches the SHA-256 in a report you have. It can't replace the
+inspector, so its verdict is always INCOMPLETE.
 
 ### 7.2 The stages
 
@@ -684,11 +755,13 @@ IRAM rules and real Xtensa timing.
 PALM APP INSPECTION REPORT
 ==========================
 App        com.example.dice  "Dice"  version 1.0   API 1.0
-Pack       apps/dice/dice.pack   18,432 bytes
+Pack       out/com.example.dice/app.pack   18,432 bytes
 SHA-256    3f9a0c1e7b2d…c21e      (About Dice on the device shows 3f9a0c1e7b2d)
-Inspected  2026-10-02 14:31 UTC, SDK sdk-v1.0 (a1b2c3d), full run
+Inspected  2026-10-02 14:31 UTC, full run, on this computer (network off)
+Inspector  palm-inspect sdk-v1.0  sha256:9c41e0…77ab
+Source     ~/apps/dice  12 files, tree hash 5d2e81…04fa
 
-VERDICT: NOT READY -- 2 errors, 1 warning. Do not copy this pack to the card.
+VERDICT: NOT READY -- 2 errors, 1 warning. No pack was written.
 
 STAGES
   G0 Rules                  PASS
@@ -710,7 +783,7 @@ ERRORS
 
   E2  G4  app.c:41  AddressSanitizer: global-buffer-overflow, WRITE of size 1
       Monkey run, seed 5, event 1,882 (BUTTON id 3). Same cause as E1.
-      Reproduce: sdk/inspect.sh apps/dice --replay monkey:5:1882
+      Reproduce: palm-inspect ~/apps/dice --replay monkey:5:1882
 
 WARNINGS
   W1  G5  Arena use 23.1 KB of 24 KB (96 %).
@@ -929,8 +1002,14 @@ numbers are what we keep.
 - A simulator "app host" mode: `make -C sim app APP=path/to/app`, which
   compiles the app into the simulator and opens it from More.
 - Tools: `mkpack.py`, `packlint.py` (source and ELF passes), `stackcheck.py`,
-  the monkey and fuzz drivers, and **`inspect.sh` with its report writer**
-  (§7.3–7.4). G7 shows as NOT CHECKED until Phase 3.
+  the monkey and fuzz drivers, and **the inspector**: `sdk/inspector/Dockerfile`,
+  the `palm-inspect` wrappers (shell and PowerShell), the report writer
+  (§7.3–7.4), reproducible pack builds, and `--verify`. G7 shows as NOT
+  CHECKED until Phase 3.
+- **Check the foolproofing:** the inspector runs with networking off and the
+  app folder read-only; two inspections of the same source on different
+  machines (one `amd64`, one `arm64`) give the same pack SHA-256; a NOT READY
+  run writes no pack.
 - Examples in `apps/`: `hello`, `dice`, `counter`.
 - **A set of known-bad apps** in `sdk/tests/bad/` (an overrun, an off-by-one
   string, a use of `double`, recursion, an infinite loop, an unaligned read,
@@ -967,8 +1046,10 @@ numbers are what we keep.
   called. Drop unused slots, add anything that was missing, then freeze
   **`sdk-v1.0`**: API `1.0` and `abi/pa_api_v1.txt`. Add the app
   compatibility gate to `ci.yml`.
-- **Exit:** `sdk-v1.0` is tagged, and every app in `apps/` has a release
-  built against it, with a READY report attached.
+- Build the `sdk-v1.0` inspector image, push it by hand to the GitHub
+  container registry, and record its digest in the tag's notes.
+- **Exit:** `sdk-v1.0` is tagged, and every app in `apps/` inspects READY
+  with the published `sdk-v1.0` inspector, its report committed beside it.
 
 ### Phase 5 — On glass, then split the repo
 
@@ -978,8 +1059,8 @@ numbers are what we keep.
   the built-in game. Record them in `BUILD_PROGRESS.md`.
 - **Split:** move `apps/` to `cyd-palm-apps` with its history, add
   `palm-sdk.lock` pinned to `sdk-v1.0`, and point the compatibility gate at the new repo. `apps/` leaves this repo.
-- **Exit:** a pack released from `cyd-palm-apps` installs and runs on the
-  bench device, and a firmware PR here runs that repo's apps in its
+- **Exit:** an app from `cyd-palm-apps`, inspected on a laptop with the
+  published inspector, installs and runs on the bench device, and a firmware PR here runs that repo's apps in its
   compatibility gate.
 
 ### Later (not planned yet)
@@ -1003,8 +1084,7 @@ numbers are what we keep.
    distributed under any licence. This permission can only come from the
    copyright holder, and only for the code the project owns. The
    PumpkinOS-derived fonts and icons are data that apps never link against
-   or receive. Have the exact wording checked before the first `app-*`
-   release.
+   or receive. Have the exact wording checked before the first app is shared.
 3. **No signing, no Developer Mode.** *(Revised 2026-09-27; the first
    answer was "signing from the first pack".)* Apps are checked by a
    **manual inspection** that prints a text report of any issues (§7). The
@@ -1024,3 +1104,9 @@ numbers are what we keep.
    The list is reviewed again against real use before the freeze (Phase 4).
 5. **No flash or NVS encryption.** Protection comes from the API and the
    firmware instead (§8.2). What that can't prevent is stated in §9.
+6. **Inspection runs locally.** Checking an app never needs a commit, a push
+   or a GitHub Actions run: `palm-inspect` runs one pinned container image
+   on your own computer, with networking off and the app folder read-only,
+   and only a passing full inspection writes a pack (§7.1). The inspector
+   image is built locally or pulled from the GitHub container registry,
+   where the maintainer pushes it by hand once per SDK release.
