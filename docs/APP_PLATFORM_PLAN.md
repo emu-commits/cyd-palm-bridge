@@ -285,7 +285,7 @@ frozen each slot has to be kept for good.
   | `PA_E_NOSPACE` | Over a quota |
   | `PA_E_LIMIT` | Too many of something |
   | `PA_E_IO` | The SD card failed |
-  | `PA_E_BUSY` | A picker or prompt is already open |
+  | `PA_E_BUSY` | A picker or prompt is already open, or the file is already open for writing |
 
 - **Text is UTF-8 in, Palm font out** (decided 2026-09-27). Apps pass UTF-8
   strings. The firmware draws them in the device's own 11 px Palm font,
@@ -375,12 +375,12 @@ slots were renumbered to keep related calls together.
 | 30 | `int32_t pa_state_load(void *buf, uint32_t len, uint16_t ver)` | Returns `len` on success. If the file is missing, is a different size or version, or fails its CRC, it returns an error and **leaves `buf` untouched**. |
 | 31 | `pa_err pa_state_save(const void *buf, uint32_t len, uint16_t ver)` | Crash-safe write (`safefile`) to `state.bin`, ≤ 4 KB. Can be called at any time, not only on close. Apps should save after any change worth keeping, because a battery pull sends no `PA_EV_CLOSE`. |
 | | **Files** (`PA_CAP_FILES`; see §5.7 for the folder rules) | |
-| 32 | `int32_t pa_file_open(const char *name, uint8_t mode)` | `PA_READ`, `PA_WRITE` (truncates) or `PA_APPEND`. A name is either `file` (the app's own files) or `data/file` (read-only); `file` matches `[a-z0-9._-]{1,31}`. At most 2 open at once. Returns a handle ≥ 0. |
+| 32 | `int32_t pa_file_open(const char *name, uint8_t mode)` | A name is either `file` (the app's own files) or `data/file` (read-only); `file` matches `[a-z0-9._-]{1,31}`. Modes: `PA_READ`; `PA_WRITE` (create or truncate); `PA_APPEND`; ★ **`PA_UPDATE`** (an existing file, read and write in place without truncating, for changing one record); ★ **`PA_REPLACE`** (crash-safe rewrite, see §5.8). Only `PA_READ` works in `data/`. **At most 4 open at once** (§5.8). A file can't be opened twice if either open writes to it (`PA_E_BUSY`). Returns a handle ≥ 0. |
 | 33 | `int32_t pa_file_read(int32_t h, void *buf, uint32_t len)` | Bytes read, 0 at the end of the file. |
 | 34 | `int32_t pa_file_write(int32_t h, const void *buf, uint32_t len)` | Bytes written. `PA_E_NOSPACE` if the app's own files would exceed **256 KB in total**. |
 | 35 | `pa_err pa_file_seek(int32_t h, uint32_t pos)` | |
 | 36 | `int32_t pa_file_size(int32_t h)` | |
-| 37 | `pa_err pa_file_close(int32_t h)` | The firmware closes any handles still open on unload. |
+| 37 | `pa_err pa_file_close(int32_t h)` | For a `PA_REPLACE` handle, this is the moment the new version replaces the old one. The firmware closes any handles still open on a normal unload; a `PA_REPLACE` file still open then is **discarded**, not swapped in. |
 | 38 | `pa_err pa_file_remove(const char *name)` | The app's own files only; `data/` gives `PA_E_DENIED`. |
 | 39 | `int32_t pa_file_list(uint8_t where, uint16_t index, char *name, uint16_t cap)` | The n-th file in `PA_DIR_OWN` or `PA_DIR_DATA`, or `PA_E_NOTFOUND` past the end. Only names that follow the rules are listed (§5.7). |
 | | **Memory** | |
@@ -425,7 +425,7 @@ like `sd_new`), and `playclock.h` (unchanged from the firmware).
 | State file | 4 KB |
 | The app's own files | 256 KB in total |
 | `data/` | Read-only; no quota |
-| Open files | 2 |
+| Open files | 4 (§5.8) |
 | Buttons / menu items / status slots | 4 / 6 / 2 |
 | Picker | 32 items, 24 bytes each |
 | Prompt | 64 bytes |
@@ -445,6 +445,9 @@ MicroPython option would have left.
 | Reminders that fire while the app is closed | Needs the firmware to own a schedule and a lock-screen notice. |
 | Write-only Memo and Date Book entries | Lower risk than reading PIM data, but still needs a consent design. |
 | A long-press event | Apps can build one from pen events and `pa_ticks_ms`. Add one if several apps do. |
+| The firmware's kana font (`PA_FONT_KANA`) | **1.1 candidate**, from the SRS backtest (§5.9). The 38 px hiragana and katakana font from the Kana trainer is already in flash, so exposing it costs no flash. It would let an app show kana as you type romaji. |
+| A count on the app's tile (`pa_badge`) | **1.1 candidate**, from the SRS backtest. The app leaves a number (for example, reviews due) that the More folder shows on its tile while the app is closed. The firmware only stores and draws a number. |
+| Handwritten kana input | **1.1 candidate**, from the SRS backtest. The firmware already checks kana strokes (`kana_write.c`). |
 | Sleep/wake events | Play clocks already work from `pa_now()`. |
 | A second timer, a sub-100 ms timer | No game needs it; it costs battery. |
 | Read-only PIM access (`PA_CAP_PIM_READ`) | Needs a consent prompt design, and a decision on what an app may see. |
@@ -500,7 +503,97 @@ MicroPython option would have left.
   also feeds truncated and damaged copies of those files to the app. It
   reports the total size of `data/` as a NOTE.
 
-### 5.8 An example
+### 5.8 Open files, and changing a file safely
+
+**Why 4, and why it's free.** The SD card is mounted with **6 file slots**
+(`max_files = 6` in `app_main.c`). ESP-IDF allocates all six when the card
+is mounted, so an open file costs no extra heap. The API reads and writes
+with plain POSIX calls, not `stdio`, so there's no extra buffer either.
+While an app is open, the firmware itself needs **at most 2** slots:
+- saving `state.bin` (`safefile`);
+- a line in `power.log` or `crash.log`.
+
+HotSync, which holds five, can't run while an app is open. That leaves
+**4 for the app**, and `apphost` keeps the 2 reserved: a fifth
+`pa_file_open` returns `PA_E_LIMIT`. The inspection reports the app's peak
+number of open files as a NOTE, and hitting the limit in any run as an ERROR
+at the line that opened the file.
+
+Two other ways were considered and not chosen:
+- **Keeping 2 and making apps close files between uses.** It works, but
+  every app has to plan its opens in phases, which is exactly the fussy
+  code AI authors get wrong.
+- **"Virtual" handles that the firmware closes and reopens behind the
+  app's back.** It hides the limit, but it makes the crash-safety rules
+  below much harder to keep.
+
+If an app ever needs more than 4, it closes a file it isn't using. For a
+file that is read only now and then, a `pa_file_open`/`pa_file_close` pair
+costs a few milliseconds.
+
+**`PA_UPDATE`: change a record in place.** Open an existing file, seek to
+record *n*, write it. It doesn't truncate and doesn't need a rewrite. The
+catch: a battery pull in the middle of a write can leave that one record
+half-written, so apps pair it with a checksum per record, or use the
+pattern below.
+
+**`PA_REPLACE`: a crash-safe rewrite.** The firmware writes to a hidden
+temporary file. It isn't listed, doesn't count as open twice, and counts
+against the quota only while it exists. `pa_file_close` swaps it in the way
+`safefile` does for `state.bin`, so at every instant the card holds either
+the whole old file or the whole new one. If the app is unloaded with the
+file still open, stops with `pa_fail`, crashes, or loses power, the old file
+is kept untouched.
+
+**The pattern for progress that must survive a battery pull**, in
+`AGENTS.md`:
+1. Keep the main data in one file (for example `srs.dat`, a record per item).
+2. Record each change by **appending** a few bytes to a log
+   (`PA_APPEND`, `srs.log`). An append that is cut off loses only the last
+   entry, which the app detects by its checksum and ignores.
+3. When the app opens, **fold the log into the main file**:
+   - read `srs.dat` and `srs.log`;
+   - write the result through a `PA_REPLACE` handle to `srs.dat`;
+   - close it, which swaps the new version in;
+   - then empty the log.
+
+   That's 3 files open at once, within the 4. Spread it across a few timer
+   ticks if the file is large.
+
+### 5.9 Backtest: a kanji SRS app
+
+To test the design, an Anki- or WaniKani-style kanji app was checked
+against it. It uses about 9,000 items (radicals, about 2,000 kanji, about
+6,500 words) from a preformatted file on the card.
+
+| Need | Limit | Result |
+|---|---|---|
+| Dataset, about 9,000 × 1–2 KB records, 10–20 MB | `data/`, no quota | Fits |
+| Review state, 9,000 × 8 B ≈ 72 KB, plus a log | The app's own files, 256 KB | Fits |
+| Code: SRS logic, drawing, record parsing | 24 KB | Fits easily |
+| Due list (up to 500 items), record and glyph buffers | 16 KB data + 24 KB arena | Fits |
+| Showing a card: read one record, draw it | 50 ms per event | Fits: a few ms of SD reading |
+| Finding due reviews: scan 72 KB of state | 50 ms per event | Fits, split over a few ticks at open (SD speed to be measured, Phase 5) |
+| Big kanji, reading, meaning, long mnemonic | 240×164 canvas | Fits: kanji as a 48–64 px bitmap, mnemonic paged with `pa_text_box` and `pa_scroll` |
+| Japanese text | Text folds to ASCII (§5.1) | Fits, **through the data file**: the preformatting script renders every Japanese string to a 1-bpp bitmap with a Japanese font (such as Noto Sans JP), and the app draws it with `pa_blit`. A 48 px kanji is 288 B; a four-character word at 32 px is 512 B. |
+| Typing answers | `pa_prompt` returns ASCII | Fits: the app converts romaji to kana with its own table (about 1 KB). Anki-style self-grading with buttons needs no typing at all. |
+| Progress that survives a battery pull | — | **Was a gap.** Now covered by `PA_UPDATE`, `PA_REPLACE` and the log pattern (§5.8). |
+| Dataset, state and log open together | 2 open files | **Was a gap.** Now 4 (§5.8). |
+| "42 reviews due" while the app is closed | Nothing | Not in v1; `pa_badge` is a 1.1 candidate (§5.5). |
+| Clock not set yet (`pa_now()` returns 0) | — | The app must not schedule, and should say to HotSync. |
+
+**Inspecting it:** ship a small sample dataset (say 50 items) in the app's
+`data/` so the inspection has real records to test with. The inspection's
+file fuzz proves that a damaged dataset can't crash the app, but it can't
+check the content of the full file copied onto the card later. A dataset
+checker in the app's `tools/` folder, run on the computer, covers that.
+
+**Content licensing:** WaniKani's item content and mnemonics belong to
+Tofugu, so an export is for personal use and can't be committed to
+`apps/`. KANJIDIC2 and JMdict (EDRDG, openly licensed) and KanjiVG are the
+open equivalents for an app that will be shared.
+
+### 5.10 An example
 
 **A complete app, to show the shape an AI should produce:**
 
@@ -900,7 +993,8 @@ finding it. These are listed in the order they'd be built.
    other `/`, no `..`), and the firmware builds the full path itself. There's
    no call that can reach `config.ini`, the Palm databases, another app's
    folder or `/sdcard/apps/` itself. `data/` is read-only, the app's own
-   files have a 256 KB quota, and `state.bin` and `app.pack` can't be opened
+   files have a 256 KB quota, 2 of the 6 file slots are always kept for the
+   firmware (§5.8), and `state.bin` and `app.pack` can't be opened
    directly (§5.7).
 7. **No way to fake the system UI.** The title bar always shows the pack's
    display name. `pa_alert`, `pa_confirm`, `pa_pick` and `pa_prompt` boxes
@@ -1098,6 +1192,10 @@ numbers are what we keep.
    - **Added:** `pa_text_box`, `PA_GRAY`, `pa_pick`, `pa_fail`,
      `pa_pref`/`pa_pref_str`, `pa_prompt`/`pa_prompt_text`, `pa_scroll`,
      the tile icon (§5.6) and the folder and data-file rules (§5.7).
+   - **Added after the SRS backtest (§5.9):** the `PA_UPDATE` and
+     `PA_REPLACE` file modes, and 4 open files instead of 2 (§5.8).
+     `PA_FONT_KANA`, `pa_badge` and handwritten kana are listed as 1.1
+     candidates.
    - **Considered and not added:** keeping the screen awake, and a backlight
      pulse.
 
