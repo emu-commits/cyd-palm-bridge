@@ -418,7 +418,8 @@ follow-ups*.
 ### App platform
 Native C apps loaded from the SD card, with their own SDK, versioning and a
 validation pipeline before they reach the device: **`APP_PLATFORM_PLAN.md`**
-(phases 0–5, with the decisions it needs listed in its §11).
+(phases 0–5; decisions recorded 2026-09-27 in its §11, the v1 API list in §5
+awaiting review).
 
 ## Parked — offered, NOT approved (do not build without a yes)
 
