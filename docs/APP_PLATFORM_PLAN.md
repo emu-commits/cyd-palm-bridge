@@ -87,10 +87,10 @@ it is marked as an estimate.
  SD card                             Firmware (factory partition)
  /sdcard/apps/                       ┌──────────────────────────────────────────┐
    dice/                             │ ui.c ── "More" folder (was "Games")      │
-     app.pack  ──── read, verify ──▶ │   built-ins: Mines Wordie Sudoku Zip …   │
-     icon.bin                        │   packs:     one tile per installed app   │
-     data/…   ◀── pa_file_* API ───  │                                          │
-     state.bin ◀─ pa_state_* API ──  │ apphost.c  verify → load → run → unload  │
+     app.pack  ──── read, check ───▶ │   built-ins: Mines Wordie Sudoku Zip …   │
+     data/…   ─── read-only ───────▶ │   packs:     one tile per installed app   │
+     notes.txt ◀── pa_file_* API ──  │                                          │
+     state.bin ◀─ pa_state_* API ──  │ apphost.c  check → load → run → unload   │
    crash.log                         │   ├─ packfmt.c   header + SHA-256        │
                                      │   ├─ loader      ELF relocation (IRAM)   │
                                      │   └─ guards      canaries, crash flag,   │
@@ -103,7 +103,8 @@ it is marked as an estimate.
 **Life of an app, on the device:**
 
 1. The **More** folder lists the built-in games plus each `/sdcard/apps/*/app.pack`.
-   To draw a tile it reads only the pack header (name, icon, API version).
+   To draw a tile it reads only the pack's 256-byte header (name, icon,
+   API version).
    Nothing is loaded yet.
 2. On tap, `apphost` **checks** the pack: magic, format version, API
    compatibility, size limits, and the SHA-256 (which catches a truncated or
@@ -215,8 +216,12 @@ offset  size  field
 84      4     ELF length
 88      32    SHA-256 of the ELF
 120     8     reserved (0)
-128     …     ELF (relocatable, Xtensa)
+128     66    tile icon: 24×22, 1 bpp, rows padded to 3 bytes (§5.6)
+194     62    description, UTF-8, NUL-padded (§5.6)
+256     …     ELF (relocatable, Xtensa)
 ```
+
+The More folder draws a tile from the first 256 bytes alone.
 
 - **No signature.** The SHA-256 is there to catch a truncated or corrupted
   copy, and to give the pack an identity: the inspection report (§7.4) and
@@ -230,7 +235,7 @@ offset  size  field
 ## 5) The app SDK
 
 One header, `palm_app.h`, is the whole API. The **v1 list below is the
-proposal for review.** I chose it by checking what the four built-in games
+proposal for review.** The first draft covered what the four built-in games
 use today:
 - a 1-bpp canvas with pen down, drag and up;
 - two or three status labels;
@@ -239,31 +244,63 @@ use today:
 - a play clock;
 - a save file.
 
-Everything a game uses is in v1. Anything only *possibly* useful waits for
-1.1, because once `sdk-v1.0` is frozen each slot has to be kept for good.
+The 2026-09-27 review added what a general app developer would want next:
+- wrapped text;
+- a grey pattern;
+- a list picker;
+- a text prompt;
+- region scrolling;
+- a clean self-stop;
+- the user's preferences;
+- a tile icon, and rules for data files.
+
+Anything only *possibly* useful waits for 1.1, because once `sdk-v1.0` is
+frozen each slot has to be kept for good.
 
 ### 5.1 Conventions
 
 - **Canvas:** 240×164 pixels, 1 bpp, with the origin at the top left.
-  Colours are `PA_PAPER`, `PA_INK` and `PA_XOR`; XOR is the Palm-style
-  selection highlight, so no separate `invert` call is needed.
+- **Colours:**
+  - `PA_PAPER` and `PA_INK`.
+  - `PA_XOR`, the Palm-style selection highlight, so no separate `invert`
+    call is needed.
+  - `PA_GRAY`, a 50 % checkerboard (the stipple Mines and Coach already
+    draw). The checkerboard is aligned to canvas coordinates, so neighbouring
+    grey fills join without a seam. `pa_clear`, `pa_fill` and `pa_disc`
+    accept it; the other calls draw it as `PA_INK`.
 - **Every drawing call clips to the canvas.** The firmware redraws the canvas
   after each `on_event` in which something was drawn, so there is no
   `invalidate` call for an app to forget.
-- **Errors:** functions that can fail return `pa_err` (`int32_t`):
-  - `PA_OK` = 0
-  - `PA_E_ARG`: bad argument, including a pointer outside the app's own memory (§8.2)
-  - `PA_E_DENIED`: the app lacks the capability
-  - `PA_E_NOTFOUND`
-  - `PA_E_NOSPACE`: over a quota
-  - `PA_E_LIMIT`: too many of something
-  - `PA_E_IO`
-  - `PA_E_BUSY`
+- **Errors:** functions that can fail return `pa_err` (`int32_t`). They
+  never fault.
 
-  They never fault.
-- **Strings:** ASCII bytes. Every string argument is read up to its NUL or a
-  cap stated below, whichever comes first. Bytes outside printable ASCII draw
-  as `?`.
+  | Code | Meaning |
+  |---|---|
+  | `PA_OK` = 0 | Success |
+  | `PA_E_ARG` | Bad argument, including a pointer outside the app's own memory (§8.2) |
+  | `PA_E_DENIED` | The app lacks the capability, or tried to write to `data/` |
+  | `PA_E_NOTFOUND` | No such file, preference or list entry |
+  | `PA_E_NOSPACE` | Over a quota |
+  | `PA_E_LIMIT` | Too many of something |
+  | `PA_E_IO` | The SD card failed |
+  | `PA_E_BUSY` | A picker or prompt is already open |
+
+- **Text is UTF-8 in, Palm font out** (decided 2026-09-27). Apps pass UTF-8
+  strings. The firmware draws them in the device's own 11 px Palm font,
+  folding every character to plain ASCII first:
+  - Accented Latin letters become the base letter: `é → e`, `Ç → C`, `ñ → n`,
+    `ü → u`.
+  - Ligatures expand: `æ → ae`, `œ → oe`, `ß → ss`.
+  - Curly quotes become straight quotes, en and em dashes become `-`, `…`
+    becomes `...`, and a non-breaking space becomes a space.
+  - Anything else, and any invalid UTF-8, becomes `?`.
+
+  The fold table sits beside the CP1252 tables in `bridge/charset.c`, so the
+  simulator draws exactly what the device draws. It applies to every string
+  that reaches the screen: text, labels, status, alerts, pickers and prompts.
+  Width and wrapping are measured on the folded text. `maxlen` arguments
+  count **input bytes**. Text returned by `pa_prompt_text` is already plain
+  ASCII.
 - **The title bar belongs to the firmware.** It always shows the pack's
   display name, so an app can't make itself look like Settings or a password
   prompt (§8.2). That's why there is no `pa_title()`.
@@ -276,15 +313,24 @@ int16_t x, y; uint32_t ch; }`:
 | Event | Fields | When |
 |---|---|---|
 | `PA_EV_OPEN` | — | Once, after load. Restore state and draw here. |
-| `PA_EV_CLOSE` | — | Once, before unload (Home, the app calling `pa_exit`, a HotSync starting, a Coach seal). Save state here. There are no more events after it. |
+| `PA_EV_CLOSE` | — | Once, before unload: Home, the app calling `pa_exit`, a HotSync starting, or a Coach seal. Save state here. There are no more events after it. **It isn't sent after `pa_fail`.** |
 | `PA_EV_PEN_DOWN` / `PEN_MOVE` / `PEN_UP` | `x`, `y` in canvas coordinates | Touches on the canvas. `PEN_MOVE` is sent at most every 20 ms. |
 | `PA_EV_BUTTON` | `id` 0–3 | A tap on one of the app's buttons. |
 | `PA_EV_MENU` | `id` 0–5 | One of the app's menu items. |
 | `PA_EV_CHAR` | `ch`: ASCII, `'\b'`, `'\n'` | A Graffiti stroke, while the Graffiti strip is on. |
 | `PA_EV_TICK` | — | The app's timer. It doesn't fire while the screen is off. |
 | `PA_EV_CONFIRM` | `id` as passed to `pa_confirm`; `x` = 1 for yes, 0 for no | The answer to a confirmation. |
+| `PA_EV_PICK` | `id` as passed to `pa_pick`; `x` = the chosen index, or −1 if cancelled | The answer to a list picker. |
+| `PA_EV_PROMPT` | `id` as passed to `pa_prompt`; `x` = 1 for OK, 0 for Cancel | The prompt closed. On OK, read the text with `pa_prompt_text`. |
+
+While a picker, prompt, alert or confirmation is open, the app gets no pen,
+button, menu or character events. Only one can be open at a time
+(`PA_E_BUSY`).
 
 ### 5.3 The proposed v1 table (slot order is the ABI)
+
+★ marks calls added in the 2026-09-27 review. Nothing is frozen yet, so the
+slots were renumbered to keep related calls together.
 
 | # | Call | Contract |
 |---|---|---|
@@ -295,47 +341,61 @@ int16_t x, y; uint32_t ch; }`:
 | 2 | `void pa_pixel(int16_t x, int16_t y, uint8_t colour)` | |
 | 3 | `void pa_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint8_t colour)` | |
 | 4 | `void pa_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t colour)` | Outline. |
-| 5 | `void pa_fill(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t colour)` | Filled. With `PA_XOR` it is the selection highlight. |
+| 5 | `void pa_fill(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t colour)` | Filled. `PA_XOR` gives the selection highlight and `PA_GRAY` the stipple. |
 | 6 | `void pa_disc(int16_t cx, int16_t cy, int16_t r, uint8_t colour)` | Filled circle, r ≤ 80. |
 | 7 | `pa_err pa_blit(const uint8_t *bits, int16_t w, int16_t h, int16_t x, int16_t y, uint8_t colour)` | 1-bpp bitmap, rows padded to bytes, MSB first. Set bits are drawn in `colour`; clear bits are left alone. Reads exactly `((w+7)/8)*h` bytes, all of which must be in app memory. |
-| 8 | `int16_t pa_text(int16_t x, int16_t y, uint8_t font, const char *s, uint16_t maxlen, uint8_t colour)` | `font` is `PA_FONT_STD` or `PA_FONT_BOLD` (the 11 px Palm fonts). Draws at most `maxlen` bytes on one line and returns the width drawn. |
-| 9 | `int16_t pa_text_width(uint8_t font, const char *s, uint16_t maxlen)` | For centring and wrapping. |
-| 10 | `uint8_t pa_font_height(uint8_t font)` | |
-| | **Chrome** (drawn by the firmware in Palm style) | |
-| 11 | `pa_err pa_buttons(const char *const *labels, uint8_t n)` | 0–4 buttons in the bottom strip, each label ≤ 10 bytes. `n = 0` removes them. |
-| 12 | `pa_err pa_button_label(uint8_t id, const char *label)` | Relabel one button, for toggles like Dig/Flag, without rebuilding the strip. |
-| 13 | `void pa_status(uint8_t slot, const char *s)` | Slot 0 is left-aligned and slot 1 right-aligned, on the line above the buttons (games put a status on the left and a time on the right). ≤ 24 bytes each. |
-| 14 | `pa_err pa_menu(const char *const *labels, uint8_t n)` | 0–6 app items at the top of Menu. The firmware always adds "About <app>", which shows the pack's id, version, API version, capabilities and the first 12 characters of its SHA-256. |
-| 15 | `void pa_alert(const char *s)` | Modal OK box, ≤ 160 bytes. |
-| 16 | `void pa_confirm(const char *s, uint8_t id)` | Yes/No box. The answer arrives as `PA_EV_CONFIRM`. |
-| 17 | `pa_err pa_graffiti(uint8_t mode)` | `PA_GRAF_OFF`, `PA_GRAF_LETTERS` or `PA_GRAF_DIGITS`. Shows the Graffiti strip; strokes arrive as `PA_EV_CHAR`. |
+| 8 ★ | `void pa_scroll(int16_t x, int16_t y, int16_t w, int16_t h, int16_t dx, int16_t dy, uint8_t fill)` | Shift the pixels in a rectangle by `dx`, `dy`. The strip uncovered by the shift is filled with `fill`, and pixels shifted out are dropped. It's for smooth-scrolling lists and readers: shift, then draw only the new strip. |
+| 9 | `int16_t pa_text(int16_t x, int16_t y, uint8_t font, const char *s, uint16_t maxlen, uint8_t colour)` | `font` is `PA_FONT_STD` or `PA_FONT_BOLD` (the 11 px Palm fonts). Draws at most `maxlen` bytes on one line and returns the width drawn. |
+| 10 ★ | `int32_t pa_text_box(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t font, const char *s, uint32_t maxlen, uint8_t colour)` | Word-wrapped text in a box. Lines break at spaces and at `'\n'`; a word wider than the box is split. It stops at the last line that fits completely and **returns the number of input bytes it drew**, so the next page starts at `s + result`. |
+| 11 | `int16_t pa_text_width(uint8_t font, const char *s, uint16_t maxlen)` | For centring and alignment. |
+| 12 | `uint8_t pa_font_height(uint8_t font)` | |
+| | **Screen furniture** (drawn by the firmware in Palm style) | |
+| 13 | `pa_err pa_buttons(const char *const *labels, uint8_t n)` | 0–4 buttons in the bottom strip, each label ≤ 10 bytes. `n = 0` removes them. |
+| 14 | `pa_err pa_button_label(uint8_t id, const char *label)` | Relabel one button, for toggles like Dig/Flag, without rebuilding the strip. |
+| 15 | `void pa_status(uint8_t slot, const char *s)` | Slot 0 is left-aligned and slot 1 right-aligned, on the line above the buttons. ≤ 24 bytes each. |
+| 16 | `pa_err pa_menu(const char *const *labels, uint8_t n)` | 0–6 app items at the top of Menu. The firmware always adds "About <app>" (§5.6). |
+| 17 | `void pa_alert(const char *s)` | Modal OK box, ≤ 160 bytes. |
+| 18 | `void pa_confirm(const char *s, uint8_t id)` | Yes/No box. The answer arrives as `PA_EV_CONFIRM`. |
+| 19 ★ | `pa_err pa_pick(const char *title, const char *const *labels, uint8_t n, int16_t selected, uint8_t id)` | A Palm-style pop-up list of 1–32 items, each ≤ 24 bytes, scrolling when longer than the screen. `selected` highlights one item (−1 for none). The answer arrives as `PA_EV_PICK`. The firmware copies the labels, so the app's array needn't outlive the call. |
+| 20 ★ | `pa_err pa_prompt(const char *title, const char *initial, uint8_t maxlen, uint8_t kind, uint8_t id)` | A modal box for typing up to `maxlen` bytes (≤ 64), with the device's own Graffiti and on-screen keyboard. `kind` is `PA_PROMPT_TEXT` or `PA_PROMPT_NUMBER` (digits, `-` and `.` only). Typed text is always shown, never masked (§8.2). The result arrives as `PA_EV_PROMPT`. |
+| 21 ★ | `int32_t pa_prompt_text(char *buf, uint16_t cap)` | After `PA_EV_PROMPT` with OK: copies the typed text (ASCII, NUL-terminated, truncated to `cap`) and returns its length. The text is kept until the next prompt opens. |
+| 22 | `pa_err pa_graffiti(uint8_t mode)` | `PA_GRAF_OFF`, `PA_GRAF_LETTERS` or `PA_GRAF_DIGITS`. Shows the Graffiti strip; strokes arrive as `PA_EV_CHAR`. |
 | | **Time** | |
-| 18 | `int64_t pa_now(void)` | UNIX seconds, or 0 if the clock has never been set. |
-| 19 | `pa_err pa_localtime(int64_t t, pa_tm *out)` | In the device's time zone. `pa_tm` holds year, month, day, hour, minute, second and weekday. |
-| 20 | `uint32_t pa_ticks_ms(void)` | Monotonic milliseconds since boot. |
-| 21 | `pa_err pa_timer(uint16_t period_ms)` | One repeating `PA_EV_TICK`. 0 stops it; the minimum is 100 ms. |
-| 22 | `uint32_t pa_random(void)` | Hardware RNG. For reproducible boards, seed the header-only `pa_rng` from it. |
+| 23 | `int64_t pa_now(void)` | UNIX seconds, or 0 if the clock has never been set. |
+| 24 | `pa_err pa_localtime(int64_t t, pa_tm *out)` | In the device's time zone. `pa_tm` holds year, month, day, hour, minute, second and weekday. |
+| 25 | `uint32_t pa_ticks_ms(void)` | Monotonic milliseconds since boot. |
+| 26 | `pa_err pa_timer(uint16_t period_ms)` | One repeating `PA_EV_TICK`. 0 stops it; the minimum is 100 ms. |
+| 27 | `uint32_t pa_random(void)` | Hardware RNG. For reproducible boards, seed the header-only `pa_rng` from it. |
+| | **User preferences** ★ | |
+| 28 ★ | `int32_t pa_pref(uint16_t key)` | A numeric setting, or `PA_E_NOTFOUND` for a key this firmware doesn't know. v1 keys: `PA_PREF_CLOCK24` (1 = 24-hour clock, from the existing `clock24` setting), `PA_PREF_WEEK_START` (0 = Sunday, 1 = Monday; the firmware has no such setting yet, so this returns 0 until Settings gains one), `PA_PREF_BATTERY_LOW` (1 when the power gauge says low). Unknown keys return an error instead of failing, so new keys can arrive in minor versions without new slots. |
+| 29 ★ | `int32_t pa_pref_str(uint16_t key, char *buf, uint16_t cap)` | A text setting, copied NUL-terminated and returning its length. v1 key: `PA_PREF_OWNER` (the owner's name from Settings, as shown on the lock screen). Passwords, accounts, Wi-Fi networks and location aren't available through any key. |
 | | **State** | |
-| 23 | `int32_t pa_state_load(void *buf, uint32_t len, uint16_t ver)` | Returns `len` on success. If the file is missing, is a different size or version, or fails its CRC, it returns an error and **leaves `buf` untouched**. |
-| 24 | `pa_err pa_state_save(const void *buf, uint32_t len, uint16_t ver)` | Crash-safe write (`safefile`) to `state.bin`, ≤ 4 KB. |
-| | **Files** (`PA_CAP_FILES`; the app's own folder only) | |
-| 25 | `int32_t pa_file_open(const char *name, uint8_t mode)` | `PA_READ`, `PA_WRITE` (truncates) or `PA_APPEND`. Names match `[a-z0-9._-]{1,31}`; `state.bin` and `app.pack` are reserved. At most 2 open at once. Returns a handle ≥ 0. |
-| 26 | `int32_t pa_file_read(int32_t h, void *buf, uint32_t len)` | Bytes read, 0 at the end of the file. |
-| 27 | `int32_t pa_file_write(int32_t h, const void *buf, uint32_t len)` | Counts against the app's **256 KB** folder quota. |
-| 28 | `pa_err pa_file_seek(int32_t h, uint32_t pos)` | |
-| 29 | `int32_t pa_file_size(int32_t h)` | |
-| 30 | `pa_err pa_file_close(int32_t h)` | The firmware closes any handles still open on unload. |
-| 31 | `pa_err pa_file_remove(const char *name)` | |
-| 32 | `int32_t pa_file_list(uint16_t index, char *name, uint16_t cap)` | The n-th file in the app's folder (reserved names skipped), or `PA_E_NOTFOUND` past the end. |
+| 30 | `int32_t pa_state_load(void *buf, uint32_t len, uint16_t ver)` | Returns `len` on success. If the file is missing, is a different size or version, or fails its CRC, it returns an error and **leaves `buf` untouched**. |
+| 31 | `pa_err pa_state_save(const void *buf, uint32_t len, uint16_t ver)` | Crash-safe write (`safefile`) to `state.bin`, ≤ 4 KB. Can be called at any time, not only on close. Apps should save after any change worth keeping, because a battery pull sends no `PA_EV_CLOSE`. |
+| | **Files** (`PA_CAP_FILES`; see §5.7 for the folder rules) | |
+| 32 | `int32_t pa_file_open(const char *name, uint8_t mode)` | `PA_READ`, `PA_WRITE` (truncates) or `PA_APPEND`. A name is either `file` (the app's own files) or `data/file` (read-only); `file` matches `[a-z0-9._-]{1,31}`. At most 2 open at once. Returns a handle ≥ 0. |
+| 33 | `int32_t pa_file_read(int32_t h, void *buf, uint32_t len)` | Bytes read, 0 at the end of the file. |
+| 34 | `int32_t pa_file_write(int32_t h, const void *buf, uint32_t len)` | Bytes written. `PA_E_NOSPACE` if the app's own files would exceed **256 KB in total**. |
+| 35 | `pa_err pa_file_seek(int32_t h, uint32_t pos)` | |
+| 36 | `int32_t pa_file_size(int32_t h)` | |
+| 37 | `pa_err pa_file_close(int32_t h)` | The firmware closes any handles still open on unload. |
+| 38 | `pa_err pa_file_remove(const char *name)` | The app's own files only; `data/` gives `PA_E_DENIED`. |
+| 39 | `int32_t pa_file_list(uint8_t where, uint16_t index, char *name, uint16_t cap)` | The n-th file in `PA_DIR_OWN` or `PA_DIR_DATA`, or `PA_E_NOTFOUND` past the end. Only names that follow the rules are listed (§5.7). |
 | | **Memory** | |
-| 33 | `void *pa_arena(uint32_t bytes)` | One zeroed block per session, ≤ 24 KB, freed on unload. A second call returns NULL. |
+| 40 | `void *pa_arena(uint32_t bytes)` | One zeroed block per session, ≤ 24 KB, freed on unload. A second call returns NULL. |
 | | **System** | |
-| 34 | `void pa_log(const char *s)` | One line to the serial console (and the simulator's stdout), ≤ 80 bytes, at most 10 lines a second. |
-| 35 | `void pa_exit(void)` | Ask to close. `PA_EV_CLOSE` follows after the current event returns. |
+| 41 | `void pa_log(const char *s)` | One line to the serial console (and the simulator's stdout), ≤ 80 bytes, at most 10 lines a second. |
+| 42 ★ | `void pa_fail(const char *msg)` | **Stops the app now**, for a state it knows is wrong. It doesn't return and sends no `PA_EV_CLOSE`, so a bad state is never saved. The screen shows "<app> stopped: <msg>", and one line goes to `crash.log`. It isn't a crash, so the app isn't quarantined. The header's `PA_ASSERT(cond)` calls it with the file, line and condition. In the inspection, reaching `pa_fail` during any run is an **ERROR** that quotes the message. |
+| 43 | `void pa_exit(void)` | Ask to close. `PA_EV_CLOSE` follows after the current event returns. |
 
-That's **36 slots**. There are no capabilities besides `PA_CAP_FILES` in v1.
-The capability field in the pack header is 32 bits, so later ones (such as
-`PA_CAP_PIM_READ`) have room.
+That's **44 slots** (8 added in the review). There are no capabilities
+besides `PA_CAP_FILES` in v1. The capability field in the pack header is 32
+bits, so later ones (such as `PA_CAP_PIM_READ`) have room.
+
+**How `pa_fail` stops the app.** `apphost` sets a `setjmp` point before each
+call into the app, and `pa_fail` jumps back to it. That is safe here because
+Palm C code has no destructors or held locks, and the firmware releases the
+app's files, arena and IRAM on the way out, the same as a normal unload.
 
 **Compiler helpers the loader resolves by name** (not in the table; the G6
 allow-list): `memcpy`, `memset`, `memmove`, `memcmp`, and the 64-bit integer
@@ -346,23 +406,27 @@ so it is not allowed (§6.1).
 
 **Header-only helpers** (compiled into the app, not part of the ABI, and free
 to improve between SDK versions): `pa_strlcpy`, `pa_strlcat`, `pa_fmt_int`,
-`pa_fmt_time` (`m:ss` / `h:mm:ss`), `pa_min`/`pa_max`/`pa_clamp`,
-`PA_COUNTOF`, `pa_rng` (seeded xorshift32, so generators are reproducible and
-host-testable like `sd_new`), and `playclock.h` (unchanged from the firmware).
+`pa_fmt_time` (`m:ss` / `h:mm:ss`, honouring `PA_PREF_CLOCK24` when given a
+time of day), `pa_min`/`pa_max`/`pa_clamp`, `PA_COUNTOF`, `PA_ASSERT`,
+`pa_rng` (seeded xorshift32, so generators are reproducible and host-testable
+like `sd_new`), and `playclock.h` (unchanged from the firmware).
 
 ### 5.4 Budgets (checked by the inspection, enforced by the loader and guards)
 
 | Resource | Limit |
 |---|---|
 | Code (`.text` and literals, in IRAM) | 24 KB |
-| Data (`.rodata`, `.data` and `.bss`, in DRAM) | 16 KB. Large tables such as word lists go in the app's folder as files. |
+| Data (`.rodata`, `.data` and `.bss`, in DRAM) | 16 KB. Large tables such as word lists go in `data/` as files. |
 | Arena | 24 KB, one block |
 | Stack, worst case | 2 KB, no recursion |
 | Time per event | 50 ms (G7), with a device watermark at 100 ms (§8) |
 | State file | 4 KB |
-| Folder on the SD card | 256 KB written in total |
+| The app's own files | 256 KB in total |
+| `data/` | Read-only; no quota |
 | Open files | 2 |
 | Buttons / menu items / status slots | 4 / 6 / 2 |
+| Picker | 32 items, 24 bytes each |
+| Prompt | 64 bytes |
 
 With an app at its maximum (16 + 24 KB of data), about **66 KB** of the
 ~106 KB heap stays free for the system. That's more than the 48 KB-heap
@@ -373,7 +437,12 @@ MicroPython option would have left.
 | Deferred | Why not now |
 |---|---|
 | A large-digit font (the lock screen's `DASH_DIG`), circle outlines, polygons | Apps can draw them with `pa_blit` and `pa_line`. Add them once two apps have needed them. |
-| A text-field widget | `PA_EV_CHAR` plus `pa_text` covers entry. A widget costs LVGL pool and fixes a look before any app has asked for one. |
+| A text-field widget on the canvas | `pa_prompt` covers typing a value, and `PA_EV_CHAR` plus `pa_text` covers live entry. A widget costs LVGL pool and fixes a look before any app has asked for one. |
+| Keeping the screen awake (`pa_keep_awake`) | Considered in the review and not chosen for v1. Timer and reader apps go dark at the idle timeout. |
+| A backlight pulse for attention (`pa_attention`) | Considered in the review and not chosen for v1. |
+| Reminders that fire while the app is closed | Needs the firmware to own a schedule and a lock-screen notice. |
+| Write-only Memo and Date Book entries | Lower risk than reading PIM data, but still needs a consent design. |
+| A long-press event | Apps can build one from pen events and `pa_ticks_ms`. Add one if several apps do. |
 | Sleep/wake events | Play clocks already work from `pa_now()`. |
 | A second timer, a sub-100 ms timer | No game needs it; it costs battery. |
 | Read-only PIM access (`PA_CAP_PIM_READ`) | Needs a consent prompt design, and a decision on what an app may see. |
@@ -381,7 +450,55 @@ MicroPython option would have left.
 | Sound | No hardware yet (`PRODUCT_PLAN.md` §4). |
 | Networking, NVS, raw LVGL, threads | Out of scope (§1). |
 
-### 5.6 An example
+### 5.6 The tile icon and description
+
+- **Icon:** `icon.png` in the app's source folder, **24×22 pixels, black
+  and white only** (black is ink). That's the size of the built-in launcher
+  icons in `palm_icons.c`. `mkpack` packs it into the header as 66 bytes of
+  1-bpp bitmap. The More folder expands it to the same 8-bit mask the
+  built-in icons use, recoloured the same way, so pack tiles match built-in
+  ones. That costs 528 bytes of heap per tile on screen.
+- **Description:** one line in `app.toml` (`description = "…"`), ≤ 61 bytes,
+  UTF-8 folded like any other text. **About <app>** shows it, with the id,
+  version, API version, capabilities and the first 12 characters of the
+  pack's SHA-256.
+- **Missing or wrong:** a missing icon gets a generic tile and a
+  **WARNING** from the inspection. An icon that is the wrong size or has grey
+  pixels is an **ERROR** (G0), because the result on the device would be
+  unpredictable.
+
+### 5.7 The app's folder, and data files
+
+```
+/sdcard/apps/<app-id>/
+  app.pack        the app (header, icon, code)        written by you; the app can't open it
+  state.bin       pa_state_save / pa_state_load       firmware-managed; the app can't open it
+  notes.txt …     the app's own files                  read/write, 256 KB in total
+  data/           files that ship with the app, or    READ-ONLY to the app, no quota
+    words.txt     that you copy there (books, lists)
+```
+
+- **Installing** means copying the inspection's output folder, which holds
+  `app.pack` plus the app's `data/`, to `/sdcard/apps/<app-id>/`.
+  **Uninstalling** means deleting that folder.
+- **`data/` is read-only to the app.** It holds shipped files (from the
+  app's source folder) and anything you add yourself, such as a book for a
+  reader app. Writing, removing or creating files there returns
+  `PA_E_DENIED`, so an app bug can't damage them. They don't count against
+  the quota.
+- **Names:** lower-case letters, digits, `.`, `_` and `-`, 1–31 characters,
+  and no subfolders inside `data/`. FAT on the card ignores case, so
+  `Words.TXT` opens as `words.txt`. A file whose name breaks the rules (a
+  space, an accent, too long) is **invisible to the app**. **About <app>**
+  lists it as "ignored: rename to lower-case letters, digits, . _ -", so
+  it's clear why the app can't see it.
+- **Text files are UTF-8.** They draw folded to the Palm font (§5.1), so a
+  book with accents still reads correctly, just without the accents.
+- **The inspection runs with the shipped `data/`** (G4), and its file fuzz
+  also feeds truncated and damaged copies of those files to the app. It
+  reports the total size of `data/` as a NOTE.
+
+### 5.8 An example
 
 **A complete app, to show the shape an AI should produce:**
 
@@ -482,7 +599,9 @@ In `apps/` (and, after the split, the `cyd-palm-apps` template):
   `reader` (streams a text file from its folder a page at a time), and
   `sudoku` (a port of the built-in game, the reference for canvas grids,
   Graffiti digits and a play clock).
-- **`make new APP=<id>`** scaffolds a folder that already inspects READY.
+- **`make new APP=<id>`** scaffolds a folder that already inspects READY:
+  `app.c`, `logic.c`/`logic.h`, `test_logic.c`, `tour.txt`, `app.toml`
+  (description and waivers), a placeholder `icon.png` and an empty `data/`.
 - **`sdk/inspect.sh apps/<id> --quick`** runs G0–G5 in about a minute and
   prints **one line per finding**, in compiler format
   (`file:line: G#: message`), for the edit loop. The **full inspection**
@@ -516,8 +635,9 @@ sdk/inspect.sh dice.pack              # a pack without its source: G6–G7 only
 - `inspect.sh` runs inside the SDK's container image, which holds ESP-IDF
   5.5, clang, cppcheck and Espressif QEMU. The only thing to install is
   Docker; the same image runs in CI.
-- The report goes to the terminal and to `inspect-report.txt` next to the
-  pack.
+- The report goes to the terminal and to `inspect-report.txt`. The pack and
+  a copy of the app's `data/` go to `out/<app-id>/`, the folder you copy to
+  `/sdcard/apps/` (§5.7).
 - **Exit code:** 0 = READY, 1 = NOT READY, 2 = INCOMPLETE. That lets an AI
   author, or a CI job on `apps/` pull requests, act on the result without
   parsing the text.
@@ -529,7 +649,7 @@ sdk/inspect.sh dice.pack              # a pack without its source: G6–G7 only
 
 | Stage | What it runs | What it catches | Error when |
 |---|---|---|---|
-| **G0 Rules** | `packlint --source`: includes, banned identifiers, globals, required files, manifest | Code outside the Palm C profile (§6.1) | Any rule broken |
+| **G0 Rules** | `packlint --source`: includes, banned identifiers, globals, required files, `app.toml`, the icon (24×22, black and white), `data/` file names | Code outside the Palm C profile (§6.1) | Any rule broken |
 | **G1 Compile, twice** | Host `clang -m32` (32-bit, like the device) **and** Xtensa `gcc` (the IDF 5.5 toolchain) with `-std=c11 -Wall -Wextra -Wconversion -Wshadow -Wvla -Wformat=2 -Wcast-align -Wstrict-prototypes` | Truncation, sign mix-ups, shadowed state, misalignment | Any warning on either compiler |
 | **G2 Static analysis + stack bound** | `gcc -fanalyzer`, `cppcheck --enable=warning,portability`, `clang-tidy` (`bugprone-*`, `cert-*`, `clang-analyzer-*`); `stackcheck.py` over `.su` and `.ci` files | Null dereferences, out-of-bounds indexes, uninitialised reads; recursion; stack over 2 KB | Any finding not waived in `app.toml` with a reason (a waived one is a warning); any call cycle; stack over budget |
 | **G3 Logic tests** | `test_logic.c` with ASan + UBSan, `-m32` | Wrong rules and edge cases, before the UI is involved | Any failed check or sanitizer report |
@@ -703,21 +823,27 @@ finding it. These are listed in the order they'd be built.
    *legitimate* pointer to anything outside its own memory, which is also
    what makes the G6 address-constant scan meaningful.
 6. **Files limited to the app's own folder.** File names are checked
-   against `[a-z0-9._-]{1,31}` (no `/`, no `..`), and the firmware builds the
-   full path itself. There's no call that can reach `config.ini`, the Palm
-   databases, another app's folder or `/sdcard/apps/` itself. There's a
-   256 KB write quota, and `state.bin` and `app.pack` can't be opened
-   directly.
+   against `[a-z0-9._-]{1,31}`, with `data/` as the only allowed prefix (no
+   other `/`, no `..`), and the firmware builds the full path itself. There's
+   no call that can reach `config.ini`, the Palm databases, another app's
+   folder or `/sdcard/apps/` itself. `data/` is read-only, the app's own
+   files have a 256 KB quota, and `state.bin` and `app.pack` can't be opened
+   directly (§5.7).
 7. **No way to fake the system UI.** The title bar always shows the pack's
-   display name. `pa_alert` and `pa_confirm` boxes carry the app's name in
-   their frame. The API has no password field, and the Graffiti strip, when
-   an app turns it on, shows the app's name. So an app can't pass itself off
+   display name. `pa_alert`, `pa_confirm`, `pa_pick` and `pa_prompt` boxes
+   carry the app's name in their frame. `pa_prompt` always shows what is
+   typed and has no masked mode, so it never looks like a password field.
+   The Graffiti strip, when an app turns it on, shows the app's name. So an app can't pass itself off
    as Settings asking for the iCloud password.
 8. **Capabilities in the table itself.** A slot the pack's header didn't ask
    for (in v1, only the file calls) points at a stub that returns
    `PA_E_DENIED`, so the app never gets the real function's address. The
    More folder's "About <app>" lists the capabilities the app asked for.
-9. **Rate and size limits** on everything that reaches the outside world:
+9. **Preferences are an allow-list.** `pa_pref` and `pa_pref_str` answer
+   only the keys in §5.3 (the 12/24-hour setting, the week start, low
+   battery, the owner's name). No key reaches passwords, accounts, Wi-Fi
+   networks or location.
+10. **Rate and size limits** on everything that reaches the outside world:
    the log (10 lines a second), the timer (≥ 100 ms), file writes (the quota),
    and state (4 KB).
 
@@ -885,8 +1011,16 @@ numbers are what we keep.
    device loads any well-formed pack. It checks the pack's structure,
    SHA-256 and API version, and the guards in §8 still run, but it doesn't
    know or care whether the pack was inspected.
-4. **API list:** proposed in §5.3 (36 slots) with budgets in §5.4 and
-   exclusions in §5.5. **Still open for your review.** It is reviewed again
-   against real use before the freeze (Phase 4).
+4. **API list:** 44 slots in §5.3, with budgets in §5.4 and exclusions in
+   §5.5. The 2026-09-27 review:
+   - **Text** is UTF-8 in and drawn in the Palm font, with accents and
+     ligatures folded to plain ASCII (`é → e`).
+   - **Added:** `pa_text_box`, `PA_GRAY`, `pa_pick`, `pa_fail`,
+     `pa_pref`/`pa_pref_str`, `pa_prompt`/`pa_prompt_text`, `pa_scroll`,
+     the tile icon (§5.6) and the folder and data-file rules (§5.7).
+   - **Considered and not added:** keeping the screen awake, and a backlight
+     pulse.
+
+   The list is reviewed again against real use before the freeze (Phase 4).
 5. **No flash or NVS encryption.** Protection comes from the API and the
    firmware instead (§8.2). What that can't prevent is stated in §9.
