@@ -173,11 +173,11 @@ c 32 40
 t 400
 c 18 225
 t 300
-# News (RSS reader, roadmap #4): launcher app (row 3 col 1) opens a one-item-per-view
+# News (RSS reader, roadmap #4): launcher app (row 2 col 1 since the Planner merge) opens a one-item-per-view
 # feed (seeded with samples in the sim).
 # Press-drag UP navigates to the next article. Pool-safe (labels + content swap on
 # a gesture surface; a regression here would HANG or fail to advance).
-c 46 160
+c 46 110
 t 400
 s news_reader
 d 120 185
@@ -433,7 +433,9 @@ t 300
 # and opened a record, and todo_list.ppm has been a picture of an Address detail
 # ever since -- green the whole time, because the gate reads the exit code.
 s launcher_after_about
-# To Do (launcher row 1 col 3)
+# The Planner (launcher row 1 col 3): To Do and Memo in one app. It opens on the
+# half that was open last, which on a fresh boot is To Do. The title bar says
+# "Planner"; the bar's first box says which half this is, and is the switch.
 c 195 56
 t 400
 s todo_list
@@ -487,8 +489,11 @@ t 1200
 s due_saved
 c 18 225
 t 300
-# Memo Pad (launcher row 2 col 1 after the Graffiti app was added)
-c 40 110
+# Memo: the same Planner tile (it reopens on To Do, the half left open above),
+# then the switch at the left of the bar.
+c 195 56
+t 400
+c 30 40
 t 400
 s memo_list
 # Q8 quick add: write into the bar, tap New, and the row must APPEAR. This is
@@ -501,6 +506,45 @@ s q8_memo_typed
 c 215 40
 t 500
 s q8_memo_added
+# The Planner's checklist memo. New on an empty bar opens the form; the
+# "[ ] Checkbox" button under the text puts a box at the start of the line the
+# cursor is on. K types hex: 0a is a newline, and the second item is written
+# out as "[ ] eggs" by hand, which must work just the same.
+c 215 40
+t 400
+k Groceries
+K 0a
+c 66 152
+t 200
+k milk
+K 0a
+K 5b205d2065676773
+t 100
+s planner_memo_boxes
+c 36 188
+t 1200
+# "Groceries" sorts second. Its detail is a list: the title as a plain row, the
+# two items with drawn boxes (the To Do list's own boxes, no per-line object).
+c 120 86
+t 400
+s planner_checklist
+# Tap milk's BOX: ticked, struck through, saved into the memo text as "[x]".
+c 16 56
+t 400
+s planner_checklist_ticked
+# Tap eggs' WORDS: "Make this line a To Do?" -- it leaves the memo and becomes a
+# real, syncable To Do at priority 1.
+c 120 78
+t 400
+s planner_make_todo
+c 180 190
+t 600
+s planner_moved
+c 36 188
+t 400
+c 30 40
+t 400
+s planner_todo_has_eggs
 c 18 225
 t 300
 # HotSync -- launcher row 2 col 2, back in the middle where it is findable
@@ -891,7 +935,7 @@ t 500
 s hotsync_news
 c 18 225
 t 300
-c 46 160
+c 46 110
 t 500
 s news_from_sync
 # Preferences > News feeds: the checkbox manager + the URL editor keyboard. Pin the

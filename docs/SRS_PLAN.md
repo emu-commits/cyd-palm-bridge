@@ -149,7 +149,7 @@ either way.
 **Name, tile and speaker** (decided 2026-09-29):
 - **Name: Study.**
 - **Launcher: position 7 on the main 3×3 grid.** The grid is full today.
-  The **Planner** merge of To Do and Memo (approved 2026-09-29;
+  The **Planner** merge of To Do and Memo (built 2026-09-29;
   `BACKLOG.md` ▸ RESUME HERE) frees a slot, and the grid becomes:
 
   | | | |

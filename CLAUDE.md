@@ -63,7 +63,7 @@ before touching anything.
   the working branch isn't touched. The container is wiped between sessions:
   anything not committed and pushed is lost, including earlier spike code.
 
-## Current work: the SRS app, and two firmware items (approved 2026-09-29)
+## Current work: the SRS app, S0 next (approved 2026-09-29)
 
 **The app platform is on hold** (`APP_PLATFORM_PLAN.md`, status block and
 §11 decision 7). The user's main goal is one first-class SRS app
@@ -117,30 +117,13 @@ mounted. LVGL pool free: 11,024 B.
 
 ### The order of work
 
-1. **Passwords out of resident RAM** (was platform §8.2 item 1). Worth doing
-   on its own; do it first.
-   - `Config` (`bridge/config.h`, `g_cfg` in `firmware/main/appcfg.c`) stops
-     holding passwords and keeps only "has password" flags.
-   - `hotsync.c` reads each password with `secret_get()` into a short-lived
-     buffer (the DAV `d.pass` and `dcard.pass` copies, and `wifi_config_t wc`)
-     and wipes it with `mbedtls_platform_zeroize()` after use.
-   - Settings password fields write straight to `secretstore` and show
-     `********`.
-   - Call `esp_wifi_set_storage(WIFI_STORAGE_RAM)`.
-   - Add a sim gate (for example `make -C sim secretscan`) that searches heap
-     and static memory for a test password after a stubbed sync and after
-     closing Settings. Add it to `ci.yml` and to the gate list above.
-   - Leave the `[d]` bench item for the user: Wi-Fi join and an iCloud
-     HotSync still work.
-2. **Firmware version in About.**
-   - Set it from `git describe --tags --always --dirty` (`PROJECT_VER`);
-     check what ESP-IDF already does by default.
-   - Show it in Settings ▸ About. The About text is in `ui.c`, near the
-     Settings row list with "About". The sim needs an
-     `esp_app_get_description` shim in `sim/include`.
-   - Make `tools/package_firmware.py` and `ci.yml` use the same string.
-3. **SRS S0: the course format and demo content** (`SRS_PLAN.md` §4, §9,
-   §10).
+**Done 2026-09-29** (details in `BUILD_PROGRESS.md`): passwords out of
+resident RAM (with the `secretscan` gate), the firmware version in Settings ▸
+About, and the Planner (To Do and Memo in one launcher tile, position 7 held
+open for Study). Their bench checks are `[d]` items in `BACKLOG.md`.
+
+1. **SRS S0: the course format and demo content** (`SRS_PLAN.md` §4, §9,
+   §10). **This is next.**
    - Turn §4 into `docs/COURSE_FORMAT.md`: exact byte layouts
      (little-endian, each section's offset, length and CRC32), the source
      format, and an authoring guide that uses the demo as its example.
@@ -153,16 +136,22 @@ mounted. LVGL pool free: 11,024 B.
    - **Then stop for the user's review** of the format and the demo content
      before S1. The format is the one thing that's hard to change once real
      courses exist.
-4. **The Planner** (To Do and Memo in one app; design in `BACKLOG.md`).
-   Independent of the SRS work, so it can be done while the S0 review is
-   pending. It must land before S3, since it frees Study's launcher slot.
-   Its own commit or commits, every gate, and smoke screenshots looked at.
-5. **S1 onward** as `SRS_PLAN.md` §10 describes, keeping to its §7 budgets:
+2. **S1 onward** as `SRS_PLAN.md` §10 describes, keeping to its §7 budgets:
    - pure-C `course.c` and `srs.c` in `firmware/main/`, with no LVGL and the
      time passed in, tested the way `wordie.c` and `coach.c` are;
    - new host gates added to `ci.yml` and to the gate list above;
    - the reader fuzzed under ASan and UBSan;
-   - screens checked by smoke screenshots before any `[s]`.
+   - screens checked by smoke screenshots before any `[s]`;
+   - Study's tile goes in the empty launcher slot (`APPS[6]` is `NULL`).
+
+**Gate-running notes from 2026-09-29:**
+- Run `make -C sim clean` before the sim gates if `smoke32` ran last: it
+  leaves 32-bit objects in `sim/build`, and the next 64-bit link fails.
+- Clear the simulator's card (`find /sdcard -mindepth 1 -delete`) before a
+  smoke run whose screenshots you're going to judge. The walk expects a fresh
+  card, and a previous run leaves demo data removed and Wi-Fi saved.
+- `smoke32` needs `gcc-multilib` (`sudo apt-get update` first in a fresh
+  container).
 
 When a phase is done, tick its `[s]` items in `BACKLOG.md` and move the
 finished text to `BUILD_PROGRESS.md`.

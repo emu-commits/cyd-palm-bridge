@@ -24,6 +24,9 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 
 ## RESUME HERE — the SRS app, the Planner, and two firmware items (approved 2026-09-29)
 
+**Done 2026-09-29:** the two firmware items and the Planner (`[s]` below;
+their `[d]` checks are open). **Next: SRS S0.**
+
 **The app platform is on hold.** The main goal is one first-class SRS app
 (WaniKani/Anki-style, with a large course on the SD card), and it's being
 built into the firmware: **`SRS_PLAN.md`**, with the reasons in its §1. The
@@ -34,31 +37,9 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 - [ ] Wi-Fi join and an iCloud HotSync still work after that change `[d]`
 - [x] Firmware version from `git describe`, shown in Settings ▸ About `[s]` (2026-09-29)
 
-**Planner — To Do and Memo as one app** (approved 2026-09-29; before S3)
-- [ ] Planner built: one launcher tile, memos and task lists together, checkbox lines in memos, "make it a task", new icon, and the new grid `[s]`
-- [ ] Planner on glass: lists, a checklist memo, a task still syncs `[d]`
-
-Asked for by the owner, to free a launcher slot for Study (`SRS_PLAN.md` §3)
-and because notes and tasks belong together. Grid: Date Book, Address,
-**Planner** / News, HotSync, Games / **Study**, Guru, Coach.
-- **Storage doesn't change**, so sync doesn't either. Memos stay in
-  `MemoDB.pdb`, on this device only, as today. Tasks stay in `ToDoDB.pdb`
-  and keep syncing as CalDAV tasks, routed by category.
-- **A memo can hold checkbox lines** as well as text: `[ ] ` and `[x] ` at
-  the start of a line, stored in the memo's plain text. They're checklists,
-  and they stay on the device like the rest of the memo. They don't sync,
-  and have no due date or priority.
-- **Real tasks** (synced, with due dates and priority) are the To Do records
-  as now. The Planner lists memos and task lists together, and a memo
-  checkbox line can be turned into a real task.
-- **RAM:** no new static buffers. The list is the same single virtualized
-  `lv_table`, filled by two streaming passes instead of one. A checklist
-  memo shows as a table with a checkbox column, as the To Do list already
-  does. Editing reuses the memo editor's existing 1,200-byte buffer. Pool
-  use is the same as the To Do screen's.
-- **Also touched:** Find's result labels, the HotSync screen's names, the
-  About box, the demo seed, Coach's "save as memo", the smoke tour and its
-  screenshots, and a new Planner icon.
+**Planner — To Do and Memo as one app** (built 2026-09-29; `BUILD_PROGRESS.md`)
+- [x] Planner built: one launcher tile, the To Do / Memo switch, checkbox lines in memos, "make it a To Do", new icon, and the new grid `[s]`
+- [ ] Planner on glass: the switch, a checklist memo (tick one, move one to To Do), and that To Do still syncs `[d]`
 
 **SRS app** (phases in `SRS_PLAN.md` §10)
 - [ ] S0 — `docs/COURSE_FORMAT.md`, the two-level demo kanji course source, and the Albanian fit check; **stop for the user's review**

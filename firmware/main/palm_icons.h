@@ -7,6 +7,7 @@ extern const lv_image_dsc_t icon_graffiti;
 extern const lv_image_dsc_t icon_news;
 extern const lv_image_dsc_t icon_kana;      /* Kana trainer (roadmap #3, Tier 1) */
 extern const lv_image_dsc_t icon_games;     /* Games launcher (product roadmap) */
+extern const lv_image_dsc_t icon_planner;   /* Planner: To Do + Memo (gen_planner_icon.py) */
 extern const lv_image_dsc_t icon_mines;     /* Minesweeper (Games sub-launcher) */
 extern const lv_image_dsc_t icon_wordie;    /* Wordie (Games sub-launcher) */
 extern const lv_image_dsc_t icon_sudoku;    /* Sudoku (Games sub-launcher) */

@@ -119,13 +119,17 @@ static uint8_t g_greet_last[GREET_NSPEAKER];  /* index of the line last shown   
  * Anything that reads a launcher position -- notably sim/tests/smoke.txt, which
  * taps cells by coordinate -- must be re-pointed when this changes. That file
  * already carries a scar from an earlier reorder. */
-static const char *APPS[] = { "Date Book", "Address", "To Do List",
-                              "Memo Pad", "HotSync", "Games",
-                              "News", "Guru", "Coach" };
+/* The Planner is To Do and Memo in one tile (list_view switches between them),
+ * which is what freed a slot. NULL is an empty cell that keeps its place in the
+ * grid: position 7 is Study's (docs/SRS_PLAN.md), and Guru and Coach stay where
+ * people's thumbs already know them. */
+static const char *APPS[] = { "Date Book", "Address", "Planner",
+                              "News", "HotSync", "Games",
+                              NULL, "Guru", "Coach" };
 /* authentic Palm app launcher icons (from PumpkinOS), Guru's drawn to match */
-static const lv_image_dsc_t *APP_ICONS[] = { &icon_datebook, &icon_address, &icon_todo,
-                                             &icon_memo, &icon_hotsync, &icon_games,
-                                             &icon_news, &icon_guru, &icon_coach };
+static const lv_image_dsc_t *APP_ICONS[] = { &icon_datebook, &icon_address, &icon_planner,
+                                             &icon_news, &icon_hotsync, &icon_games,
+                                             NULL, &icon_guru, &icon_coach };
 #define NAPPS ((int)(sizeof(APPS)/sizeof(APPS[0])))
 
 static void show_launcher(void);
@@ -217,6 +221,12 @@ static const AppDef APPDEFS[] = {
     { "Memo Pad",   APP_MEMO, data_memo     },
 };
 #define NAPPDEFS ((int)(sizeof(APPDEFS)/sizeof(APPDEFS[0])))
+#define APPDEF_TODO (&APPDEFS[2])
+#define APPDEF_MEMO (&APPDEFS[3])
+/* The Planner remembers which half was open last, for the life of the boot, so
+ * the tile goes back to where you were. */
+static int g_planner_memo;
+static int is_planner(const AppDef *ad){ return ad && (ad->app == APP_TODO || ad->app == APP_MEMO); }
 static const AppDef *cur_app;   /* the data app whose list/detail is showing */
 static uint32_t cur_uid;        /* the record currently in detail/edit (0 = none) */
 
@@ -889,11 +899,27 @@ static void lookup_ta_cb(lv_event_t *e){
 #define LIST_BAR_FIND_MAX ((int)sizeof g_lookup - 1)
 #define LIST_BAR_ADD_MAX  (QUICK_ADD_MAX - 1)
 
+/* `on_word` makes the word a button (the Planner's To Do / Memo switch); NULL
+ * leaves it a label. */
 static lv_obj_t *list_top_bar(const char *word, const char *seed, int maxlen,
-                              lv_event_cb_t on_type, lv_event_cb_t on_new){
-    lv_obj_t *l = lv_label_create(content);
-    lv_label_set_text(l, word);
-    lv_obj_set_pos(l, 4, 8);
+                              lv_event_cb_t on_type, lv_event_cb_t on_new,
+                              lv_event_cb_t on_word){
+    if(on_word){
+        lv_obj_t *wb = lv_button_create(content);
+        lv_obj_set_size(wb, LIST_BAR_LBLW - 6, 28);
+        lv_obj_set_pos(wb, 2, 1);
+        lv_obj_set_style_radius(wb, 0, 0);
+        lv_obj_set_style_pad_all(wb, 0, 0);
+        lv_obj_t *wl = lv_label_create(wb);
+        lv_label_set_text(wl, word);
+        lv_obj_set_style_text_font(wl, &lv_font_palm_bold, 0);
+        lv_obj_center(wl);
+        lv_obj_add_event_cb(wb, on_word, LV_EVENT_CLICKED, NULL);
+    } else {
+        lv_obj_t *l = lv_label_create(content);
+        lv_label_set_text(l, word);
+        lv_obj_set_pos(l, 4, 8);
+    }
 
     lv_obj_t *nb = lv_button_create(content);
     lv_obj_set_size(nb, LIST_BAR_NEWW, 28);
@@ -953,25 +979,41 @@ static void quick_add_cb(lv_event_t *e){ (void)e;
 static void list_new_cb(lv_event_t *e){ (void)e; if(cur_app) show_edit(0); }
 
 /* scrolling list of records for one app (virtualized lv_table + per-app lens) */
+/* The Planner's switch: To Do <-> Memo. Categories belong to each half's own
+ * database (a To Do category is not a Memo one), so the filter resets to All. */
+static void list_view(const AppDef *ad);
+static void planner_switch_cb(lv_event_t *e){
+    (void)e;
+    if(!cur_app) return;
+    data_set_category(-1);
+    list_view(cur_app->app == APP_TODO ? APPDEF_MEMO : APPDEF_TODO);
+}
+
 static void list_view(const AppDef *ad){
     kill_kb();
     cur_app = ad;
     cur_uid = 0;
     content_clear();
     g_listtbl = NULL;
-    lv_label_set_text(title_lbl, ad->name);
+    if(is_planner(ad)) g_planner_memo = (ad->app == APP_MEMO);
+    lv_label_set_text(title_lbl, is_planner(ad) ? "Planner" : ad->name);
 
     /* The top bar. Graffiti writes into whichever field the bar put there --
      * the Look Up filter on Address, the new record on To Do and Memo. */
     if(ad->app == APP_ADDR){
         active_ta = list_top_bar("Look Up:", g_lookup, LIST_BAR_FIND_MAX,
-                                 lookup_ta_cb, list_new_cb);
+                                 lookup_ta_cb, list_new_cb, NULL);
     } else {
         g_lookup[0] = 0;                               /* filter only applies to Address */
+        /* The Planner: the word at the left of the bar says which half this
+         * is, and tapping it switches to the other -- the one control the merge
+         * added, where the eye already goes to see what the field will make. */
         if(ad->app == APP_TODO)
-            active_ta = list_top_bar("To Do:", "", LIST_BAR_ADD_MAX, NULL, quick_add_cb);
+            active_ta = list_top_bar("To Do", "", LIST_BAR_ADD_MAX, NULL, quick_add_cb,
+                                     planner_switch_cb);
         else if(ad->app == APP_MEMO)
-            active_ta = list_top_bar("Memo:",  "", LIST_BAR_ADD_MAX, NULL, quick_add_cb);
+            active_ta = list_top_bar("Memo",  "", LIST_BAR_ADD_MAX, NULL, quick_add_cb,
+                                     planner_switch_cb);
         /* R9: the quick-add field IS the record's first line, so it starts with
          * a capital. Look Up (above) does not: it is a filter, not text. */
         if(ad->app == APP_TODO || ad->app == APP_MEMO)
@@ -1056,6 +1098,172 @@ static void ask_delete(uint32_t uid){
 }
 static void del_btn_cb(lv_event_t *e){ ask_delete((uint32_t)(uintptr_t)lv_event_get_user_data(e)); }
 
+/* ---- the Planner: checkbox lines in a memo --------------------------------
+ * A memo can hold checklist lines as well as text: "[ ] " or "[x] " at the start
+ * of a line. They are PLAIN TEXT in the memo, so nothing about how a memo is
+ * stored changes, a memo stays readable anywhere a Palm memo is, and it stays on
+ * the device like every memo (memos have no server copy). A line that needs a
+ * due date or has to reach the server becomes a real To Do instead: tap the
+ * line's words, not its box, and it moves.
+ *
+ * The detail screen shows such a memo as a list -- the same one lv_table and the
+ * same drawn boxes as the To Do list, so no screen gains a per-line object. The
+ * memo is read again for every change and written back whole; the list keeps
+ * only which LINE each row is (in g_rowuids, freed on the way out like any
+ * list's). */
+#define MEMO_CAP 1200                      /* the memo editor's own limit */
+/* 0 = not a box line, 1 = open, 2 = ticked. "[ ]" alone ends the line too. */
+static int memo_box(const char *l){
+    if(l[0] != '[' || (l[1] != ' ' && l[1] != 'x' && l[1] != 'X') || l[2] != ']') return 0;
+    if(l[3] != ' ' && l[3] != '\n' && l[3] != 0) return 0;
+    return l[1] == ' ' ? 1 : 2;
+}
+static int memo_has_boxes(const char *t){
+    for(const char *l = t; l; l = strchr(l, '\n'), l = l ? l + 1 : NULL)
+        if(memo_box(l)) return 1;
+    return 0;
+}
+/* start of line `n` (0-based), or NULL */
+static char *memo_line(char *t, int n){
+    for(char *l = t; l; l = strchr(l, '\n'), l = l ? l + 1 : NULL)
+        if(n-- == 0) return l;
+    return NULL;
+}
+static uint32_t g_chk_uid;                 /* the memo the checklist is showing */
+static int      g_chk_line;                /* the line "make it a To Do" asks about */
+static void show_detail(uint32_t uid);
+
+/* read the memo, let `fn` change line `n`, write it back under its category */
+static void memo_edit_line(int n, void (*fn)(char *text, char *line)){
+    char *t = malloc(MEMO_CAP);
+    if(!t){ toast_show("(low memory)"); return; }
+    if(data_get_memo(g_chk_uid, t, MEMO_CAP)){
+        char *l = memo_line(t, n);
+        if(l && memo_box(l)){
+            fn(t, l);
+            int rc = data_record_category(APP_MEMO, g_chk_uid);
+            data_save_memo(g_chk_uid, rc < 0 ? 0 : rc, t);
+        }
+    }
+    free(t);
+}
+static void memo_tick(char *t, char *l){ (void)t; l[1] = (l[1] == ' ') ? 'x' : ' '; }
+/* the line moves to To Do: make the record, then take the line out of the memo */
+static void memo_to_todo(char *t, char *l){
+    (void)t;
+    char *end = strchr(l, '\n');
+    const char *words = l + (l[3] == ' ' ? 4 : 3);
+    int wl = (int)((end ? end : l + strlen(l)) - words);
+    Todo td; memset(&td, 0, sizeof td);
+    td.priority = 1;                          /* as the quick-add bar files one */
+    snprintf(td.description, sizeof td.description, "%.*s", wl, words);
+    if(!td.description[0]) snprintf(td.description, sizeof td.description, "(untitled)");
+    data_save_todo(0, 0, &td);                /* Unfiled: the memo's category is a Memo one */
+    if(end) memmove(l, end + 1, strlen(end + 1) + 1);   /* drop the line and its newline */
+    else { if(l > t) l[-1] = 0; else l[0] = 0; }          /* last line: drop it and the one before's */
+}
+static void chk_move_cb(lv_event_t *e){ (void)e;
+    confirm_close();
+    memo_edit_line(g_chk_line, memo_to_todo);
+    show_detail(g_chk_uid);
+    toast_show("Moved to To Do");
+}
+static void chk_ask_move(int line){
+    if(g_confirm) return;
+    g_chk_line = line;
+    g_confirm = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_confirm, LCD_W, LCD_H);
+    lv_obj_set_style_bg_color(g_confirm, COL_LINE, 0);
+    lv_obj_set_style_bg_opa(g_confirm, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(g_confirm, 0, 0);
+    lv_obj_set_style_pad_all(g_confirm, 0, 0);
+    lv_obj_add_flag(g_confirm, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_confirm, confirm_cancel_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *panel = lv_obj_create(g_confirm);
+    lv_obj_set_width(panel, 210);
+    lv_obj_set_height(panel, 112);
+    lv_obj_center(panel);
+    lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
+    lv_obj_set_style_border_width(panel, 1, 0);
+    lv_obj_set_style_border_color(panel, COL_LINE, 0);
+    lv_obj_set_style_radius(panel, 0, 0);
+    lv_obj_set_style_pad_all(panel, 10, 0);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *q = lv_label_create(panel);
+    lv_label_set_long_mode(q, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(q, 190);
+    lv_label_set_text(q, "Make this line a To Do?\nIt leaves the memo, and can "
+                         "have a due date and sync.");
+    lv_obj_align(q, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    lv_obj_t *cancel = lv_button_create(panel);
+    lv_obj_set_size(cancel, 82, 30);
+    lv_obj_align(cancel, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_t *cl = lv_label_create(cancel); lv_label_set_text(cl, "Cancel"); lv_obj_center(cl);
+    lv_obj_add_event_cb(cancel, confirm_cancel_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *mv = lv_button_create(panel);
+    lv_obj_set_size(mv, 92, 30);
+    lv_obj_align(mv, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_t *ml = lv_label_create(mv); lv_label_set_text(ml, "Make To Do"); lv_obj_center(ml);
+    lv_obj_add_event_cb(mv, chk_move_cb, LV_EVENT_CLICKED, NULL);
+}
+static void chk_click_cb(lv_event_t *e){
+    lv_obj_t *t = lv_event_get_target(e);
+    uint32_t r = LV_TABLE_CELL_NONE, c = LV_TABLE_CELL_NONE;
+    lv_table_get_selected_cell(t, &r, &c);
+    if(r == LV_TABLE_CELL_NONE || !g_rowuids || (int)r >= g_rowuid_n) return;
+    if(!list_row_is(t, r, LIST_BOX)) return;          /* a plain line: nothing to do */
+    int line = (int)g_rowuids[r];
+    if(c == 0){ memo_edit_line(line, memo_tick); show_detail(g_chk_uid); }
+    else      chk_ask_move(line);
+}
+/* The checklist body of a memo detail: one row per non-blank line. Returns 0 if
+ * it could not be built (no memory), and the caller shows the plain text. */
+static int memo_checklist(uint32_t uid, int h){
+    char *t = malloc(MEMO_CAP);
+    if(!t) return 0;
+    if(!data_get_memo(uid, t, MEMO_CAP) || !memo_has_boxes(t)){ free(t); return 0; }
+    int n = 0;
+    for(char *l = t; l; l = strchr(l, '\n'), l = l ? l + 1 : NULL) if(*l && *l != '\n') n++;
+    free_rowuids();
+    g_rowuids = calloc(n ? n : 1, sizeof *g_rowuids);
+    if(!g_rowuids){ free(t); return 0; }
+    g_chk_uid = uid;
+
+    lv_obj_t *tb = lv_table_create(content);
+    list_table_style(tb);
+    lv_table_set_column_width(tb, 0, 30);
+    lv_table_set_column_width(tb, 1, LCD_W - 38);
+    lv_obj_set_size(tb, LCD_W, h);
+    lv_obj_set_pos(tb, 0, 0);
+    lv_obj_add_event_cb(tb, chk_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    int row = 0, line = 0;
+    for(char *l = t; l; l = strchr(l, '\n'), l = l ? l + 1 : NULL, line++){
+        char *end = strchr(l, '\n');
+        if(end) *end = 0;                        /* this line alone (restored below) */
+        if(*l){
+            int b = memo_box(l);
+            if(b){
+                lv_table_set_cell_value(tb, row, 1, l + (l[3] == ' ' ? 4 : 3));
+                list_set_box(tb, row, b == 2, 1);
+            } else {
+                lv_table_set_cell_value(tb, row, 0, l);
+                list_cell_ctrl_set(tb, row, 0, LV_TABLE_CELL_CTRL_MERGE_RIGHT);
+            }
+            g_rowuids[row++] = (uint32_t)line;
+        }
+        if(end) *end = '\n';
+    }
+    g_rowuid_n = row;
+    free(t);
+    return 1;
+}
+
 /* read-only detail for one record (scrollable text + Done / Delete / Edit) */
 static void show_detail(uint32_t uid){
     if(!cur_app) return;
@@ -1068,16 +1276,18 @@ static void show_detail(uint32_t uid){
     int ch = PDA_H - TITLE_H;
     int istodo = (cur_app->app == APP_TODO);
     /* leave room for the action row (and a second row for ToDo's Mark Done) */
-    lv_obj_t *box = lv_obj_create(content);       /* scrolls if text overflows */
-    lv_obj_set_size(box, LCD_W, ch - (istodo ? 78 : 40));
-    lv_obj_set_pos(box, 0, 0);
-    lv_obj_set_style_radius(box, 0, 0);
-    lv_obj_set_style_border_width(box, 0, 0);
-    lv_obj_set_style_bg_color(box, COL_BODY, 0);
-    lv_obj_t *l = lv_label_create(box);
-    lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(l, LCD_W - 16);
-    lv_label_set_text(l, buf);
+    if(cur_app->app != APP_MEMO || !memo_checklist(uid, ch - 40)){
+        lv_obj_t *box = lv_obj_create(content);   /* scrolls if text overflows */
+        lv_obj_set_size(box, LCD_W, ch - (istodo ? 78 : 40));
+        lv_obj_set_pos(box, 0, 0);
+        lv_obj_set_style_radius(box, 0, 0);
+        lv_obj_set_style_border_width(box, 0, 0);
+        lv_obj_set_style_bg_color(box, COL_BODY, 0);
+        lv_obj_t *l = lv_label_create(box);
+        lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(l, LCD_W - 16);
+        lv_label_set_text(l, buf);
+    }
 
     /* primary actions, three across: Done | Delete | Edit */
     lv_obj_t *done = lv_button_create(content);
@@ -1388,6 +1598,32 @@ static void set_editcat_label(void){
         lv_label_set_text(edit_cat_lbl, "Unfiled");
 }
 
+/* The memo editor's checkbox button: the line the cursor is on gains "[ ] " at
+ * its start, or loses it if it has one -- one button, both ways. */
+static void memo_box_btn_cb(lv_event_t *e){
+    (void)e;
+    lv_obj_t *ta = g_nfields ? g_fields[0] : NULL;
+    if(!ta) return;
+    const char *t = lv_textarea_get_text(ta);
+    int cur = (int)lv_textarea_get_cursor_pos(ta);
+    int len = (int)strlen(t);
+    if(cur > len) cur = len;
+    int start = cur;
+    while(start > 0 && t[start - 1] != '\n') start--;
+    if(memo_box(t + start)){
+        int n = (t[start + 3] == ' ') ? 4 : 3;
+        lv_textarea_set_cursor_pos(ta, start + n);
+        for(int i = 0; i < n; i++) lv_textarea_delete_char(ta);
+        lv_textarea_set_cursor_pos(ta, cur - n > start ? cur - n : start);
+    } else {
+        lv_textarea_set_cursor_pos(ta, start);
+        lv_textarea_add_text(ta, "[ ] ");
+        lv_textarea_set_cursor_pos(ta, cur + 4);
+    }
+    active_ta = ta;
+    lv_obj_add_state(ta, LV_STATE_FOCUSED);
+}
+
 static void show_edit(uint32_t uid){
     if(!cur_app) return;
     edit_uid = uid; cur_uid = uid; g_nfields = 0;
@@ -1562,16 +1798,27 @@ static void show_edit(uint32_t uid){
         form_field(form,"Note",a.fields[F_note],200,&y);      /* fv9 */
         field_mode(TA_CAP_FIRST, NULL);
     } else if(cur_app->app == APP_MEMO){
-        static char mtext[1200];
+        static char mtext[MEMO_CAP];
         if(!data_get_memo(uid, mtext, sizeof mtext)) mtext[0]=0;
         lv_obj_t *ta = lv_textarea_create(form);       /* one big multi-line field */
         lv_textarea_set_text(ta, mtext);
         lv_textarea_set_max_length(ta, sizeof mtext - 1);
-        lv_obj_set_size(ta, LCD_W - 16, (PDA_H - TITLE_H) - 46);
+        /* The Planner: a checkbox button under the text, because "[ ] " is four
+         * Graffiti strokes, two of them punctuation, and nobody should have to
+         * know that is how a checklist is written. */
+        lv_obj_set_size(ta, LCD_W - 16, (PDA_H - TITLE_H) - 46 - 32);
         lv_obj_set_pos(ta, 2, 2);
         lv_obj_add_event_cb(ta, ta_click_cb, LV_EVENT_CLICKED, NULL);
         g_fields[g_nfields++] = ta;
         field_mode(TA_CAP_FIRST, NULL);
+        lv_obj_t *bx = lv_button_create(form);
+        lv_obj_set_size(bx, 120, 26);
+        lv_obj_set_pos(bx, 2, (PDA_H - TITLE_H) - 46 - 26);
+        lv_obj_set_style_radius(bx, 0, 0);
+        lv_obj_t *bxl = lv_label_create(bx);
+        lv_label_set_text(bxl, "[ ] Checkbox");
+        lv_obj_center(bxl);
+        lv_obj_add_event_cb(bx, memo_box_btn_cb, LV_EVENT_CLICKED, NULL);
     }
 
     /* focus the first field so Graffiti has a target immediately */
@@ -2051,6 +2298,11 @@ static void show_app(const char *name){
     }
     for(int i=0;i<NAPPDEFS;i++)
         if(!strcmp(name, APPDEFS[i].name)){ data_set_category(-1); list_view(&APPDEFS[i]); return; }
+    if(!strcmp(name, "Planner")){
+        data_set_category(-1);
+        list_view(g_planner_memo ? APPDEF_MEMO : APPDEF_TODO);
+        return;
+    }
     if(!strcmp(name, "HotSync")){ show_hotsync(); return; }
     if(!strcmp(name, "Graffiti")){ show_trainer(); return; }
     if(!strcmp(name, "News")){ show_news(); return; }
@@ -3144,8 +3396,14 @@ static void show_launcher(void){
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
 
-    for(int i=0;i<NAPPS;i++)
-        icon_cell(grid, APP_ICONS[i], APPS[i], app_cb, (void *)APPS[i]);
+    for(int i=0;i<NAPPS;i++){
+        if(APPS[i]){ icon_cell(grid, APP_ICONS[i], APPS[i], app_cb, (void *)APPS[i]); continue; }
+        lv_obj_t *gap = lv_obj_create(grid);           /* a free slot, held open */
+        lv_obj_set_size(gap, 68, 52);
+        lv_obj_set_style_bg_opa(gap, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(gap, 0, 0);
+        lv_obj_clear_flag(gap, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    }
 
     /* W10 REMOVED THE ONBOARDING HINT that used to hang off the end of this grid.
      * Three faults, and the third is fatal on its own:

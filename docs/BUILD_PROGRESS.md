@@ -16,6 +16,53 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-29 — the Planner: To Do and Memo in one app
+
+**One launcher tile, both halves.** The grid is now Date Book, Address,
+**Planner** / News, HotSync, Games / *(open)*, Guru, Coach. Position 7 is held
+open by an empty cell (a `NULL` in `APPS[]`) for Study (`SRS_PLAN.md`), so Guru
+and Coach did not move. The tile's icon is a Palm page tilted 15 degrees on the
+black disc, two checkbox lines and two text lines (`tools/gen_planner_icon.py`;
+its art is kept as text, like `gen_faces.py`).
+
+**How the two halves are joined: a switch, not one mixed list.** The backlog
+said "lists memos and task lists together". It is built as one app whose list
+bar's first box says which half is open (**To Do** or **Memo**, bold, framed)
+and switches to the other, with the title bar reading "Planner" on both. A
+single mixed list was the first idea and was dropped for three reasons: To Do
+and Memo have separate category tables, so one category filter over both has no
+honest meaning; the quick-add field would need a way to say which kind of record
+to make; and on a 7-row screen, tasks sorted first push every memo below the
+fold. The switch keeps every To Do and Memo feature exactly as it was (quick
+add, categories, completed/sort options, the forms) and adds one control, where
+the eye already goes to see what the field will make. The tile reopens the half
+that was open last.
+
+**Storage and sync are unchanged.** Memos stay in `MemoDB.pdb`, on the device
+only; To Dos stay in `ToDoDB.pdb` and sync as CalDAV tasks by category.
+
+**Checklist memos.** A memo line starting `[ ] ` or `[x] ` is a checkbox line.
+It is plain text in the memo, so a memo stays a valid Palm memo and nothing
+about storage changed.
+- **Writing one:** the memo editor has a "[ ] Checkbox" button under the text
+  that adds a box to the start of the cursor's line, or takes it off. Typing the
+  four characters works the same.
+- **Reading one:** a memo with any box line opens as a list: plain lines as rows,
+  box lines with the To Do list's own drawn boxes. It is one `lv_table`, so no
+  per-line object. Tapping a box ticks it (filled, struck through) and saves.
+- **Tapping a box line's words** asks "Make this line a To Do?". Yes creates a
+  priority-1 To Do in Unfiled and removes the line from the memo, so a checklist
+  item that needs a due date, or has to reach the server, becomes a real task.
+- Each change re-reads the memo into a 1,200-byte heap buffer, edits one line
+  and writes it back whole; the list keeps only row-to-line numbers, in
+  `g_rowuids`, freed on the way out like every list's.
+
+**Numbers:** image 1,586,416 B (+1,376 over the version commit); static DRAM
++8 B (the switch's state and the checklist's memo id and pending line). The smoke
+tour gained a checklist walk (`planner_*` shots): build a memo with the button
+and with typed boxes, open it, tick one, move one to To Do, and find it there.
+The News taps moved from row 3 to row 2; the Memo walk goes through the switch.
+
 ### 2026-09-29 — the firmware version, shown in About
 
 **ESP-IDF already stamps a version into the image**: with no `PROJECT_VER` in
