@@ -44,9 +44,12 @@ only; To Dos stay in `ToDoDB.pdb` and sync as CalDAV tasks by category.
 **Checklist memos.** A memo line starting `[ ] ` or `[x] ` is a checkbox line.
 It is plain text in the memo, so a memo stays a valid Palm memo and nothing
 about storage changed.
-- **Writing one:** the memo editor has a "[ ] Checkbox" button under the text
-  that adds a box to the start of the cursor's line, or takes it off. Typing the
-  four characters works the same.
+- **Writing one:** the memo editor has an "[X]" button in its action row,
+  between Done and the category, that adds a box to the start of the cursor's
+  line or takes it off. On the memo form only, Done and Cancel narrow to 56 px
+  and the category button to 80, so the text keeps the whole form (it was first
+  a full-width button under the text, which cost the memo 32 px of height).
+  Typing the four characters works the same.
 - **Reading one:** a memo with any box line opens as a list: plain lines as rows,
   box lines with the To Do list's own drawn boxes. It is one `lv_table`, so no
   per-line object. Tapping a box ticks it (filled, struck through) and saves.

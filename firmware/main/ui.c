@@ -1803,20 +1803,26 @@ static void show_edit(uint32_t uid){
         lv_obj_t *ta = lv_textarea_create(form);       /* one big multi-line field */
         lv_textarea_set_text(ta, mtext);
         lv_textarea_set_max_length(ta, sizeof mtext - 1);
-        /* The Planner: a checkbox button under the text, because "[ ] " is four
-         * Graffiti strokes, two of them punctuation, and nobody should have to
-         * know that is how a checklist is written. */
-        lv_obj_set_size(ta, LCD_W - 16, (PDA_H - TITLE_H) - 46 - 32);
+        lv_obj_set_size(ta, LCD_W - 16, (PDA_H - TITLE_H) - 46);
         lv_obj_set_pos(ta, 2, 2);
         lv_obj_add_event_cb(ta, ta_click_cb, LV_EVENT_CLICKED, NULL);
         g_fields[g_nfields++] = ta;
         field_mode(TA_CAP_FIRST, NULL);
-        lv_obj_t *bx = lv_button_create(form);
-        lv_obj_set_size(bx, 120, 26);
-        lv_obj_set_pos(bx, 2, (PDA_H - TITLE_H) - 46 - 26);
-        lv_obj_set_style_radius(bx, 0, 0);
+        /* The Planner: a checkbox button, because "[ ] " is four Graffiti
+         * strokes, two of them punctuation, and nobody should have to know that
+         * is how a checklist is written. It sits IN the action row, so the text
+         * keeps the whole form: Done and Cancel give up 8 px each and the
+         * category button 16, which their labels do not need. */
+        lv_obj_set_width(done, 56);
+        lv_obj_set_width(cancel, 56);
+        lv_obj_set_width(det, 80);
+        lv_obj_align(det, LV_ALIGN_BOTTOM_MID, 18, -3);
+        lv_obj_t *bx = lv_button_create(content);
+        lv_obj_set_size(bx, 34, 30);
+        lv_obj_align(bx, LV_ALIGN_BOTTOM_LEFT, 64, -3);
+        lv_obj_set_style_pad_all(bx, 0, 0);
         lv_obj_t *bxl = lv_label_create(bx);
-        lv_label_set_text(bxl, "[ ] Checkbox");
+        lv_label_set_text(bxl, "[X]");
         lv_obj_center(bxl);
         lv_obj_add_event_cb(bx, memo_box_btn_cb, LV_EVENT_CLICKED, NULL);
     }

@@ -506,15 +506,15 @@ s q8_memo_typed
 c 215 40
 t 500
 s q8_memo_added
-# The Planner's checklist memo. New on an empty bar opens the form; the
-# "[ ] Checkbox" button under the text puts a box at the start of the line the
-# cursor is on. K types hex: 0a is a newline, and the second item is written
+# The Planner's checklist memo. New on an empty bar opens the form; the "[X]"
+# button in the action row (between Done and the category) puts a box at the
+# start of the line the cursor is on. K types hex: 0a is a newline, and the second item is written
 # out as "[ ] eggs" by hand, which must work just the same.
 c 215 40
 t 400
 k Groceries
 K 0a
-c 66 152
+c 81 188
 t 200
 k milk
 K 0a
