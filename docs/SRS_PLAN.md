@@ -171,9 +171,12 @@ either way.
     ink coverage 96, which gives 60×63 with no blank rows to trim. The
     result is `docs/img/study_face.png`, a 1:1 black-on-white PNG that reads
     back pixel for pixel.
-  - **The owner is hand-editing it** and will provide the finished PNG. S3
-    replaces `study_face.png` with it and adds it to `FACES` as `STUDY`,
-    through `--from-exact`. The portrait is const flash, not the LVGL pool.
+  - **The owner hand-finished it** (2026-09-29): brows, eyes, smile, an ear
+    and the collar, 124 pixels in all. `docs/img/study_face.png` is now the
+    finished art: 60×63, pure black and white, reading back pixel for pixel.
+    **It is the artwork; never regenerate it from the source.** S3 adds it
+    to `FACES` as `STUDY` through `--from-exact`, and emits it into
+    `palm_icons.c`. The portrait is const flash, not the LVGL pool.
 
 ## 4) The course file
 
@@ -554,7 +557,8 @@ only.
 
 **S3 — Screens and the demo on the device.**
 - Needs the Planner merge first, for the launcher slot (§3).
-- The owner's hand-edited portrait (§3).
+- The owner's finished portrait (`docs/img/study_face.png`, §3) added to
+  `FACES`.
 - The launcher tile and icon, the speaker portrait, the course picker, the dashboard, and the
   lesson and review screens with self-grading.
 - `study_demo.c` and the first-run install, with its flash cost measured.

@@ -100,9 +100,9 @@ from there, or ask the user whether it has been merged.
    showed.
 8. **Name "Study"**, at **position 7** on the main launcher grid, with a
    textbook-on-a-black-circle icon and the user's portrait as its speaker,
-   like Coach and Guru (`SRS_PLAN.md` §3). The user is hand-editing
-   `docs/img/study_face.png` (60×63, 1:1) and will provide it back; use
-   theirs, and don't regenerate it from the source art.
+   like Coach and Guru (`SRS_PLAN.md` §3). **`docs/img/study_face.png`
+   (60×63, 1:1) is the user's hand-finished art**: use it as it is, through
+   `gen_faces.py --from-exact`, and never regenerate it from the source.
 9. **The Planner is approved:** To Do and Memo become one launcher app
    (design in `BACKLOG.md`'s RESUME HERE). Storage and sync don't change.
    The grid becomes Date Book, Address, Planner / News, HotSync, Games /

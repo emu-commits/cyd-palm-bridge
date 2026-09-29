@@ -64,7 +64,7 @@ and because notes and tasks belong together. Grid: Date Book, Address,
 - [ ] S0 — `docs/COURSE_FORMAT.md`, the two-level demo kanji course source, and the Albanian fit check; **stop for the user's review**
 - [ ] S1 — `course.c` reader and `tools/mkcourse.py`, with round-trip, fuzz and demo-rebuild gates in CI `[s]`
 - [ ] S2 — `srs.c` with both schedulers and crash-safe progress, with host tests in CI `[s]`
-- [ ] S3 — launcher tile (position 7), the user's hand-edited portrait, course picker, dashboard, lessons and reviews, and the demo installed on first run, in the sim `[s]`
+- [ ] S3 — launcher tile (position 7), the user's finished portrait (`docs/img/study_face.png`), course picker, dashboard, lessons and reviews, and the demo installed on first run, in the sim `[s]`
 - [ ] S4 — typed answers: romaji to kana on the Graffiti strip, meaning matching `[s]`
 - [ ] S5 — due counts on the lock screen and launcher, forecast and stats `[s]`
 - [ ] S6 — a full course on the real card: open time, next-card time, heap, battery pull, kanji readability `[d]`
