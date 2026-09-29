@@ -75,19 +75,32 @@ HERE" in `BACKLOG.md`. These docs were written on branch
 `git fetch origin claude/project-review-recommendations-x1ihdn` and take them
 from there, or ask the user whether it has been merged.
 
-**Decisions already made (don't reopen them):**
+**Decisions already made (don't reopen them):** see `SRS_PLAN.md` §11.
 1. The SRS app is **built in**, not an SD-loaded app.
-2. **Courses are data on the card** (`/sdcard/study/<id>/course.srs`), built
-   on a computer by `tools/mkcourse.py`. Progress is keyed by stable item id
-   and kept apart from the course, so a course update keeps progress.
-3. **Japanese text is pre-rendered bitmaps** in the course file. The
-   firmware ships no kanji font; readings may use the existing 38 px
+2. **Courses are data on the card** (`/sdcard/study/<id>/course.srs`), one
+   file each, read a piece at a time (never loaded whole). They're built on
+   a computer by `tools/mkcourse.py`. Progress is keyed by stable item id
+   (string ids map to numbers through the course's `ids.tsv`) and kept apart
+   from the course, so a course update keeps progress.
+3. **Text in U+0020–U+00FF is drawn with the Palm fonts** (they include ë,
+   ç and the rest of Latin-1). **Anything else is a pre-rendered bitmap** in
+   the course file, including all kanji. Readings may use the existing 38 px
    `lv_font_kana`.
-4. **WaniKani content never enters the repo.** It belongs to Tofugu, so it's
-   for personal use on the user's card. The repo holds only a small
-   self-written sample course and the converter.
-5. **Proposed, open until the user reviews S0:** the working name "Study",
-   its own launcher tile, and the stage scheduler with per-course intervals.
+4. **Two schedulers**, stage-based (WaniKani) and SM-2 (Anki), chosen and
+   tuned by each course in its `META`.
+5. **A demo course of two WaniKani-style kanji levels ships with the
+   firmware** (`courses/demo-kanji/`, installed to the card on first run).
+   It's also the reference example for course authors. Its content is
+   written for this project: facts checked against KANJIDIC2/JMdict,
+   original radical names, mnemonics and sentences.
+6. **WaniKani content never enters the repo.** It belongs to Tofugu.
+7. **The user's Albanian course** (github.com/androidbot18/albcourse) is
+   still in progress and is **only a design check**: never copy its data
+   into this repo or use it in tests. `SRS_PLAN.md` §4.6 has what it
+   showed.
+8. **Proposed, open until the user reviews S0:** the working name "Study",
+   its own launcher tile, JSON Lines as the source format, CC0 for the demo
+   content, and the demo's kanji list.
 
 **Measured already (QEMU, launcher showing):** 114,352 B free heap (largest
 block 90,112 B); about 106–108 KB estimated on the device with the SD card
@@ -117,14 +130,20 @@ mounted. LVGL pool free: 11,024 B.
      Settings row list with "About". The sim needs an
      `esp_app_get_description` shim in `sim/include`.
    - Make `tools/package_firmware.py` and `ci.yml` use the same string.
-3. **SRS S0: the course format.** Turn `SRS_PLAN.md` §4 into
-   `docs/COURSE_FORMAT.md` with exact byte layouts (little-endian, with the
-   offsets and CRC32 of each section), plus the TSV/JSON source format
-   `mkcourse.py` reads. Write the sample course source in
-   `tests/data/study/` (about 30 self-written items: a few radicals, kanji
-   and words, and a small generic front/back deck). **Then stop for the
-   user's review of the format** before S1; it's the one thing that's hard
-   to change once real courses exist.
+3. **SRS S0: the course format and demo content** (`SRS_PLAN.md` §4, §9,
+   §10).
+   - Turn §4 into `docs/COURSE_FORMAT.md`: exact byte layouts
+     (little-endian, each section's offset, length and CRC32), the source
+     format, and an authoring guide that uses the demo as its example.
+   - Write the demo course source in `courses/demo-kanji/`: two levels,
+     about 10 radicals, 12 kanji and 20 words each, with a README walking
+     through every file.
+   - Write the test-only generic front/back deck in `tests/data/study/`.
+   - Add an appendix mapping the Albanian course's fields onto the format
+     (a paper check; read its repo, copy nothing).
+   - **Then stop for the user's review** of the format and the demo content
+     before S1. The format is the one thing that's hard to change once real
+     courses exist.
 4. **S1 onward** as `SRS_PLAN.md` §9 describes, keeping to its §7 budgets:
    - pure-C `course.c` and `srs.c` in `firmware/main/`, with no LVGL and the
      time passed in, tested the way `wordie.c` and `coach.c` are;

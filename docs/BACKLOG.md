@@ -35,10 +35,10 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 - [ ] Firmware version from `git describe`, shown in Settings ▸ About `[s]`
 
 **SRS app** (phases in `SRS_PLAN.md` §9)
-- [ ] S0 — `docs/COURSE_FORMAT.md` and the sample course source; **stop for the user's review of the format**
-- [ ] S1 — `course.c` reader and `tools/mkcourse.py`, with round-trip and fuzz gates in CI `[s]`
-- [ ] S2 — `srs.c` scheduler and crash-safe progress, with host tests in CI `[s]`
-- [ ] S3 — launcher tile, course picker, dashboard, lessons and reviews in the sim `[s]`
+- [ ] S0 — `docs/COURSE_FORMAT.md`, the two-level demo kanji course source, and the Albanian fit check; **stop for the user's review**
+- [ ] S1 — `course.c` reader and `tools/mkcourse.py`, with round-trip, fuzz and demo-rebuild gates in CI `[s]`
+- [ ] S2 — `srs.c` with both schedulers and crash-safe progress, with host tests in CI `[s]`
+- [ ] S3 — launcher tile, course picker, dashboard, lessons and reviews, and the demo installed on first run, in the sim `[s]`
 - [ ] S4 — typed answers: romaji to kana on the Graffiti strip, meaning matching `[s]`
 - [ ] S5 — due counts on the lock screen and launcher, forecast and stats `[s]`
 - [ ] S6 — a full course on the real card: open time, next-card time, heap, battery pull, kanji readability `[d]`
