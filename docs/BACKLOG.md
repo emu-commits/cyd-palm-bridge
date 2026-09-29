@@ -38,8 +38,8 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 - [x] Firmware version from `git describe`, shown in Settings ▸ About `[s]` (2026-09-29)
 
 **Planner — To Do and Memo as one app** (built 2026-09-29; `BUILD_PROGRESS.md`)
-- [x] Planner built: one launcher tile, the To Do / Memo switch, checkbox lines in memos, "make it a To Do", new icon, and the new grid `[s]`
-- [ ] Planner on glass: the switch, a checklist memo (tick one, move one to To Do), and that To Do still syncs `[d]`
+- [x] Planner built: one launcher tile, the To Do / Memo switch, checkbox lines in memos, new icon, and the new grid `[s]`
+- [ ] Planner on glass: the To Do / Memo switch, a checklist memo (the [X] button, tick and untick by box and by words), and To Do still syncs `[d]`
 
 **SRS app** (phases in `SRS_PLAN.md` §10)
 - [ ] S0 — `docs/COURSE_FORMAT.md`, the two-level demo kanji course source, and the Albanian fit check; **stop for the user's review**
@@ -446,6 +446,15 @@ follow-ups*.
 ---
 
 ## Parked — offered, NOT approved (do not build without a yes)
+
+- **Planner: a workflow between checklist memos and To Do.** A "make this line
+  a To Do" was built and removed on 2026-09-29: To Do syncs to one server list
+  and the item landed in Unfiled, so it lost its project (the memo). Options
+  discussed: checklist memos as the project lists with an optional due date in
+  the item's text; To Do categories as the project lists ("Lists", named after
+  the memo, up to 15), with the category sent to the server (`CATEGORIES`) or
+  routed to its own collection (`sync_categorized` exists but the device does
+  not use it). The owner will decide later.
 
 - **The app platform** (`APP_PLATFORM_PLAN.md`): native C apps from the SD
   card, with an SDK, versions and a local inspection. **On hold since

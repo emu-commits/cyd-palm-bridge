@@ -52,10 +52,12 @@ about storage changed.
   Typing the four characters works the same.
 - **Reading one:** a memo with any box line opens as a list: plain lines as rows,
   box lines with the To Do list's own drawn boxes. It is one `lv_table`, so no
-  per-line object. Tapping a box ticks it (filled, struck through) and saves.
-- **Tapping a box line's words** asks "Make this line a To Do?". Yes creates a
-  priority-1 To Do in Unfiled and removes the line from the memo, so a checklist
-  item that needs a due date, or has to reach the server, becomes a real task.
+  per-line object. Tapping an item, its box or its words, ticks or unticks it
+  (filled and struck through when ticked) and saves.
+- **"Make this line a To Do" was built and then taken out** the same day, at
+  the owner's request. To Do syncs to one server list and Unfiled is where the
+  item landed, so moving it out of its memo lost the project the memo was. A
+  better way between checklist memos and To Do is parked in `BACKLOG.md`.
 - Each change re-reads the memo into a 1,200-byte heap buffer, edits one line
   and writes it back whole; the list keeps only row-to-line numbers, in
   `g_rowuids`, freed on the way out like every list's.
@@ -63,7 +65,8 @@ about storage changed.
 **Numbers:** image 1,586,416 B (+1,376 over the version commit); static DRAM
 +8 B (the switch's state and the checklist's memo id and pending line). The smoke
 tour gained a checklist walk (`planner_*` shots): build a memo with the button
-and with typed boxes, open it, tick one, move one to To Do, and find it there.
+and with typed boxes, open it, tick one by its box, one by its words, and
+untick it again.
 The News taps moved from row 3 to row 2; the Memo walk goes through the switch.
 
 ### 2026-09-29 — the firmware version, shown in About

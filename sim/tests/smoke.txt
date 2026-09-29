@@ -532,19 +532,14 @@ s planner_checklist
 c 16 56
 t 400
 s planner_checklist_ticked
-# Tap eggs' WORDS: "Make this line a To Do?" -- it leaves the memo and becomes a
-# real, syncable To Do at priority 1.
+# Tap eggs' WORDS: the same thing -- the whole row is the checkbox.
 c 120 78
 t 400
-s planner_make_todo
-c 180 190
-t 600
-s planner_moved
-c 36 188
+s planner_checklist_both
+# ...and again: unticked.
+c 120 78
 t 400
-c 30 40
-t 400
-s planner_todo_has_eggs
+s planner_checklist_untick
 c 18 225
 t 300
 # HotSync -- launcher row 2 col 2, back in the middle where it is findable

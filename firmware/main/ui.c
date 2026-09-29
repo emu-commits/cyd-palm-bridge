@@ -1102,9 +1102,12 @@ static void del_btn_cb(lv_event_t *e){ ask_delete((uint32_t)(uintptr_t)lv_event_
  * A memo can hold checklist lines as well as text: "[ ] " or "[x] " at the start
  * of a line. They are PLAIN TEXT in the memo, so nothing about how a memo is
  * stored changes, a memo stays readable anywhere a Palm memo is, and it stays on
- * the device like every memo (memos have no server copy). A line that needs a
- * due date or has to reach the server becomes a real To Do instead: tap the
- * line's words, not its box, and it moves.
+ * the device like every memo (memos have no server copy). Tapping an item --
+ * its box or its words -- ticks or unticks it.
+ *
+ * There used to be a "make this line a To Do" here. It was taken out
+ * (2026-09-29): To Do has one server list, so moving an item out of its memo
+ * lost the project the memo was. A better way between the two is open.
  *
  * The detail screen shows such a memo as a list -- the same one lv_table and the
  * same drawn boxes as the To Do list, so no screen gains a per-line object. The
@@ -1130,7 +1133,6 @@ static char *memo_line(char *t, int n){
     return NULL;
 }
 static uint32_t g_chk_uid;                 /* the memo the checklist is showing */
-static int      g_chk_line;                /* the line "make it a To Do" asks about */
 static void show_detail(uint32_t uid);
 
 /* read the memo, let `fn` change line `n`, write it back under its category */
@@ -1148,78 +1150,15 @@ static void memo_edit_line(int n, void (*fn)(char *text, char *line)){
     free(t);
 }
 static void memo_tick(char *t, char *l){ (void)t; l[1] = (l[1] == ' ') ? 'x' : ' '; }
-/* the line moves to To Do: make the record, then take the line out of the memo */
-static void memo_to_todo(char *t, char *l){
-    (void)t;
-    char *end = strchr(l, '\n');
-    const char *words = l + (l[3] == ' ' ? 4 : 3);
-    int wl = (int)((end ? end : l + strlen(l)) - words);
-    Todo td; memset(&td, 0, sizeof td);
-    td.priority = 1;                          /* as the quick-add bar files one */
-    snprintf(td.description, sizeof td.description, "%.*s", wl, words);
-    if(!td.description[0]) snprintf(td.description, sizeof td.description, "(untitled)");
-    data_save_todo(0, 0, &td);                /* Unfiled: the memo's category is a Memo one */
-    if(end) memmove(l, end + 1, strlen(end + 1) + 1);   /* drop the line and its newline */
-    else { if(l > t) l[-1] = 0; else l[0] = 0; }          /* last line: drop it and the one before's */
-}
-static void chk_move_cb(lv_event_t *e){ (void)e;
-    confirm_close();
-    memo_edit_line(g_chk_line, memo_to_todo);
-    show_detail(g_chk_uid);
-    toast_show("Moved to To Do");
-}
-static void chk_ask_move(int line){
-    if(g_confirm) return;
-    g_chk_line = line;
-    g_confirm = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(g_confirm, LCD_W, LCD_H);
-    lv_obj_set_style_bg_color(g_confirm, COL_LINE, 0);
-    lv_obj_set_style_bg_opa(g_confirm, LV_OPA_30, 0);
-    lv_obj_set_style_border_width(g_confirm, 0, 0);
-    lv_obj_set_style_pad_all(g_confirm, 0, 0);
-    lv_obj_add_flag(g_confirm, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(g_confirm, confirm_cancel_cb, LV_EVENT_CLICKED, NULL);
-
-    lv_obj_t *panel = lv_obj_create(g_confirm);
-    lv_obj_set_width(panel, 210);
-    lv_obj_set_height(panel, 112);
-    lv_obj_center(panel);
-    lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
-    lv_obj_set_style_border_width(panel, 1, 0);
-    lv_obj_set_style_border_color(panel, COL_LINE, 0);
-    lv_obj_set_style_radius(panel, 0, 0);
-    lv_obj_set_style_pad_all(panel, 10, 0);
-    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
-
-    lv_obj_t *q = lv_label_create(panel);
-    lv_label_set_long_mode(q, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(q, 190);
-    lv_label_set_text(q, "Make this line a To Do?\nIt leaves the memo, and can "
-                         "have a due date and sync.");
-    lv_obj_align(q, LV_ALIGN_TOP_LEFT, 0, 0);
-
-    lv_obj_t *cancel = lv_button_create(panel);
-    lv_obj_set_size(cancel, 82, 30);
-    lv_obj_align(cancel, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-    lv_obj_t *cl = lv_label_create(cancel); lv_label_set_text(cl, "Cancel"); lv_obj_center(cl);
-    lv_obj_add_event_cb(cancel, confirm_cancel_cb, LV_EVENT_CLICKED, NULL);
-
-    lv_obj_t *mv = lv_button_create(panel);
-    lv_obj_set_size(mv, 92, 30);
-    lv_obj_align(mv, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
-    lv_obj_t *ml = lv_label_create(mv); lv_label_set_text(ml, "Make To Do"); lv_obj_center(ml);
-    lv_obj_add_event_cb(mv, chk_move_cb, LV_EVENT_CLICKED, NULL);
-}
 static void chk_click_cb(lv_event_t *e){
     lv_obj_t *t = lv_event_get_target(e);
     uint32_t r = LV_TABLE_CELL_NONE, c = LV_TABLE_CELL_NONE;
     lv_table_get_selected_cell(t, &r, &c);
     if(r == LV_TABLE_CELL_NONE || !g_rowuids || (int)r >= g_rowuid_n) return;
+    (void)c;                                          /* the box or the words: the same */
     if(!list_row_is(t, r, LIST_BOX)) return;          /* a plain line: nothing to do */
-    int line = (int)g_rowuids[r];
-    if(c == 0){ memo_edit_line(line, memo_tick); show_detail(g_chk_uid); }
-    else      chk_ask_move(line);
+    memo_edit_line((int)g_rowuids[r], memo_tick);
+    show_detail(g_chk_uid);
 }
 /* The checklist body of a memo detail: one row per non-blank line. Returns 0 if
  * it could not be built (no memory), and the caller shows the plain text. */
