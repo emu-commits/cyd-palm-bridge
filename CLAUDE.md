@@ -98,9 +98,13 @@ from there, or ask the user whether it has been merged.
    still in progress and is **only a design check**: never copy its data
    into this repo or use it in tests. `SRS_PLAN.md` §4.6 has what it
    showed.
-8. **Proposed, open until the user reviews S0:** the working name "Study",
-   its own launcher tile, JSON Lines as the source format, CC0 for the demo
-   content, and the demo's kanji list.
+8. **Name "Study"**, at position 6 on the main launcher grid, with a
+   textbook-on-a-black-circle icon and the user's portrait
+   (`docs/img/study_avatar_src.png`) as its speaker, like Coach and Guru
+   (`SRS_PLAN.md` §3). The slot depends on the proposed Planner merge of To
+   Do and Memo (`BACKLOG.md` ▸ Proposals), which isn't approved yet.
+9. **Proposed, open until the user reviews S0:** JSON Lines as the source
+   format, CC0 for the demo content, and the demo's kanji list.
 
 **Measured already (QEMU, launcher showing):** 114,352 B free heap (largest
 block 90,112 B); about 106–108 KB estimated on the device with the SD card

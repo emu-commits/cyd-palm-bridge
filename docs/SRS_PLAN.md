@@ -1,6 +1,7 @@
-# SRS plan — a built-in spaced-repetition app (working name "Study")
+# SRS plan — Study, a built-in spaced-repetition app
 
-> **Status: approved 2026-09-29; S0 is next.** Nothing is built yet. This
+> **Status: approved 2026-09-29; S0 is next.** Name, launcher slot and
+> speaker settled the same day (§3). Nothing is built yet. This
 > replaces the app platform (`APP_PLATFORM_PLAN.md`) as the current project.
 > That plan is on hold, and why is in §1. Revised the same day after
 > checking the design against a real course in progress (§4.6), and to add
@@ -145,8 +146,33 @@ through a small `ui_internal.h` is simple, the screens go in `study_ui.c`.
 If not, they go in `ui.c` like the rest, and the logic stays separate
 either way.
 
-**Launch point: its own launcher tile**, like Coach and Guru, with a new
-24×22 icon. It's a daily habit app, not a game.
+**Name, tile and speaker** (decided 2026-09-29):
+- **Name: Study.**
+- **Launcher: position 6 on the main 3×3 grid.** The grid is full today, so
+  this depends on the proposed **Planner** merge of To Do and Memo
+  (`BACKLOG.md` ▸ Proposals ▸ Planner), which frees a slot. With it, the
+  grid becomes:
+
+  | | | |
+  |---|---|---|
+  | Date Book | Address | **Planner** |
+  | News | HotSync | **Study** |
+  | Games | Guru | Coach |
+
+  Games moving to position 7 is an assumption; the owner placed only
+  Planner, News and Study. If the Planner isn't built, Study needs another
+  home, and that goes back to the owner.
+- **Icon:** a textbook on a black circle, Palm style, 24×22 A8 like the
+  other launcher icons, drawn with a small generator as the Guru and Zip
+  icons are.
+- **A speaker, like Coach and Guru:** a portrait in the right-hand margin
+  with speech bubbles, for the greeting, the "reviews due" line, level-ups
+  and the end-of-session summary. The owner's source art is
+  `docs/img/study_avatar_src.png` (1-bit, 1008×1054). A trial reduction with
+  `tools/gen_faces.py --from-image` at 60 px wide and ink coverage 64 reads
+  well (glasses, brows and smile all survive). S3 adds it to `FACES`, trims
+  blank rows, finishes it by hand if needed, and emits it into
+  `palm_icons.c`. It's const flash, not the LVGL pool.
 
 ## 4) The course file
 
@@ -526,7 +552,8 @@ only.
 - **Exit:** the tests are green in CI.
 
 **S3 — Screens and the demo on the device.**
-- The launcher tile and icon, the course picker, the dashboard, and the
+- Needs the Planner merge first, for the launcher slot (§3).
+- The launcher tile and icon, the speaker portrait, the course picker, the dashboard, and the
   lesson and review screens with self-grading.
 - `study_demo.c` and the first-run install, with its flash cost measured.
 - Smoke tour steps and screenshots using the demo, looked at before ticking
@@ -569,9 +596,10 @@ only.
    reference example for course authors (§9).
 6. **The Albanian course is a design check only.** It's still being
    built, and none of its data enters this repo.
-7. **Proposed, open until the S0 review:**
-   - the working name "Study";
-   - its own launcher tile;
+7. **Name, tile and speaker** (2026-09-29): "Study", position 6 on the
+   main grid (which depends on the Planner merge), a textbook-on-a-black-
+   circle icon, and the owner's portrait as its speaker (§3).
+8. **Proposed, open until the S0 review:**
    - JSON Lines as the source format;
    - CC0 for the demo content;
    - the demo's kanji list.

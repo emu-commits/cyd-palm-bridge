@@ -436,6 +436,29 @@ follow-ups*.
 7. **Static analysis in CI.** `-Wextra`, `cppcheck`, and ASan/UBSan over the
    host gates (today only the RSS parser has an ASan run).
 
+### Planner — To Do and Memo as one app (proposed 2026-09-29, NOT approved)
+Asked for by the owner, to free a launcher slot for Study (`SRS_PLAN.md` §3)
+and because notes and tasks belong together. Grid: Date Book, Address,
+**Planner** / News, HotSync, **Study** / Games, Guru, Coach.
+- **Storage doesn't change**, so sync doesn't either. Memos stay in
+  `MemoDB.pdb`, on this device only, as today. Tasks stay in `ToDoDB.pdb`
+  and keep syncing as CalDAV tasks, routed by category.
+- **A memo can hold checkbox lines** as well as text: `[ ] ` and `[x] ` at
+  the start of a line, stored in the memo's plain text. They're checklists,
+  and they stay on the device like the rest of the memo. They don't sync,
+  and have no due date or priority.
+- **Real tasks** (synced, with due dates and priority) are the To Do records
+  as now. The Planner lists memos and task lists together, and a memo
+  checkbox line can be turned into a real task.
+- **RAM:** no new static buffers. The list is the same single virtualized
+  `lv_table`, filled by two streaming passes instead of one. A checklist
+  memo shows as a table with a checkbox column, as the To Do list already
+  does. Editing reuses the memo editor's existing 1,200-byte buffer. Pool
+  use is the same as the To Do screen's.
+- **Also touched:** Find's result labels, the HotSync screen's names, the
+  About box, the demo seed, Coach's "save as memo", the smoke tour and its
+  screenshots, and a new Planner icon.
+
 ---
 
 ## Parked — offered, NOT approved (do not build without a yes)
