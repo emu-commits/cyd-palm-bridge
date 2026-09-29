@@ -16,6 +16,29 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-29 — the firmware version, shown in About
+
+**ESP-IDF already stamps a version into the image**: with no `PROJECT_VER` in
+the project and no `version.txt`, it runs `git describe --always --tags
+--dirty`. There are no tags yet, so a build says the commit (`334fcac`), with
+`-dirty` if it was built from uncommitted edits; after a `v*` tag, the tag's
+name. So nothing was added to the build. It is now **shown** and **reused**:
+- **Settings ▸ About** has a "Version ..." row (second; "All settings" moved to
+  the fifth row, and the smoke tap followed it to y=147). The two About boxes
+  (the launcher's and Guru's) say "Version ..." where they said a hard-coded
+  "v0.3".
+- **`tools/package_firmware.py`** reads the version from the build's
+  `project_description.json` instead of taking it on the command line, and CI
+  stopped computing its own. The installer's manifest, the release file's name
+  and About on the device can no longer disagree. Checked against a local
+  build: manifest and file name said `334fcac-dirty`, as About did.
+- **The simulator** gets the same `git describe` from `sim/Makefile`, passed
+  unquoted and stringified in `sim/include/esp_app_desc.h`, because a quoted
+  `-D` does not survive `smoke32` re-quoting `CFLAGS` for its sub-make.
+- `main` now lists `esp_app_format` in `REQUIRES` (for `esp_app_desc.h`).
+
+Image +112 B; static DRAM unchanged.
+
 ### 2026-09-29 — passwords out of resident RAM
 
 **The running config no longer holds a password.** `Config` lost its five

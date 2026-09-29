@@ -67,9 +67,10 @@ jobs:
         shell: bash
         run: |
           . "$IDF_PATH/export.sh"
-          if [ "$GITHUB_REF_TYPE" = tag ]; then ver="$GITHUB_REF_NAME"
-          else ver="$(git rev-parse --short HEAD)"; fi
-          python tools/package_firmware.py firmware/build firmware-web "$ver"
+          # The version is read from the build: ESP-IDF stamped it from `git
+          # describe` (a tag's name on a tag, else the commit), and About on
+          # the device shows the same string.
+          python tools/package_firmware.py firmware/build firmware-web
       - name: Upload the firmware
         uses: actions/upload-artifact@v4
         with:

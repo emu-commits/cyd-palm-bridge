@@ -850,9 +850,10 @@ t 400
 c 195 160
 t 400
 s settings_about
-# "All settings (one list)" is the About panel's FOURTH row (y=119). This tap
-# was y=37 -- the first row -- so prefs_list had been a second picture of About.
-c 120 119
+# "All settings (one list)" is the About panel's FIFTH row (y=147) since the
+# version row went in second. This tap was once y=37 -- the first row -- so
+# prefs_list had been a second picture of About; check the PNG, not the exit code.
+c 120 147
 t 400
 s prefs_list
 c 18 225

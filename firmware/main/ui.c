@@ -20,6 +20,7 @@
 #include "find.h"         /* global search engine (bridge/find.c) */
 #include "news.h"         /* RSS reader's on-SD article store */
 #include "feeds.h"        /* RSS feed list (Preferences manager + HotSync fetch) */
+#include "esp_app_desc.h" /* the build's version: `git describe`, stamped by ESP-IDF */
 #include "lv_font_kana.h" /* hiragana+katakana bitmap subset (Kana trainer) */
 #include "kana_data.h"    /* ordered gojuon table (Kana trainer, roadmap #3) */
 #include "kana_strokes.h" /* per-kana stroke polylines (Tier 2 writing challenge) */
@@ -4695,6 +4696,12 @@ static void show_set_panel(int tile){
          * will look; the whole-list view stays underneath it as the escape
          * hatch for a config.ini that has gone wrong. */
         pf_add(list, "CYD Palm Bridge", NULL, 0);
+        /* The build, as `git describe` named it when it was compiled: a tag on a
+         * release, else the commit, with "-dirty" if it was built from edits.
+         * The browser installer and a release's file name use the same string
+         * (tools/package_firmware.py), so this row matches what was installed. */
+        snprintf(row, sizeof row, "Version %.40s", esp_app_get_description()->version);
+        pf_add(list, row, NULL, 0);
         pf_add(list, "A Palm-style PDA on a $12 board", NULL, 0);
         pf_add(list, "GPLv3. Icons + font from PumpkinOS", NULL, 0);
         pf_add(list, "All settings (one list)", sp_prefs_cb, 0);
@@ -5084,16 +5091,20 @@ static void act_about(lv_event_t *e){ (void)e;
                  "less than one a day.\n\n"
                  "%s\n\n"
                  "These are popular wellness habits, not medical advice.\n\n"
-                 "v0.3 - tap to close", src);
+                 "Version %s - tap to close", src, esp_app_get_description()->version);
         lv_label_set_text(body, gbuf);
     }
-    else
-        lv_label_set_text(body, "A pocket PDA that syncs to iCloud. Offline "
-                                "by default. HotSync when you want to. No feed. "
-                                "No ads.\n\n"
-                                "Memos stay on this device. To Dos sync as "
-                                "CalDAV tasks, not the Reminders app.\n\n"
-                                "v0.3 - tap to close");
+    else {
+        char abuf[320];
+        snprintf(abuf, sizeof abuf,
+                 "A pocket PDA that syncs to iCloud. Offline "
+                 "by default. HotSync when you want to. No feed. "
+                 "No ads.\n\n"
+                 "Memos stay on this device. To Dos sync as "
+                 "CalDAV tasks, not the Reminders app.\n\n"
+                 "Version %s - tap to close", esp_app_get_description()->version);
+        lv_label_set_text(body, abuf);
+    }
     lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 20);
 }
 

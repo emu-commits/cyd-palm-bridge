@@ -32,7 +32,7 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 **Firmware groundwork** (from the old Phase 1; one commit each)
 - [x] Passwords out of resident RAM, with a sim `secretscan` gate `[s]` (2026-09-29; `BUILD_PROGRESS.md`)
 - [ ] Wi-Fi join and an iCloud HotSync still work after that change `[d]`
-- [ ] Firmware version from `git describe`, shown in Settings ▸ About `[s]`
+- [x] Firmware version from `git describe`, shown in Settings ▸ About `[s]` (2026-09-29)
 
 **Planner — To Do and Memo as one app** (approved 2026-09-29; before S3)
 - [ ] Planner built: one launcher tile, memos and task lists together, checkbox lines in memos, "make it a task", new icon, and the new grid `[s]`

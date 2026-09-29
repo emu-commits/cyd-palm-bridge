@@ -33,7 +33,12 @@ INC    := -I. -Iinclude -Ilvgl -I$(FW) -I$(BR)
 # Defined ONCE, here, because smoke32 rebuilds CFLAGS from scratch and a second
 # hand-copied list is exactly how a build flag silently stops applying to half
 # the gates.
-SIMDEF := -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS -DUI_SEED_TESTEVENTS
+# The version About shows: the same `git describe` ESP-IDF stamps into the
+# device image when a project sets no PROJECT_VER (sim/include/esp_app_desc.h).
+# Passed as a bare token and made a string there: a quoted -D does not survive
+# smoke32, which hands CFLAGS to a sub-make inside double quotes.
+APP_VER := $(shell git describe --tags --always --dirty 2>/dev/null || echo unknown)
+SIMDEF := -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS -DUI_SEED_TESTEVENTS -DSIM_APP_VERSION_RAW=$(APP_VER)
 CFLAGS := -O2 -g -Wall $(SIMDEF) $(INC)
 
 # the REAL firmware UI + data layer + portable modules, unchanged

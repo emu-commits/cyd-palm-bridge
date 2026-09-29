@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Package an ESP-IDF build for flashing from a browser (ESP Web Tools).
 
-    package_firmware.py <firmware/build> <out_dir> <version>
+    package_firmware.py <firmware/build> <out_dir>
 
 Writes into out_dir:
   manifest.json            what the web page's Install button reads
@@ -19,6 +19,12 @@ live in the NVS partition (secretstore.h), which sits between the partition
 table and the app. A merged image pads that gap with 0xFF, so installing it
 erases every saved password. The parts skip the gap, and an update keeps them.
 This script refuses to write a manifest that would touch NVS.
+
+The version is the one the build stamped into the app image, read back from
+the build's project_description.json: ESP-IDF sets it from `git describe
+--always --tags --dirty` when the project sets no PROJECT_VER. So the manifest,
+the release file's name and Settings > About on the device all say the same
+thing, and there is no second copy of the rule here to drift from it.
 """
 import csv, json, os, shutil, subprocess, sys
 
@@ -32,10 +38,14 @@ def partitions(csv_path):
     return out
 
 def main():
-    if len(sys.argv) != 4:
+    if len(sys.argv) != 3:
         sys.exit(__doc__)
-    build, out, version = sys.argv[1:]
+    build, out = sys.argv[1:]
     build, out = os.path.abspath(build), os.path.abspath(out)   # merge_bin runs in build/
+    with open(os.path.join(build, 'project_description.json')) as f:
+        version = json.load(f)['project_version']
+    if not version or any(c in version for c in '/\\ '):
+        sys.exit(f'package_firmware: unusable version {version!r} in the build')
     with open(os.path.join(build, 'flasher_args.json')) as f:
         fa = json.load(f)
     chip = fa['extra_esptool_args']['chip']
