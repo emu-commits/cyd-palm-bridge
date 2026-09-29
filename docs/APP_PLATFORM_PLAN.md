@@ -1,8 +1,15 @@
 # App platform plan — native C apps from the SD card
 
-> **Status: Phases 0 and 1 approved to start (2026-09-27).** Nothing here
-> is built yet. The decisions in §11 were made on 2026-09-27; the v1 API list
-> in §5 is proposed and awaits review. How to resume: the root `CLAUDE.md`.
+> **Status: ON HOLD (2026-09-29).** Nothing here is built. The owner's
+> main goal is one first-class SRS app, and that app is now being built into
+> the firmware instead (`SRS_PLAN.md` §1 has the reasons). Two groundwork
+> items from Phase 1 continue as plain firmware work, since they're worth
+> having anyway: passwords out of resident RAM (§8.2 item 1) and the firmware
+> version in About. **Bring this plan back** if someone other than the owner
+> wants to write apps, if `ui.c` or flash becomes a real bottleneck, or if
+> apps need to be shared with other people's devices. Until then §11 stands
+> as decided, but nothing is scheduled.
+>
 > This plan follows the
 > MicroPython-versus-native measurement round (QEMU, ESP-IDF v5.5, this
 > firmware's own image). Its conclusion was: **compiled C apps, loaded from
@@ -1209,3 +1216,10 @@ numbers are what we keep.
    and only a passing full inspection writes a pack (§7.1). The inspector
    image is built locally or pulled from the GitHub container registry,
    where the maintainer pushes it by hand once per SDK release.
+7. **Put on hold (2026-09-29).** Building the platform before its first
+   real app would cost several times the app itself, and the one app wanted
+   now (an SRS course reader) is better built in, with no 24 KB block, 1-bit
+   bitmap or kana-font limits. See `SRS_PLAN.md` §1. Phase 0 was never run;
+   Phase 1's secrets and version items continue as firmware work, and the
+   SDK skeleton, licences and the Games-to-More rename are dropped until
+   the plan comes back.

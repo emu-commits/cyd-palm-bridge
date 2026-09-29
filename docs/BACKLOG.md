@@ -22,28 +22,26 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 
 ---
 
-## RESUME HERE — app platform, Phases 0 and 1 (approved 2026-09-27)
+## RESUME HERE — the SRS app, and two firmware items (approved 2026-09-29)
 
-Native C apps from the SD card: `APP_PLATFORM_PLAN.md`. The step-by-step
-instructions, environment notes and decisions for these two phases are in
-the root **`CLAUDE.md`** ("Current work"). The plan's §10 has the exit
-criteria.
+**The app platform is on hold.** The main goal is one first-class SRS app
+(WaniKani/Anki-style, with a large course on the SD card), and it's being
+built into the firmware: **`SRS_PLAN.md`**, with the reasons in its §1. The
+root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 
-**Phase 0 — loader spike** (throwaway code in a scratch copy; numbers go to
-`BUILD_PROGRESS.md`)
-- [ ] Baseline build in the IDF container matches CI (1,582,695 B) `[s]`
-- [ ] Hello pack loads from a flash partition in QEMU and calls back into the firmware `[s]`
-- [ ] Every Phase 0 exit criterion measured and recorded; `elf_loader` or custom loader decided `[s]`
-
-**Phase 1 — groundwork** (one commit each)
+**Firmware groundwork** (from the old Phase 1; one commit each)
 - [ ] Passwords out of resident RAM, with a sim `secretscan` gate `[s]`
 - [ ] Wi-Fi join and an iCloud HotSync still work after that change `[d]`
-- [ ] Firmware version from `git describe`, shown in Settings ▸ About with the API version `[s]`
-- [ ] `sdk/palm_app.h` (API 0.1, unstable) with `abicheck` in CI `[s]`
-- [ ] MIT `sdk/LICENSE` and `apps/LICENSE`, and the `NOTICE` permission draft `[s]`
-- [ ] Games folder renamed More; smoke tour and screenshots updated `[s]`
+- [ ] Firmware version from `git describe`, shown in Settings ▸ About `[s]`
 
-Then stop for the user's review of the API list before Phase 2.
+**SRS app** (phases in `SRS_PLAN.md` §9)
+- [ ] S0 — `docs/COURSE_FORMAT.md` and the sample course source; **stop for the user's review of the format**
+- [ ] S1 — `course.c` reader and `tools/mkcourse.py`, with round-trip and fuzz gates in CI `[s]`
+- [ ] S2 — `srs.c` scheduler and crash-safe progress, with host tests in CI `[s]`
+- [ ] S3 — launcher tile, course picker, dashboard, lessons and reviews in the sim `[s]`
+- [ ] S4 — typed answers: romaji to kana on the Graffiti strip, meaning matching `[s]`
+- [ ] S5 — due counts on the lock screen and launcher, forecast and stats `[s]`
+- [ ] S6 — a full course on the real card: open time, next-card time, heap, battery pull, kanji readability `[d]`
 
 ---
 
@@ -440,14 +438,13 @@ follow-ups*.
 
 ---
 
-### App platform
-Native C apps loaded from the SD card, with their own SDK, versioning and a
-a manual inspection that reports any issues before they reach the device: **`APP_PLATFORM_PLAN.md`**
-(phases 0–5; decisions recorded 2026-09-27 in its §11, the v1 API list in §5
-awaiting review).
-
 ## Parked — offered, NOT approved (do not build without a yes)
 
+- **The app platform** (`APP_PLATFORM_PLAN.md`): native C apps from the SD
+  card, with an SDK, versions and a local inspection. **On hold since
+  2026-09-29**, planned but not built. Bring it back if someone else wants to
+  write apps, if `ui.c` or flash becomes a bottleneck, or if apps need
+  sharing between devices.
 - **Opt-in CORS-proxy RSS fetch in the web emulator.** Feed servers send no
   `Access-Control-Allow-Origin`; the routes are a public proxy (fragile) or a
   self-hosted one (infra). Emulator parity only.
@@ -458,6 +455,12 @@ awaiting review).
 - **BLE + a companion iOS app: dropped, not parked** — see `PRODUCT_PLAN.md` §2.
 
 ## Decided — kept so the reasoning is not relitigated
+
+- **The SRS app is built in, not an SD app** (2026-09-29). The app framework
+  would have cost several times the app, saved only the full-firmware flash,
+  and limited the app to a small memory block, 1-bit bitmaps and no kana
+  font. Courses are data on the card, which covers most of the benefit of
+  adding things without reflashing. `SRS_PLAN.md` §1.
 
 - **No RTC part for timekeeping.** Drift on battery is under a minute a day and
   idle clears 24 h (measured 2026-08-27). An RTC survives only as the enabler for
