@@ -15,6 +15,14 @@
  *   u               pointer up
  *   c <x> <y>       click = down, 80 ms, up, 200 ms
  *   s <name>        screenshot -> <shotdir>/<name>.ppm
+ *   k <text>        type into the focused field (see below)
+ *   K <hex>         the same, with the text given in hex -- for a PASSWORD, so
+ *                   the script (and stdin's buffer) never holds it in plain
+ *   X <hex>         secretscan: fail if the hex-decoded string appears anywhere
+ *                   in this process's writable memory (see secret_scan)
+ *   P <who> <hex>   fail unless the store holds that password for <who>: `a` for
+ *                   the account, or a Wi-Fi slot 1..4. Proves the typing landed,
+ *                   so an X that finds nothing means "wiped", not "never typed"
  *   q               quit (implicit at EOF)
  *
  * Usage: sim_host [shotdir] < script      (shotdir default "build/shots")
@@ -72,6 +80,101 @@ static void wall_wait(int ms){
         struct timespec nap = { 0, 15 * 1000 * 1000 };   /* 15 ms, so we don't spin */
         nanosleep(&nap, NULL);
     }
+}
+
+/* ---- secretscan ----------------------------------------------------------
+ * A password must not outlive its use anywhere in RAM: not in a live buffer,
+ * not in freed heap, not in the LVGL pool, not in a dead stack frame. So this
+ * reads every WRITABLE mapping of the process (/proc/self/maps: .data, .bss,
+ * the heap, anonymous maps, every stack) and looks for the exact bytes. Freed
+ * memory is not cleared by anything, which is the point: it finds what a
+ * missing wipe leaves behind.
+ *
+ * PIECES COUNT, not just the whole password. Freeing a block overwrites its
+ * first bytes with the allocator's free-list pointers (glibc's tcache writes
+ * 16; the ESP32's heap does the same), so an unwiped buffer that was freed no
+ * longer holds the password from its start -- only its tail. A whole-string
+ * search passes that. So any SCAN_WIN consecutive bytes of the password is a
+ * hit, and the gate's test passwords are long enough that a freed copy always
+ * leaves more than that behind.
+ *
+ * The needle itself is the one legitimate copy, so its own bytes are skipped.
+ * It prints WHERE a copy is (the mapping's name and offset), never the value. */
+#define SCAN_WIN 12
+static int hexval(int c){
+    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10
+         : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+}
+/* decode hex into out (NUL-terminated); returns the length, or -1 */
+static int unhex(const char *h, char *out, int cap){
+    int n = 0;
+    while(h[0] && h[0] != '\n' && h[1]){
+        int a = hexval(h[0]), b = hexval(h[1]);
+        if(a < 0 || b < 0 || n + 1 >= cap) return -1;
+        out[n++] = (char)(a * 16 + b);
+        h += 2;
+    }
+    out[n] = 0;
+    return n;
+}
+static void wipe(void *p, size_t n){ volatile char *v = p; while(n--) *v++ = 0; }
+
+static int secret_scan(const char *hex){
+    char *needle = malloc(128);
+    if(!needle) return 1;
+    int n = unhex(hex, needle, 128);
+    if(n < 3 * SCAN_WIN){
+        fprintf(stderr, "secretscan: use a test password of at least %d bytes\n", 3 * SCAN_WIN);
+        free(needle); return 1;
+    }
+    FILE *m = fopen("/proc/self/maps", "r");
+    if(!m){ fprintf(stderr, "secretscan: no /proc/self/maps\n"); wipe(needle, 128); free(needle); return 1; }
+    char ln[512];
+    int hits = 0; size_t scanned = 0;
+    while(fgets(ln, sizeof ln, m)){
+        unsigned long lo, hi; char perm[8] = "", name[256] = "";
+        if(sscanf(ln, "%lx-%lx %7s %*s %*s %*s %255[^\n]", &lo, &hi, perm, name) < 3) continue;
+        if(perm[0] != 'r' || perm[1] != 'w') continue;          /* writable only */
+        if(strstr(name, "[vvar")) continue;
+        const char *b = (const char *)lo, *e = (const char *)hi;
+        scanned += (size_t)(hi - lo);
+        for(const char *p = b; p + SCAN_WIN <= e; p++){
+            if(p >= needle && p < needle + 128) continue;          /* the needle itself */
+            int w = 0;
+            for(; w + SCAN_WIN <= n; w++)
+                if(p[0] == needle[w] && !memcmp(p, needle + w, SCAN_WIN)) break;
+            if(w + SCAN_WIN > n) continue;
+            fprintf(stderr, "secretscan: FOUND %d+ bytes of it in %s at +0x%lx\n",
+                    SCAN_WIN, name[0] ? name : "(anonymous)", (unsigned long)(p - b));
+            hits++;
+            p += SCAN_WIN - 1;                                     /* one report per run */
+        }
+    }
+    fclose(m);
+    wipe(needle, 128);
+    free(needle);
+    fprintf(stderr, "secretscan: %d cop%s in %zu KB of writable memory\n",
+            hits, hits == 1 ? "y" : "ies", scanned / 1024);
+    return hits ? 1 : 0;
+}
+
+static int secret_expect(const char *arg){
+    char who = arg[0];
+    const char *h = arg + 1;
+    while(*h == ' ') h++;
+    char *want = malloc(128), *have = malloc(128);
+    int ok = 0;
+    if(want && have && unhex(h, want, 128) > 0){
+        if(who == 'a') appcfg_dav_pass(have, 128);
+        else if(who >= '1' && who <= '0' + CFG_WIFI_N) appcfg_wifi_pass(who - '1', have, 128);
+        else have[0] = 0;
+        ok = !strcmp(want, have);
+    }
+    fprintf(stderr, "secretscan: the store %s the expected password for %c\n",
+            ok ? "holds" : "does NOT hold", who);
+    if(want){ wipe(want, 128); free(want); }
+    if(have){ wipe(have, 128); free(have); }
+    return ok ? 0 : 1;
 }
 
 static int shot(const char *name){
@@ -153,6 +256,22 @@ int main(int argc, char **argv){
          * the screens and overlays under it (R11: an open Calculator) was
          * otherwise untestable: the script has no way to let the device sleep. */
         else if(line[0] == 'L' && (line[1] == '\n' || !line[1])){ ui_show_lock(); sim_step(100); }
+        /* K <hex>: type a password without the plain text ever being in the
+         * script, stdin's buffer or this line -- one character at a time. */
+        else if(line[0] == 'K' && line[1] == ' '){
+            const char *h = line + 2;
+            while(h[0] && h[0] != '\n' && h[1]){
+                int a = hexval(h[0]), b = hexval(h[1]);
+                if(a < 0 || b < 0){ fprintf(stderr, "script: bad hex: %s", line); rc = 1; break; }
+                char one[2] = { (char)(a * 16 + b), 0 };
+                ui_test_type(one);
+                wipe(one, sizeof one);
+                h += 2;
+            }
+            sim_step(60);
+        }
+        else if(line[0] == 'X' && line[1] == ' '){ if(secret_scan(line + 2)) rc = 1; }
+        else if(line[0] == 'P' && line[1] == ' '){ if(secret_expect(line + 2)) rc = 1; }
         else if(sscanf(line, "s %127s", name) == 1)   { if(shot(name)) rc = 1; }
         else if(line[0] == 'q') break;
         else { fprintf(stderr, "script: bad line: %s", line); rc = 1; }

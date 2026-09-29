@@ -30,7 +30,7 @@ built into the firmware: **`SRS_PLAN.md`**, with the reasons in its §1. The
 root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 
 **Firmware groundwork** (from the old Phase 1; one commit each)
-- [ ] Passwords out of resident RAM, with a sim `secretscan` gate `[s]`
+- [x] Passwords out of resident RAM, with a sim `secretscan` gate `[s]` (2026-09-29; `BUILD_PROGRESS.md`)
 - [ ] Wi-Fi join and an iCloud HotSync still work after that change `[d]`
 - [ ] Firmware version from `git describe`, shown in Settings ▸ About `[s]`
 

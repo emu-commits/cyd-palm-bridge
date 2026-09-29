@@ -14,6 +14,7 @@
 #include "secretstore.h"  /* the passwords, off the card                   */
 #include "esp_log.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Overridable so a gate can point it at a path that does not exist and see the
@@ -27,27 +28,81 @@
 static Config g_cfg;
 static int    g_loaded  = 0;
 static int    g_from_sd = 0;
+/* config.ini still holds a password the store would not take (see
+ * file_only_secrets). Almost always 0, and then the file is never re-read. */
+static int    g_file_secrets = 0;
 
 /* The passwords. config.ini is on a removable card, so the device keeps them in
  * its own flash (secretstore.h) and the file keeps everything else.
  *
  * On LOAD, a password that IS in the file -- a card from before this, or one
- * typed on a computer -- is moved into the store; a field the file leaves
- * empty is filled from it. Returns how many were moved, so the caller can
- * rewrite the file without them. A move that fails leaves the password where
- * it was: better in the file than lost. */
-static int secrets_settle(Config *c, int *failed){
+ * typed on a computer -- is moved into the store. Returns how many were moved,
+ * so the caller can rewrite the file without them. A move that fails leaves the
+ * password where it was: better in the file than lost. */
+static int secrets_settle(const ConfigSecrets *sec, int *failed){
     int moved = 0; char k[12];
     *failed = 0;
     for(int i = 0; i < CFG_WIFI_N; i++){
-        if(!c->wifi[i].ssid[0]) continue;
-        secret_wifi_key(c->wifi[i].ssid, k);
-        if(c->wifi[i].pass[0]){ if(secret_set(k, c->wifi[i].pass) == 0) moved++; else (*failed)++; }
-        else secret_get(k, c->wifi[i].pass, sizeof c->wifi[i].pass);
+        if(!g_cfg.wifi[i].ssid[0] || !sec->wifi_pass[i][0]) continue;
+        secret_wifi_key(g_cfg.wifi[i].ssid, k);
+        if(secret_set(k, sec->wifi_pass[i]) == 0) moved++; else (*failed)++;
     }
-    if(c->dav_pass[0]){ if(secret_set("dav", c->dav_pass) == 0) moved++; else (*failed)++; }
-    else secret_get("dav", c->dav_pass, sizeof c->dav_pass);
+    if(sec->dav_pass[0]){ if(secret_set("dav", sec->dav_pass) == 0) moved++; else (*failed)++; }
     return moved;
+}
+
+/* The passwords config.ini holds that the STORE does not: the ones it refused
+ * at load. Mapped onto the current slots by SSID, since slots reorder. Heap,
+ * for as long as the caller needs it; free it with secrets_free(). NULL when
+ * there are none, which is the normal case and costs no file read. */
+static void secrets_free(ConfigSecrets *s){
+    if(s){ config_wipe(s, sizeof *s); free(s); }
+}
+static ConfigSecrets *file_only_secrets(void){
+    if(!g_file_secrets) return NULL;
+    Config *tmp = malloc(sizeof *tmp);
+    ConfigSecrets *fs = calloc(1, sizeof *fs), *keep = calloc(1, sizeof *keep);
+    int any = 0;
+    if(tmp && fs && keep){
+        config_defaults(tmp);
+        if(config_load(CFG_PATH, tmp, fs) == 0){
+            char k[12];
+            for(int i = 0; i < CFG_WIFI_N; i++){
+                if(!g_cfg.wifi[i].ssid[0]) continue;
+                secret_wifi_key(g_cfg.wifi[i].ssid, k);
+                if(secret_has(k)) continue;
+                for(int j = 0; j < CFG_WIFI_N; j++)
+                    if(fs->wifi_pass[j][0] && !strcmp(tmp->wifi[j].ssid, g_cfg.wifi[i].ssid)){
+                        snprintf(keep->wifi_pass[i], sizeof keep->wifi_pass[i], "%s", fs->wifi_pass[j]);
+                        any = 1;
+                        break;
+                    }
+            }
+            if(fs->dav_pass[0] && !secret_has("dav")){
+                snprintf(keep->dav_pass, sizeof keep->dav_pass, "%s", fs->dav_pass);
+                any = 1;
+            }
+        }
+    }
+    secrets_free(fs);
+    free(tmp);
+    if(!any){ secrets_free(keep); return NULL; }
+    return keep;
+}
+
+/* has_pass for every slot and the account, from the store (and the file, in
+ * the rare case above). Reads lengths, never values. */
+static void refresh_flags(void){
+    ConfigSecrets *fo = file_only_secrets();
+    char k[12];
+    for(int i = 0; i < CFG_WIFI_N; i++){
+        WifiNet *n = &g_cfg.wifi[i];
+        if(!n->ssid[0]){ n->has_pass = 0; continue; }
+        secret_wifi_key(n->ssid, k);
+        n->has_pass = secret_has(k) || (fo && fo->wifi_pass[i][0]);
+    }
+    g_cfg.dav_has_pass = secret_has("dav") || (fo && fo->dav_pass[0]);
+    secrets_free(fo);
 }
 
 /* Settle `loc_auto` for a card that predates it (config.h explains the three
@@ -79,11 +134,19 @@ static void resolve_loc_auto(Config *c){
 
 void appcfg_load(void){
     config_defaults(&g_cfg);
-    g_from_sd = (config_load(CFG_PATH, &g_cfg) == 0);
+    /* The file's passwords, if it has any, pass through this heap block on
+     * their way to the store, and it is wiped before anything else runs. */
+    ConfigSecrets *sec = calloc(1, sizeof *sec);
+    g_from_sd = (config_load(CFG_PATH, &g_cfg, sec) == 0);
     int failed = 0;
-    int moved = secrets_settle(&g_cfg, &failed);
+    int moved = sec ? secrets_settle(sec, &failed) : 0;
+    secrets_free(sec);
+    /* No block to read them into means they were skipped, not moved: leave the
+     * file alone and look there if the store turns out not to have them. */
+    g_file_secrets = failed > 0 || (!sec && g_from_sd);
     resolve_loc_auto(&g_cfg);
     g_loaded  = 1;
+    refresh_flags();
     /* a password was found on the card: take it off again */
     if(moved && !failed && g_from_sd) appcfg_save();
 
@@ -92,11 +155,11 @@ void appcfg_load(void){
      * saved" from "wrong password" without anyone opening config.ini. */
     int nets = 0, keyed = 0;
     for(int i = 0; i < CFG_WIFI_N; i++)
-        if(g_cfg.wifi[i].ssid[0]){ nets++; if(g_cfg.wifi[i].pass[0]) keyed++; }
+        if(g_cfg.wifi[i].ssid[0]){ nets++; if(g_cfg.wifi[i].has_pass) keyed++; }
     ESP_LOGI("appcfg", "config: %s, %d Wi-Fi network(s) (%d with a password), "
              "account %s, password %s%s", g_from_sd ? "config.ini" : "defaults (no config.ini)",
              nets, keyed, g_cfg.dav_user[0] ? "set" : "unset",
-             g_cfg.dav_pass[0] ? "held" : "none",
+             g_cfg.dav_has_pass ? "held" : "none",
              moved ? (failed ? "; could NOT move them off the card" : "; moved off the card") : "");
 }
 
@@ -104,26 +167,70 @@ const Config* appcfg(void){ if(!g_loaded) appcfg_load(); return &g_cfg; }
 Config*       appcfg_mut(void){ if(!g_loaded) appcfg_load(); return &g_cfg; }
 int           appcfg_from_sd(void){ if(!g_loaded) appcfg_load(); return g_from_sd; }
 
-/* The passwords go to the store and the file gets a copy with them blanked.
- * If the store refuses any of them, the file keeps them all -- a password on
- * the card is a privacy problem; a password nowhere is a device that cannot
- * connect. */
 int appcfg_save(void){
     if(!g_loaded) appcfg_load();
-    int stored = 1; char k[12];
-    for(int i = 0; i < CFG_WIFI_N; i++){
-        if(!g_cfg.wifi[i].ssid[0]) continue;
-        secret_wifi_key(g_cfg.wifi[i].ssid, k);
-        if(secret_set(k, g_cfg.wifi[i].pass) != 0) stored = 0;
-    }
-    if(secret_set("dav", g_cfg.dav_pass) != 0) stored = 0;
-
-    Config out = g_cfg;
-    if(stored){
-        for(int i = 0; i < CFG_WIFI_N; i++) out.wifi[i].pass[0] = 0;
-        out.dav_pass[0] = 0;
-    }
-    int r = config_save(CFG_PATH, &out);
+    ConfigSecrets *keep = file_only_secrets();   /* NULL in the normal case */
+    int r = config_save(CFG_PATH, &g_cfg, keep);
+    secrets_free(keep);
     if(r == 0) g_from_sd = 1;
     return r;
+}
+
+/* ---- passwords ---------------------------------------------------------- */
+int appcfg_wifi_pass(int slot, char *out, size_t cap){
+    if(cap) out[0] = 0;
+    if(!g_loaded) appcfg_load();
+    if(slot < 0 || slot >= CFG_WIFI_N || !g_cfg.wifi[slot].ssid[0] || !cap) return 0;
+    char k[12];
+    secret_wifi_key(g_cfg.wifi[slot].ssid, k);
+    if(secret_get(k, out, cap)) return 1;
+    ConfigSecrets *fo = file_only_secrets();
+    if(fo && fo->wifi_pass[slot][0]) snprintf(out, cap, "%s", fo->wifi_pass[slot]);
+    secrets_free(fo);
+    return out[0] != 0;
+}
+
+int appcfg_dav_pass(char *out, size_t cap){
+    if(cap) out[0] = 0;
+    if(!g_loaded) appcfg_load();
+    if(!cap) return 0;
+    if(secret_get("dav", out, cap)) return 1;
+    ConfigSecrets *fo = file_only_secrets();
+    if(fo && fo->dav_pass[0]) snprintf(out, cap, "%s", fo->dav_pass);
+    secrets_free(fo);
+    return out[0] != 0;
+}
+
+int appcfg_set_wifi_pass(int slot, const char *pass){
+    if(!g_loaded) appcfg_load();
+    if(slot < 0 || slot >= CFG_WIFI_N || !g_cfg.wifi[slot].ssid[0]) return -1;
+    char k[12];
+    secret_wifi_key(g_cfg.wifi[slot].ssid, k);
+    int r = secret_set(k, pass);
+    refresh_flags();
+    return r;
+}
+
+int appcfg_set_dav_pass(const char *pass){
+    if(!g_loaded) appcfg_load();
+    int r = secret_set("dav", pass);
+    refresh_flags();
+    return r;
+}
+
+void appcfg_set_wifi_ssid(int slot, const char *ssid){
+    if(!g_loaded) appcfg_load();
+    if(slot < 0 || slot >= CFG_WIFI_N) return;
+    WifiNet *n = &g_cfg.wifi[slot];
+    char old[sizeof n->ssid];
+    snprintf(old, sizeof old, "%s", n->ssid);
+    snprintf(n->ssid, sizeof n->ssid, "%s", ssid ? ssid : "");
+    /* The old network's password goes when no slot names that network any more:
+     * forgetting a network should forget its password too. */
+    if(old[0] && strcmp(old, n->ssid)){
+        int used = 0;
+        for(int i = 0; i < CFG_WIFI_N; i++) if(!strcmp(g_cfg.wifi[i].ssid, old)) used = 1;
+        if(!used){ char k[12]; secret_wifi_key(old, k); secret_set(k, NULL); }
+    }
+    refresh_flags();
 }

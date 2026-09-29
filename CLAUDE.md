@@ -26,8 +26,8 @@ before touching anything.
 - **Run every gate before a commit, not just the smoke:**
   - `make test` and `make ftest` (host);
   - `sudo mkdir -p /sdcard && sudo chmod 777 /sdcard`, then `make -C sim`
-    with the targets `poolparity nosecrets data graf mines wordie sudoku zip
-    clock coach guru gurupool dash smoke smoke32`;
+    with the targets `poolparity nosecrets secretscan data graf mines wordie
+    sudoku zip clock coach guru gurupool dash smoke smoke32`;
   - the firmware build in the `espressif/idf:release-v5.5` container
     (`idf.py set-target esp32 && idf.py build` in `firmware/`);
   - `make -C sim wasm` if emsdk is available.

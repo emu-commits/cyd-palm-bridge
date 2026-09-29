@@ -228,6 +228,8 @@ static lv_obj_t *edit_cat_lbl;         /* label on the edit-form category trigge
 static lv_obj_t *g_fields[12];         /* edit-form textareas (also the Preferences form) */
 static int g_nfields;
 static lv_obj_t *active_ta;            /* last-focused textarea (Graffiti target) */
+static char     *g_secret;             /* the password editor's own buffer, or NULL */
+static void      secret_key(char c);   /* ...and how a key reaches it */
 
 /* To Do due-date picker state: edited via the due popup, written on Save. */
 static int g_due_has, g_due_y, g_due_m, g_due_d;
@@ -1757,7 +1759,7 @@ static void show_hotsync(void){
      * that is missing. It is read before the button is pressed, which is the
      * moment the question is actually being asked. */
     { const Config *cf = appcfg();
-      int acct = cf->dav_base[0] && cf->dav_user[0] && cf->dav_pass[0];
+      int acct = cf->dav_base[0] && cf->dav_user[0] && cf->dav_has_pass;
       int coll = cf->cal_coll[0] || cf->todo_coll[0] || cf->card_coll[0];
       g_hs_what = lv_label_create(content);
       lv_obj_t *what = g_hs_what;
@@ -3283,19 +3285,23 @@ static const char *pol_name(int p){
          : p==CFG_POL_BOTH  ? "keep both"
          :                    "iCloud wins";
 }
-/* the config buffer + capacity for field i (both read and write go through this) */
+/* Is a password stored for secret field i? The Config holds a flag, never the
+ * password itself (appcfg.h). */
+static int pf_secret_set(const Config *c, int i){
+    if(i == PF_PASS) return c->dav_has_pass;
+    for(int s = 0; s < CFG_WIFI_N; s++) if(i == pf_wifi_pass(s)) return c->wifi[s].has_pass;
+    return 0;
+}
+/* the config buffer + capacity for field i (both read and write go through this).
+ * NULL for a password field: those have no buffer here, and are edited by
+ * show_secret_edit() straight into the store. */
 static char *pf_buf(Config *c, int i, int *cap){
     switch(i){
         case PF_SSID:   *cap=sizeof c->wifi[0].ssid; return c->wifi[0].ssid;
-        case PF_WPASS:  *cap=sizeof c->wifi[0].pass; return c->wifi[0].pass;
         case PF_SSID2:  *cap=sizeof c->wifi[1].ssid; return c->wifi[1].ssid;
-        case PF_WPASS2: *cap=sizeof c->wifi[1].pass; return c->wifi[1].pass;
         case PF_SSID3:  *cap=sizeof c->wifi[2].ssid; return c->wifi[2].ssid;
-        case PF_WPASS3: *cap=sizeof c->wifi[2].pass; return c->wifi[2].pass;
         case PF_SSID4:  *cap=sizeof c->wifi[3].ssid; return c->wifi[3].ssid;
-        case PF_WPASS4: *cap=sizeof c->wifi[3].pass; return c->wifi[3].pass;
         case PF_USER:  *cap=sizeof c->dav_user;      return c->dav_user;
-        case PF_PASS:  *cap=sizeof c->dav_pass;      return c->dav_pass;
         case PF_CALB:  *cap=sizeof c->dav_base;      return c->dav_base;
         case PF_CARDB: *cap=sizeof c->dav_card_base; return c->dav_card_base;
         case PF_CAL:   *cap=sizeof c->cal_coll;      return c->cal_coll;
@@ -3316,8 +3322,11 @@ static void pf_edit_back(void){ set_return(); }
 static void pf_edit_cancel_cb(lv_event_t *e){ (void)e; pf_edit_back(); }
 static void pf_edit_save_cb(lv_event_t *e){ (void)e;
     Config *cfg = appcfg_mut();
+    int wslot = -1;
+    for(int s = 0; s < CFG_WIFI_N; s++) if(pf_edit_idx == pf_wifi_ssid(s)) wslot = s;
     int cap=0; char *dst = pf_buf(cfg, pf_edit_idx, &cap);
-    if(dst && cap) snprintf(dst, cap, "%s", lv_textarea_get_text(g_fields[0]));
+    if(wslot >= 0) appcfg_set_wifi_ssid(wslot, lv_textarea_get_text(g_fields[0]));
+    else if(dst && cap) snprintf(dst, cap, "%s", lv_textarea_get_text(g_fields[0]));
     /* TYPING A COORDINATE PINS IT. Everything else that fills the location is a
      * guess of some kind -- the zone, the city list, the IP lookup -- and a sync
      * is allowed to improve a guess. Numbers somebody entered by hand are the one
@@ -3357,16 +3366,22 @@ static void prefkb_cb(lv_event_t *e){
     lv_obj_t *bm = lv_event_get_target(e);
     uint32_t id = lv_buttonmatrix_get_selected_button(bm);
     const char *t = lv_buttonmatrix_get_button_text(bm, id);
-    if(!t || !active_ta) return;
+    if(!t || (!active_ta && !g_secret)) return;
     if(!strcmp(t, "ABC")){ lv_buttonmatrix_set_map(bm, KB_UPPER); return; }
     if(!strcmp(t, "abc")){ lv_buttonmatrix_set_map(bm, KB_LOWER); return; }
     if(!strcmp(t, "123")){ lv_buttonmatrix_set_map(bm, KB_DIGIT); return; }
+    if(g_secret){
+        secret_key(!strcmp(t, "<-") ? '\b' : !strcmp(t, "space") ? ' ' : t[0]);
+        return;
+    }
     if(!strcmp(t, "<-")) { lv_textarea_delete_char(active_ta); return; }
     if(!strcmp(t, "space")){ lv_textarea_add_char(active_ta, ' '); return; }
     lv_textarea_add_char(active_ta, (uint32_t)t[0]);
 }
 
+static void show_secret_edit(int i);
 static void show_pref_edit(int i){
+    if(pf_is_secret(i)){ show_secret_edit(i); return; }
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0; pf_edit_idx = i;
     content_clear();
@@ -3397,6 +3412,104 @@ static void show_pref_edit(int i){
     lv_obj_add_state(ta, LV_STATE_FOCUSED);
 
     /* the tap keyboard fills the rest of the screen below the field */
+    lv_obj_t *bm = lv_buttonmatrix_create(content);
+    lv_obj_set_size(bm, LCD_W - 4, (PDA_H - TITLE_H) - 92);
+    lv_obj_align(bm, LV_ALIGN_BOTTOM_MID, 0, -2);
+    lv_buttonmatrix_set_map(bm, KB_LOWER);
+    lv_obj_set_style_radius(bm, 0, 0);
+    lv_obj_set_style_radius(bm, 0, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(bm, 0, 0);
+    lv_obj_add_event_cb(bm, prefkb_cb, LV_EVENT_VALUE_CHANGED, NULL);
+}
+
+/* ---- the password editor ------------------------------------------------
+ * PASSWORDS NEVER ENTER LVGL. A textarea keeps its text in the LVGL pool and
+ * grows it by realloc, so every keystroke leaves a longer copy of the password
+ * in freed pool memory, where nothing ever wipes it. So this screen is not a
+ * textarea: the tap keyboard and Graffiti write into g_secret, one heap block
+ * of our own, and the screen shows one '*' per character. The block is wiped
+ * and freed when the screen goes, however it goes (Save, Cancel, Home), because
+ * that is hung off the display label's DELETE event.
+ *
+ * It starts EMPTY: a stored password is never read back to fill it. Save with
+ * nothing typed leaves the stored one alone, which is also what makes this
+ * screen safe to open just to look. */
+#define SECRET_CAP 64
+static int       g_secret_idx;
+static lv_obj_t *g_secret_lbl;
+static int secret_len(void){ return g_secret ? (int)strlen(g_secret) : 0; }
+static void secret_show(void){
+    if(!g_secret_lbl) return;
+    char stars[SECRET_CAP + 1];
+    int n = secret_len();
+    if(!n){
+        lv_label_set_text(g_secret_lbl, pf_secret_set(appcfg(), g_secret_idx)
+                          ? "(saved -- type to replace)" : "(none)");
+        return;
+    }
+    memset(stars, '*', n); stars[n] = 0;
+    lv_label_set_text(g_secret_lbl, stars);
+}
+static void secret_key(char c){
+    if(!g_secret) return;
+    int n = secret_len();
+    if(c == '\b'){ if(n) g_secret[n - 1] = 0; }
+    else if(c == '\n') return;                       /* one line, like the textarea */
+    else if(n < SECRET_CAP - 1 && (unsigned char)c >= 32){ g_secret[n] = c; g_secret[n + 1] = 0; }
+    secret_show();
+}
+static void secret_graf(char c){ secret_key(c); }
+static void secret_gone_cb(lv_event_t *e){
+    (void)e;
+    if(g_secret){ config_wipe(g_secret, SECRET_CAP); free(g_secret); g_secret = NULL; }
+    g_secret_lbl = NULL;
+}
+static void secret_save_cb(lv_event_t *e){ (void)e;
+    if(!g_secret) { pf_edit_back(); return; }
+    if(!secret_len()){ pf_edit_back(); toast_show("Unchanged"); return; }
+    int r = -1;
+    if(g_secret_idx == PF_PASS) r = appcfg_set_dav_pass(g_secret);
+    else for(int s = 0; s < CFG_WIFI_N; s++)
+        if(g_secret_idx == pf_wifi_pass(s)) r = appcfg_set_wifi_pass(s, g_secret);
+    config_wipe(g_secret, SECRET_CAP);               /* now, not when the screen goes */
+    appcfg_save();
+    pf_edit_back();
+    toast_show(r == 0 ? "Saved" : "Could not save the password");
+}
+static void show_secret_edit(int i){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0; pf_edit_idx = i; g_secret_idx = i;
+    content_clear();                                  /* frees any previous block */
+    lv_label_set_text(title_lbl, PF_LABELS[i]);
+    update_cat_trigger();
+
+    g_secret = calloc(1, SECRET_CAP);
+    if(!g_secret){ toast_show("(low memory)"); pf_edit_back(); return; }
+
+    lv_obj_t *cancel = lv_button_create(content);
+    lv_obj_set_size(cancel, 60, 28); lv_obj_align(cancel, LV_ALIGN_TOP_LEFT, 2, 2);
+    lv_obj_t *cl=lv_label_create(cancel); lv_label_set_text(cl,"Cancel"); lv_obj_center(cl);
+    lv_obj_add_event_cb(cancel, pf_edit_cancel_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *save = lv_button_create(content);
+    lv_obj_set_size(save, 60, 28); lv_obj_align(save, LV_ALIGN_TOP_RIGHT, -2, 2);
+    lv_obj_t *sl=lv_label_create(save); lv_label_set_text(sl,"Save"); lv_obj_center(sl);
+    lv_obj_add_event_cb(save, secret_save_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *lb = lv_label_create(content);
+    lv_label_set_text(lb, PF_LABELS[i]);
+    lv_obj_set_pos(lb, 4, 38);
+    /* drawn like the textarea it replaces: a bordered one-line box */
+    g_secret_lbl = lv_label_create(content);
+    lv_obj_set_size(g_secret_lbl, LCD_W - 16, 30);
+    lv_obj_set_pos(g_secret_lbl, 4, 54);
+    lv_obj_set_style_border_width(g_secret_lbl, 1, 0);
+    lv_obj_set_style_border_color(g_secret_lbl, COL_LINE, 0);
+    lv_obj_set_style_pad_all(g_secret_lbl, 6, 0);
+    lv_label_set_long_mode(g_secret_lbl, LV_LABEL_LONG_CLIP);
+    lv_obj_add_event_cb(g_secret_lbl, secret_gone_cb, LV_EVENT_DELETE, NULL);
+    secret_show();
+    graf_char_hook = secret_graf;                     /* AFTER kill_kb cleared it */
+
     lv_obj_t *bm = lv_buttonmatrix_create(content);
     lv_obj_set_size(bm, LCD_W - 4, (PDA_H - TITLE_H) - 92);
     lv_obj_align(bm, LV_ALIGN_BOTTOM_MID, 0, -2);
@@ -3750,7 +3863,7 @@ static void show_prefs(void){
         int cap=0; const char *v = pf_buf(c, i, &cap);
         char shown[28];
         if(pf_is_secret(i))
-            snprintf(shown, sizeof shown, "%s", (v && v[0]) ? "********" : "(unset)");
+            snprintf(shown, sizeof shown, "%s", pf_secret_set(c, i) ? "********" : "(unset)");
         else if(v && v[0])
             snprintf(shown, sizeof shown, "%.20s%s", v, strlen(v)>20 ? "..." : "");
         else
@@ -3896,7 +4009,7 @@ static void sp_field_row(lv_obj_t *list, int tile, int f){
     int cap = 0; const char *v = pf_buf((Config *)c, f, &cap);
     char shown[28], row[80];
     if(pf_is_secret(f))
-        snprintf(shown, sizeof shown, "%s", (v && v[0]) ? "********" : "(unset)");
+        snprintf(shown, sizeof shown, "%s", pf_secret_set(c, f) ? "********" : "(unset)");
     else if(v && v[0])
         snprintf(shown, sizeof shown, "%.20s%s", v, strlen(v) > 20 ? "..." : "");
     else
@@ -4285,8 +4398,8 @@ static void wifi_forget_cb(lv_event_t *e){
     int slot = (int)(intptr_t)lv_event_get_user_data(e);
     Config *c = appcfg_mut();
     if(slot >= 0 && slot < CFG_WIFI_N){
-        c->wifi[slot].ssid[0] = 0;
-        c->wifi[slot].pass[0] = 0;
+        (void)c;
+        appcfg_set_wifi_ssid(slot, "");   /* and its password, if no slot shares it */
         appcfg_save();
         toast_show("Forgotten");
     }
@@ -4321,7 +4434,7 @@ static void show_wifi_net(int slot){
     pf_add(list, row, wifi_name_cb, slot);
     if(set){
         snprintf(row, sizeof row, "Password:  %s",
-                 c->wifi[slot].pass[0] ? "********" : "(none -- open network)");
+                 c->wifi[slot].has_pass ? "********" : "(none -- open network)");
         pf_add(list, row, wifi_pass_cb, slot);
         if(slot > 0) pf_add(list, "Try this one first", wifi_promote_cb, slot);
         pf_add(list, "Forget this network", wifi_forget_cb, slot);
@@ -4362,9 +4475,8 @@ static void wifi_pick_cb(lv_event_t *e){
     const WifiAP *ap = wifi_scan_get(i);
     if(!ap) return;
     int slot = g_wifi_pick_slot;
-    Config *c = appcfg_mut();
-    snprintf(c->wifi[slot].ssid, sizeof c->wifi[slot].ssid, "%s", ap->ssid);
-    if(!ap->secure) c->wifi[slot].pass[0] = 0;
+    appcfg_set_wifi_ssid(slot, ap->ssid);
+    if(!ap->secure) appcfg_set_wifi_pass(slot, NULL);
     appcfg_save();
     wifi_scan_kill();
     if(ap->secure){ g_set_ret = RET_WIFI; g_wifi_slot = slot; show_pref_edit(pf_wifi_pass(slot)); }
@@ -4485,7 +4597,7 @@ static void show_set_panel(int tile){
         for(int i = 0; i < CFG_WIFI_N; i++){
             const char *s = c->wifi[i].ssid;
             if(s[0]) snprintf(row, sizeof row, "%d.  %.28s%s", i + 1, s,
-                              c->wifi[i].pass[0] ? "" : "   (open)");
+                              c->wifi[i].has_pass ? "" : "   (open)");
             else     snprintf(row, sizeof row, "%d.  (empty)", i + 1);
             pf_add(list, row, wifi_row_cb, i);
         }
@@ -6300,7 +6412,13 @@ static void graf_up_cb(lv_event_t *e){
     if(c == GRAF_SHIFT){ graf_case = (graf_case + 1) % 3; show_case(); return; }
     if(c == GRAF_PUNCT){ show_punct(1); return; }       /* tap: arm punctuation */
     show_punct(0);                                      /* any real char clears it */
-    if(graf_char_hook){ graf_char_hook(c); return; }    /* trainer intercepts input */
+    if(g_secret && c != '\b' && graf_case != CASE_NONE && c >= 'a' && c <= 'z')
+        c = c - 'a' + 'A';                              /* the password editor has no autocap */
+    if(graf_char_hook){                                 /* trainer intercepts input */
+        graf_char_hook(c);
+        if(g_secret && graf_case == CASE_SHIFT){ graf_case = CASE_NONE; show_case(); }
+        return;
+    }
     if(!active_ta){ graf_case = CASE_NONE; show_case(); return; }
     if(c == '\b'){                                     /* backspace: keep caps lock */
         lv_textarea_delete_char(active_ta);
@@ -8739,6 +8857,11 @@ int ui_owns_backlight(void){ return g_co_flash != NULL; }
  * which is what makes the Address Look Up filter testable and not just the
  * quick-add bars. */
 void ui_test_type(const char *text){
+    if(g_secret){                               /* the password editor (no textarea) */
+        if(!text){ while(secret_len()) secret_key('\b'); return; }
+        for(const char *p = text; *p; p++) secret_key(*p);
+        return;
+    }
     if(!active_ta) return;
     if(!text){ lv_textarea_set_text(active_ta, ""); return; }   /* clear */
     for(const unsigned char *p = (const unsigned char *)text; *p; p++)

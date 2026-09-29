@@ -53,7 +53,7 @@ WRAP_LD := -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free
 LVGL_SRCS := $(shell find lvgl/src -name '*.c' 2>/dev/null)
 LVGL_OBJS := $(patsubst lvgl/src/%.c,build/lvgl/%.o,$(LVGL_SRCS))
 
-.PHONY: host wasm smoke smoke32 poolparity data graf mines wordie sudoku zip clock coach guru gurupool dash games clean lvgl-src
+.PHONY: host wasm smoke smoke32 secretscan poolparity data graf mines wordie sudoku zip clock coach guru gurupool dash games clean lvgl-src
 
 # LVGL_SRCS is evaluated when make parses this file, so on a clean checkout the
 # source must be fetched BEFORE the build graph is used: the entry points fetch,
@@ -129,6 +129,25 @@ build/nosecrets: tests/nosecrets.c $(FW)/appcfg.c $(FW)/secretstore.c $(BR)/conf
 	@mkdir -p build
 	$(CC) -O2 -Wall $(SIMDEF) -DCFG_PATH='"/nonexistent/cyd-nosecrets.ini"' $(INC) \
 	    tests/nosecrets.c $(FW)/appcfg.c $(FW)/secretstore.c $(BR)/config.c $(FW)/clock.c -o $@
+
+# ---- secretscan: a password must not outlive its use anywhere in RAM.
+# Types two passwords through the real Settings screens, runs the stubbed sync
+# that reads them the way hotsync.c does, and after each step scans every
+# writable page of the process for them (host_main.c: secret_scan) -- live
+# buffers, freed heap, the LVGL pool, dead stack frames. The passwords are in
+# the script as hex only. Reports where a copy is, never the value. ----
+#
+# It runs on an EMPTY card and puts the old one back afterwards, pass or fail:
+# CI runs it in the same job as `smoke`, whose walk expects a fresh card with no
+# Wi-Fi saved, and this gate saves one.
+secretscan: host
+	rm -rf build/secretshots build/sdcard.keep && mkdir -p build/secretshots build/sdcard.keep
+	cp -a /sdcard/. build/sdcard.keep/
+	find /sdcard -mindepth 1 -delete
+	./build/sim_host build/secretshots < tests/secretscan.txt; rc=$$?; \
+	    find /sdcard -mindepth 1 -delete; cp -a build/sdcard.keep/. /sdcard/; \
+	    rm -rf build/sdcard.keep; exit $$rc
+	@echo "sim secretscan: OK"
 
 # ---- graf: offline Graffiti recognizer accuracy gate (no LVGL/display needed).
 # Synthesizes noisy strokes from the real templates and asserts recognition

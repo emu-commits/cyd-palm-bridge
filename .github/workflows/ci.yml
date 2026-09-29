@@ -97,6 +97,8 @@ jobs:
       # the simulator. Reports field names and lengths, never values.
       - name: No compile-time credentials in a simulator build
         run: make -C sim nosecrets
+      - name: No password left in RAM after use (Settings, then a sync)
+        run: make -C sim secretscan
       - name: Data layer gate (tombstones, the demo seed's uids)
         run: make -C sim data
       - name: Graffiti recognizer accuracy gate

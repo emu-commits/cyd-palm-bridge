@@ -16,6 +16,69 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-29 — passwords out of resident RAM
+
+**The running config no longer holds a password.** `Config` lost its five
+password buffers (four Wi-Fi, one account). It keeps a `has_pass` flag per
+network (inside `WifiNet`, so it moves when a join promotes a slot) and
+`dav_has_pass`. `config.ini` can still carry passwords, so `config_load` and
+`config_save` take a separate `ConfigSecrets`, which `appcfg_load` holds on the
+heap only while it moves them into the store, then wipes. Code that needs a
+password asks for it (`appcfg_wifi_pass`, `appcfg_dav_pass`), uses it, and
+wipes its copy (`config_wipe`, or `mbedtls_platform_zeroize` on the device):
+- **Wi-Fi join** (`wifi_try`): into `wifi_config_t`, handed to the driver,
+  wiped. The driver now keeps its copy in RAM only (`WIFI_STORAGE_RAM`); before,
+  it also wrote every network's password to NVS a second time, outside the store.
+- **Sync and discovery**: into the `DavCtx` for that run, wiped at the one exit
+  before `wifi_down()`. `basic_auth` wipes `user:pass` and its base64, and
+  `davreq` wipes the `Authorization` header it built.
+- **Passwords are stored by SSID**, so pointing a slot at another network
+  (`appcfg_set_wifi_ssid`) now also removes the old network's password once no
+  slot names it. Forgetting a network used to leave its password in flash.
+
+**The password screen is not a textarea any more.** An `lv_textarea` keeps its
+text in the LVGL pool and grows it by `realloc` per keystroke, so every key left
+a longer copy of the password in freed pool memory, and nothing wipes the pool.
+`show_secret_edit` takes the tap keyboard and Graffiti into a 64-byte heap
+buffer of its own, shows one `*` per character, and wipes and frees the buffer
+from the display label's `LV_EVENT_DELETE`, so Home, Cancel and Save all clear
+it. It starts empty ("(saved -- type to replace)"); Save with nothing typed
+keeps the stored password. The old editor filled the field with the stored
+password in plain text.
+
+**The gate: `make -C sim secretscan`** (in CI, and in `CLAUDE.md`'s list).
+`tests/secretscan.txt` types two test passwords through the real Settings
+screens, leaves one editor with Home, reopens one, runs the stub sync (which now
+reads and wipes the passwords the way `hotsync.c` does), and after each step:
+- `P` checks the store holds the password, so a clean scan means "wiped", not
+  "never typed";
+- `X` reads every writable mapping in `/proc/self/maps` (`.data`, `.bss`, heap,
+  anonymous maps, stacks), freed memory included, for **any 12 bytes** of it.
+The passwords are in the script as hex only (`K`, `X`, `P`). The simulator's
+store masks what it holds, since it stands in for flash, not RAM. The gate runs
+on an empty card and restores the previous one afterwards, because `smoke` in
+the same CI job expects a fresh card.
+
+**Checked that it fails:** with the editor's wipe removed, it reports the
+leftover pieces; with a static unwiped copy in the sync stub, it reports that.
+Its first run failed on the script itself, whose comment spelled the test
+passwords out; stdin's read buffer held them. **What it cannot see:** a stack
+buffer that isn't wiped (an unwiped one in the stub passed, because the UI
+reuses that stack before the scan runs), and the Wi-Fi driver's and HTTP
+client's own copies, which exist only on the device. `SECURITY.md` has a new
+"Passwords in RAM" section saying all of this.
+
+**Numbers** (IDF v5.5 container, LVGL 9.5.0 from a local clone; the baseline is
+a clean build of `904921a`):
+
+| | Before | After |
+|---|---|---|
+| App image | 1,582,816 B | 1,584,928 B (+2,112) |
+| Static DRAM used | 160,812 B | 160,524 B (−288) |
+| Static DRAM free | 19,924 B | 20,212 B |
+
+Bench check (Wi-Fi join and an iCloud HotSync still work) is in `BACKLOG.md`.
+
 ### 2026-09-23 — flash from the browser
 
 **The Pages site has an Install page** (`sim/web/flash.html`, linked from the

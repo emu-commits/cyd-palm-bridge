@@ -9,12 +9,17 @@
  * FOLLOWS whitespace ends the value ("timezone = UTC   # note"). A '#' with no
  * space before it is an ordinary character, so a password may contain one.
  *
- * NOTE: the Config struct holds the Wi-Fi and app-specific passwords -- never
- * log the password fields. On the device they are NOT written to the file:
- * appcfg keeps them in its own flash (firmware/main/secretstore.h).
+ * PASSWORDS ARE NOT IN Config. A config.ini may still carry them (a card from
+ * before the device kept its own, or one typed on a computer), so the reader
+ * and writer take a separate ConfigSecrets, which the caller holds only for as
+ * long as it takes to move them into the device's store and wipes afterwards.
+ * The resident Config keeps a "has a password" flag per network and for the
+ * account, and nothing else (firmware/main/appcfg.h, secretstore.h).
  */
 #ifndef CONFIG_H
 #define CONFIG_H
+#include <stddef.h>
+#include <stdint.h>
 
 /* conflict policy values match ConflictPolicy in sync.h (server/local/both). */
 enum { CFG_POL_SERVER = 0, CFG_POL_LOCAL = 1, CFG_POL_BOTH = 2 };
@@ -25,9 +30,18 @@ enum { CFG_POL_SERVER = 0, CFG_POL_LOCAL = 1, CFG_POL_BOTH = 2 };
 #define CFG_WIFI_N 4
 
 typedef struct {
-    char ssid[64];
-    char pass[64];
+    char    ssid[64];
+    uint8_t has_pass;          /* a password is stored for this SSID. Runtime
+                                * only: set by appcfg, never read or written by
+                                * the file functions below. It moves with the
+                                * slot when config_wifi_promote reorders them. */
 } WifiNet;
+
+/* The passwords a config.ini can carry, by slot as the file lists them. */
+typedef struct {
+    char wifi_pass[CFG_WIFI_N][64];
+    char dav_pass[64];
+} ConfigSecrets;
 
 typedef struct {
     /* THE ARRAY ORDER IS THE TRY ORDER, and slot 0 is whichever network
@@ -37,7 +51,7 @@ typedef struct {
      * "last used" key that could disagree with the list it describes. */
     WifiNet wifi[CFG_WIFI_N];
     char dav_user[128];        /* Apple ID email                         */
-    char dav_pass[64];         /* app-specific password (with dashes)    */
+    uint8_t dav_has_pass;      /* an app-specific password is stored (runtime only) */
     char dav_base[128];        /* caldav host, e.g. https://caldav.icloud.com   */
     char dav_card_base[128];   /* carddav host, e.g. https://contacts.icloud.com */
     char cal_coll[192];        /* Date Book collection path              */
@@ -91,11 +105,16 @@ void config_defaults(Config *c);
 
 /* load from `path` over the current contents of *c (call config_defaults first,
  * or pre-fill). Each recognised key overrides its field; the rest stay as-is.
+ * Password keys go to *sec, or are skipped when sec is NULL.
  * Returns 0 if the file was read (even partially), -1 if it could not be opened. */
-int  config_load(const char *path, Config *c);
+int  config_load(const char *path, Config *c, ConfigSecrets *sec);
 
-/* write *c to `path` as a commented key=value file. Returns 0 or -1. */
-int  config_save(const char *path, const Config *c);
+/* write *c to `path` as a commented key=value file, with the passwords from
+ * *sec, or with every password key empty when sec is NULL. Returns 0 or -1. */
+int  config_save(const char *path, const Config *c, const ConfigSecrets *sec);
+
+/* zero a buffer that held a password, in a way the compiler cannot drop. */
+void config_wipe(void *p, size_t n);
 
 /* Move Wi-Fi slot `i` to the front, keeping the order of the rest. Call it when a
  * network connects, so the next sync tries that one first. Returns 1 if the order

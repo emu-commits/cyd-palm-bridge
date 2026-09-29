@@ -57,6 +57,18 @@ void hotsync_start(void){
         if(sim_in_range(s)) reach++;
     }
     s_wifi_problem = !saved ? HS_WIFI_NONE_SAVED : !reach ? HS_WIFI_NO_JOIN : HS_WIFI_OK;
+    /* Take the passwords out and put them back the way the device does
+     * (hotsync.c: wifi_try, sync_task): into a buffer of this function's own,
+     * used, wiped. There is no network to hand them to here, but the handling
+     * is the part `make -C sim secretscan` checks, so the stub does it for real. */
+    char pw[64];
+    for(int i = 0; i < CFG_WIFI_N; i++){
+        if(!appcfg()->wifi[i].ssid[0]) continue;
+        appcfg_wifi_pass(i, pw, sizeof pw);
+        config_wipe(pw, sizeof pw);
+    }
+    appcfg_dav_pass(pw, sizeof pw);
+    config_wipe(pw, sizeof pw);
     if(s_wifi_problem){
         snprintf(s_status, sizeof s_status, "%s",
                  saved ? "Wi-Fi failed" : "No Wi-Fi network saved");
