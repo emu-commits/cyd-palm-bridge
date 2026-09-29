@@ -69,7 +69,7 @@ before touching anything.
 §11 decision 7). The user's main goal is one first-class SRS app
 (WaniKani/Anki-style, with a large course on the SD card), and it's being
 built into the firmware. The plan is `docs/SRS_PLAN.md`: §1 says why built
-in, §9 has the phases, §10 the decisions. The checklist is the first "RESUME
+in, §10 has the phases, §11 the decisions. The checklist is the first "RESUME
 HERE" in `BACKLOG.md`. These docs were written on branch
 `claude/project-review-recommendations-x1ihdn`. If your branch lacks them,
 `git fetch origin claude/project-review-recommendations-x1ihdn` and take them
@@ -98,13 +98,18 @@ from there, or ask the user whether it has been merged.
    still in progress and is **only a design check**: never copy its data
    into this repo or use it in tests. `SRS_PLAN.md` §4.6 has what it
    showed.
-8. **Name "Study"**, at position 6 on the main launcher grid, with a
-   textbook-on-a-black-circle icon and the user's portrait
-   (`docs/img/study_avatar_src.png`) as its speaker, like Coach and Guru
-   (`SRS_PLAN.md` §3). The slot depends on the proposed Planner merge of To
-   Do and Memo (`BACKLOG.md` ▸ Proposals), which isn't approved yet.
-9. **Proposed, open until the user reviews S0:** JSON Lines as the source
-   format, CC0 for the demo content, and the demo's kanji list.
+8. **Name "Study"**, at **position 7** on the main launcher grid, with a
+   textbook-on-a-black-circle icon and the user's portrait as its speaker,
+   like Coach and Guru (`SRS_PLAN.md` §3). The user is hand-editing
+   `docs/img/study_face.png` (60×63, 1:1) and will provide it back; use
+   theirs, and don't regenerate it from the source art.
+9. **The Planner is approved:** To Do and Memo become one launcher app
+   (design in `BACKLOG.md`'s RESUME HERE). Storage and sync don't change.
+   The grid becomes Date Book, Address, Planner / News, HotSync, Games /
+   Study, Guru, Coach.
+10. **Accepted:** JSON Lines as the course source format, CC0 for the demo
+    content, and the demo's kanji list. The written `COURSE_FORMAT.md` still
+    gets the user's review at the end of S0.
 
 **Measured already (QEMU, launcher showing):** 114,352 B free heap (largest
 block 90,112 B); about 106–108 KB estimated on the device with the SD card
@@ -148,7 +153,11 @@ mounted. LVGL pool free: 11,024 B.
    - **Then stop for the user's review** of the format and the demo content
      before S1. The format is the one thing that's hard to change once real
      courses exist.
-4. **S1 onward** as `SRS_PLAN.md` §9 describes, keeping to its §7 budgets:
+4. **The Planner** (To Do and Memo in one app; design in `BACKLOG.md`).
+   Independent of the SRS work, so it can be done while the S0 review is
+   pending. It must land before S3, since it frees Study's launcher slot.
+   Its own commit or commits, every gate, and smoke screenshots looked at.
+5. **S1 onward** as `SRS_PLAN.md` §10 describes, keeping to its §7 budgets:
    - pure-C `course.c` and `srs.c` in `firmware/main/`, with no LVGL and the
      time passed in, tested the way `wordie.c` and `coach.c` are;
    - new host gates added to `ci.yml` and to the gate list above;

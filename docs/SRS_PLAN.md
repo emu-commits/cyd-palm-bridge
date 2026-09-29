@@ -1,7 +1,7 @@
 # SRS plan — Study, a built-in spaced-repetition app
 
-> **Status: approved 2026-09-29; S0 is next.** Name, launcher slot and
-> speaker settled the same day (§3). Nothing is built yet. This
+> **Status: approved 2026-09-29; S0 is next.** The name, launcher slot,
+> speaker and S0 proposals were settled the same day (§3, §11). Nothing is built yet. This
 > replaces the app platform (`APP_PLATFORM_PLAN.md`) as the current project.
 > That plan is on hold, and why is in §1. Revised the same day after
 > checking the design against a real course in progress (§4.6), and to add
@@ -148,31 +148,32 @@ either way.
 
 **Name, tile and speaker** (decided 2026-09-29):
 - **Name: Study.**
-- **Launcher: position 6 on the main 3×3 grid.** The grid is full today, so
-  this depends on the proposed **Planner** merge of To Do and Memo
-  (`BACKLOG.md` ▸ Proposals ▸ Planner), which frees a slot. With it, the
-  grid becomes:
+- **Launcher: position 7 on the main 3×3 grid.** The grid is full today.
+  The **Planner** merge of To Do and Memo (approved 2026-09-29;
+  `BACKLOG.md` ▸ RESUME HERE) frees a slot, and the grid becomes:
 
   | | | |
   |---|---|---|
   | Date Book | Address | **Planner** |
-  | News | HotSync | **Study** |
-  | Games | Guru | Coach |
+  | News | HotSync | Games |
+  | **Study** | Guru | Coach |
 
-  Games moving to position 7 is an assumption; the owner placed only
-  Planner, News and Study. If the Planner isn't built, Study needs another
-  home, and that goes back to the owner.
+  News moves up from 7 to 4, Games stays at 6, and Study takes 7.
 - **Icon:** a textbook on a black circle, Palm style, 24×22 A8 like the
   other launcher icons, drawn with a small generator as the Guru and Zip
   icons are.
 - **A speaker, like Coach and Guru:** a portrait in the right-hand margin
   with speech bubbles, for the greeting, the "reviews due" line, level-ups
-  and the end-of-session summary. The owner's source art is
-  `docs/img/study_avatar_src.png` (1-bit, 1008×1054). A trial reduction with
-  `tools/gen_faces.py --from-image` at 60 px wide and ink coverage 64 reads
-  well (glasses, brows and smile all survive). S3 adds it to `FACES`, trims
-  blank rows, finishes it by hand if needed, and emits it into
-  `palm_icons.c`. It's const flash, not the LVGL pool.
+  and the end-of-session summary.
+  - The owner's source art is `docs/img/study_avatar_src.png` (1-bit,
+    1008×1054).
+  - It was reduced with `tools/gen_faces.py --from-image` at 60 px wide and
+    ink coverage 96, which gives 60×63 with no blank rows to trim. The
+    result is `docs/img/study_face.png`, a 1:1 black-on-white PNG that reads
+    back pixel for pixel.
+  - **The owner is hand-editing it** and will provide the finished PNG. S3
+    replaces `study_face.png` with it and adds it to `FACES` as `STUDY`,
+    through `--from-exact`. The portrait is const flash, not the LVGL pool.
 
 ## 4) The course file
 
@@ -259,7 +260,7 @@ adds new ids at the end and **never reuses or renumbers one**, so rebuilding
 never scrambles anyone's progress. The file is part of the course source
 and committed with it.
 
-### 4.5 The source format (proposed; S0 decides)
+### 4.5 The source format (accepted: JSON Lines)
 
 A course source folder, which is what an author writes and what
 `mkcourse.py` reads:
@@ -477,7 +478,7 @@ jobs:
    - mnemonics and examples;
    - rendered kanji.
 
-**Content (proposed; S0 writes it):** about 10 radicals, 12 kanji and 20
+**Content (accepted; S0 writes it):** about 10 radicals, 12 kanji and 20
 words per level. Kanji in level 2 are built from radicals of both levels,
 so unlocking across levels is exercised:
 
@@ -491,7 +492,7 @@ and 月.
 - **Written for this project.** Meanings and readings are facts, checked
   against KANJIDIC2 and JMdict. Radical names, mnemonics and example
   sentences are original. Nothing comes from WaniKani.
-- **Licence (proposed): CC0**, so anyone can copy it as the starting point
+- **Licence: CC0**, so anyone can copy it as the starting point
   for their own course.
 
 **How it's built and shipped:**
@@ -553,6 +554,7 @@ only.
 
 **S3 — Screens and the demo on the device.**
 - Needs the Planner merge first, for the launcher slot (§3).
+- The owner's hand-edited portrait (§3).
 - The launcher tile and icon, the speaker portrait, the course picker, the dashboard, and the
   lesson and review screens with self-grading.
 - `study_demo.c` and the first-run install, with its flash cost measured.
@@ -596,10 +598,9 @@ only.
    reference example for course authors (§9).
 6. **The Albanian course is a design check only.** It's still being
    built, and none of its data enters this repo.
-7. **Name, tile and speaker** (2026-09-29): "Study", position 6 on the
-   main grid (which depends on the Planner merge), a textbook-on-a-black-
+7. **Name, tile and speaker** (2026-09-29): "Study", position 7 on the
+   main grid (made possible by the Planner merge), a textbook-on-a-black-
    circle icon, and the owner's portrait as its speaker (§3).
-8. **Proposed, open until the S0 review:**
-   - JSON Lines as the source format;
-   - CC0 for the demo content;
-   - the demo's kanji list.
+8. **Accepted 2026-09-29:** JSON Lines as the source format, CC0 for the
+   demo content, and the demo's kanji list (§9). The written format
+   (`COURSE_FORMAT.md`) still gets the owner's review at the end of S0.
