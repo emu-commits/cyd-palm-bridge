@@ -26,6 +26,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import struct
 import sys
 import unicodedata
@@ -107,9 +108,38 @@ FOLD = {"‘": "'", "’": "'", "‚": "'", "‛": "'", "′": "'",
         "…": "...", " ": " ", " ": " ", " ": " "}
 
 
+FOLD.update({"\u2044": "/", "\u2215": "/", "\u2192": "->", "\u2190": "<-", "\u2194": "<->",
+             "\u21d2": "=>", "\u2070": "0"})
+for _i in range(10):
+    FOLD[chr(0x2080 + _i)] = str(_i)                  # subscript digits
+for _i in range(4, 10):
+    FOLD[chr(0x2070 + _i)] = str(_i)                  # superscripts; 1 2 3 are Latin-1
+WHITESPACE_RUN = re.compile(r"[ ]*[\t\r\n][\t\r\n ]*")
+
+
 def fold(s):
+    """Typographic characters the Palm font lacks, and line breaks, to plain
+    ones: a course's text is one flowing paragraph per field."""
     s = unicodedata.normalize("NFC", s)
+    s = WHITESPACE_RUN.sub(" ", s)
     return "".join(FOLD.get(ch, ch) for ch in s)
+
+
+def latin_fallback(s):
+    """A Latin letter outside Latin-1 (č, ā, ſ, ʰ) to the letters it's built
+    on (c, a, s, h), as a Palm did it. Not for TERM or READING, which must be
+    exact; any other character is left alone."""
+    out = []
+    for ch in s:
+        if 0x20 <= ord(ch) <= 0xFF or ch == SEP:
+            out.append(ch)
+            continue
+        d = "".join(x for x in unicodedata.normalize("NFKD", ch) if not unicodedata.combining(x))
+        if d and all(x.isascii() and x.isalpha() for x in d):
+            out.append(d)
+        else:
+            out.append(ch)
+    return "".join(out)
 
 
 def is_palm(s, allow_sep=False):
@@ -779,16 +809,39 @@ def classify(c, painter_box, font_arg):
             return attr, text, None
         if is_kana(text):
             return attr | A_KANA, text, None
+        if tag not in (TERM, READING):
+            text = latin_fallback(text)
+            if is_palm(text, allow_sep):
+                return attr, text, None
         if tag in c.strip:
             s = strip_unpalm(text)
-            if s and is_palm(s):
+            if not any(ch.isalnum() for ch in s):
+                return None                 # nothing readable left: drop it
+            if is_palm(s):
                 return attr, s, None
         return attr | A_PICTURE, text, painter().picture(tag, text, where)
 
+    def encode_fields(fields, where):
+        out, drop_translation = [], False
+        for t, a, s in fields:
+            if t == TRANSLATION and drop_translation:
+                drop_translation = False
+                c.dropped += 1
+                continue
+            drop_translation = False
+            e = one(t, a, s, "%s %s" % (where, TAG_NAMES[t]))
+            if e is None:
+                c.dropped += 1
+                drop_translation = t == EXAMPLE     # its translation goes with it
+                continue
+            out.append(e + (t,))
+        return out
+
+    c.dropped = 0
     for lvl in c.levels:
-        lvl["enc"] = [one(t, a, s, lvl["where"]) + (t,) for t, a, s in lvl["fields"]]
+        lvl["enc"] = encode_fields(lvl["fields"], lvl["where"])
     for it in c.items:
-        it["enc"] = [one(t, a, s, "%s %s" % (it["where"], TAG_NAMES[t])) + (t,) for t, a, s in it["fields"]]
+        it["enc"] = encode_fields(it["fields"], it["where"])
 
 
 def encode(c):
@@ -1122,7 +1175,10 @@ def dump_source(c, data):
 # ---------------------------------------------------------------- --check
 
 def check(path):
-    data = Path(path).read_bytes()
+    try:
+        data = Path(path).read_bytes()
+    except OSError as e:
+        fail("can't read %s: %s" % (path, e.strerror))
     r = Reader(data)
     meta = dict((k, v) for k, v in r.meta())
     for k in (K_ID, K_TITLE, K_SCHED):
@@ -1183,9 +1239,10 @@ def main():
             tmp = out.with_suffix(out.suffix + ".tmp")
             tmp.write_bytes(data)
             tmp.replace(out)
-            print("mkcourse: %s: %d items, %d levels, %d B%s" % (
+            print("mkcourse: %s: %d items, %d levels, %d B%s%s" % (
                 out, len(c.items), len(c.levels), len(data),
-                ", %d new ids in ids.tsv" % added if added else ""))
+                ", %d new ids in ids.tsv" % added if added else "",
+                ", %d stripped fields dropped (nothing readable left)" % c.dropped if c.dropped else ""))
     except CourseError as e:
         print("mkcourse: %s" % e, file=sys.stderr)
         sys.exit(1)

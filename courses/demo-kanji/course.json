@@ -15,18 +15,18 @@
   ],
   "scheduler": {
     "type": "stages",
-    "intervals": ["4h", "8h", "1d", "2d", "7d", "14d", "30d", "120d", null],
+    "intervals": ["2h", "4h", "8h", "1d", "2d", "7d", "14d", "30d", "120d", null],
     "groups": [
       {"from": 1, "name": "Learning"},
-      {"from": 5, "name": "Known"},
-      {"from": 7, "name": "Strong"},
+      {"from": 2, "name": "Known"},
+      {"from": 6, "name": "Strong"},
       {"from": 8, "name": "Deep"},
-      {"from": 9, "name": "Retired"}
+      {"from": 10, "name": "Retired"}
     ],
     "drop": 1,
     "drop_high": 2,
-    "high_from": 5,
-    "known": 5
+    "high_from": 6,
+    "known": 2
   },
   "grading": "two",
   "lessons": {"batch": 5},

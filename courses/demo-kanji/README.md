@@ -47,21 +47,25 @@ on it without asking.
   meaning and reading. `"level_up": true` on `kanji` means the next level
   opens when 90 % of this level's kanji are known (`unlock.level_percent`).
 - **`scheduler`**: `stages`, WaniKani's intervals (4 h, 8 h, 1 day, 2 days,
-  1 week, 2 weeks, a month, 4 months, then retired). A wrong answer drops an
-  item one stage, or two once it's at stage 5 or above. `known: 5` is the
-  stage at which an item counts as known, which is what opens the lessons
-  built on it.
+  1 week, 2 weeks, a month, 4 months, then retired) **with a 2-hour stage in
+  front**. A wrong answer drops an item one stage, or two once it's at stage
+  6 (a week) or above. `known: 2` is the stage at which an item counts as
+  known, which is what opens the lessons built on it: here, one right
+  answer.
 - **`unlock.by_links`**: a kanji's lesson waits until its radicals are known,
   and a word's until its kanji are. The `built_from` links in `items.jsonl`
   say which.
 - **`grading: "two"`**: Wrong / Right, as WaniKani does it.
 - **`levels`**: a title and theme for each.
 
-This is WaniKani's pace: a kanji's lesson opens three and a half days after
-its radicals' lesson at the soonest (4 h + 8 h + 1 day + 2 days of right
-answers take them to stage 5). That's slow for trying the app out, but
-it's what the demo is showing. A course that wants to move faster lowers
-`known`.
+**The demo is faster than WaniKani, so it can be tried in an afternoon.** A
+kanji's lesson opens as soon as its radicals have been answered right once,
+2 hours after their lesson; a word's opens 2 hours after its kanji's. Level
+2 opens once 11 of level 1's 12 kanji (90 %, rounded up) have been answered
+right once. At WaniKani's own pace (its intervals without the 2-hour stage,
+and `known: 5`, which are the format's defaults), each of those steps takes
+three and a half days. A real course would normally use that; the demo's
+job is to show every kind of lesson on the first day.
 
 ### `items.jsonl`: the items, one per line
 
@@ -112,7 +116,7 @@ if you delete an item, its line stays and its number is never reused.
 
 ### `course.srs`: the built course
 
-What goes on the card: 81,756 bytes, and **82 % of it is pictures** (91 of
+What goes on the card: 81,760 bytes, and **82 % of it is pictures** (91 of
 them, 66,784 B). There's one for each kanji, radical and word written in
 kanji (the radical 一 and the kanji 一 share one), and one for each example
 sentence. Everything else is text: meanings, mnemonics and notes in the Palm

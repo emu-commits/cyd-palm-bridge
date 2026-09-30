@@ -16,6 +16,47 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-30 — a faster demo, Albanian confirmed, and the builder's text rules
+
+**The demo is faster** (asked for by the owner). A 2-hour stage now comes
+before WaniKani's intervals, and `known` is 2, one right answer. So a
+kanji's lesson opens 2 hours after its radicals', and a word's 2 hours after
+its kanji's: the first level can be tried in an afternoon. The format's
+defaults stay at WaniKani's pace; the demo's README says which is which. The
+course is 81,760 B (+4).
+
+**Albanian's letters draw with the Palm font** (asked by the owner):
+- **ë, ç, Ë and Ç** are Latin-1. The glyphs were decoded from
+  `lv_font_palm.c` and `lv_font_palm_bold.c` and looked at: real diaeresis
+  and cedilla, different from e and c, in both weights.
+- **The Albanian course, scanned** (read only): no character in any word,
+  form, level title or root is outside U+0020–U+00FF.
+- **Then built whole** in a scratch folder (deleted; nothing entered the
+  repo), with a converter written to Appendix A's mapping: 4,087 items, 592
+  levels, 1,394,508 B, **no pictures at all**. `course_verify()` passed and
+  both readers agreed.
+
+**What that build found, and the builder now handles** (`COURSE_FORMAT.md`
+§4):
+- **370 line breaks in etymologies**, which the builder refused as control
+  characters. Line breaks and tabs now fold to a space.
+- **CO₂-style subscripts and a fraction slash** in two meanings. These now
+  fold to plain digits and `/`; arrows fold to `->`.
+- **č, ć and š in glosses.** Neither font has them. A **Latin fallback** now
+  turns a Latin letter outside Latin-1 into its base letter (č to c, ā to a,
+  ſ to s) in every field but TERM and READING, which must stay exact.
+- **Examples written wholly in the Greek alphabet** (historical texts). With
+  examples stripped, nothing readable is left, so the field is now
+  **dropped**, with its translation, and the build reports the count: 7 in
+  that course.
+- `--check` on a missing file printed a traceback; it now says so plainly.
+
+**Gates:**
+- `course_test` checks the folded meaning, the fallback, joined lines and
+  a dropped field, from two new items in the `features` deck.
+- `mkcourse_test.py` checks that a TERM with č is refused (18 refusals
+  now), and that a stripped example goes with its translation.
+
 ### 2026-09-30 — Study S0 and S1: the course format, the demo, the builder and the reader
 
 The owner asked for S0 and S1 together, so S0's stop for review became a
@@ -37,9 +78,11 @@ The choices most worth a look:
    Greek.** Measured, not assumed: the plan had said Arabic would become a
    picture. Such text is stripped instead (`render.strip`), which suits
    etymologies, the only place the Albanian course has it.
-4. **The demo waits as WaniKani does:** a kanji's lesson opens once its
-   radicals reach stage 5, three and a half days at the soonest. A faster
-   demo is one number (`known`) in `course.json`.
+4. **The demo's pace** (settled 2026-09-30: the owner asked for it
+   faster). A 2-hour stage now comes before WaniKani's intervals, and
+   `known` is 2, one right answer. So a kanji's lesson opens 2 hours after
+   its radicals', not three and a half days. The format's defaults stay at
+   WaniKani's pace.
 5. **The demo's stage names are its own** (Learning, Known, Strong, Deep,
    Retired): WaniKani's are theirs, and "Guru" is already an app here.
 6. **8 radicals in level 1 and 6 in level 2** (the plan said about 10

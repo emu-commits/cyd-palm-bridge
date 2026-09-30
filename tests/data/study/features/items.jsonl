@@ -4,3 +4,5 @@
 {"id": "comedor", "kind": "word", "level": 2, "term": "comedor", "meanings": ["dining room"], "readings": ["ko-me-DOR"], "built_from": ["comer"], "family": "comer", "related": ["comida"], "unlock_after": ["comida"], "mnemonic_reading": "Stress on the last syllable: -DOR."}
 {"id": "つき", "kind": "kana", "level": 2, "term": "つき", "meanings": ["moon"], "readings": [{"text": "つき", "type": "kun", "primary": true}, {"text": "げつ", "type": "on"}, {"text": "がつ", "type": "on"}, {"text": "つぎ", "type": "nanori"}], "examples": [{"text": "つきがきれい。", "translation": "The moon is pretty."}], "related": ["comer"]}
 {"id": "long", "kind": "word", "level": 7, "term": "a word with a very long picture term: 図書館と博物館と美術館", "meanings": ["test"], "readings": ["x"]}
+{"id": "fold", "kind": "word", "level": 7, "term": "fold", "meanings": ["Dvořák’s CO₂ → H₂O"], "readings": ["x"], "etymology": "First line.\nSecond line, with ſ and bʰ.", "examples": [{"text": "Kept, with Čapek.", "translation": "kept"}]}
+{"id": "drop", "kind": "word", "level": 7, "term": "drop", "meanings": ["an etymology with nothing readable left is dropped"], "readings": ["x"], "etymology": "Ἑλλάς"}

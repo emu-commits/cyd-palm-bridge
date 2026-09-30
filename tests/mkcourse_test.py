@@ -116,6 +116,7 @@ def refusals():
     refused(item(1, readings=[{"text": "a", "primary": True}, {"text": "b", "primary": True}]), "exactly one reading")
     refused(item(3, level=99), "isn't in course.json")
     refused(item(1, meanings=[]), "needs \"meanings\"")
+    refused(item(1, term="Čapek"), "has no glyph for 'Č'")      # a TERM is never altered
     refused(item(1, built_from=[{"id": "comer", "role": "prefix"}]), "isn't in course.json roles")
 
     def cfg(**kw):
@@ -140,11 +141,32 @@ def refusals():
     print("  refusals")
 
 
+def text_rules():
+    """Folding and stripping, on a copy of the features deck."""
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp) / "c"
+        shutil.copytree(ROOT / "tests/data/study/features", d)
+        cfg = json.loads((d / "course.json").read_text())
+        cfg["render"]["strip"] = ["etymology", "example"]
+        (d / "course.json").write_text(json.dumps(cfg, ensure_ascii=False))
+        with open(d / "items.jsonl", "a") as f:
+            f.write(json.dumps({"id": "t", "kind": "word", "level": 7, "term": "t", "meanings": ["m"], "readings": ["r"],
+                                "examples": [{"text": "Ἑλλάς", "translation": "goes with its example"},
+                                             {"text": "Greek Ἑλλάς (Hellas)", "translation": "stays"}]},
+                               ensure_ascii=False) + "\n")
+        c, data, _ = mkcourse.build(d, font=FONT, write_ids=False)
+        dump = mkcourse.dump_file(data)
+        check("goes with its example" not in dump, "a dropped example takes its translation with it")
+        check('"Greek (Hellas)"' in dump and '"stays"' in dump, "a stripped example keeps what's readable")
+    print("  text rules")
+
+
 def main():
     print("mkcourse_test:")
     rebuild_all()
     ids_rules()
     refusals()
+    text_rules()
     print("mkcourse_test: %s" % ("FAILED" if fails else "OK"))
     sys.exit(1 if fails else 0)
 

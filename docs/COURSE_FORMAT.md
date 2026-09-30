@@ -123,7 +123,9 @@ font can draw (§4), because it's shown in lists and title bars.
 
 ### 2.2 The two schedulers
 
-**`stages`** (WaniKani-style). The demo's, which are also the defaults:
+**`stages`** (WaniKani-style). WaniKani's pace, which is also the default
+(the demo speeds it up with a 2-hour first stage and `"known": 2`, so it can be
+tried in an afternoon):
 
 ```json
 "scheduler": {
@@ -145,8 +147,8 @@ font can draw (§4), because it's shown in lists and title bars.
   `d` or `w`.
 - A right answer moves up one stage. A wrong one moves down `drop` stages,
   or `drop_high` from stage `high_from` and above, but never below 1.
-- `known`: the stage from which an item counts as known, for unlocking
-  (stage 5, a week's wait, here).
+- `known`: the stage from which an item counts as known, for unlocking.
+  Stage 5 here: three and a half days of right answers.
 - `groups`: names for runs of stages, for the dashboard. The demo names its
   own; WaniKani's stage names are theirs, and "Guru" is already an app on
   this device.
@@ -496,9 +498,20 @@ each field and records it in the attributes (§3.5):
 
 1. **The Palm fonts**, when every character is in U+0020–U+00FF: English,
    and the Latin-1 languages (French, German, Spanish, Italian, Portuguese,
-   Dutch, the Nordic languages, Albanian with ë and ç). Before deciding,
-   typographic punctuation is **folded**: curly quotes to `"` and `'`, en
-   and em dashes to `-`, `…` to `...`, a no-break space to a space.
+   Dutch, the Nordic languages, and Albanian with ë, ç, Ë and Ç, whose
+   glyphs were checked in both the regular and bold font). Before deciding,
+   two things happen:
+   - **Folding**, in every field: curly quotes to `"` and `'`, en and em
+     dashes to `-`, `…` to `...`, a no-break space to a space, the
+     fraction slash to `/`, subscript and superscript digits to digits
+     (CO₂ to CO2), arrows to `->` and `<-`, and line breaks and tabs to a
+     space. A field is one flowing paragraph.
+   - **Latin fallback**, in every field except TERM and READING: a Latin
+     letter outside Latin-1 becomes the letters it's built on, as a Palm
+     did it: č to c, ā to a, ſ to s, ʰ to h (á, ë and the rest of Latin-1
+     stay as they are). A gloss that mentions "Dvořák" shows "Dvorák". TERM
+     and READING must be exact, so there such a letter makes a picture, or
+     fails the build if the font lacks it.
 2. **The kana font** (38 px, attribute bit 5), when every character is
    hiragana or katakana (U+3041–U+3096, U+309B–U+309E, U+30A1–U+30FE):
    readings, and words written in kana.
@@ -530,7 +543,8 @@ quotes around them if nothing else is left inside, and the rest stays
 text: `"Ottoman Turkish حال (hal, 'situation')"` becomes `"Ottoman Turkish
 (hal, 'situation')"`. Wiktionary gives a transliteration next to foreign
 script, which is why this reads well. TERM, MEANING and READING are never
-stripped.
+stripped. **A stripped field with no letter or digit left is dropped**, and
+a dropped example takes its translation with it; the build says how many.
 
 ## 5) Limits
 
@@ -700,3 +714,26 @@ why the mapping doesn't.) No word has more than 24 senses, inside the 31
 that bits 0–4 number.
 
 The paper check found no reason to change the format.
+
+**Then a real build** (2026-09-30, in a scratch folder that was deleted
+afterwards; nothing entered this repo). A converter written to the mapping
+above turned the whole course into a source, and `mkcourse.py` built it:
+- **4,087 items in 592 levels, 1,394,508 B, with not one picture.** Every
+  field is Palm-font text. `course_verify()` passed on it, and the C and
+  Python readers dumped it identically. The largest item is 3,343 B.
+- **Albanian's own letters (ë, ç, Ë, Ç) are all Latin-1.** No character in
+  any word, form, level title or root is outside the Palm font.
+- What isn't Latin-1 is quoted from other languages:
+  - Greek, Arabic, Cyrillic and Old Albanian scripts in etymologies, and in
+    a few historical examples;
+  - č, ć and š in a few glosses;
+  - CO₂-style subscripts and a fraction slash in two meanings;
+  - 370 line breaks in etymologies.
+  Folding and the Latin fallback (§4) handle the glosses, the meanings and
+  the line breaks.
+- The settings it needs: `"render": {"strip": ["etymology", "example",
+  "translation"]}`. With those, 7 fields had nothing readable left and were
+  dropped: examples written wholly in the Greek alphabet, and their
+  translations.
+- The converter has to leave out examples whose translation is empty (the
+  builder refuses empty text).

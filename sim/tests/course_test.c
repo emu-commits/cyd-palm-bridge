@@ -152,11 +152,12 @@ static void check_demo(void){
     CHECK(c.n_items == 78 && c.n_levels == 2, "%u items, %u levels", (unsigned)c.n_items, (unsigned)c.n_levels);
     CHECK(c.n_kinds == 3 && !strcmp(c.kinds[1].name, "kanji") && c.kinds[1].quiz == 3 && c.kinds[1].flags == 1,
           "kinds");
-    CHECK(c.scheduler == CS_STAGES && c.n_steps == 9 && c.steps[0] == 4 * 3600 && c.steps[8] == 0,
+    CHECK(c.scheduler == CS_STAGES && c.n_steps == 10 && c.steps[0] == 2 * 3600 && c.steps[1] == 4 * 3600 && c.steps[9] == 0,
           "stages: %u, first %u", c.n_steps, (unsigned)c.steps[0]);
-    CHECK(c.known == 5 && c.drop == 1 && c.drop_high == 2 && c.high_from == 5, "known/drops");
+    CHECK(c.known == 2 && c.drop == 1 && c.drop_high == 2 && c.high_from == 6, "known/drops");
     CHECK(c.grading == 2 && c.batch == 5 && c.level_pct == 90 && c.by_links == 1, "grading/batch/unlock");
-    CHECK(c.n_groups == 5 && c.groups[1].from == 5 && !strcmp(c.groups[1].name, "Known"), "groups");
+    CHECK(c.n_groups == 5 && c.groups[1].from == 2 && !strcmp(c.groups[1].name, "Known") && c.groups[4].from == 10,
+          "groups");
     CHECK(course_meta_text(&c, 0x0004, t, sizeof t) > 0 && !strcmp(t, "The CYD Palm project"), "author '%s'", t);
     CHECK(course_meta_text(&c, 0x0004, t, 8) == 7 && !strcmp(t, "The CYD"), "author cut to fit '%s'", t);
     CHECK(course_meta_text(&c, 0x0099, t, sizeof t) == 0 && !t[0], "an absent key");
@@ -281,6 +282,18 @@ static void check_decks(void){
     CHECK(n != 0xFFFFFFFF && field_text(&c, n, CF_TERM, 0, t, sizeof t, &attr) == 0 && (attr & CF_A_KANA)
           && !(attr & CF_A_PICTURE), "a kana term");
     CHECK(field_text(&c, n, CF_READING, 3, t, sizeof t, &attr) == 0 && (attr & CF_A_VALUE) == 3, "a nanori");
+    /* the builder's folding: typography to ASCII, Latin letters outside
+     * Latin-1 to their base letter (not in TERM or READING), lines joined */
+    n = find_term(&c, "fold");
+    CHECK(n != 0xFFFFFFFF && field_text(&c, n, CF_MEANING, 0, t, sizeof t, &attr) == 0
+          && !strcmp(t, "Dvor\xc3\xa1k's CO2 -> H2O") && !(attr & CF_A_PICTURE), "folded meaning: %s", t);
+    CHECK(field_text(&c, n, CF_EXAMPLE, 0, t, sizeof t, &attr) == 0 && !strcmp(t, "Kept, with Capek.")
+          && !(attr & CF_A_PICTURE), "Latin fallback in an example: %s", t);
+    CHECK(field_text(&c, n, CF_ETYMOLOGY, 0, t, sizeof t, NULL) == 0
+          && !strcmp(t, "First line. Second line, with s and bh."), "lines joined: %s", t);
+    n = find_term(&c, "drop");
+    CHECK(n != 0xFFFFFFFF && field_text(&c, n, CF_ETYMOLOGY, 0, t, sizeof t, NULL) == -1,
+          "a stripped field with nothing readable left is dropped");
     course_close(&c);
 }
 
