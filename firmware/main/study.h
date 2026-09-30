@@ -82,4 +82,45 @@ int  st_list_courses(const char *root, char ids[][ST_ID_MAX], int max);
 int  st_last_get(const char *root, char id[ST_ID_MAX]);
 void st_last_set(const char *root, const char *id);
 
+/* ---- the week: <root>/study/<course-id>/history.dat (SRS_PLAN.md S4) ----
+ * What the Week screen draws: per local day, the items reviewed (and how
+ * many of those had no miss) and the items learned. Days are local day
+ * numbers (daycal.h's cal_day_index), passed in, so the host can test any
+ * calendar. */
+
+typedef struct {
+    int32_t  day;               /* local day number */
+    uint16_t reviews, right;    /* items reviewed; of those, answered with no miss */
+    uint16_t lessons;           /* items learned (their lesson's quiz passed) */
+    uint16_t pad;
+} StDay;
+
+#define ST_WEEK_N 14            /* last week and this: [13] is today */
+typedef struct {
+    uint16_t reviews[ST_WEEK_N], right[ST_WEEK_N], lessons[ST_WEEK_N];
+    int      streak;            /* days in a row with study, to today or yesterday */
+    int      best;              /* the longest such run on record */
+} StWeek;
+
+/* Count an item on `day`: +1 review (+1 right), or +1 lesson; negative to
+ * take one back (Undo). Returns 0, or -1 if the card couldn't be written. */
+int  st_hist_add(const char *root, const char *id, int32_t day, int reviews, int right, int lessons);
+
+/* The fortnight ending on `today`, and the streaks. Returns 1, or 0 if
+ * there's no history yet (*w is zeroed either way first). */
+int  st_hist_week(const char *root, const char *id, int32_t today, StWeek *w);
+
+/* What she says about the week, in order of what matters most. */
+enum {
+    ST_ADV_START,               /* nothing this week or last */
+    ST_ADV_PILE,                /* reviews have piled up: hold the lessons */
+    ST_ADV_MISSES,              /* under 75 % right this week */
+    ST_ADV_STREAK,              /* a week or more without missing a day */
+    ST_ADV_GAPS,                /* fewer days than last week */
+    ST_ADV_MORE,                /* 90 % right or better: room for more lessons */
+    ST_ADV_STEADY,
+};
+#define ST_ADV_PILE_AT 50       /* due now, for ST_ADV_PILE */
+int  st_advise(const StWeek *w, int due_now);
+
 #endif

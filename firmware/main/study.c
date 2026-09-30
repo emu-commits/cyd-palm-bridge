@@ -152,7 +152,7 @@ int st_install_demo(const char *root, int force){
 
 int st_remove_course(const char *root, const char *id){
     static const char *const FILES[] = { "course.srs", "progress.dat", "progress.log",
-                                         "progress.dat.tmp", "course.srs.tmp" };
+                                         "progress.dat.tmp", "course.srs.tmp", "history.dat" };
     char p[128];
     if(!id[0] || strchr(id, '/') || strstr(id, "..")) return -1;
     for(size_t i = 0; i < sizeof FILES / sizeof FILES[0]; i++){
@@ -208,4 +208,138 @@ void st_last_set(const char *root, const char *id){
     if(!sf_open(&sf, p, "wb")) return;
     int ok = fputs(id, sf.f) >= 0;
     sf_commit(&sf, ok);
+}
+
+/* ---- the week: history.dat ----
+ * An 8-byte header, then one StDay per local day that saw any study, oldest
+ * first. An add rewrites one 12-byte record in place or appends one, so a
+ * torn write costs that day's counts at most: the reader ignores a partial
+ * record, and the next add writes over it. History is a nicety, not
+ * progress, so a file that isn't one is started again rather than refused. */
+
+#define HIST_MAGIC 0x31485453u                  /* "STH1" */
+#define HIST_HDR   8
+
+static void hist_path(char *p, int cap, const char *root, const char *id){
+    snprintf(p, cap, "%s/study/%s/history.dat", root, id);
+}
+
+/* the whole records in an open history file, or -1 if it isn't one */
+static long hist_count(FILE *f){
+    uint32_t h[2];
+    if(fseek(f, 0, SEEK_SET) || fread(h, 4, 2, f) != 2) return -1;
+    if(h[0] != HIST_MAGIC || h[1] != sizeof(StDay)) return -1;
+    if(fseek(f, 0, SEEK_END)) return -1;
+    long sz = ftell(f);
+    return sz < HIST_HDR ? -1 : (sz - HIST_HDR) / (long)sizeof(StDay);
+}
+
+static uint16_t hist_bump(uint16_t v, int d){
+    int n = (int)v + d;
+    return (uint16_t)(n < 0 ? 0 : n > 0xFFFF ? 0xFFFF : n);
+}
+
+int st_hist_add(const char *root, const char *id, int32_t day, int reviews, int right, int lessons){
+    char p[96];
+    if(!id[0] || strchr(id, '/') || strstr(id, "..")) return -1;
+    hist_path(p, sizeof p, root, id);
+    FILE *f = fopen(p, "r+b");
+    long n = f ? hist_count(f) : -1;
+    if(n < 0){
+        if(f) fclose(f);
+        if(reviews <= 0 && lessons <= 0) return 0;          /* an undo of nothing */
+        if(!(f = fopen(p, "w+b"))) return -1;
+        uint32_t h[2] = { HIST_MAGIC, sizeof(StDay) };
+        if(fwrite(h, 4, 2, f) != 2){ fclose(f); return -1; }
+        n = 0;
+    }
+    /* The day's own record if it's among the last fortnight's, or a new one
+     * on the end. A day before the newest with no record of its own (the
+     * clock was set back) is counted on the newest: the file stays in order,
+     * and nothing is lost from the totals. */
+    StDay d, last;
+    long at = n;
+    memset(&d, 0, sizeof d);
+    memset(&last, 0, sizeof last);
+    d.day = day;
+    for(long i = n - 1; i >= 0 && i >= n - ST_WEEK_N; i--){
+        StDay r;
+        if(fseek(f, HIST_HDR + i * (long)sizeof r, SEEK_SET) || fread(&r, sizeof r, 1, f) != 1){
+            fclose(f);
+            return -1;
+        }
+        if(i == n - 1) last = r;
+        if(r.day == day){ at = i; d = r; break; }
+        if(r.day < day) break;                  /* in order: it isn't further back */
+    }
+    if(at == n && n > 0 && day < last.day){ at = n - 1; d = last; }
+    d.reviews = hist_bump(d.reviews, reviews);
+    d.right   = hist_bump(d.right, right);
+    d.lessons = hist_bump(d.lessons, lessons);
+    if(d.right > d.reviews) d.right = d.reviews;
+    int ok = !fseek(f, HIST_HDR + at * (long)sizeof d, SEEK_SET) && fwrite(&d, sizeof d, 1, f) == 1;
+    ok = (fclose(f) == 0) && ok;
+    return ok ? 0 : -1;
+}
+
+int st_hist_week(const char *root, const char *id, int32_t today, StWeek *w){
+    memset(w, 0, sizeof *w);
+    char p[96];
+    hist_path(p, sizeof p, root, id);
+    FILE *f = fopen(p, "rb");
+    if(!f) return 0;
+    long n = hist_count(f);
+    if(n <= 0 || fseek(f, HIST_HDR, SEEK_SET)){ fclose(f); return 0; }
+    /* One pass, oldest first, 16 records at a time: the fortnight's columns,
+     * and every run of days in a row for the best. A day undone to nothing
+     * wasn't a day studied. */
+    int32_t prev = 0;
+    int run = 0, have = 0;
+    StDay buf[16];
+    while(n > 0){
+        size_t k = fread(buf, sizeof buf[0], n < 16 ? (size_t)n : 16, f);
+        if(!k) break;
+        n -= (long)k;
+        for(size_t i = 0; i < k; i++){
+            const StDay *d = &buf[i];
+            int64_t ago = (int64_t)today - d->day;
+            if(ago >= 0 && ago < ST_WEEK_N){
+                int s = ST_WEEK_N - 1 - (int)ago;
+                w->reviews[s] = hist_bump(w->reviews[s], d->reviews);
+                w->right[s]   = hist_bump(w->right[s], d->right);
+                w->lessons[s] = hist_bump(w->lessons[s], d->lessons);
+            }
+            if(!d->reviews && !d->lessons) continue;
+            if(have && d->day <= prev) continue;
+            run = (have && d->day == prev + 1) ? run + 1 : 1;
+            prev = d->day;
+            have = 1;
+            if(run > w->best) w->best = run;
+        }
+    }
+    fclose(f);
+    /* the streak is the run that reaches today, or yesterday: today isn't
+     * over, and a streak shouldn't read 0 at breakfast */
+    if(have && prev <= today && today - prev <= 1) w->streak = run;
+    return 1;
+}
+
+int st_advise(const StWeek *w, int due_now){
+    int wk = 0, last = 0, rv = 0, rt = 0, days = 0, days_last = 0;
+    for(int i = 0; i < 7; i++){
+        int a = w->reviews[i] + w->lessons[i], b = w->reviews[7 + i] + w->lessons[7 + i];
+        last += a;
+        wk += b;
+        if(a) days_last++;
+        if(b) days++;
+        rv += w->reviews[7 + i];
+        rt += w->right[7 + i];
+    }
+    if(due_now >= ST_ADV_PILE_AT) return ST_ADV_PILE;
+    if(!wk && !last) return ST_ADV_START;
+    if(rv >= 10 && rt * 100 < rv * 75) return ST_ADV_MISSES;
+    if(w->streak >= 7) return ST_ADV_STREAK;
+    if(days < days_last) return ST_ADV_GAPS;
+    if(rv >= 10 && rt * 100 >= rv * 90) return ST_ADV_MORE;
+    return ST_ADV_STEADY;
 }

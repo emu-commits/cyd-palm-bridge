@@ -582,6 +582,101 @@ static void card(void){
     CHECK(st_last_get(root, id) == 1 && !strcmp(id, "demo-kanji"), "the last course");
 }
 
+/* the Week screen's history: days, undo, streaks, a torn or foreign file,
+ * and the advice */
+static void history(void){
+    const char *root = "build/srs_root";
+    char p[160];
+    mkdir(root, 0777);
+    snprintf(p, sizeof p, "%s/study", root); mkdir(p, 0777);
+    snprintf(p, sizeof p, "%s/study/hist", root); mkdir(p, 0777);
+    snprintf(p, sizeof p, "%s/study/hist/history.dat", root); remove(p);
+    StWeek w;
+    const int32_t T = 20000;                    /* "today" */
+    CHECK(st_hist_week(root, "hist", T, &w) == 0 && !w.streak && !w.best, "no history yet");
+    CHECK(st_hist_add(root, "hist", T, -1, -1, 0) == 0, "an undo with no file writes nothing");
+    FILE *f = fopen(p, "rb");
+    CHECK(!f, "no file made for it");
+    if(f) fclose(f);
+
+    /* three days in a row; on the second day after them the streak is gone */
+    for(int d = 0; d < 3; d++) for(int k = 0; k < 4; k++) st_hist_add(root, "hist", T - 5 + d, 1, k != 0, 0);
+    CHECK(st_hist_week(root, "hist", T - 1, &w) == 1 && w.streak == 0 && w.best == 3,
+          "a missed day ends it: streak %d best %d", w.streak, w.best);
+    st_hist_add(root, "hist", T - 2, 0, 0, 1);
+    st_hist_add(root, "hist", T - 1, 0, 0, 5);
+    CHECK(st_hist_week(root, "hist", T, &w) == 1, "read");
+    CHECK(w.streak == 5 && w.best == 5, "a streak can end yesterday: %d %d", w.streak, w.best);
+    CHECK(w.reviews[13 - 5] == 4 && w.right[13 - 5] == 3 && w.lessons[13 - 1] == 5 && w.lessons[13 - 2] == 1
+          && !w.reviews[13], "the columns: [13] is today");
+    st_hist_add(root, "hist", T, 1, 1, 0);
+    st_hist_add(root, "hist", T, 1, 0, 0);
+    st_hist_add(root, "hist", T, -1, 0, 0);     /* Undo */
+    st_hist_week(root, "hist", T, &w);
+    CHECK(w.reviews[13] == 1 && w.right[13] == 1 && w.streak == 6, "today, and an undo: %u %u %d",
+          w.reviews[13], w.right[13], w.streak);
+    st_hist_add(root, "hist", T, -1, -1, 0);
+    st_hist_week(root, "hist", T, &w);
+    CHECK(!w.reviews[13] && w.streak == 5, "a day undone to nothing isn't a day studied");
+    st_hist_add(root, "hist", T, 1, 1, 0);
+
+    /* the clock set back: a day in the file is found; one before them all goes on the newest */
+    st_hist_add(root, "hist", T - 4, 1, 1, 0);
+    st_hist_add(root, "hist", T - 400, 0, 0, 1);
+    st_hist_week(root, "hist", T, &w);
+    CHECK(w.reviews[13 - 4] == 5 && w.lessons[13] == 1, "set back: %u %u", w.reviews[13 - 4], w.lessons[13]);
+    f = fopen(p, "rb");
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fclose(f);
+    CHECK(sz == 8 + 6 * 12, "one record a day, in order: %ld B", sz);
+
+    /* a torn append: the partial record is ignored, and the next add writes over it */
+    f = fopen(p, "ab");
+    fwrite("\x01\x02\x03\x04\x05", 1, 5, f);
+    fclose(f);
+    CHECK(st_hist_week(root, "hist", T, &w) == 1 && w.reviews[13] == 1, "a torn tail is ignored");
+    st_hist_add(root, "hist", T + 1, 1, 1, 0);
+    f = fopen(p, "rb");
+    fseek(f, 0, SEEK_END);
+    sz = ftell(f);
+    fclose(f);
+    CHECK(sz == 8 + 7 * 12, "and written over: %ld B", sz);
+    st_hist_week(root, "hist", T + 1, &w);
+    CHECK(w.streak == 7 && w.best == 7 && w.reviews[13] == 1, "a week: %d %d", w.streak, w.best);
+
+    /* a long history: the best is found anywhere in it, past the first read */
+    remove(p);
+    for(int d = 0; d < 40; d++) if(d != 30) st_hist_add(root, "hist", T - 100 + d, 0, 0, 1);
+    st_hist_week(root, "hist", T, &w);
+    CHECK(w.best == 30 && w.streak == 0, "best of a long file: %d, streak %d", w.best, w.streak);
+
+    /* not a history file: started again */
+    spit(p, (const uint8_t *)"garbage garbage garbage", 23);
+    CHECK(st_hist_week(root, "hist", T, &w) == 0, "a foreign file reads as none");
+    CHECK(st_hist_add(root, "hist", T, 1, 1, 0) == 0 && st_hist_week(root, "hist", T, &w) == 1
+          && w.reviews[13] == 1, "and is started again");
+    CHECK(st_hist_add(root, "../x", T, 1, 1, 0) == -1, "an id can't climb out of study/");
+
+    /* the advice, most important first */
+    StWeek a;
+    memset(&a, 0, sizeof a);
+    CHECK(st_advise(&a, 0) == ST_ADV_START, "an empty fortnight");
+    CHECK(st_advise(&a, ST_ADV_PILE_AT) == ST_ADV_PILE, "a pile, even before any study");
+    a.reviews[13] = 20; a.right[13] = 14;
+    CHECK(st_advise(&a, 0) == ST_ADV_MISSES, "70 %% right");
+    a.right[13] = 20; a.streak = 7;
+    CHECK(st_advise(&a, 0) == ST_ADV_STREAK, "a week's streak");
+    a.streak = 1; a.reviews[0] = 1; a.reviews[1] = 1;
+    CHECK(st_advise(&a, 0) == ST_ADV_GAPS, "fewer days than last week");
+    a.reviews[1] = 0;
+    CHECK(st_advise(&a, 0) == ST_ADV_MORE, "all right: room for more");
+    a.right[13] = 17;
+    CHECK(st_advise(&a, 0) == ST_ADV_STEADY, "85 %%: steady");
+    remove(p);
+    snprintf(p, sizeof p, "%s/study/hist", root); rmdir(p);
+}
+
 int main(int argc, char **argv){
     if(argc == 3 && !strcmp(argv[1], "sm2trace")){
         Course *c = open_course(CARDS);
@@ -599,6 +694,7 @@ int main(int argc, char **argv){
     scanning();
     rounds();
     card();
+    history();
     printf("srs_test (%zu-bit): %s\n", sizeof(void *) * 8, fails ? "FAILED" : "OK");
     return fails ? 1 : 0;
 }

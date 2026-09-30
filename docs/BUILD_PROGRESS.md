@@ -16,6 +16,64 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-30 — Study S4: the Week screen
+
+From the bench: "we need a Week stats screen in study just like how it is
+done in coach and guru". It's built on their page (`wk_page`, `wk_chart`,
+`wk_row`, `wk_delta`) and reached the same two ways: a **Week** button on
+the dashboard, and **This week** in the menu.
+
+**What it shows** (`study_week` in the smoke tour, looked at):
+- "5 reviews" and "+5 on last week"; under it "5 new · 100% right" and
+  "streak 1 · best 1";
+- the last seven days' reviews as bars, today underlined. There's no
+  target line: a day's reviews are whatever came due;
+- the course's stage groups (the demo's Learning, Known, Strong, Deep,
+  Retired) as rows, scaled to the largest; with fewer groups, "N of M
+  items started" under them;
+- her advice from the strip, and a tap anywhere goes back to the
+  dashboard.
+
+**The history** (`study.c`, host-tested in `make -C sim srs` and in
+`smoke32`):
+- `<course>/history.dat`: an 8-byte header, then one 12-byte `StDay` per
+  local day studied (reviews, right, lessons). About 4.4 KB for a year of
+  daily study.
+- `st_hist_add()` is called as each item finishes: a review (+1, and +1
+  right if it had no miss) or a lesson (+1). Undo takes its review back.
+  It rewrites one record in place or appends one, so a torn write costs
+  that day's counts at most: a partial record is ignored and written
+  over.
+- A day before the newest with no record of its own (the clock set back)
+  is counted on the newest: the file stays in day order and the totals
+  lose nothing. A file that isn't a history file is started again;
+  history is a nicety, not progress.
+- `st_hist_week()` reads it in one pass, 16 records at a time: the
+  fortnight's columns, the streak (the run reaching today or yesterday, so
+  it doesn't read 0 at breakfast), and the best run anywhere in the file.
+- `st_advise()` picks her line, most important first: a pile of 50+
+  reviews due; nothing this week or last; under 75 % right; a week's
+  streak; fewer days than last week; 90 %+ right (room for more lessons);
+  otherwise steady.
+- The test covers: no file, an undo with no file (writes nothing), a
+  missed day ending a streak, a streak ending yesterday, the columns,
+  undo down to zero (not a day studied), the clock set back (found in
+  the file, and before it all), a torn append ignored then written over,
+  the best run in a 39-day file past the first read, a foreign file
+  started again, an id with `..` refused, and each advice case.
+- Removing a course removes its `history.dat` too.
+
+**Cost:**
+- While the Week screen is up the heap in use is 13,328 B: the session
+  (8,856 B) plus the chart's canvas buffer (4.4 KB), freed with the
+  screen. Within §7's 24 KB; the smoke run's peak is still 13,896 B, and
+  `E leaving Study` still finds every byte given back.
+- LVGL pool: 31,704 B free on the Week screen (64-bit sim).
+- Firmware build (`espressif/idf:release-v5.5`, LVGL 9.5.0 as a local
+  component): app 1,716,208 B, **+2,880 B** of flash on the 2× answer
+  commit; static DRAM unchanged at 160,556 B (the screen's state is on the
+  stack and in the session block).
+
 ### 2026-09-30 — Study's answers at twice the size
 
 From the bench: "the answer english text is a small font — can it be 2x?"

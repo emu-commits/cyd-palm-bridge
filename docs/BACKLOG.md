@@ -31,7 +31,7 @@ review of `COURSE_FORMAT.md` and the demo content.** S2 (the schedulers and
 progress) is done too, and so is S3, the screens (2026-09-30). **S4 was
 replanned from the bench the same day: no typed answers on the device
 (`SRS_PLAN.md` §11 decision 9). It's now the answer at 2x (done) and a
-Week screen; then S5, due counts at a glance.**
+Week screen, both done in the sim. Next: S5, due counts at a glance.**
 
 **The app platform is on hold.** The main goal is one first-class SRS app
 (WaniKani/Anki-style, with a large course on the SD card), and it's being
@@ -58,7 +58,8 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 - [ ] Study on glass: the tile and portrait, a lesson and its quiz, reviews two hours later (Undo, the Card view), the kana answers, and whether 1-bit kanji read well at 64 and 24 px `[d]`
 - [x] S4a — the answer at 2x: the Palm bold font pixel-doubled (`tools/gen_font_2x.py`), for the answer and a term that's words `[s]` (2026-09-30; `study_review_answer`)
 - [ ] S4a on glass: the 2x answer reads well, and a long one falls back to 1x `[d]`
-- [ ] S4b — the Week screen, as Coach and Guru have it: `history.dat` per course, the chart, this week against last, streak, right %, stage groups, her advice `[s]`
+- [x] S4b — the Week screen, as Coach and Guru have it: `history.dat` per course, the chart, this week against last, streak, right %, stage groups, her advice `[s]` (2026-09-30; `study_week`, and the history's host tests)
+- [ ] The Week screen on glass: after a few days of use, the bars match what was done, the streak holds overnight, Undo takes a review back off the count `[d]`
 - [ ] S5 — due counts on the lock screen and launcher (`summary.bin`), and a forecast of reviews coming due `[s]`
 - [ ] S6 — a full course on the real card: open time, next-card time, heap, battery pull, kanji readability `[d]`
 

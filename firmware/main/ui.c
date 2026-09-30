@@ -10915,6 +10915,7 @@ static uint32_t st_now(void){
     return t;
 }
 static int32_t st_tz(void){ return (int32_t)ui_tz() * 60; }
+static int32_t st_today(void){ return cal_day_index(st_now(), ui_tz()); }
 /* the same test the rest of the UI uses for "never set": a year before 2024 */
 static int st_clock_ok(void){
     time_t t = (time_t)st_now();
@@ -11226,6 +11227,7 @@ static void st_show_card(void);
 static void st_show_ask(void);
 static void st_show_done(void);
 static void st_show_pick(void);
+static void st_show_week(void);
 
 /* a line of text in the middle of an otherwise empty screen */
 static void st_notice(const char *title, const char *msg){
@@ -11290,6 +11292,7 @@ static const char *const ST_GREET_IDLE[] = {
 };
 static uint8_t g_st_last_line;
 static void st_greet_tap_cb(lv_event_t *e){ (void)e; spk_pane_close(); }
+static void st_week_cb(lv_event_t *e){ (void)e; st_show_week(); }
 
 static void st_lessons_cb(lv_event_t *e);
 static void st_reviews_cb(lv_event_t *e);
@@ -11358,12 +11361,13 @@ static void st_show_dash(void){
         st_span(g_st->srs.next_due - now, span, sizeof span);
         snprintf(b, sizeof b, "Next review in %s.", span);
     } else snprintf(b, sizeof b, "%s", g_st->srs.started ? "Nothing is scheduled." : "Start with a lesson.");
-    lv_obj_t *nx = st_label(content, b, NULL, 228);
+    lv_obj_t *nx = st_label(content, b, NULL, 160);
     lv_obj_set_pos(nx, 6, 142);
     snprintf(b, sizeof b, "%u of %u items started", (unsigned)g_st->srs.started, (unsigned)c->n_items);
-    lv_obj_t *st = st_label(content, b, NULL, 228);
+    lv_obj_t *st = st_label(content, b, NULL, 160);
     lv_obj_set_pos(st, 6, 160);
     lv_obj_set_style_text_color(st, COL_DIM, 0);
+    st_btn(content, LCD_W - 72, 146, 66, 30, "Week", st_week_cb, 0, 0);
 
     if(greet_due(GREET_STUDY)){
         greet_done(GREET_STUDY);
@@ -11374,6 +11378,80 @@ static void st_show_dash(void){
         else snprintf(line, sizeof line, "%s", greet_pick(lessons ? ST_GREET_NEW : ST_GREET_IDLE, 3, &g_st_last_line));
         speaker_aside_ex(&study_face, line, "tap to continue", st_greet_tap_cb, 1);
     }
+}
+
+/* ---- the week (Coach's and Guru's week screens, for a course) ----
+ * The fortnight comes from history.dat (study.c), which each finished item
+ * adds to; the stage groups are the scan the dashboard already made. The
+ * page is theirs too: wk_page's canvas, freed by content_clear. */
+
+static void st_week_back_cb(lv_event_t *e){ (void)e; st_show_dash(); }
+
+static void st_week_advice(char *out, int cap, int adv, const StWeek *w, int due){
+    int rv = 0, rt = 0;
+    for(int i = 7; i < ST_WEEK_N; i++){ rv += w->reviews[i]; rt += w->right[i]; }
+    switch(adv){
+    case ST_ADV_START:  snprintf(out, cap, "Nothing yet this week. One lesson is five minutes, and it starts a streak."); break;
+    case ST_ADV_PILE:   snprintf(out, cap, "%d reviews are waiting. Hold off on lessons until they're down -- "
+                                           "new items only add to the pile.", due); break;
+    case ST_ADV_MISSES: snprintf(out, cap, "A lot of misses this week. Take fewer lessons for a few days "
+                                           "and let the reviews catch up."); break;
+    case ST_ADV_STREAK: snprintf(out, cap, "%d days in a row. That's exactly how it sticks.", w->streak); break;
+    case ST_ADV_GAPS:   snprintf(out, cap, "Fewer days than last week. A little every day beats a lot now and then."); break;
+    case ST_ADV_MORE:   snprintf(out, cap, "%d%% right this week. You've room for a few more lessons.",
+                                 rv ? rt * 100 / rv : 100); break;
+    default:            snprintf(out, cap, "A steady week. Keep the reviews at zero and the levels will come."); break;
+    }
+}
+
+static void st_show_week(void){
+    if(!g_st || !g_st->course_ok || !g_st->srs_ok){ show_study(); return; }
+    st_screen("This week");
+    uint32_t now = st_now();
+    srs_scan(&g_st->srs, now);
+    StWeek w;
+    st_hist_week(ST_ROOT, g_st->id, st_today(), &w);
+    /* the chart and the headline are reviews (the lessons are "new"), so
+     * the bars, the total and "on last week" all count the same thing */
+    int d[7], last = 0, rv = 0, rt = 0, ls = 0;
+    for(int i = 0; i < 7; i++){
+        last += w.reviews[i];
+        d[i] = w.reviews[7 + i];
+        rv += d[i]; rt += w.right[7 + i]; ls += w.lessons[7 + i];
+    }
+
+    lv_obj_t *page = wk_page();
+    char b[64];
+    snprintf(b, sizeof b, "%d review%s", rv, rv == 1 ? "" : "s");
+    wk_lbl(page, 8, 2, 1, b);
+    wk_delta(b, sizeof b, rv, last);
+    if(b[0]) wk_lbl_r(page, 2, b);
+    if(rv) snprintf(b, sizeof b, "%d new \xC2\xB7 %d%% right", ls, rt * 100 / rv);
+    else   snprintf(b, sizeof b, "%d new", ls);
+    wk_lbl(page, 8, 18, 0, b);
+    snprintf(b, sizeof b, "streak %d \xC2\xB7 best %d", w.streak, w.best);
+    wk_lbl_r(page, 18, b);
+
+    if(g_wk_cv){
+        /* no target line: the day's reviews are whatever came due */
+        wk_chart(page, d, 0, st_today());
+        /* where everything stands, by the course's own group names */
+        Course *c = &g_st->c;
+        int top = 0, y = WK_ROW_Y;
+        for(int i = 0; i < c->n_groups; i++) if(g_st->srs.group_count[i] > top) top = g_st->srs.group_count[i];
+        for(int i = 0; i < c->n_groups && y + WK_ROW_H <= PDA_H - TITLE_H; i++, y += WK_ROW_H)
+            wk_row(page, y, c->groups[i].name, g_st->srs.group_count[i], top);
+        if(y + 14 <= PDA_H - TITLE_H){
+            snprintf(b, sizeof b, "%u of %u items started", (unsigned)g_st->srs.started, (unsigned)c->n_items);
+            lv_obj_t *l = wk_lbl(page, 8, y + 2, 0, b);
+            lv_obj_set_style_text_color(l, COL_DIM, 0);
+        }
+    }
+
+    char say[160];
+    st_week_advice(say, sizeof say, st_advise(&w, g_st->srs.due_total), &w, g_st->srs.due_total);
+    tap_anywhere(page, st_week_back_cb);
+    speaker_aside_ex(&study_face, say, "tap anywhere to go back", st_week_back_cb, 1);
 }
 
 /* ---- lessons: the cards, then a quiz on them ---- */
@@ -11442,12 +11520,14 @@ static void st_grade_cb(lv_event_t *e){
                     g_st->undo_right = !done.wrong;
                     srs_grade(&g_st->c, &r, done.grade, now, st_tz());
                     if(srs_put(&g_st->srs, done.item, &r, now)) toast_show("Couldn't save to the card");
+                    else st_hist_add(ST_ROOT, g_st->id, st_today(), 1, !done.wrong, 0);
                 }
                 g_st->total++;
                 if(!done.wrong) g_st->right++;
             } else {
                 srs_start(&g_st->c, &r, it.id, now, st_tz());
                 if(srs_put(&g_st->srs, done.item, &r, now)) toast_show("Couldn't save to the card");
+                else st_hist_add(ST_ROOT, g_st->id, st_today(), 0, 0, 1);
                 g_st->learned++;
             }
         }
@@ -11464,6 +11544,7 @@ static void st_undo_cb(lv_event_t *e){
     if(r == 1 && g_st->undo_had && item == g_st->undo_item){
         /* the item had been graded: its record goes back as it was */
         srs_put(&g_st->srs, item, &g_st->undo_rec, st_now());
+        st_hist_add(ST_ROOT, g_st->id, st_today(), -1, -(int)g_st->undo_right, 0);
         g_st->total--;
         if(g_st->undo_right) g_st->right--;
     }
@@ -11690,6 +11771,7 @@ static void show_study(void){
 /* ---- the menu's Study items ---- */
 
 static void act_st_courses(lv_event_t *e){ (void)e; menu_close(); if(g_st) st_show_pick(); }
+static void act_st_week(lv_event_t *e){ (void)e; menu_close(); st_show_week(); }
 static void act_st_reinstall(lv_event_t *e){ menu_close(); st_reinstall_cb(e); }
 
 static void act_st_info(lv_event_t *e){
@@ -11772,6 +11854,7 @@ static void st_menu(lv_obj_t *panel){
     menu_header(panel, "Study");
     menu_item(panel, "Courses", act_st_courses);
     if(g_st && g_st->course_ok){
+        if(g_st->srs_ok) menu_item(panel, "This week", act_st_week);
         menu_item(panel, "About this course", act_st_info);
         menu_item(panel, "Check course", act_st_check);
         menu_item(panel, "Remove course", act_st_remove);

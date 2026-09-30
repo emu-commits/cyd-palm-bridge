@@ -1517,6 +1517,13 @@ t 200
 c 120 130
 t 400
 s study_dash_after_reviews
+# the Week screen, as Coach's and Guru's: today's lesson and reviews in the
+# chart (history.dat), the stage groups, and her advice; a tap goes back
+c 201 185
+t 400
+s study_week
+c 120 100
+t 400
 # the next lesson: the last three radicals, then kanji -- whose reading
 # questions come on a black banner and answer in the kana font
 c 61 92
@@ -1533,18 +1540,18 @@ t 300
 c 176 191
 t 300
 s study_quiz2
-# the menu's Study items: About this course, and Check course
+# the menu's Study items: This week, About this course, and Check course
 c 18 300
 t 400
 s study_menu
-c 60 158
+c 60 184
 t 400
 s study_about_course
 c 120 160
 t 300
 c 18 300
 t 400
-c 60 184
+c 60 210
 t 600
 s study_check_course
 c 120 160

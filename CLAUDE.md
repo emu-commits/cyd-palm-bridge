@@ -176,9 +176,16 @@ and S1**, which the owner asked for together:
     `tools/gen_font_2x.py` (checked in `make -C sim course`), used through
     `st_big()` in `ui.c`.
   - S4 was replanned to "readability and the week" (`SRS_PLAN.md` §10).
+  - **The Week screen is done:** `history.dat` per course, written by
+    `st_hist_add()` as each item finishes (Undo takes it back), read by
+    `st_hist_week()`, with `st_advise()` choosing her line; all in
+    `study.c`, tested in `make -C sim srs`. The page is Coach's and Guru's
+    (`wk_page`, `wk_chart`, `wk_row`), reached from the dashboard's Week
+    button and the menu's This week (`study_week` shot).
 
-1. **S4, the Week screen**, then **S5, glanceable due counts**, as
-   `SRS_PLAN.md` §10 describes, keeping to its §7 budgets:
+1. **S5, glanceable due counts** (`summary.bin`, the lock screen and the
+   launcher tile, and a forecast), as `SRS_PLAN.md` §10 describes, keeping
+   to its §7 budgets:
    - the screens use `course.c`, `srs.c` and `study.c` as they are; logic
      belongs there, not in `ui.c`;
    - new host gates added to `ci.yml` and to the gate list above;

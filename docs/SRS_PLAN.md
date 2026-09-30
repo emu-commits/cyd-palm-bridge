@@ -1,8 +1,9 @@
 # SRS plan — Study, a built-in spaced-repetition app
 
 > **Status: S0 to S3 done 2026-09-30, and S4 replanned the same day: no
-> typed answers (§11 decision 9). S4 is now readability and the Week
-> screen; S5 (due counts at a glance) comes after it.** Study is on the
+> typed answers (§11 decision 9). S4, the answer at 2× and the Week
+> screen, is done in the simulator too; S5 (due counts at a glance) is
+> next.** Study is on the
 > launcher and runs the demo end to end; the owner has it on the device. The format is
 > `COURSE_FORMAT.md` (awaiting the owner's review), the demo is
 > `courses/demo-kanji/`, `tools/mkcourse.py` builds courses and
