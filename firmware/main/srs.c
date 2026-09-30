@@ -357,7 +357,48 @@ static int fold(Srs *s){
     return 0;
 }
 
-static int scan_dat(Srs *s, uint32_t now){
+/* The week ahead, gathered one record at a time. The soonest SRS_SOON_MAX
+ * minutes are kept in a max-heap (so a later one can make room by pushing out
+ * the latest) and sorted when the scan ends: a heap sort, in place. */
+static void soon_sift(uint16_t *h, int n, int i){
+    for(;;){
+        int l = 2 * i + 1, r = l + 1, m = i;
+        if(l < n && h[l] > h[m]) m = l;
+        if(r < n && h[r] > h[m]) m = r;
+        if(m == i) return;
+        uint16_t t = h[i]; h[i] = h[m]; h[m] = t;
+        i = m;
+    }
+}
+
+void srs_sum_add(SrsSum *u, uint32_t due, int32_t tz){
+    uint32_t at = u->at;
+    if(due <= at){ u->due++; return; }
+    if(!u->next || due < u->next) u->next = due;
+    if(due - at <= 86400) u->in24++;
+    int64_t d = ((int64_t)start_of_day(due, tz) - (int64_t)start_of_day(at, tz)) / 86400;
+    if(d >= 0 && d < 7 && u->day[d] < 0xFFFF) u->day[d]++;
+    uint32_t m = (due - at + 59) / 60;
+    if(m > SRS_SOON_MIN) return;
+    uint16_t *h = u->soon;
+    if(u->n_soon < SRS_SOON_MAX){                  /* push, and sift up */
+        int i = u->n_soon++;
+        h[i] = (uint16_t)m;
+        while(i && h[(i - 1) / 2] < h[i]){ uint16_t t = h[i]; h[i] = h[(i - 1) / 2]; h[(i - 1) / 2] = t; i = (i - 1) / 2; }
+    } else {
+        u->full = 1;
+        if(m < h[0]){ h[0] = (uint16_t)m; soon_sift(h, u->n_soon, 0); }
+    }
+}
+
+void srs_sum_done(SrsSum *u){
+    for(int n = u->n_soon; n > 1; n--){
+        uint16_t t = u->soon[0]; u->soon[0] = u->soon[n - 1]; u->soon[n - 1] = t;
+        soon_sift(u->soon, n - 1, 0);
+    }
+}
+
+static int scan_dat(Srs *s, uint32_t now, int32_t tz, SrsSum *sum){
     Course *c = s->c;
     memset(s->state, 0, (c->n_items + 3) / 4);
     s->n_due = 0; s->due_total = 0; s->next_due = 0; s->started = 0;
@@ -387,22 +428,27 @@ static int scan_dat(Srs *s, uint32_t now){
         set_state(s, idx_n, srs_known(c, &r) ? SRS_KNOWN : SRS_LEARNING);
         s->group_count[srs_group(c, &r)]++;
         if((r.flags & (SRS_F_RETIRED | SRS_F_SUSPENDED)) || !r.due) continue;
+        if(sum) srs_sum_add(sum, r.due, tz);
         if(r.due <= now){
             s->due_total++;
             if(s->n_due < SRS_DUE_MAX) s->due[s->n_due++] = (uint16_t)idx_n;
         } else if(!s->next_due || r.due < s->next_due) s->next_due = r.due;
     }
     fclose(f);
+    if(sum) srs_sum_done(sum);
     if(crc != h.crc) return err(s, SRS_EBAD, "progress.dat is damaged");
     return 0;
 }
 
 /* Recount: the session's log is folded in first, so progress.dat is the
  * whole truth, then scanned. */
-int srs_scan(Srs *s, uint32_t now){
+int srs_scan(Srs *s, uint32_t now){ return srs_scan_sum(s, now, 0, NULL); }
+
+int srs_scan_sum(Srs *s, uint32_t now, int32_t tz, SrsSum *sum){
+    if(sum){ memset(sum, 0, sizeof *sum); sum->at = now; }
     if(s->logf){ fclose(s->logf); s->logf = NULL; }
     int r = fold(s);
-    if(!r) r = scan_dat(s, now);
+    if(!r) r = scan_dat(s, now, tz, sum);
     if(!s->logf && !(s->logf = fopen(s->log, "a+b")) && !r) r = err(s, SRS_EIO, "can't open the progress log");
     return r;
 }

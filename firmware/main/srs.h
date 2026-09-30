@@ -127,6 +127,33 @@ int  srs_put(Srs *s, uint32_t n, const SrsRec *r, uint32_t now);
  * log into progress.dat first, then scans it. */
 int  srs_scan(Srs *s, uint32_t now);
 
+/* ---- what's coming: the reviews of the next week, for the lock screen, the
+ * launcher and the Week screen's forecast (SRS_PLAN.md S5). study.c keeps it
+ * on the card as summary.bin, so they needn't open the course. */
+
+#define SRS_SOON_MAX  1024      /* due times kept to the minute (2 B each) */
+#define SRS_SOON_MIN  (7 * 1440)
+
+typedef struct {
+    uint32_t at;                /* when it was made */
+    uint32_t due;               /* due at `at` */
+    uint32_t next;              /* the soonest due time after `at`, to the second; 0 = none */
+    uint32_t in24;              /* due in (at, at + 24 h] */
+    uint16_t day[7];            /* due on the local day of `at` (after `at`) and the six after */
+    uint16_t n_soon;
+    uint8_t  full;              /* more than SRS_SOON_MAX fell in the week: the latest were left out */
+    /* minutes after `at` (rounded up, so never early) of each review due in
+     * the next seven days, soonest first: the SRS_SOON_MAX soonest */
+    uint16_t soon[SRS_SOON_MAX];
+} SrsSum;
+
+/* srs_scan(), and the week ahead into *sum as well. */
+int  srs_scan_sum(Srs *s, uint32_t now, int32_t tz, SrsSum *sum);
+/* What the scan does with each due time (zero *u and set u->at first), and
+ * the sort at the end: open for the tests. */
+void srs_sum_add(SrsSum *u, uint32_t due, int32_t tz);
+void srs_sum_done(SrsSum *u);
+
 /* Lessons available now, in teaching order: up to `max` item numbers into
  * `out` (which may be NULL to count). Returns how many there are in all. An
  * item is available when its level is open, it has no record, and (with

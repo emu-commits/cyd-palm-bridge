@@ -1559,6 +1559,41 @@ t 300
 c 18 225
 t 300
 E leaving Study
+# S5: Study at a glance, with no course open: the launcher's badge and the
+# lock's STUDY row come from each course's summary.bin (written as Study
+# closed). Just after the reviews nothing is due: no badge, "caught up".
+s study_launcher_none
+L
+t 300
+s study_lock_caught_up
+d 120 275
+t 30
+m 120 210
+t 30
+m 120 140
+t 30
+m 120 90
+t 30
+u
+t 400
+# a day and a half on (`A`): what was reviewed is due again
+A 129600
+c 18 225
+t 300
+s study_launcher_badge
+L
+t 300
+s study_lock_due
+d 120 275
+t 30
+m 120 210
+t 30
+m 120 140
+t 30
+m 120 90
+t 30
+u
+t 400
 # I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.
 # (CI starts on a fresh /sdcard, so the seed + manifest exist here.)
 c 18 225

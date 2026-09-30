@@ -16,6 +16,73 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-30 — Study S5: the reviews due, at a glance
+
+The owner picked the layouts from simulator mock-ups ("go with A and the
+badge, total across courses, reviews only. air quality can be minimized on
+the dashboard as necessary").
+
+**What shows** (smoke shots `study_lock_caught_up`, `study_lock_due`,
+`study_launcher_none`, `study_launcher_badge`, `study_week`; looked at):
+- **The lock screen:** AHEAD has a third row, STUDY, under NEXT and DUE:
+  "5 reviews due", "caught up · next 9:47p" (a weekday, then a date, when
+  it's further off), or "no reviews yet" before any course has a summary.
+  The lock repaints every minute, and counts again when the next review
+  comes due, so the number rises on its own.
+- **The room for it** came from the CONDITIONS box, 14 px shorter (rule at
+  204, was 218): the air quality moved up to the right of the reading's
+  line, and the hourly strip moved up with the rain bars capped at 20 px
+  (was 24). The air label is fitted on every paint: whole ("Air 120 ·
+  Unhealthy*"), then just the number ("Air 250" beside "104° Thunder +
+  hail"), then nothing. The worst cases were rendered in a scratch copy.
+- **The launcher:** a black count at the Study icon's shoulder ("5"; "99+"
+  at most), none at 0.
+- **The Week screen's lower half is the week ahead:** "Coming up", "N in
+  the next 24 h", and seven outlined bars (today's includes what's waiting
+  now) under the week behind. It replaced the stage-group rows, which the
+  dashboard shows anyway.
+
+**How** (`srs.c`, `study.c`; host tests in `make -C sim srs` and
+`smoke32`):
+- `srs_scan_sum()` is the dashboard's scan, gathering the week ahead as it
+  goes: the count due, the next due time to the second, the count in the
+  next 24 hours, the next seven local days, and the soonest 1,024 due
+  times as minutes after the scan (rounded up, so a count never rises
+  early), kept in a max-heap and heap-sorted at the end.
+- `st_sum_write()` puts it on the card as `<course>/summary.bin` (a 40 B
+  header, 2 B a time, a CRC-32; replaced whole). The dashboard writes it,
+  and so does closing Study with grades since (`sum_dirty`).
+- `st_glance()` totals every course's summary at the time asked: each
+  one's count, plus its minutes that have passed. A damaged summary is
+  left out rather than guessed at; a summary from the future (the clock
+  set back) counts as it was made.
+- Tests: a scan's counts, by-day buckets in two time zones, rounding, a
+  suspended item left out, the 1,024 soonest of 1,500, a round trip, a
+  flipped bit and a short file refused, and totals across two courses as
+  the clock moves (including the minute a review comes due).
+- Removing a course removes its summary.
+
+**Cost:**
+- Firmware (`espressif/idf:release-v5.5`, LVGL 9.5.0 local): app
+  1,719,232 B, **+3,024 B**; static DRAM 160,564 B, **+8 B** (two label
+  pointers and a time).
+- LVGL pool, 64-bit sim: the lock screen leaves 26,632 B free (was
+  27,488: three more labels); the launcher with a badge 30,880 B (31,280
+  without).
+- Heap: the Week screen peaks at 15,416 B while it builds (the session,
+  its chart canvas and the 2.1 KB summary, freed at once). Reading the
+  summaries for the lock or launcher takes 512 B (the course list) and a
+  128 B stack buffer, freed before returning. The smoke run's peak is 15,416 B of the 147,456 B budget.
+- A course with nothing coming up in the week has a 44 B summary; the
+  demo's is 60 B at the end of the smoke tour (eight due times); the most
+  one can be is 2,092 B.
+
+**Found on the way:** `lv_text_get_width` is public in the simulator's
+LVGL 9.2 but private in 9.5 (the device's), and the firmware build failed
+on it. The width now comes from `lv_text_get_size`, public in both. Only
+the firmware build catches this kind of thing, so it stays in the gate
+list.
+
 ### 2026-09-30 — Study S4: the Week screen
 
 From the bench: "we need a Week stats screen in study just like how it is

@@ -65,7 +65,7 @@ before touching anything.
   the working branch isn't touched. The container is wiped between sessions:
   anything not committed and pushed is lost, including earlier spike code.
 
-## Current work: the SRS app, S4 (replanned 2026-09-30: no typing)
+## Current work: the SRS app, S0–S5 done in the sim (no typing; S6 is the bench)
 
 **The app platform is on hold** (`APP_PLATFORM_PLAN.md`, status block and
 §11 decision 7). The user's main goal is one first-class SRS app
@@ -117,6 +117,10 @@ from there, or ask the user whether it has been merged.
     type on, so every question is shown, revealed and self-graded. The old
     S4 (romaji to kana, meaning matching, "close enough" accents) is
     dropped for good: don't build it or `romaji.c`.
+12. **Glanceable counts** (2026-09-30, `SRS_PLAN.md` §11 decision 10): a
+    STUDY row in the lock screen's AHEAD zone (the air quality may shrink
+    to make room), a count badge on the launcher's Study icon, the total
+    across every course, reviews only.
 
 **Measured already (QEMU, launcher showing):** 114,352 B free heap (largest
 block 90,112 B); about 106–108 KB estimated on the device with the SD card
@@ -183,9 +187,16 @@ and S1**, which the owner asked for together:
     (`wk_page`, `wk_chart`, `wk_row`), reached from the dashboard's Week
     button and the menu's This week (`study_week` shot).
 
-1. **S5, glanceable due counts** (`summary.bin`, the lock screen and the
-   launcher tile, and a forecast), as `SRS_PLAN.md` §10 describes, keeping
-   to its §7 budgets:
+- **S5, glanceable due counts, is done** (the owner chose the layouts from
+  simulator mock-ups: `SRS_PLAN.md` §11 decision 10). `srs_scan_sum()`
+  gathers the week ahead; `study.c` writes it as `summary.bin` and
+  `st_glance()` totals every course's. The lock screen's AHEAD zone has a
+  STUDY row (the weather box gave up 14 px: the air quality is beside the
+  reading now), the launcher shows a badge on Study, and the Week screen's
+  lower half is the forecast.
+
+1. **S6, the bench**, is the owner's (`[d]` items in `BACKLOG.md`). Any
+   further work follows `SRS_PLAN.md` §10, keeping to its §7 budgets:
    - the screens use `course.c`, `srs.c` and `study.c` as they are; logic
      belongs there, not in `ui.c`;
    - new host gates added to `ci.yml` and to the gate list above;

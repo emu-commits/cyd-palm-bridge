@@ -9,6 +9,7 @@
 #include "srs.h"
 #include "study.h"
 
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -677,6 +678,102 @@ static void history(void){
     snprintf(p, sizeof p, "%s/study/hist", root); rmdir(p);
 }
 
+/* ---- at a glance (S5): the week ahead, summary.bin, and the total ---- */
+
+static void put_due(Srs *s, Course *c, uint32_t n, uint32_t due, uint8_t flags){
+    SrsRec r;
+    srs_start(c, &r, id_of(c, n), T0, 0);
+    r.due = due;
+    r.flags |= flags;
+    put(s, n, &r);
+}
+
+static void summary(void){
+    Course *c = open_course(DEMO);
+    Srs s;
+    fresh_dir();
+    CHECK(srs_open(&s, c, TMP, T0, 0) == 0, "open");
+    put_due(&s, c, 0, T0 - H, 0);                  /* overdue */
+    put_due(&s, c, 1, T0 - H, 0);
+    put_due(&s, c, 2, T0 + 90, 0);                 /* 1.5 minutes: counted at the 2nd */
+    put_due(&s, c, 3, T0 + 23 * H, 0);
+    put_due(&s, c, 4, T0 + 25 * H, 0);
+    put_due(&s, c, 5, T0 + 6 * D + 1, 0);
+    put_due(&s, c, 6, T0 + 7 * D + 10, 0);         /* past the week */
+    put_due(&s, c, 7, T0 + H, SRS_F_SUSPENDED);    /* left out of reviews */
+    SrsSum *u = malloc(sizeof *u);
+    CHECK(srs_scan_sum(&s, T0, 0, u) == 0, "scan");
+    CHECK(u->at == T0 && u->due == 2 && s.due_total == 2, "due now: %u", u->due);
+    CHECK(u->next == T0 + 90 && s.next_due == T0 + 90, "the next, to the second");
+    CHECK(u->in24 == 2, "two in the next 24 h: %u", u->in24);
+    CHECK(u->day[0] == 2 && u->day[1] == 1 && u->day[6] == 1 && u->day[2] + u->day[3] + u->day[4] + u->day[5] == 0,
+          "by day: %u %u .. %u", u->day[0], u->day[1], u->day[6]);
+    CHECK(u->n_soon == 4 && !u->full && u->soon[0] == 2 && u->soon[1] == 23 * 60 && u->soon[2] == 25 * 60
+          && u->soon[3] == 6 * 1440 + 1, "the week's minutes, rounded up, soonest first");
+    /* the days are local days: at UTC-5, T0 is 19:00 on the day before */
+    CHECK(srs_scan_sum(&s, T0, -5 * 3600, u) == 0 && u->day[0] == 1 && u->day[1] == 2,
+          "local days: %u %u", u->day[0], u->day[1]);
+    srs_close(&s);
+    course_close(c); free(c);
+
+    /* more due in the week than are kept: the soonest are */
+    memset(u, 0, sizeof *u);
+    u->at = T0;
+    for(uint32_t k = 0; k < 1500; k++) srs_sum_add(u, T0 + 60 * (1 + (k * 7919) % 1500), 0);
+    srs_sum_done(u);
+    int sorted = 1;
+    for(int i = 0; i < u->n_soon; i++) if(u->soon[i] != i + 1) sorted = 0;
+    CHECK(u->n_soon == SRS_SOON_MAX && u->full && sorted, "the %d soonest, in order", SRS_SOON_MAX);
+
+    /* summary.bin: a round trip, and a damaged one reads as none */
+    const char *root = "build/srs_root";
+    char p[160];
+    mkdir(root, 0777);
+    snprintf(p, sizeof p, "%s/study", root); mkdir(p, 0777);
+    const char *ids[3] = { "sum-a", "sum-b", "sum-c" };
+    for(int i = 0; i < 3; i++){
+        st_remove_course(root, ids[i]);
+        snprintf(p, sizeof p, "%s/study/%s", root, ids[i]); mkdir(p, 0777);
+        snprintf(p, sizeof p, "%s/study/%s/course.srs", root, ids[i]); spit(p, (const uint8_t *)"x", 1);
+    }
+    SrsSum *v = malloc(sizeof *v);
+    CHECK(st_sum_write(root, "sum-a", u) == 0 && st_sum_read(root, "sum-a", v) == 1
+          && !memcmp(u, v, offsetof(SrsSum, soon) + sizeof(uint16_t) * u->n_soon), "a round trip");
+    snprintf(p, sizeof p, "%s/study/sum-a/summary.bin", root);
+    static uint8_t fb[4096];
+    long nb = slurp(p, fb, sizeof fb);
+    CHECK(nb == 40 + 2 * SRS_SOON_MAX + 4, "its size: %ld", nb);
+    fb[100] ^= 1; spit(p, fb, nb);
+    CHECK(st_sum_read(root, "sum-a", v) == 0, "a flipped bit is caught");
+    fb[100] ^= 1; spit(p, fb, nb - 1);
+    CHECK(st_sum_read(root, "sum-a", v) == 0, "so is a short file");
+    CHECK(st_sum_write(root, "../x", u) == -1, "an id can't climb out");
+
+    /* the total, across courses, as the clock moves */
+    StGlance g;
+    CHECK(st_glance(root, T0, &g) == 0 && !g.due, "no summaries, nothing due");
+    memset(u, 0, sizeof *u);
+    u->at = T0; u->due = 3; u->next = T0 + 570; u->n_soon = 3;
+    u->soon[0] = 10; u->soon[1] = 20; u->soon[2] = 600;
+    st_sum_write(root, "sum-a", u);
+    memset(u, 0, sizeof *u);
+    u->at = T0 + 100; u->due = 1; u->next = T0 + 400; u->n_soon = 1; u->soon[0] = 5;
+    st_sum_write(root, "sum-b", u);
+    CHECK(st_glance(root, T0, &g) == 2 && g.due == 4 && g.next == T0 + 400 && g.change == T0 + 400,
+          "before b's summary was made, b is its own count: %u next %u", g.due, g.next - T0);
+    CHECK(st_glance(root, T0 + 700, &g) == 2 && g.due == 6 && g.next == T0 + 1200 && g.change == T0 + 1200,
+          "an hour on, as they come due: %u, next +%u", g.due, g.next - T0);
+    CHECK(st_glance(root, T0 + 1200, &g) == 2 && g.due == 7, "at the minute it's due, it is: %u", g.due);
+    CHECK(st_glance(root, T0 + 11 * H, &g) == 2 && g.due == 8 && !g.next && !g.change,
+          "all of it, and nothing more known: %u", g.due);
+    snprintf(p, sizeof p, "%s/study/sum-b/summary.bin", root);
+    nb = slurp(p, fb, sizeof fb);
+    fb[nb - 1] ^= 0x80; spit(p, fb, nb);
+    CHECK(st_glance(root, T0 + 11 * H, &g) == 1 && g.due == 6, "a damaged summary is left out, not guessed at");
+    for(int i = 0; i < 3; i++) CHECK(st_remove_course(root, ids[i]) == 0, "removing %s takes its summary", ids[i]);
+    free(u); free(v);
+}
+
 int main(int argc, char **argv){
     if(argc == 3 && !strcmp(argv[1], "sm2trace")){
         Course *c = open_course(CARDS);
@@ -695,6 +792,7 @@ int main(int argc, char **argv){
     rounds();
     card();
     history();
+    summary();
     printf("srs_test (%zu-bit): %s\n", sizeof(void *) * 8, fails ? "FAILED" : "OK");
     return fails ? 1 : 0;
 }

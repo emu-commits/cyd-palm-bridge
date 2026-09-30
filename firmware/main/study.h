@@ -13,6 +13,7 @@
 #define STUDY_H
 
 #include <stdint.h>
+#include "srs.h"
 
 #define ST_MEANING 1            /* question bits, as a course's kind "quiz" */
 #define ST_READING 2
@@ -122,5 +123,25 @@ enum {
 };
 #define ST_ADV_PILE_AT 50       /* due now, for ST_ADV_PILE */
 int  st_advise(const StWeek *w, int due_now);
+
+/* ---- at a glance: <root>/study/<course-id>/summary.bin (SRS_PLAN.md S5) ----
+ * The lock screen and the launcher show the reviews due across every course
+ * without opening one: each course's summary (srs_scan_sum) is written when
+ * its dashboard counts it and when Study closes with grades not yet counted,
+ * and holds the next week's due times to the minute, so the total goes up by
+ * itself as they come due. */
+
+int  st_sum_write(const char *root, const char *id, const SrsSum *u);
+/* 1 read, 0 none or not a summary (*u is zeroed first either way) */
+int  st_sum_read(const char *root, const char *id, SrsSum *u);
+
+typedef struct {
+    uint32_t due;               /* reviews due now, every course */
+    uint32_t next;              /* the soonest one after now, 0 = none known */
+    uint32_t change;            /* when `due` next goes up (look again then), 0 = not known */
+    int      courses;           /* courses with a summary */
+} StGlance;
+/* Read every course's summary at `now`. Returns g->courses. */
+int  st_glance(const char *root, uint32_t now, StGlance *g);
 
 #endif

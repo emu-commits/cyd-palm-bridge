@@ -152,7 +152,8 @@ int st_install_demo(const char *root, int force){
 
 int st_remove_course(const char *root, const char *id){
     static const char *const FILES[] = { "course.srs", "progress.dat", "progress.log",
-                                         "progress.dat.tmp", "course.srs.tmp", "history.dat" };
+                                         "progress.dat.tmp", "course.srs.tmp", "history.dat",
+                                         "summary.bin", "summary.bin.tmp" };
     char p[128];
     if(!id[0] || strchr(id, '/') || strstr(id, "..")) return -1;
     for(size_t i = 0; i < sizeof FILES / sizeof FILES[0]; i++){
@@ -342,4 +343,137 @@ int st_advise(const StWeek *w, int due_now){
     if(days < days_last) return ST_ADV_GAPS;
     if(rv >= 10 && rt * 100 >= rv * 90) return ST_ADV_MORE;
     return ST_ADV_STEADY;
+}
+
+/* ---- at a glance: summary.bin ----
+ *   0 u32 magic "STS1"  4 u32 at  8 u32 due  12 u32 next  16 u32 in24
+ *  20 u16 day[7]  34 u16 n_soon  36 u8 full  37 u8 0  38 u16 0
+ *  40 u16 soon[n_soon]  then u32 CRC-32 of everything before it
+ * Little-endian, replaced whole (safefile.h). */
+
+#define SUM_MAGIC 0x31535453u                   /* "STS1" */
+#define SUM_HDR   40
+
+static void put16(uint8_t *p, uint32_t v){ p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
+static void put32(uint8_t *p, uint32_t v){ put16(p, v); put16(p + 2, v >> 16); }
+static uint32_t get16(const uint8_t *p){ return p[0] | (uint32_t)p[1] << 8; }
+static uint32_t get32(const uint8_t *p){ return get16(p) | get16(p + 2) << 16; }
+
+static void sum_path(char *p, int cap, const char *root, const char *id){
+    snprintf(p, cap, "%s/study/%s/summary.bin", root, id);
+}
+
+int st_sum_write(const char *root, const char *id, const SrsSum *u){
+    char p[96];
+    if(!id[0] || strchr(id, '/') || strstr(id, "..") || u->n_soon > SRS_SOON_MAX) return -1;
+    sum_path(p, sizeof p, root, id);
+    uint8_t h[SUM_HDR] = { 0 };
+    put32(h, SUM_MAGIC); put32(h + 4, u->at); put32(h + 8, u->due);
+    put32(h + 12, u->next); put32(h + 16, u->in24);
+    for(int i = 0; i < 7; i++) put16(h + 20 + 2 * i, u->day[i]);
+    put16(h + 34, u->n_soon);
+    h[36] = u->full;
+    SafeFile sf;
+    if(!sf_open(&sf, p, "wb")) return -1;
+    uint32_t crc = course_crc32(0, h, SUM_HDR);
+    int ok = fwrite(h, 1, SUM_HDR, sf.f) == SUM_HDR;
+    uint8_t b[128];
+    for(int i = 0; ok && i < u->n_soon; ){
+        int k = 0;
+        for(; k < (int)sizeof b / 2 && i < u->n_soon; k++, i++) put16(b + 2 * k, u->soon[i]);
+        crc = course_crc32(crc, b, 2 * k);
+        ok = fwrite(b, 1, 2 * k, sf.f) == (size_t)(2 * k);
+    }
+    put32(b, crc);
+    ok = ok && fwrite(b, 1, 4, sf.f) == 4;
+    return sf_commit(&sf, ok);
+}
+
+/* Open a summary and check its header and size; the CRC is checked by the
+ * caller's walk of the minutes. NULL if there isn't a good one. */
+static FILE *sum_open(const char *root, const char *id, uint8_t h[SUM_HDR]){
+    char p[96];
+    sum_path(p, sizeof p, root, id);
+    sf_recover(p);
+    FILE *f = fopen(p, "rb");
+    if(!f) return NULL;
+    long want;
+    if(fread(h, 1, SUM_HDR, f) != SUM_HDR || get32(h) != SUM_MAGIC || get16(h + 34) > SRS_SOON_MAX
+       || fseek(f, 0, SEEK_END) || ftell(f) != (want = SUM_HDR + 2 * (long)get16(h + 34) + 4)
+       || fseek(f, SUM_HDR, SEEK_SET)){
+        fclose(f);
+        return NULL;
+    }
+    return f;
+}
+
+/* Walk a summary's minutes in chunks, handing each to `fn`, then check the
+ * CRC. 0 if it's whole. */
+static int sum_walk(FILE *f, const uint8_t h[SUM_HDR], void (*fn)(void *, uint16_t), void *ctx){
+    uint32_t crc = course_crc32(0, h, SUM_HDR);
+    int n = (int)get16(h + 34);
+    uint8_t b[128];
+    while(n > 0){
+        int k = n < (int)sizeof b / 2 ? n : (int)sizeof b / 2;
+        if(fread(b, 1, 2 * k, f) != (size_t)(2 * k)) return -1;
+        crc = course_crc32(crc, b, 2 * k);
+        for(int i = 0; i < k; i++) fn(ctx, (uint16_t)get16(b + 2 * i));
+        n -= k;
+    }
+    return fread(b, 1, 4, f) == 4 && get32(b) == crc ? 0 : -1;
+}
+
+static void sum_collect(void *ctx, uint16_t m){
+    SrsSum *u = ctx;
+    u->soon[u->n_soon++] = m;
+}
+
+int st_sum_read(const char *root, const char *id, SrsSum *u){
+    memset(u, 0, sizeof *u);
+    uint8_t h[SUM_HDR];
+    FILE *f = sum_open(root, id, h);
+    if(!f) return 0;
+    int ok = !sum_walk(f, h, sum_collect, u);
+    fclose(f);
+    if(!ok || u->n_soon != get16(h + 34)){ memset(u, 0, sizeof *u); return 0; }
+    u->at = get32(h + 4); u->due = get32(h + 8); u->next = get32(h + 12); u->in24 = get32(h + 16);
+    for(int i = 0; i < 7; i++) u->day[i] = (uint16_t)get16(h + 20 + 2 * i);
+    u->full = h[36];
+    return 1;
+}
+
+/* one course's minutes against `now`: how many are due, and the first after */
+typedef struct { uint32_t at, now, due, first; } GlanceWalk;
+static void glance_one(void *ctx, uint16_t m){
+    GlanceWalk *w = ctx;
+    uint32_t t = w->at + (uint32_t)m * 60;
+    if(t <= w->now) w->due++;
+    else if(!w->first) w->first = t;           /* ascending: the first is the soonest */
+}
+
+int st_glance(const char *root, uint32_t now, StGlance *g){
+    memset(g, 0, sizeof *g);
+    enum { MAXC = 16 };
+    char (*ids)[ST_ID_MAX] = malloc(MAXC * ST_ID_MAX);
+    if(!ids) return 0;
+    int n = st_list_courses(root, ids, MAXC);
+    for(int i = 0; i < n; i++){
+        uint8_t h[SUM_HDR];
+        FILE *f = sum_open(root, ids[i], h);
+        if(!f) continue;
+        GlanceWalk w = { get32(h + 4), now, 0, 0 };
+        int ok = !sum_walk(f, h, glance_one, &w);
+        fclose(f);
+        if(!ok) continue;
+        uint32_t at = get32(h + 4), next = get32(h + 12);
+        g->courses++;
+        /* before the summary was made (the clock went back): its own count */
+        g->due += get32(h + 8) + (now >= at ? w.due : 0);
+        if(now < at) w.first = next;
+        if(w.first && (!g->change || w.first < g->change)) g->change = w.first;
+        uint32_t nx = w.first ? w.first : (next > now ? next : 0);
+        if(nx && (!g->next || nx < g->next)) g->next = nx;
+    }
+    free(ids);
+    return g->courses;
 }

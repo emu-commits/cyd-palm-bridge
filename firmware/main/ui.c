@@ -136,6 +136,10 @@ static const lv_image_dsc_t *APP_ICONS[] = { &icon_datebook, &icon_address, &ico
 #define NAPPS ((int)(sizeof(APPS)/sizeof(APPS[0])))
 
 static void show_launcher(void);
+/* Study, at a glance (S5): the lock's STUDY row and the launcher's badge */
+static void st_glance_text(char *b, int cap, uint32_t *change);
+static uint32_t st_glance_due(void);
+static uint32_t st_now(void);                 /* Study's clock (the smoke tour can move it) */
 static void show_trainer(void);
 static void show_kana(void);
 static void show_news(void);
@@ -3331,6 +3335,26 @@ static lv_obj_t *icon_cell(lv_obj_t *grid, const lv_image_dsc_t *icon,
     return cell;
 }
 
+/* S5: the reviews due in every course, as a count at the icon's shoulder,
+ * like a phone's. Nothing when there are none; 99+ past two digits. Kept
+ * inside the cell: anything standing proud of it is clipped. */
+static void st_badge(lv_obj_t *cell, uint32_t n){
+    if(!n) return;
+    char b[8];
+    if(n > 99) snprintf(b, sizeof b, "99+"); else snprintf(b, sizeof b, "%u", (unsigned)n);
+    lv_obj_t *bd = lv_label_create(cell);
+    lv_obj_add_flag(bd, LV_OBJ_FLAG_FLOATING);
+    lv_obj_clear_flag(bd, LV_OBJ_FLAG_CLICKABLE);
+    lv_label_set_text(bd, b);
+    lv_obj_set_style_text_font(bd, &lv_font_palm_bold, 0);
+    lv_obj_set_style_text_color(bd, COL_BODY, 0);
+    lv_obj_set_style_bg_color(bd, COL_LINE, 0);
+    lv_obj_set_style_bg_opa(bd, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_hor(bd, 3, 0);
+    lv_obj_set_style_radius(bd, 7, 0);
+    lv_obj_set_pos(bd, 38, -2);
+}
+
 static void show_launcher(void){
     kill_kb();
     cur_app = NULL;
@@ -3351,7 +3375,11 @@ static void show_launcher(void){
     lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
 
     for(int i=0;i<NAPPS;i++){
-        if(APPS[i]){ icon_cell(grid, APP_ICONS[i], APPS[i], app_cb, (void *)APPS[i]); continue; }
+        if(APPS[i]){
+            lv_obj_t *cell = icon_cell(grid, APP_ICONS[i], APPS[i], app_cb, (void *)APPS[i]);
+            if(APP_ICONS[i] == &icon_study) st_badge(cell, st_glance_due());
+            continue;
+        }
         lv_obj_t *gap = lv_obj_create(grid);           /* a free slot, held open */
         lv_obj_set_size(gap, 68, 52);
         lv_obj_set_style_bg_opa(gap, LV_OPA_TRANSP, 0);
@@ -6851,22 +6879,27 @@ static void clock_tick(lv_timer_t *t){
 #define DASH_MARGIN     8                /* zone inset from both edges       */
 
 #define DASH_Y_WX       106              /* CONDITIONS header                */
-#define DASH_H_WX       112              /*   ...closing rule at 218         */
-#define DASH_Y_AGENDA   222              /* AHEAD header                     */
-#define DASH_H_AGENDA   44               /*   ...closing rule at 266         */
+#define DASH_H_WX       98               /*   ...closing rule at 204         */
+#define DASH_Y_AGENDA   208              /* AHEAD header                     */
+#define DASH_H_AGENDA   58               /*   ...closing rule at 266         */
+#define DASH_Y_ROW1     224              /* AHEAD's rows: NEXT, DUE, STUDY   */
+#define DASH_ROW_H      14
+#define DASH_ROW_VX     (DASH_MARGIN+50) /* their values' column             */
 #define DASH_Y_SUN      268              /* SUN & MOON header, open-bottomed */
 #define DASH_H_SUN      36
 
-/* content baselines inside the weather zone */
-#define DASH_Y_WXNOW    122
-#define DASH_Y_AIR      136
-#define DASH_Y_COLT     148              /* the six temperatures             */
-#define DASH_Y_BARBASE  188              /* rain bars grow UP to this line   */
-#define DASH_Y_COLH     192              /* hour                             */
-#define DASH_Y_COLR     204              /* rain % -- ends at 216, and the   */
-                                         /* zone's rule is at 218, so it     */
-                                         /* clears. Shrinking the bars was   */
-                                         /* the price of that clearance.     */
+/* content baselines inside the weather zone. S5 (2026-09-30) took 14 px
+ * from it for AHEAD's STUDY row: the air quality moved up beside the
+ * reading (and shortens, or goes, when the reading is long), and the rain
+ * bars top out at 20 px instead of 24. */
+#define DASH_Y_WXNOW    122              /* the reading; the air at the right */
+#define DASH_Y_COLT     136              /* the six temperatures             */
+#define DASH_Y_BARBASE  173              /* rain bars grow UP to this line   */
+#define DASH_BAR_MAX    20
+#define DASH_Y_COLH     175              /* hour                             */
+#define DASH_Y_COLR     188              /* rain % -- ends at 203, and the   */
+                                         /* zone's rule is at 204, so it     */
+                                         /* clears.                          */
 static lv_obj_t *g_lock;                 /* the overlay root, or NULL when unlocked */
 
 /* see ui.h: which screen is up, for the pool monitor (lvgl_port.c) */
@@ -6886,6 +6919,9 @@ static int       g_wxloaded;              /* 1 if a snapshot exists at all (fres
  * text baked in when the lock went up. Built once with their positions; the words
  * arrive on the first paint and change on every subsequent one. */
 static lv_obj_t *g_wx_now_lbl;                          /* "81 deg  Partly cloudy" */
+static lv_obj_t *g_wx_air_lbl;                          /* "Air 41 . Good", beside it */
+static lv_obj_t *g_dash_study;                          /* AHEAD's STUDY row value */
+static uint32_t  g_dash_study_at;                       /* when its count next goes up */
 static lv_obj_t *g_wx_col_t[WX_STRIP];                  /* per-column temperature */
 static lv_obj_t *g_wx_col_h[WX_STRIP];                  /* per-column hour         */
 static lv_obj_t *g_wx_col_r[WX_STRIP];                  /* per-column rain %       */
@@ -7195,7 +7231,7 @@ static void lock_pressing_cb(lv_event_t *e){ (void)e;
 static void lock_release_cb(lv_event_t *e){ (void)e;
     if(g_lock_py - g_lock_ly > 40){                 /* dragged up -> unlock */
         if(g_lock){ lv_obj_del(g_lock); g_lock=NULL; g_dash_cv=NULL; g_dash_db=NULL; g_dash_time_ap=NULL;
-                    g_dash_stat=NULL; g_wx_now_lbl=NULL;
+                    g_dash_stat=NULL; g_wx_now_lbl=NULL; g_wx_air_lbl=NULL; g_dash_study=NULL;
                     for(int i=0;i<WX_STRIP;i++){ g_wx_col_t[i]=g_wx_col_h[i]=g_wx_col_r[i]=NULL; } }
         /* Every speaker owes a greeting again. This is the one place the lock goes
          * up, so it is the one place that defines an "unlock session" -- see the
@@ -7226,6 +7262,14 @@ static void dash_status_text(char *b, size_t n){
 }
 
 /* paint the canvas graphics + (re)set the time labels from the current clock. */
+/* a line's width in `font` (lv_text_get_width is private in LVGL 9.5; this
+ * call is public in both 9.2 and 9.5) */
+static int dash_text_w(const char *t, const lv_font_t *font){
+    lv_point_t sz;
+    lv_text_get_size(&sz, t, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    return sz.x;
+}
+
 static void dash_paint(void){
     if(!g_lock || !g_dash_cv) return;
 
@@ -7246,6 +7290,11 @@ static void dash_paint(void){
     }
     if(g_dash_stat){ char sb[48]; dash_status_text(sb,sizeof sb);
                      lv_label_set_text(g_dash_stat, sb); }
+    if(g_dash_study && g_dash_study_at && st_now() >= g_dash_study_at){
+        char sb[48];                               /* a review came due: count again */
+        st_glance_text(sb, sizeof sb, &g_dash_study_at);
+        lv_label_set_text(g_dash_study, sb);
+    }
 
     /* ---- the furniture: a reversed strip at the top, then one declared zone
      * per kind of data. The bars and their labels are static, so they are built
@@ -7301,6 +7350,16 @@ static void dash_paint(void){
             char wl[48];
             snprintf(wl,sizeof wl,"%d\xC2\xB0  %s", tf, dash_wcode_desc(cd));
             lv_label_set_text(g_wx_now_lbl, wl);
+            /* the air shares the line: whole if it fits, then just the
+             * number, then not at all -- the reading comes first */
+            if(g_wx_air_lbl){
+                int room = DASH_CW - 2*(DASH_MARGIN+4) - 8 - dash_text_w(wl, &lv_font_palm_bold);
+                char al[32];
+                snprintf(al,sizeof al,"Air %d \xC2\xB7 %s",g_wx.aqi,aqi_word(g_wx.aqi));
+                if(dash_text_w(al, &lv_font_palm) > room) snprintf(al,sizeof al,"Air %d",g_wx.aqi);
+                if(dash_text_w(al, &lv_font_palm) > room) al[0] = 0;
+                lv_label_set_text(g_wx_air_lbl, al);
+            }
         }
         int base = dash_wx_index_at(&g_wx, now);
         if(base < 0) base = 0;
@@ -7325,7 +7384,7 @@ static void dash_paint(void){
              * baseline across six columns is what lets them be compared at a
              * glance -- it is the one line on this screen that is doing real
              * work rather than decoration. */
-            int bh = g_wx.hr[k].rain*24/100;
+            int bh = g_wx.hr[k].rain*DASH_BAR_MAX/100;
             dfill(cx-7,DASH_Y_BARBASE-bh,15,bh?bh:1);
             drule(cx-8,cx+8,DASH_Y_BARBASE+1);
         }
@@ -7455,12 +7514,12 @@ void ui_show_lock(void){
 
     /* ---- weather ---- */
     if(havewx){
-        char wl[48];
-        /* AQI is a single daily figure, not an hourly series -- it is the one
-         * reading here that does NOT step, so it is written once. */
         g_wx_now_lbl = dash_lbl(DASH_MARGIN+4,DASH_Y_WXNOW,"",1);
-        if(wx.aqi>=0){ snprintf(wl,sizeof wl,"Air %d \xC2\xB7 %s",wx.aqi,aqi_word(wx.aqi));
-                       dash_lbl(DASH_MARGIN+4,DASH_Y_AIR,wl,0); }
+        /* AQI is a single daily figure, not an hourly series. It sits at the
+         * right of the reading's line, and dash_paint() sizes it to what the
+         * reading (which does step) leaves it. */
+        if(wx.aqi>=0){ g_wx_air_lbl = dash_lbl(0,DASH_Y_WXNOW,"",0);
+                       lv_obj_align(g_wx_air_lbl,LV_ALIGN_TOP_RIGHT,-(DASH_MARGIN+4),DASH_Y_WXNOW); }
         /* 6-hour strip: temp (top), rain bar (canvas), hour + rain% (bottom).
          * Positions only -- which SIX of the cached twenty-four these are is a
          * question about the current time, so dash_paint() answers it. */
@@ -7478,9 +7537,9 @@ void ui_show_lock(void){
         char wl[48];
         snprintf(wl,sizeof wl,"Weather is %s old", dash_age_span(&wx));
         lv_obj_t *o = dash_lbl(0,0,wl,1);
-        lv_obj_align(o,LV_ALIGN_TOP_MID,0,150);
+        lv_obj_align(o,LV_ALIGN_TOP_MID,0,140);
         o = dash_lbl(0,0,"hidden until the next HotSync",0);
-        lv_obj_align(o,LV_ALIGN_TOP_MID,0,170);
+        lv_obj_align(o,LV_ALIGN_TOP_MID,0,160);
     } else {
         dash_lbl(DASH_MARGIN+4,DASH_Y_WXNOW,"Weather syncs on HotSync",0);
     }
@@ -7490,12 +7549,18 @@ void ui_show_lock(void){
       /* the two rows share a label column so the values line up under each
        * other; the zone header already says what the block is, so the row
        * labels shrink to their job of distinguishing the two. */
-      dash_lbl(DASH_MARGIN+4,238,"NEXT",1);
-      dash_lbl(DASH_MARGIN+4,252,"DUE",1);
-      if(dash_next_event(e,sizeof e)) dash_lbl(DASH_MARGIN+44,238,e,0);
-      else                            dash_lbl(DASH_MARGIN+44,238,"nothing upcoming",0);
-      if(dash_next_due(e,sizeof e))   dash_lbl(DASH_MARGIN+44,252,e,0);
-      else                            dash_lbl(DASH_MARGIN+44,252,"nothing due",0); }
+      const int y1 = DASH_Y_ROW1, y2 = y1 + DASH_ROW_H, y3 = y2 + DASH_ROW_H;
+      dash_lbl(DASH_MARGIN+4,y1,"NEXT",1);
+      dash_lbl(DASH_MARGIN+4,y2,"DUE",1);
+      dash_lbl(DASH_MARGIN+4,y3,"STUDY",1);
+      if(dash_next_event(e,sizeof e)) dash_lbl(DASH_ROW_VX,y1,e,0);
+      else                            dash_lbl(DASH_ROW_VX,y1,"nothing upcoming",0);
+      if(dash_next_due(e,sizeof e))   dash_lbl(DASH_ROW_VX,y2,e,0);
+      else                            dash_lbl(DASH_ROW_VX,y2,"nothing due",0);
+      /* S5: the reviews due in every course, from their summaries -- no course
+       * is opened. dash_paint() counts again when the next one comes due. */
+      st_glance_text(e, sizeof e, &g_dash_study_at);
+      g_dash_study = dash_lbl(DASH_ROW_VX,y3,e,0); }
 
     /* ---- sun + moon ---- */
     if(havewx && wx.sunrise_min>=0){
@@ -10887,6 +10952,7 @@ typedef struct {
     /* a round: a lesson's cards and quiz, or reviews */
     StSession round;
     uint8_t   round_on, reviewing, revealed, undo_ok, undo_had, undo_right;
+    uint8_t   sum_dirty;                      /* graded since summary.bin was written */
     uint16_t  lesson[20];
     int       nlesson, card;
     uint16_t  undo_item;
@@ -10916,6 +10982,53 @@ static uint32_t st_now(void){
 }
 static int32_t st_tz(void){ return (int32_t)ui_tz() * 60; }
 static int32_t st_today(void){ return cal_day_index(st_now(), ui_tz()); }
+
+/* ---- at a glance (S5) ----
+ * The lock screen and the launcher read every course's summary.bin (study.c),
+ * so they never open a course. Study writes a course's summary whenever its
+ * dashboard counts it, and when it closes with grades the summary hasn't
+ * counted (g_st->sum_dirty). */
+/* Recount the open course and write its summary, so the dashboard's count
+ * and the lock screen's come from one scan. Returns the week ahead (the
+ * caller frees it) or NULL; g_st->srs's counts are fresh either way. Not
+ * written while the clock is unset: its times would be meaningless. */
+static int st_clock_ok(void);
+static SrsSum *st_rescan(void){
+    uint32_t now = st_now();
+    SrsSum *u = st_clock_ok() ? malloc(sizeof *u) : NULL;
+    if(!u){ srs_scan(&g_st->srs, now); return NULL; }
+    if(srs_scan_sum(&g_st->srs, now, st_tz(), u)){ free(u); return NULL; }
+    if(!st_sum_write(ST_ROOT, g_st->id, u)) g_st->sum_dirty = 0;
+    return u;
+}
+
+static uint32_t st_glance_due(void){
+    StGlance g;
+    st_glance(ST_ROOT, st_now(), &g);
+    return g.due;
+}
+
+/* the lock's STUDY row: "42 reviews due", "caught up · next 9:40p" */
+static void st_glance_text(char *b, int cap, uint32_t *change){
+    uint32_t now = st_now();
+    StGlance g;
+    st_glance(ST_ROOT, now, &g);
+    *change = g.change;
+    if(!g.courses){ snprintf(b, cap, "no reviews yet"); return; }
+    if(g.due){ snprintf(b, cap, "%u review%s due", (unsigned)g.due, g.due == 1 ? "" : "s"); return; }
+    if(!g.next){ snprintf(b, cap, "caught up"); return; }
+    time_t tn = (time_t)g.next, t0 = (time_t)now;
+    struct tm a, z;
+    localtime_r(&tn, &a);
+    localtime_r(&t0, &z);
+    char hm[16];
+    fmt_hm(a.tm_hour, a.tm_min, hm, sizeof hm);
+    if(a.tm_year == z.tm_year && a.tm_yday == z.tm_yday)
+        snprintf(b, cap, "caught up \xC2\xB7 next %s", hm);
+    else if(g.next - now < 6 * 86400)
+        snprintf(b, cap, "caught up \xC2\xB7 next %s %s", DASH_DOW_S[a.tm_wday], hm);
+    else snprintf(b, cap, "caught up \xC2\xB7 next %s %d", CAL_MON[a.tm_mon + 1], a.tm_mday);
+}
 /* the same test the rest of the UI uses for "never set": a year before 2024 */
 static int st_clock_ok(void){
     time_t t = (time_t)st_now();
@@ -10929,8 +11042,11 @@ static void st_free_pics(void){
     for(int i = 0; i < g_st->npics; i++) free(g_st->pics[i]);
     g_st->npics = 0;
 }
+static SrsSum *st_rescan(void);
 static void st_close_course(void){
     if(!g_st) return;
+    /* the lock screen reads summary.bin: bring it up to date on the way out */
+    if(g_st->srs_ok && g_st->sum_dirty) free(st_rescan());
     if(g_st->round_on){ st_end(&g_st->round); g_st->round_on = 0; }
     if(g_st->srs_ok){ srs_close(&g_st->srs); g_st->srs_ok = 0; }
     if(g_st->course_ok){ course_close(&g_st->c); g_st->course_ok = 0; }
@@ -11301,7 +11417,7 @@ static void st_show_dash(void){
     if(!g_st || !g_st->course_ok || !g_st->srs_ok){ show_study(); return; }
     st_screen("Study");
     uint32_t now = st_now();
-    srs_scan(&g_st->srs, now);
+    free(st_rescan());
     uint16_t level = 0;
     int lessons = srs_lessons(&g_st->srs, NULL, 0, &level);
     Course *c = &g_st->c;
@@ -11387,6 +11503,39 @@ static void st_show_dash(void){
 
 static void st_week_back_cb(lv_event_t *e){ (void)e; st_show_dash(); }
 
+/* S5: the week AHEAD, under the week behind -- the same seven columns, but
+ * the bars outlined, since none of it has happened yet. Today's column is
+ * everything due by midnight, what's waiting now included. */
+#define ST_FC_Y    (WK_ROW_Y + 2)              /* its heading, clear of the chart's day letters */
+#define ST_FC_BASE (WK_ROW_Y + 60)             /* content y of its baseline */
+#define ST_FC_MAX  20
+static void st_forecast(lv_obj_t *page, const SrsSum *u){
+    static const char *DOW[7] = { "S", "M", "T", "W", "T", "F", "S" };
+    char b[40];
+    wk_lbl(page, 8, ST_FC_Y, 1, "Coming up");
+    snprintf(b, sizeof b, "%u in the next 24 h", (unsigned)(u->due + u->in24));
+    wk_lbl_r(page, ST_FC_Y, b);
+    int n[7], top = 1;
+    for(int i = 0; i < 7; i++){ n[i] = u->day[i] + (i ? 0 : (int)u->due); if(n[i] > top) top = n[i]; }
+    int32_t today = st_today();
+    for(int x = 4; x < LCD_W - 4; x++) wk_px(x, ST_FC_BASE);
+    for(int i = 0; i < 7; i++){
+        int cx = WK_COL0 + WK_PITCH / 2 + i * WK_PITCH;
+        int h = n[i] * ST_FC_MAX / top;
+        if(n[i] > 0 && h < 3) h = 3;
+        if(n[i] > 0){
+            wk_frame(cx - WK_BAR_W / 2, ST_FC_BASE - h, WK_BAR_W, h + 1);
+            snprintf(b, sizeof b, "%d", n[i]);
+            lv_obj_t *l = wk_lbl(page, 0, ST_FC_BASE - h - 15, 0, b);
+            lv_obj_update_layout(l);
+            lv_obj_set_x(l, cx - lv_obj_get_width(l) / 2);
+        }
+        lv_obj_t *dl = wk_lbl(page, 0, ST_FC_BASE + 2, i == 0, DOW[cal_weekday(today + i)]);
+        lv_obj_update_layout(dl);
+        lv_obj_set_x(dl, cx - lv_obj_get_width(dl) / 2);
+    }
+}
+
 static void st_week_advice(char *out, int cap, int adv, const StWeek *w, int due){
     int rv = 0, rt = 0;
     for(int i = 7; i < ST_WEEK_N; i++){ rv += w->reviews[i]; rt += w->right[i]; }
@@ -11407,8 +11556,7 @@ static void st_week_advice(char *out, int cap, int adv, const StWeek *w, int due
 static void st_show_week(void){
     if(!g_st || !g_st->course_ok || !g_st->srs_ok){ show_study(); return; }
     st_screen("This week");
-    uint32_t now = st_now();
-    srs_scan(&g_st->srs, now);
+    SrsSum *u = st_rescan();
     StWeek w;
     st_hist_week(ST_ROOT, g_st->id, st_today(), &w);
     /* the chart and the headline are reviews (the lessons are "new"), so
@@ -11435,21 +11583,12 @@ static void st_show_week(void){
     if(g_wk_cv){
         /* no target line: the day's reviews are whatever came due */
         wk_chart(page, d, 0, st_today());
-        /* where everything stands, by the course's own group names */
-        Course *c = &g_st->c;
-        int top = 0, y = WK_ROW_Y;
-        for(int i = 0; i < c->n_groups; i++) if(g_st->srs.group_count[i] > top) top = g_st->srs.group_count[i];
-        for(int i = 0; i < c->n_groups && y + WK_ROW_H <= PDA_H - TITLE_H; i++, y += WK_ROW_H)
-            wk_row(page, y, c->groups[i].name, g_st->srs.group_count[i], top);
-        if(y + 14 <= PDA_H - TITLE_H){
-            snprintf(b, sizeof b, "%u of %u items started", (unsigned)g_st->srs.started, (unsigned)c->n_items);
-            lv_obj_t *l = wk_lbl(page, 8, y + 2, 0, b);
-            lv_obj_set_style_text_color(l, COL_DIM, 0);
-        }
+        if(u) st_forecast(page, u);
     }
 
     char say[160];
     st_week_advice(say, sizeof say, st_advise(&w, g_st->srs.due_total), &w, g_st->srs.due_total);
+    free(u);
     tap_anywhere(page, st_week_back_cb);
     speaker_aside_ex(&study_face, say, "tap anywhere to go back", st_week_back_cb, 1);
 }
@@ -11521,6 +11660,7 @@ static void st_grade_cb(lv_event_t *e){
                     srs_grade(&g_st->c, &r, done.grade, now, st_tz());
                     if(srs_put(&g_st->srs, done.item, &r, now)) toast_show("Couldn't save to the card");
                     else st_hist_add(ST_ROOT, g_st->id, st_today(), 1, !done.wrong, 0);
+                    g_st->sum_dirty = 1;
                 }
                 g_st->total++;
                 if(!done.wrong) g_st->right++;
@@ -11528,6 +11668,7 @@ static void st_grade_cb(lv_event_t *e){
                 srs_start(&g_st->c, &r, it.id, now, st_tz());
                 if(srs_put(&g_st->srs, done.item, &r, now)) toast_show("Couldn't save to the card");
                 else st_hist_add(ST_ROOT, g_st->id, st_today(), 0, 0, 1);
+                g_st->sum_dirty = 1;
                 g_st->learned++;
             }
         }
@@ -11545,6 +11686,7 @@ static void st_undo_cb(lv_event_t *e){
         /* the item had been graded: its record goes back as it was */
         srs_put(&g_st->srs, item, &g_st->undo_rec, st_now());
         st_hist_add(ST_ROOT, g_st->id, st_today(), -1, -(int)g_st->undo_right, 0);
+        g_st->sum_dirty = 1;
         g_st->total--;
         if(g_st->undo_right) g_st->right--;
     }

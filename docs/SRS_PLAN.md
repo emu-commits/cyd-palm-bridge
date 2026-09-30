@@ -1,9 +1,9 @@
 # SRS plan — Study, a built-in spaced-repetition app
 
-> **Status: S0 to S3 done 2026-09-30, and S4 replanned the same day: no
-> typed answers (§11 decision 9). S4, the answer at 2× and the Week
-> screen, is done in the simulator too; S5 (due counts at a glance) is
-> next.** Study is on the
+> **Status: S0 to S5 done in the simulator, 2026-09-30.** S4 was replanned
+> the same day: no typed answers (§11 decision 9). S5 put the reviews due
+> on the lock screen and the launcher, and a forecast on the Week screen
+> (§11 decision 10). **S6, the bench, is next.** Study is on the
 > launcher and runs the demo end to end; the owner has it on the device. The format is
 > `COURSE_FORMAT.md` (awaiting the owner's review), the demo is
 > `courses/demo-kanji/`, `tools/mkcourse.py` builds courses and
@@ -107,10 +107,13 @@ shared with other people's devices. Keeping the SRS logic free of LVGL
   chart, this week against last, the streak, how many were right, where
   the items stand, and her advice.
 
-**Later (S5):**
-- **Due counts on the lock screen and launcher**, for example "42 reviews".
-- **A forecast:** how many reviews come due in the next 24 hours and on
-  each of the next seven days.
+**S5 (done 2026-09-30):**
+- **The reviews due, at a glance:** a STUDY row on the lock screen ("42
+  reviews due", or "caught up · next 9:40p") and a count on the launcher's
+  Study icon, totalled across every course. Reviews only: lessons aren't
+  counted.
+- **A forecast** on the Week screen: the next 24 hours, and each of the
+  next seven days.
 
 **Not planned:**
 - **typed answers** (§11 decision 9, 2026-09-30). Writing on a 2.8"
@@ -133,6 +136,7 @@ shared with other people's devices. Keeping the SRS logic free of LVGL
     progress.dat      one 16 B record per started item, sorted by item id
     progress.log      grades since the last fold, appended
     history.dat       one 12 B record per day studied: the Week screen (S4)
+    summary.bin       the next week's due times: the lock screen and launcher (S5)
   demo-kanji/         the demo course, written on first run (§9)
   last.txt            the course last opened
   .demo               marker: the demo has been installed once
@@ -388,8 +392,10 @@ scheduler (FSRS) can be added later as a third option.
 - For 9,000 items this reads about 216 KB, an estimated few hundred
   milliseconds. S6 measures it; if it's slow, the scan is split across
   timer ticks behind a "Loading" line.
-- On close the app writes a tiny `summary.bin` (the due count and next due
-  times). The lock screen and launcher read it in S5 without scanning.
+- The dashboard's scan also writes `summary.bin` (S5): the count due, and
+  the next week's due times to the minute. Study writes it again on close
+  if there were grades since. The lock screen and launcher read it without
+  opening the course, and the count rises by itself as times come due.
 
 ## 6) Text and other scripts
 
@@ -597,12 +603,22 @@ answers were dropped: §11 decision 9).
   - her advice from the strip, chosen in `study.c` (host-tested).
 - **Exit:** smoke shots of both, looked at; the history's tests in CI.
 
-**S5 — Glanceable.**
-- `summary.bin` per course, written when a round ends: the due count and
-  the next due time, so nothing has to open a course to show them.
-- Due counts on the lock screen and the launcher tile.
-- A forecast of reviews coming due: the next 24 hours, and each of the
-  next seven days (on the Week screen).
+**S5 — Glanceable** (done 2026-09-30, the layouts the owner chose from
+mock-ups: §11 decision 10).
+- `summary.bin` per course (`srs_scan_sum()`, `st_sum_write()`): the count
+  due, when the next is due, how many in the next 24 hours, the next seven
+  days by local day, and the 1,024 soonest due times to the minute. It's
+  written by the dashboard's scan, and on closing with grades since.
+- `st_glance()` totals every course's summary at the time asked.
+- **The lock screen:** AHEAD gets a third row, STUDY. The 14 px came from
+  the weather box: the air quality moved up beside the reading (and
+  shortens, then goes, if the reading is long), and the rain bars top out
+  at 20 px.
+- **The launcher:** a black count at the Study icon's shoulder, 99+ at
+  most, none at 0.
+- **The Week screen's lower half is the week ahead:** "Coming up", the
+  next 24 hours, and seven outlined bars under the week behind. It
+  replaced the stage groups there, which the dashboard shows anyway.
 
 **S6 — On the bench** `[d]`:
 - the demo, then a full course on the real card: open time, due scan,
@@ -641,3 +657,9 @@ answers were dropped: §11 decision 9).
    dropped, and `romaji.c` won't be written. The owner liked WaniKani's
    kana appearing as you type, but it doesn't suit this screen. S4 became
    the answer at twice the size and the Week screen.
+10. **Glanceable counts** (2026-09-30, chosen from simulator mock-ups): the
+    lock screen's AHEAD zone gets a STUDY row, made room for by moving the
+    air quality beside the weather reading ("air quality can be minimized
+    on the dashboard as necessary"); the launcher shows a count badge on
+    Study's icon; the count is the total across every course, and reviews
+    only.
