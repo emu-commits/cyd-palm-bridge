@@ -601,7 +601,9 @@ only.
    stable item id, through `ids.tsv`, and kept apart from the course.
 3. **Text the Palm fonts can draw (U+0020–U+00FF) is drawn directly.
    Everything else is a pre-rendered bitmap**, including all kanji. The
-   firmware ships no new fonts.
+   firmware ships no new fonts; the one addition (2026-09-30, from the
+   bench) is the Palm bold font pixel-doubled for answers, generated from
+   the existing one, the same glyphs at twice the size.
 4. **Two schedulers**, stage-based (WaniKani) and SM-2 (Anki), chosen and
    tuned by the course.
 5. **A demo kanji course of two levels ships with the firmware** and is the

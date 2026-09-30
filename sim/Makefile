@@ -44,7 +44,7 @@ CFLAGS := -O2 -g -Wall $(SIMDEF) $(INC)
 # the REAL firmware UI + data layer + portable modules, unchanged
 APP_SRCS := \
     $(FW)/ui.c $(FW)/data.c $(FW)/graffiti.c $(FW)/appcfg.c $(FW)/secretstore.c $(FW)/clock.c \
-    $(FW)/lv_font_palm.c $(FW)/lv_font_palm_bold.c $(FW)/lv_font_kana.c $(FW)/palm_icons.c \
+    $(FW)/lv_font_palm.c $(FW)/lv_font_palm_bold.c $(FW)/lv_font_palm_bold_2x.c $(FW)/lv_font_kana.c $(FW)/palm_icons.c \
     $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(BR)/dash.c $(FW)/minesweeper.c $(FW)/wordie.c $(FW)/sudoku.c $(FW)/zip.c $(FW)/coach.c $(FW)/guru.c $(FW)/guru_pool.c $(FW)/gurupool.c $(FW)/course.c $(FW)/srs.c $(FW)/study.c $(FW)/study_demo.c \
     $(BR)/pdb.c $(BR)/datebook.c $(BR)/address.c $(BR)/todo.c $(BR)/appinfo.c \
     $(BR)/ical.c $(BR)/vcard.c $(BR)/tz.c $(BR)/charset.c \
@@ -195,6 +195,7 @@ COURSE_FILES := ../courses/demo-kanji/course.srs ../tests/data/study/cards/cours
                 ../tests/data/study/remap-v2/course.srs
 course: build/course_test
 	python3 ../tools/gen_study_demo.py --check
+	python3 ../tools/gen_font_2x.py --check
 	./build/course_test
 	@for f in $(COURSE_FILES); do \
 	  ./build/course_test dump $$f > build/course_c.txt || exit 1; \

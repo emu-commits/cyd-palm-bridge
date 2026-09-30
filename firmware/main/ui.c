@@ -10966,6 +10966,21 @@ static lv_obj_t *st_label(lv_obj_t *par, const char *text, const lv_font_t *font
     return l;
 }
 
+/* A label's text in Palm bold at twice the size, if it fits in `lines` lines
+ * of the screen's width: 1 if it was made big. The pixel-doubled font is the
+ * same face, so a big answer reads as the rest of the UI. Otherwise the label
+ * is left as it was. */
+static int st_big(lv_obj_t *l, int lines){
+    lv_point_t sz;
+    lv_text_get_size(&sz, lv_label_get_text(l), &lv_font_palm_bold_2x, 0, 0, LCD_W - 12, LV_TEXT_FLAG_NONE);
+    if(sz.y > lines * lv_font_palm_bold_2x.line_height) return 0;
+    lv_obj_set_style_text_font(l, &lv_font_palm_bold_2x, 0);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(l, LCD_W - 12);
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+    return 1;
+}
+
 static lv_obj_t *st_btn(lv_obj_t *par, int x, int y, int w, int h, const char *text,
                         lv_event_cb_t cb, intptr_t ud, int bold){
     lv_obj_t *b = lv_button_create(par);
@@ -11073,12 +11088,14 @@ static void st_cap_kind(char *out, int cap, int kind){
     if(out[0] >= 'a' && out[0] <= 'z') out[0] = (char)(out[0] - 32);
 }
 
-/* the prompt: the item's TERM, big */
+/* the prompt: the item's TERM, big (a word at twice the size, two lines of it
+ * at most: both boxes it's drawn in are 70 px and more) */
 static void st_term(lv_obj_t *par, int max_h){
     CourseField f;
     if(!st_find(CF_TERM, 0, &f)) return;
     lv_obj_t *o = st_field(par, &f, &lv_font_palm_bold, max_h);
-    if(o && !(f.attr & (CF_A_PICTURE | CF_A_KANA))) lv_obj_set_style_text_align(o, LV_TEXT_ALIGN_CENTER, 0);
+    if(o && !(f.attr & (CF_A_PICTURE | CF_A_KANA)) && !st_big(o, 2))
+        lv_obj_set_style_text_align(o, LV_TEXT_ALIGN_CENTER, 0);
 }
 
 /* "Built from: sun + moon": the linked items' own meanings. Reads each target
@@ -11501,7 +11518,9 @@ static void st_show_ask(void){
         st_btn(content, 20, by, LCD_W - 40, 30, "Show answer", st_reveal_cb, 0, 1);
         return;
     }
-    /* the answer: the primary meaning or reading, big; the other meanings small */
+    /* the answer: the primary meaning or reading, big; the other meanings small.
+     * The area is 50 px: one line at twice the size and one of "also", or the
+     * answer at 1x (wrapped) when it's too long to be big. */
     lv_obj_t *ans = lv_obj_create(content);
     lv_obj_set_pos(ans, 0, 22 + ST_ASK_PROMPT_H);
     lv_obj_set_size(ans, LCD_W, by - (22 + ST_ASK_PROMPT_H) - 2);
@@ -11512,17 +11531,18 @@ static void st_show_ask(void){
     lv_obj_set_flex_align(ans, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(ans, LV_OBJ_FLAG_SCROLLABLE);
     CourseField f;
+    int big = 0;
     if(reading){
         if(st_find(CF_READING, CF_A_PRIMARY, &f) || st_find(CF_READING, 0, &f)){
             lv_obj_t *o = st_field(ans, &f, &lv_font_palm_bold, 44);
-            if(o && lv_obj_check_type(o, &lv_label_class)) lv_obj_set_width(o, LV_SIZE_CONTENT);
+            if(o && lv_obj_check_type(o, &lv_label_class) && ((f.attr & CF_A_KANA) || !st_big(o, 1)))
+                lv_obj_set_width(o, LV_SIZE_CONTENT);
         }
     } else {
         if(st_find(CF_MEANING, CF_A_PRIMARY, &f) || st_find(CF_MEANING, 0, &f)){
             lv_obj_t *o = st_field(ans, &f, &lv_font_palm_bold, 44);
-            if(o && lv_obj_check_type(o, &lv_label_class)){
+            if(o && lv_obj_check_type(o, &lv_label_class) && !(big = st_big(o, 1)))
                 lv_obj_set_width(o, LV_SIZE_CONTENT);
-            }
         }
         char also[160];
         int ak = 0;
@@ -11537,6 +11557,10 @@ static void st_show_ask(void){
         if(ak){
             lv_obj_t *a = st_label(ans, also, NULL, LCD_W - 16);
             lv_obj_set_style_text_align(a, LV_TEXT_ALIGN_CENTER, 0);
+            if(big){                              /* one line left under it; the rest is on the Card */
+                lv_label_set_long_mode(a, LV_LABEL_LONG_DOT);
+                lv_obj_set_height(a, lv_font_get_line_height(lv_obj_get_style_text_font(a, 0)));
+            }
         }
     }
     st_btn(ban, LCD_W - 46, 1, 44, 18, "Card", st_card_over_cb, 0, 0);
