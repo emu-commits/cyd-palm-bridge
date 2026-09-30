@@ -1,0 +1,38 @@
+{
+  "format": 1,
+  "id": "demo-kanji",
+  "title": "Kanji demo",
+  "version": "1.0",
+  "author": "The CYD Palm project",
+  "licence": "CC0-1.0",
+  "language": "ja",
+  "description": "Two WaniKani-style levels: radicals, then the kanji built from them, then words that use the kanji.",
+  "source": "Written for this project. Readings and meanings checked against KANJIDIC2 and JMdict; radical names, mnemonics and sentences are its own.",
+  "kinds": [
+    {"name": "radical", "quiz": ["meaning"]},
+    {"name": "kanji", "quiz": ["meaning", "reading"], "level_up": true},
+    {"name": "word", "quiz": ["meaning", "reading"]}
+  ],
+  "scheduler": {
+    "type": "stages",
+    "intervals": ["4h", "8h", "1d", "2d", "7d", "14d", "30d", "120d", null],
+    "groups": [
+      {"from": 1, "name": "Learning"},
+      {"from": 5, "name": "Known"},
+      {"from": 7, "name": "Strong"},
+      {"from": 8, "name": "Deep"},
+      {"from": 9, "name": "Retired"}
+    ],
+    "drop": 1,
+    "drop_high": 2,
+    "high_from": 5,
+    "known": 5
+  },
+  "grading": "two",
+  "lessons": {"batch": 5},
+  "unlock": {"level_percent": 90, "by_links": true},
+  "levels": [
+    {"level": 1, "title": "First strokes", "theme": "Numbers, people and nature"},
+    {"level": 2, "title": "Trees into forests", "theme": "Up, down, inside, and more trees"}
+  ]
+}

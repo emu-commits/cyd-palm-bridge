@@ -1,0 +1,32 @@
+{
+  "format": 1,
+  "id": "test-features",
+  "title": "Every feature (test deck)",
+  "version": "0.1",
+  "author": "The CYD Palm project",
+  "licence": "CC0-1.0",
+  "language": "es",
+  "description": "Test-only: every field, link, role and text rule of the format, in a few items.",
+  "source": "Written for the tests.",
+  "kinds": [
+    {"name": "root", "quiz": ["meaning"], "level_up": true},
+    {"name": "word", "quiz": ["meaning", "reading"]},
+    {"name": "kana", "quiz": ["reading"]}
+  ],
+  "roles": ["stem", "suffix"],
+  "scheduler": {
+    "type": "stages",
+    "intervals": ["10m", "4h", "1d", "1w", null],
+    "groups": [{"from": 1, "name": "New"}, {"from": 3, "name": "Known"}, {"from": 5, "name": "Done"}],
+    "drop": 1, "drop_high": 2, "high_from": 3, "known": 3
+  },
+  "grading": "four",
+  "lessons": {"batch": 3},
+  "unlock": {"level_percent": 80, "by_links": true},
+  "render": {"strip": ["etymology"]},
+  "levels": [
+    {"level": 1, "title": "comer 1/2", "theme": "comer", "gloss": "to eat", "part": 1, "parts": 2},
+    {"level": 2, "title": "comer 2/2", "theme": "comer", "gloss": "to eat", "part": 2, "parts": 2},
+    {"level": 7, "title": "日本語", "gloss": "a level whose title is a picture"}
+  ]
+}
