@@ -1,6 +1,7 @@
 # SRS plan — Study, a built-in spaced-repetition app
 
-> **Status: S0 and S1 done 2026-09-30; S2 is next.** The format is
+> **Status: S0, S1 and S2 done 2026-09-30; S3 is next.** `firmware/main/srs.c`
+> holds the schedulers and progress. The format is
 > `COURSE_FORMAT.md` (awaiting the owner's review), the demo is
 > `courses/demo-kanji/`, `tools/mkcourse.py` builds courses and
 > `firmware/main/course.c` reads them. Approved 2026-09-29; the name, launcher
@@ -320,7 +321,7 @@ data is copied into this repo or used in tests. Measured 2026-09-29:
 | 4 | Item id |
 | 4 | Next due time (UNIX seconds, `uint32`) |
 | 2 | Current interval in hours (saturates at about 7 years) |
-| 1 | Ease, stored as (ease − 1.30) × 100, so 1.30–3.85 (SM-2 only) |
+| 1 | Ease, stored as (ease − 1.30) / 0.05, so 1.30–14.05 (SM-2 only; changed in S2: the web app lets ease grow past 3.85) |
 | 1 | Stage (stage scheduler) or step on the ladder (SM-2) |
 | 1 | Flags (lesson done, burned, suspended) |
 | 1 | Lapses (saturating) |

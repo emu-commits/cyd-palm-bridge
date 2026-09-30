@@ -444,11 +444,11 @@ def load_source(folder):
         secs = [duration(v, Ws + " intervals") for v in iv[:-1]] + [0]
         c.meta_nums.append((K_SCHED, [1]))
         c.meta_nums.append((K_STAGES, secs))
-        drops = [s.get("drop", 1), s.get("drop_high", 2), s.get("high_from", 5)]
+        drops = [s.get("drop", 1), s.get("drop_high", 2), s.get("high_from", min(5, len(secs)))]
         if any(not isinstance(x, int) or x < 0 for x in drops) or not 1 <= drops[2] <= len(secs):
             fail("%s: bad drop, drop_high or high_from" % Ws)
         c.meta_nums.append((K_DROPS, drops))
-        known = s.get("known", 5)
+        known = s.get("known", min(5, len(secs)))
         if not isinstance(known, int) or not 1 <= known <= len(secs):
             fail("%s: \"known\" must be a stage, 1-%d" % (Ws, len(secs)))
         for i, g in enumerate(s.get("groups", [])):
@@ -474,13 +474,17 @@ def load_source(folder):
         e = need(s, "ease", Ws, dict)
         check_keys(e, {"start", "min"}, Ws + " ease")
         es = [hundredths(need(e, g, Ws + " ease"), Ws + " ease " + g) for g in ("start", "min")]
-        if not 130 <= es[1] <= es[0] <= 385:
-            fail("%s: ease must be 1.30-3.85 with min <= start" % Ws)
+        if not 130 <= es[1] <= es[0] <= 1405:
+            fail("%s: ease must be 1.30-14.05 with min <= start" % Ws)
+        if any(x % 5 for x in es):
+            fail("%s: eases go in steps of 0.05" % Ws)
         c.meta_nums.append((K_EASE, es))
         ec = s.get("ease_change", {"again": -0.2, "hard": -0.15, "good": 0, "easy": 0.15})
         check_keys(ec, {"again", "hard", "good", "easy"}, Ws + " ease_change")
-        c.meta_nums.append((K_EASE_CHANGE, [hundredths(ec.get(g, 0), Ws + " ease_change " + g, True)
-                                            for g in ("again", "hard", "good", "easy")]))
+        ecs = [hundredths(ec.get(g, 0), Ws + " ease_change " + g, True) for g in ("again", "hard", "good", "easy")]
+        if any(x % 5 or abs(x) > 1000 for x in ecs):
+            fail("%s: ease changes go in steps of 0.05, up to 10" % Ws)
+        c.meta_nums.append((K_EASE_CHANGE, ecs))
         c.meta_nums.append((K_RELEARN, [duration(s.get("relearn", "10m"), Ws + " relearn")]))
         c.meta_nums.append((K_DAY_ALIGNED, [1 if s.get("day_aligned") else 0]))
         known = s.get("known", 1)

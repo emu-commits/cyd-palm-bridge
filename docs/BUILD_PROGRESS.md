@@ -16,6 +16,94 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-30 — Study S2: the schedulers and progress on the card
+
+`firmware/main/srs.c` holds both schedulers and the progress files. It is
+pure C and stdio, beside `course.c`, and the time is passed in. Nothing is
+on screen yet (S3).
+
+**The schedulers.**
+- **`stages` (WaniKani-style).** Right moves an item up a stage; wrong moves
+  it down `drop` stages, or `drop_high` from `high_from` up, never below 1.
+  The last stage retires it. The gate walks the demo from lesson to
+  retirement: nine right answers, the last exactly 4,190 hours after the
+  lesson. It also checks every drop rule.
+- **`sm2` (Anki-style, as the Albanian web app does it)**, in integer
+  arithmetic, seconds and hundredths.
+  - **Checked against the web app's own `srs.js`** under node: five items
+    with fixed grade patterns, reviewed at 09:00 and 09:30 every day for a
+    year, in UTC and in UTC+2. That's 551 reviews each, and they are
+    **identical, review for review**, once the web app's ease is rounded
+    to hundredths after each review.
+  - That one difference is on purpose. The web app's ease is a float that
+    drifts (1.35 + 0.15 = 1.4999999999999998), so 13 days × 1.5 becomes 19
+    there and 20 here. Unaltered, the traces first part at one item's 22nd
+    review.
+  - The oracle and the Albanian code stayed outside the repo. The gate pins
+    the traces' CRC-32s.
+- **Ease now goes in steps of 0.05** (1.30–14.05 in one byte). The first
+  design stored hundredths above 1.30, capping ease at 3.85. The oracle
+  showed the web app passing that within months on a streak of Easy
+  answers. Courses must now give eases in steps of 0.05; Anki's and the web
+  app's all are. The builder and the reader both enforce it
+  (`COURSE_FORMAT.md` §2.2).
+
+**Progress on the card**, in the course's folder:
+- `progress.dat`: a 20-byte header (the records' CRC-32 and the course's
+  fingerprint), then 16-byte records sorted by id, replaced whole through
+  `safefile.h`.
+- `progress.log`: 20-byte entries (a record and its CRC-32), appended and
+  fsync'd on every grade.
+- **Opening folds the log in and empties it.** Log entries are merged 256 at
+  a time (5 KB), so a long log never needs more memory.
+- **If the course's fingerprint changed, progress is remapped:** a walk of
+  `progress.dat` beside IDX, both sorted by id. Removed items drop out, new
+  ones start unlearned, and the rest keep their records, clamped to the new
+  scheduler.
+- **The scan fills** a 2-bit state per item, the due list (up to 500), the
+  count per stage group, and the next due time.
+- **`srs_lessons`** returns what can be learned now:
+  - an item waits for its `built_from` parts (with `by_links`) and its
+    `unlock_after` items to be known;
+  - a level opens once the one before has its `level_percent` of level-up
+    items known, rounded up.
+
+**The gate, `make -C sim srs`** (ASan and UBSan, 0.3 s; `smoke32` runs it
+32-bit):
+- **The log cut at every byte** (0–240): the fold keeps every whole entry
+  before the cut and loses at most the one it cuts.
+  - **A bug it caught:** a log shorter than one entry was never emptied, so
+    every later entry would have been appended out of step. Now any bytes
+    at all mean a fold.
+- **Folding the same log twice** (a crash between the swap and the truncate)
+  gives the same bytes, and a lone `.tmp` from safefile's gap is promoted.
+- **A damaged `progress.dat`**, one flipped byte at a time, is refused and
+  left exactly as it was. The one field outside its CRC, the fingerprint,
+  only causes a harmless remap.
+- **Remapping from `remap-v1` to `remap-v2`** (new test decks: c removed, g
+  added, the order changed, a stage added), both after a fold and straight
+  from an unfolded log.
+- **The demo's unlocks:**
+  - first, only the 8 level-1 radicals;
+  - after one right answer each, all 12 kanji;
+  - words once their kanji are known (大人 yes, 日本 not while 本 isn't);
+  - level 2 shut at 10 of 12 kanji and open at 11;
+  - then 明, 林 and 森 at once (built from level-1 radicals), while 休 and
+    上 wait for 亻 and 卜.
+  - In the features deck, `unlock_after` holds comedor back.
+- **Counts across puts, rescans and an undo** (the old record put back),
+  which survives a fold.
+
+**Also fixed in the builder:** a course with fewer than 5 stages that left
+out `high_from` or `known` was refused, because their defaults of 5 weren't
+clamped. They now are, as in the reader.
+
+**Numbers:**
+- `Srs` is 436 B, `Course` 1,420 B and a record 16 B (a 32-bit build).
+- While a course is open: 2 bits per item and a 1 KB due list; plus 5 KB
+  while folding, and 4.6 KB while `srs_lessons` reads links.
+- The firmware image is unchanged, because nothing calls `srs.c` until S3.
+
 ### 2026-09-30 — a faster demo, Albanian confirmed, and the builder's text rules
 
 **The demo is faster** (asked for by the owner). A 2-hour stage now comes

@@ -273,15 +273,16 @@ static int parse_meta(Course *c, const uint8_t *m, uint32_t len){
             break;
         case K_EASE:
             if(nums(c, k, n, 2, 2)) return COURSE_EBAD;
-            c->ease[0] = (uint16_t)(le32(v) > 385 ? 0 : le32(v));
-            c->ease[1] = (uint16_t)(le32(v + 4) > 385 ? 0 : le32(v + 4));
-            if(c->ease[1] < 130 || c->ease[0] < c->ease[1]) return bad(c, "ease out of range");
+            c->ease[0] = (uint16_t)(le32(v) > 1405 ? 0 : le32(v));
+            c->ease[1] = (uint16_t)(le32(v + 4) > 1405 ? 0 : le32(v + 4));
+            if(c->ease[1] < 130 || c->ease[0] < c->ease[1] || c->ease[0] % 5 || c->ease[1] % 5)
+                return bad(c, "ease out of range");
             break;
         case K_EASE_CHANGE:
             if(nums(c, k, n, 4, 4)) return COURSE_EBAD;
             for(int i = 0; i < 4; i++){
                 int32_t d = (int32_t)le32(v + 4 * i);
-                if(d < -385 || d > 385) return bad(c, "an ease change out of range");
+                if(d < -1000 || d > 1000 || d % 5) return bad(c, "an ease change out of range");
                 c->ease_change[i] = (int16_t)d;
             }
             have_ec = 1;

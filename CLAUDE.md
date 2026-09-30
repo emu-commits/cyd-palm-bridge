@@ -27,7 +27,7 @@ before touching anything.
   - `make test` and `make ftest` (host);
   - `sudo mkdir -p /sdcard && sudo chmod 777 /sdcard`, then `make -C sim`
     with the targets `poolparity nosecrets secretscan data graf mines wordie
-    sudoku zip clock coach guru gurupool dash course smoke smoke32`;
+    sudoku zip clock coach guru gurupool dash course srs smoke smoke32`;
   - `python3 tests/mkcourse_test.py` (the course builder; needs the Pillow
     in `tools/requirements-course.txt`, and downloads the pinned font);
   - the firmware build in the `espressif/idf:release-v5.5` container
@@ -65,7 +65,7 @@ before touching anything.
   the working branch isn't touched. The container is wiped between sessions:
   anything not committed and pushed is lost, including earlier spike code.
 
-## Current work: the SRS app, S2 next (approved 2026-09-29)
+## Current work: the SRS app, S3 next (approved 2026-09-29)
 
 **The app platform is on hold** (`APP_PLATFORM_PLAN.md`, status block and
 §11 decision 7). The user's main goal is one first-class SRS app
@@ -141,11 +141,18 @@ and S1**, which the owner asked for together:
   `ids.tsv` rules, refusals).
 - **The owner's review of the format and the demo is still open.** Wait for
   it before anything that would make the format expensive to change (S3
-  shipping the demo in the firmware). S2 doesn't depend on it much.
+  shipping the demo in the firmware).
+- Then, the same day, the owner asked for a faster demo (a 2-hour first
+  stage, `known: 2`), a check that Albanian's letters draw (they do: see
+  `BUILD_PROGRESS.md`), and **S2**:
+  - `firmware/main/srs.c` holds both schedulers and the progress files;
+  - the `srs` gate runs a year per scheduler, and sm2 matches the Albanian
+    web app review for review, bar its float drift;
+  - it also cuts the log at every byte and checks remapping and unlocks.
 
-1. **S2 onward** as `SRS_PLAN.md` §10 describes, keeping to its §7 budgets:
-   - pure-C `srs.c` in `firmware/main/`, beside `course.c`, with no LVGL and
-     the time passed in, tested the way `wordie.c` and `coach.c` are;
+1. **S3 onward** as `SRS_PLAN.md` §10 describes, keeping to its §7 budgets:
+   - the screens use `course.c` and `srs.c` as they are; logic belongs
+     there, not in `ui.c`;
    - new host gates added to `ci.yml` and to the gate list above;
    - screens checked by smoke screenshots before any `[s]`;
    - Study's tile goes in the empty launcher slot (`APPS[6]` is `NULL`).

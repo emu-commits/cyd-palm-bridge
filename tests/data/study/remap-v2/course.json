@@ -1,0 +1,32 @@
+{
+  "format": 1,
+  "id": "test-remap",
+  "title": "Remap (test deck)",
+  "licence": "CC0-1.0",
+  "description": "Test-only: version 2 of remap-v1: c removed, g added, the order changed, one stage added.",
+  "kinds": [
+    {
+      "name": "card",
+      "quiz": [
+        "meaning"
+      ]
+    }
+  ],
+  "scheduler": {
+    "type": "stages",
+    "intervals": [
+      "1h",
+      "1d",
+      "1w",
+      "30d",
+      null
+    ],
+    "known": 2
+  },
+  "levels": [
+    {
+      "level": 1,
+      "title": "All"
+    }
+  ]
+}

@@ -184,9 +184,18 @@ app uses (Appendix A):
 - `known`: the rung (1 = the first) from which an item counts as known.
 - `groups` go by interval here, not by stage.
 
-Multipliers and eases are stored in hundredths (§3.2), so a value with
-more than two decimals is refused. S2 implements both schedulers; this
-section defines only what a course can set.
+Multipliers are stored in hundredths (§3.2), so a value with more than two
+decimals is refused. **Eases and ease changes go in steps of 0.05** (ease
+1.30 to 14.05), because progress keeps an item's ease in one byte. Anki's
+values and the web app's are all multiples of 0.05. Left out, `drop` is 1,
+`drop_high` 2, and `high_from` and `known` are 5, or the last stage in a
+course with fewer.
+
+`firmware/main/srs.c` implements both, in integer arithmetic. It matches the
+web app's scheduler review for review over a simulated year (the `srs`
+gate). The one difference is that the web app's ease is a JavaScript float
+that drifts (1.35 + 0.15 is 1.4999999999999998 there), so an interval that
+lands exactly on half a day can round down there and up here.
 
 ### 2.3 Levels
 
@@ -356,8 +365,8 @@ doesn't know.
 | `0x0031` | u32 × 3: drop, drop_high, high_from | stages |
 | `0x0040` | u32 seconds per rung | `ladder` (sm2) |
 | `0x0041` | u32 × 3, hundredths: hard, good, easy | `multiplier` |
-| `0x0042` | u32 × 2, hundredths: start, min | `ease` |
-| `0x0043` | i32 × 4, hundredths: again, hard, good, easy | `ease_change` |
+| `0x0042` | u32 × 2, hundredths, multiples of 5: start, min (130–1405) | `ease` |
+| `0x0043` | i32 × 4, hundredths, multiples of 5: again, hard, good, easy | `ease_change` |
 | `0x0044` | u32 seconds | `relearn` |
 | `0x0045` | u32: 1 = yes | `day_aligned` |
 | `0x0050` | u32 × 4: wrap width, then the prompt, word and text heights, in pixels | how the pictures were drawn (§4) |

@@ -145,6 +145,8 @@ jobs:
         run: make -C sim dash
       - name: Study course reader gate (checks + the C/Python round trip)
         run: make -C sim course
+      - name: Study scheduler and progress gate (a year per scheduler, torn logs, remapping, unlocks)
+        run: make -C sim srs
       - name: Build + run the scripted UI tour (real ui.c, screenshots)
         run: make -C sim smoke
       - name: Convert screenshots to PNG
