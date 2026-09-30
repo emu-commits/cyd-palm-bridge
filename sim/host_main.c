@@ -20,6 +20,9 @@
  *                   the script (and stdin's buffer) never holds it in plain
  *   X <hex>         secretscan: fail if the hex-decoded string appears anywhere
  *                   in this process's writable memory (see secret_scan)
+ *   Y <hex>         the same, but skipping the malloc heap: for while a password
+ *                   screen is OPEN, whose own buffer is on that heap. Anywhere
+ *                   else (the LVGL pool is a static array, so .bss) is a leak
  *   P <who> <hex>   fail unless the store holds that password for <who>: `a` for
  *                   the account, or a Wi-Fi slot 1..4. Proves the typing landed,
  *                   so an X that finds nothing means "wiped", not "never typed"
@@ -99,7 +102,14 @@ static void wall_wait(int ms){
  * leaves more than that behind.
  *
  * The needle itself is the one legitimate copy, so its own bytes are skipped.
- * It prints WHERE a copy is (the mapping's name and offset), never the value. */
+ * It prints WHERE a copy is (the mapping's name and offset), never the value.
+ *
+ * skip_heap leaves out glibc's [heap], for a scan while a password screen is
+ * still open: its buffer (malloc'd) legitimately holds the password then, but
+ * nothing else may -- above all not the LVGL pool, which is a static array. A
+ * scan after the screen is gone cannot prove that on its own, because LVGL
+ * grows a label's text in place and the next screen reuses the block, so one
+ * stray copy is overwritten before anyone looks. */
 #define SCAN_WIN 12
 static int hexval(int c){
     return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10
@@ -119,7 +129,7 @@ static int unhex(const char *h, char *out, int cap){
 }
 static void wipe(void *p, size_t n){ volatile char *v = p; while(n--) *v++ = 0; }
 
-static int secret_scan(const char *hex){
+static int secret_scan(const char *hex, int skip_heap){
     char *needle = malloc(128);
     if(!needle) return 1;
     int n = unhex(hex, needle, 128);
@@ -136,6 +146,7 @@ static int secret_scan(const char *hex){
         if(sscanf(ln, "%lx-%lx %7s %*s %*s %*s %255[^\n]", &lo, &hi, perm, name) < 3) continue;
         if(perm[0] != 'r' || perm[1] != 'w') continue;          /* writable only */
         if(strstr(name, "[vvar")) continue;
+        if(skip_heap && !strcmp(name, "[heap]")) continue;
         const char *b = (const char *)lo, *e = (const char *)hi;
         scanned += (size_t)(hi - lo);
         for(const char *p = b; p + SCAN_WIN <= e; p++){
@@ -270,7 +281,8 @@ int main(int argc, char **argv){
             }
             sim_step(60);
         }
-        else if(line[0] == 'X' && line[1] == ' '){ if(secret_scan(line + 2)) rc = 1; }
+        else if(line[0] == 'X' && line[1] == ' '){ if(secret_scan(line + 2, 0)) rc = 1; }
+        else if(line[0] == 'Y' && line[1] == ' '){ if(secret_scan(line + 2, 1)) rc = 1; }
         else if(line[0] == 'P' && line[1] == ' '){ if(secret_expect(line + 2)) rc = 1; }
         else if(sscanf(line, "s %127s", name) == 1)   { if(shot(name)) rc = 1; }
         else if(line[0] == 'q') break;

@@ -3631,42 +3631,87 @@ static void show_pref_edit(int i){
  * grows it by realloc, so every keystroke leaves a longer copy of the password
  * in freed pool memory, where nothing ever wipes it. So this screen is not a
  * textarea: the tap keyboard and Graffiti write into g_secret, one heap block
- * of our own, and the screen shows one '*' per character. The block is wiped
- * and freed when the screen goes, however it goes (Save, Cancel, Home), because
- * that is hung off the display label's DELETE event.
+ * of our own, and the screen shows one '*' per character (but see below). The
+ * block is wiped and freed when the screen goes, however it goes (Save, Cancel,
+ * Home), because that is hung off the display label's DELETE event.
  *
  * It starts EMPTY: a stored password is never read back to fill it. Save with
  * nothing typed leaves the stored one alone, which is also what makes this
- * screen safe to open just to look. */
+ * screen safe to open just to look.
+ *
+ * Typing blind on a small screen is hard, so the character just typed shows
+ * for SECRET_PEEK_MS before it becomes a '*' (as phones do), and "Show" lets
+ * you see the whole thing. Neither puts the password into LVGL either: what
+ * the label draws is SECRET_DISP, the second half of the same block, handed
+ * over with lv_label_set_text_static so LVGL keeps only the pointer (a label
+ * draws from it without copying; draw tasks copy text only when the caller
+ * sets text_local, which the label never does). It is wiped with the rest.
+ * When the text is wider than the box it shows the end, where you are typing,
+ * behind a '<'. */
 #define SECRET_CAP 64
-static int       g_secret_idx;
-static lv_obj_t *g_secret_lbl;
+#define SECRET_DISP (g_secret + SECRET_CAP)          /* the block is 2 x SECRET_CAP */
+#define SECRET_BOX_W (LCD_W - 16)
+#define SECRET_PEEK_MS 1000
+static int         g_secret_idx;
+static lv_obj_t   *g_secret_lbl;
+static bool        g_secret_reveal;                   /* "Show" is on */
+static bool        g_secret_peek;                     /* the last character shows */
+static lv_timer_t *g_secret_peek_t;
 static int secret_len(void){ return g_secret ? (int)strlen(g_secret) : 0; }
 static void secret_show(void){
     if(!g_secret_lbl) return;
-    char stars[SECRET_CAP + 1];
     int n = secret_len();
     if(!n){
-        lv_label_set_text(g_secret_lbl, pf_secret_set(appcfg(), g_secret_idx)
-                          ? "(saved -- type to replace)" : "(none)");
+        lv_label_set_text_static(g_secret_lbl, pf_secret_set(appcfg(), g_secret_idx)
+                                 ? "(saved -- type to replace)" : "(none)");
         return;
     }
-    memset(stars, '*', n); stars[n] = 0;
-    lv_label_set_text(g_secret_lbl, stars);
+    char *d = SECRET_DISP;
+    for(int i = 0; i < n; i++)
+        d[i] = (g_secret_reveal || (g_secret_peek && i == n - 1)) ? g_secret[i] : '*';
+    d[n] = 0;
+    /* keep the end in view: drop characters off the front until it fits */
+    const lv_font_t *f = lv_obj_get_style_text_font(g_secret_lbl, LV_PART_MAIN);
+    int avail = SECRET_BOX_W - 2 * 6 - 2 * 1;          /* the box's padding and border */
+    int lt = lv_font_get_glyph_width(f, '<', 0), w = 0, s = 0;
+    for(int i = 0; i < n; i++) w += lv_font_get_glyph_width(f, (unsigned char)d[i], 0);
+    while(s < n - 1 && w + (s ? lt : 0) > avail)
+        w -= lv_font_get_glyph_width(f, (unsigned char)d[s++], 0);
+    if(s) d[--s] = '<';
+    lv_label_set_text_static(g_secret_lbl, d + s);
+}
+static void secret_peek_end_cb(lv_timer_t *t){ (void)t;
+    g_secret_peek_t = NULL; g_secret_peek = false;
+    secret_show();
 }
 static void secret_key(char c){
     if(!g_secret) return;
     int n = secret_len();
-    if(c == '\b'){ if(n) g_secret[n - 1] = 0; }
-    else if(c == '\n') return;                       /* one line, like the textarea */
-    else if(n < SECRET_CAP - 1 && (unsigned char)c >= 32){ g_secret[n] = c; g_secret[n + 1] = 0; }
+    if(c == '\n') return;                            /* one line, like the textarea */
+    if(c == '\b'){ if(n) g_secret[n - 1] = 0; g_secret_peek = false; }
+    else if(n < SECRET_CAP - 1 && (unsigned char)c >= 32){
+        g_secret[n] = c; g_secret[n + 1] = 0;
+        g_secret_peek = true;
+        if(g_secret_peek_t) lv_timer_reset(g_secret_peek_t);
+        else {
+            g_secret_peek_t = lv_timer_create(secret_peek_end_cb, SECRET_PEEK_MS, NULL);
+            lv_timer_set_repeat_count(g_secret_peek_t, 1);
+        }
+    }
+    secret_show();
+}
+static void secret_reveal_cb(lv_event_t *e){
+    g_secret_reveal = !g_secret_reveal;
+    lv_obj_t *btn = lv_event_get_target(e);
+    lv_label_set_text(lv_obj_get_child(btn, 0), g_secret_reveal ? "Hide" : "Show");
     secret_show();
 }
 static void secret_graf(char c){ secret_key(c); }
 static void secret_gone_cb(lv_event_t *e){
     (void)e;
-    if(g_secret){ config_wipe(g_secret, SECRET_CAP); free(g_secret); g_secret = NULL; }
-    g_secret_lbl = NULL;
+    if(g_secret_peek_t){ lv_timer_delete(g_secret_peek_t); g_secret_peek_t = NULL; }
+    if(g_secret){ config_wipe(g_secret, 2 * SECRET_CAP); free(g_secret); g_secret = NULL; }
+    g_secret_lbl = NULL; g_secret_reveal = g_secret_peek = false;
 }
 static void secret_save_cb(lv_event_t *e){ (void)e;
     if(!g_secret) { pf_edit_back(); return; }
@@ -3675,7 +3720,7 @@ static void secret_save_cb(lv_event_t *e){ (void)e;
     if(g_secret_idx == PF_PASS) r = appcfg_set_dav_pass(g_secret);
     else for(int s = 0; s < CFG_WIFI_N; s++)
         if(g_secret_idx == pf_wifi_pass(s)) r = appcfg_set_wifi_pass(s, g_secret);
-    config_wipe(g_secret, SECRET_CAP);               /* now, not when the screen goes */
+    config_wipe(g_secret, 2 * SECRET_CAP);           /* now, not when the screen goes */
     appcfg_save();
     pf_edit_back();
     toast_show(r == 0 ? "Saved" : "Could not save the password");
@@ -3687,7 +3732,7 @@ static void show_secret_edit(int i){
     lv_label_set_text(title_lbl, PF_LABELS[i]);
     update_cat_trigger();
 
-    g_secret = calloc(1, SECRET_CAP);
+    g_secret = calloc(2, SECRET_CAP);                 /* the text, then SECRET_DISP */
     if(!g_secret){ toast_show("(low memory)"); pf_edit_back(); return; }
 
     lv_obj_t *cancel = lv_button_create(content);
@@ -3698,13 +3743,17 @@ static void show_secret_edit(int i){
     lv_obj_set_size(save, 60, 28); lv_obj_align(save, LV_ALIGN_TOP_RIGHT, -2, 2);
     lv_obj_t *sl=lv_label_create(save); lv_label_set_text(sl,"Save"); lv_obj_center(sl);
     lv_obj_add_event_cb(save, secret_save_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *show = lv_button_create(content);
+    lv_obj_set_size(show, 60, 28); lv_obj_align(show, LV_ALIGN_TOP_MID, 0, 2);
+    lv_obj_t *shl=lv_label_create(show); lv_label_set_text(shl,"Show"); lv_obj_center(shl);
+    lv_obj_add_event_cb(show, secret_reveal_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *lb = lv_label_create(content);
     lv_label_set_text(lb, PF_LABELS[i]);
     lv_obj_set_pos(lb, 4, 38);
     /* drawn like the textarea it replaces: a bordered one-line box */
     g_secret_lbl = lv_label_create(content);
-    lv_obj_set_size(g_secret_lbl, LCD_W - 16, 30);
+    lv_obj_set_size(g_secret_lbl, SECRET_BOX_W, 30);
     lv_obj_set_pos(g_secret_lbl, 4, 54);
     lv_obj_set_style_border_width(g_secret_lbl, 1, 0);
     lv_obj_set_style_border_color(g_secret_lbl, COL_LINE, 0);

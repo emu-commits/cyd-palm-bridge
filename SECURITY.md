@@ -39,7 +39,10 @@ never a password:
 - **The password screens never show a stored password**, not even masked into a
   field: they start empty and say "(saved -- type to replace)". What you type
   goes into a buffer of the screen's own, never into the UI toolkit's memory,
-  shows as `*`, and is wiped when the screen closes, however it closes.
+  and is wiped when the screen closes, however it closes. It shows as `*`,
+  except that the character just typed shows for a second, and **Show** shows
+  all of it (mind who can see the screen). What is drawn comes from that same
+  buffer, which the toolkit draws from without copying.
 - **`make -C sim secretscan`** checks this in CI. It types two test passwords
   through the real Settings screens, runs the simulator's sync (which reads and
   wipes them the way the device does), and after each step searches every

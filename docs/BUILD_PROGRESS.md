@@ -16,6 +16,38 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-30 — the password editor lets you see what you typed
+
+**From the bench:** typing a password blind, one `*` per key, on this screen
+and keyboard was too error-prone. The editor now works like a phone's:
+- **the character just typed shows for a second** (`SECRET_PEEK_MS`), then
+  turns into a `*`; a backspace hides it at once;
+- **"Show"**, between Cancel and Save, shows the whole password, and turns
+  into "Hide". It is off every time the screen opens.
+- **The end stays in view.** A password wider than the box used to be clipped
+  at the right, where you are typing; now the front drops off behind a `<`.
+
+**The password still never enters LVGL.** The label draws from the second half
+of the editor's own heap block (`SECRET_DISP`; the block is now 2 × 64 B),
+handed over with `lv_label_set_text_static`, so LVGL holds only the pointer.
+A label draws from its text without copying it (a draw task copies text only
+when the caller sets `text_local`, which the label never does; checked in both
+9.2.2 and 9.5.0). The whole block is wiped on Save and when the screen goes.
+
+**The gate had to get sharper to prove it.** Swapping in `lv_label_set_text`
+(a copy into the pool on every key) passed the old `secretscan`: LVGL grows a
+label's text in place and the next screen reuses the block, so the stray copy
+was overwritten before the scan after Save looked. So the harness gained `Y`:
+the same scan, but skipping the malloc heap, run **while the editor is still
+open**, with Show on and the password typed. Then only the editor's own block
+(on the heap) may hold it. The LVGL pool is a static array, so a copy there is
+found. With `lv_label_set_text` swapped in, `Y` finds 3 copies and the gate
+fails; with the real code, 0.
+
+**Numbers:** image 1,586,112 B (+432); static DRAM 160,540 B (+8: the Show
+and peek flags and the peek timer). The heap block is 128 B instead of 64 while
+the editor is open. All gates pass.
+
 ### 2026-09-29 — the Planner: To Do and Memo in one app
 
 **One launcher tile, both halves.** The grid is now Date Book, Address,

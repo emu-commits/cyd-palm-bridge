@@ -35,11 +35,13 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 **Firmware groundwork** (from the old Phase 1; one commit each)
 - [x] Passwords out of resident RAM, with a sim `secretscan` gate `[s]` (2026-09-29; `BUILD_PROGRESS.md`)
 - [ ] Wi-Fi join and an iCloud HotSync still work after that change `[d]`
+- [x] Password editor: the character just typed shows for a second, "Show"/"Hide" shows it all, and the end stays in view, still outside LVGL (`secretscan`'s new `Y`) `[s]` (2026-09-30, from the bench)
+- [ ] Password entry on glass: the peek is long enough to read, Show/Hide, a long password scrolls with `<` `[d]`
 - [x] Firmware version from `git describe`, shown in Settings ▸ About `[s]` (2026-09-29)
 
 **Planner — To Do and Memo as one app** (built 2026-09-29; `BUILD_PROGRESS.md`)
 - [x] Planner built: one launcher tile, the To Do / Memo switch, checkbox lines in memos, new icon, and the new grid `[s]`
-- [ ] Planner on glass: the To Do / Memo switch, a checklist memo (the [X] button, tick and untick by box and by words), and To Do still syncs `[d]`
+- [ ] Planner on glass: the To Do / Memo switch, a checklist memo (the [X] button, tick and untick by box and by words), and To Do still syncs `[d]` (2026-09-30: the user reports the Planner "looks great" on the device; the box is theirs to tick)
 
 **SRS app** (phases in `SRS_PLAN.md` §10)
 - [ ] S0 — `docs/COURSE_FORMAT.md`, the two-level demo kanji course source, and the Albanian fit check; **stop for the user's review**
