@@ -25,15 +25,17 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 ## RESUME HERE — the SRS app, the Planner, and two firmware items (approved 2026-09-29)
 
 **Done 2026-09-29:** the two firmware items and the Planner (`[s]` below;
-their `[d]` checks are open). **Done 2026-09-30:** SRS S0 and S1 (the course
-format, the demo course, the builder and the reader). **Open: the owner's
-review of `COURSE_FORMAT.md` and the demo content.** S2 (the schedulers and
-progress) is done too, and so is S3, the screens (2026-09-30). **S4 was
-replanned from the bench the same day: no typed answers on the device
-(`SRS_PLAN.md` §11 decision 9). It's now the answer at 2x (done) and a
-Week screen, both done in the sim. S5 (the reviews due on the lock screen
-and launcher, and a forecast) is done in the sim too. Next: the bench
-checks, and S6.**
+their `[d]` checks are open). **Done 2026-09-30:** SRS S0 to S5 in the sim
+(the owner approved the format and demo), then three rounds of bench
+feedback: the 2× answer, the 20 px readings and tidier cards, and full
+screen for lessons and reviews. S4 was replanned: no typed answers
+(`SRS_PLAN.md` §11 decision 9).
+
+**Now (2026-09-30, end of day): the owner is testing on the bench.** The
+next session starts from their report: work through what they found, and
+leave the `[d]` boxes for them to tick. The build under test is `7810d49`
+(CI green; the Pages deploy job fails on a repository setting, not the
+code).
 
 **The app platform is on hold.** The main goal is one first-class SRS app
 (WaniKani/Anki-style, with a large course on the SD card), and it's being

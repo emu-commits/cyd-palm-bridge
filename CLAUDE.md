@@ -148,9 +148,7 @@ and S1**, which the owner asked for together:
   CRC-fixed hostile files under ASan and UBSan), `smoke32` (the checks
   32-bit), and `tests/mkcourse_test.py` (byte-for-byte rebuilds, the
   `ids.tsv` rules, refusals).
-- **The owner's review of the format and the demo is still open.** Wait for
-  it before anything that would make the format expensive to change (S3
-  shipping the demo in the firmware).
+- The owner approved the format and the demo on 2026-09-30.
 - Then, the same day, the owner asked for a faster demo (a 2-hour first
   stage, `known: 2`), a check that Albanian's letters draw (they do: see
   `BUILD_PROGRESS.md`), and **S2**:
@@ -205,6 +203,10 @@ and S1**, which the owner asked for together:
   and Menu move to the title bar's right end, made only while it's on.
   `content_clear()` turns it off for everyone else; the smoke tour taps
   Home at (200,12), Menu at (226,12) and Study's buttons at y 295 there.
+
+**Where things stand (end of 2026-09-30):** the owner is bench-testing build
+`7810d49` (CI green). Start the next session from their report; the open
+`[d]` items in `BACKLOG.md`'s first RESUME HERE are the checklist.
 
 1. **S6, the bench**, is the owner's (`[d]` items in `BACKLOG.md`). Any
    further work follows `SRS_PLAN.md` §10, keeping to its §7 budgets:
