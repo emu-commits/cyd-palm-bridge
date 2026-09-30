@@ -1,0 +1,11 @@
+# source id	number -- kept by tools/mkcourse.py: numbers are never reused or changed, so commit this file with the course
+France	1
+Deutschland	2
+España	3
+Österreich	4
+Ísland	5
+Danmark	6
+civ	7
+“Quoted” — folded	8
+greece	9
+japan	10

@@ -1,7 +1,10 @@
 # SRS plan — Study, a built-in spaced-repetition app
 
-> **Status: approved 2026-09-29; S0 is next.** The name, launcher slot,
-> speaker and S0 proposals were settled the same day (§3, §11). Nothing is built yet. This
+> **Status: S0 and S1 done 2026-09-30; S2 is next.** The format is
+> `COURSE_FORMAT.md` (awaiting the owner's review), the demo is
+> `courses/demo-kanji/`, `tools/mkcourse.py` builds courses and
+> `firmware/main/course.c` reads them. Approved 2026-09-29; the name, launcher
+> slot, speaker and S0 proposals were settled the same day (§3, §11). This
 > replaces the app platform (`APP_PLATFORM_PLAN.md`) as the current project.
 > That plan is on hold, and why is in §1. Revised the same day after
 > checking the design against a real course in progress (§4.6), and to add
@@ -136,7 +139,7 @@ shared with other people's devices. Keeping the SRS logic free of LVGL
 | Screens | Course picker, dashboard, lesson, review, stats | Sim smoke tour and screenshots |
 | `tools/mkcourse.py` | Builds `course.srs` from a course source folder (§4.5); `--check` validates an existing file and prints its sizes | Yes: round-trip in a host gate |
 | `courses/demo-kanji/` | The demo course: source, id table, README, and the built `course.srs` (§9) | Yes: `--check` and a byte-for-byte rebuild |
-| `tests/data/study/` | Small test-only courses: a generic front/back deck, and damaged files for the fuzz gate | |
+| `tests/data/study/` | Small test-only courses: `cards` (a generic front/back deck) and `features` (every field and link). The fuzz gate makes its damaged copies as it runs. | |
 
 **Screens outside `ui.c`, if it's cheap.** Existing apps put their pure
 logic in their own file and their screens in `ui.c` (for example `wordie.c`
@@ -392,7 +395,9 @@ Italian, Portuguese, Dutch, the Nordic languages, and **Albanian (ë, ç, Ë,
   throughout.
 - **Any other character makes that field a bitmap**, rendered with a font
   on the computer and word-wrapped at build time to the screen width. This
-  one rule covers kanji, Greek, Cyrillic and Arabic.
+  rule covers kanji, Cyrillic and unaccented Greek. (Measured in S1: the
+  pinned Noto Sans JP has no Arabic, Hebrew or accented Greek, so those go
+  through the strip rule below; `COURSE_FORMAT.md` §4.)
 - **For side fields, a course can choose to strip instead:** drop the runs
   the font can't draw and keep the rest. Wiktionary etymologies usually
   give a transliteration in brackets, so "Ottoman Turkish حال (hal,
@@ -481,8 +486,8 @@ jobs:
    - mnemonics and examples;
    - rendered kanji.
 
-**Content (accepted; S0 writes it):** about 10 radicals, 12 kanji and 20
-words per level. Kanji in level 2 are built from radicals of both levels,
+**Content (accepted; written in S0):** 12 kanji and 20 words per level, with
+the radicals they need: 8 in level 1 and 6 in level 2, 78 items in all. Kanji in level 2 are built from radicals of both levels,
 so unlocking across levels is exercised:
 
 | Level | Kanji |
@@ -500,8 +505,7 @@ and 月.
 
 **How it's built and shipped:**
 - `courses/demo-kanji/` holds the source and the built `course.srs`. The
-  built file is committed; it's small, about 100–150 KB, mostly kanji
-  bitmaps.
+  built file is committed: 81,756 B, 82 % of it pictures (measured in S1).
 - `tools/gen_study_demo.py` turns the built file into
   `firmware/main/study_demo.c`, as `guru_pool.c` is generated.
 - **Rebuilds are reproducible.** `mkcourse.py` pins its font by SHA-256 and

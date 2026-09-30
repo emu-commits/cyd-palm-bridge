@@ -45,7 +45,7 @@ CFLAGS := -O2 -g -Wall $(SIMDEF) $(INC)
 APP_SRCS := \
     $(FW)/ui.c $(FW)/data.c $(FW)/graffiti.c $(FW)/appcfg.c $(FW)/secretstore.c $(FW)/clock.c \
     $(FW)/lv_font_palm.c $(FW)/lv_font_palm_bold.c $(FW)/lv_font_kana.c $(FW)/palm_icons.c \
-    $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(BR)/dash.c $(FW)/minesweeper.c $(FW)/wordie.c $(FW)/sudoku.c $(FW)/zip.c $(FW)/coach.c $(FW)/guru.c $(FW)/guru_pool.c $(FW)/gurupool.c \
+    $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(BR)/dash.c $(FW)/minesweeper.c $(FW)/wordie.c $(FW)/sudoku.c $(FW)/zip.c $(FW)/coach.c $(FW)/guru.c $(FW)/guru_pool.c $(FW)/gurupool.c $(FW)/course.c \
     $(BR)/pdb.c $(BR)/datebook.c $(BR)/address.c $(BR)/todo.c $(BR)/appinfo.c \
     $(BR)/ical.c $(BR)/vcard.c $(BR)/tz.c $(BR)/charset.c \
     $(BR)/find.c $(BR)/calc.c $(BR)/config.c $(BR)/rss.c $(BR)/news.c $(BR)/feeds.c \
@@ -58,7 +58,7 @@ WRAP_LD := -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free
 LVGL_SRCS := $(shell find lvgl/src -name '*.c' 2>/dev/null)
 LVGL_OBJS := $(patsubst lvgl/src/%.c,build/lvgl/%.o,$(LVGL_SRCS))
 
-.PHONY: host wasm smoke smoke32 secretscan poolparity data graf mines wordie sudoku zip clock coach guru gurupool dash games clean lvgl-src
+.PHONY: host wasm smoke smoke32 secretscan poolparity data graf mines wordie sudoku zip clock coach guru gurupool dash course games clean lvgl-src
 
 # LVGL_SRCS is evaluated when make parses this file, so on a clean checkout the
 # source must be fetched BEFORE the build graph is used: the entry points fetch,
@@ -109,6 +109,8 @@ smoke32: lvgl-src
 	rm -rf build/shots && mkdir -p build/shots
 	./build/sim_host build/shots < tests/smoke.txt
 	@ls build/shots/*.ppm >/dev/null
+	$(CC) -m32 -O2 -Wall -Wextra -I$(FW) tests/course_test.c $(FW)/course.c -o build/course_test32
+	./build/course_test32
 	@echo "sim smoke32 (true device-sized pool): OK"
 
 # ---- poolparity: assert sim/lv_conf.h still matches the device's configured
@@ -180,6 +182,26 @@ wordie: build/wordie_test
 build/wordie_test: tests/wordie_test.c $(FW)/wordie.c $(FW)/wordie.h
 	@mkdir -p build
 	$(CC) -O2 -Wall -I$(FW) tests/wordie_test.c $(FW)/wordie.c -o $@
+
+# ---- course: the Study course reader (firmware/main/course.c), pure C. Its
+# checks on the committed course files, then the round trip: the C reader's
+# dump of each file must equal tools/mkcourse.py's, byte for byte (the Python
+# side reads the file with its own reader, stdlib only). smoke32 runs the
+# checks again 32-bit, as on the device; make ftest fuzzes the reader. ----
+COURSE_FILES := ../courses/demo-kanji/course.srs ../tests/data/study/cards/course.srs \
+                ../tests/data/study/features/course.srs
+course: build/course_test
+	./build/course_test
+	@for f in $(COURSE_FILES); do \
+	  ./build/course_test dump $$f > build/course_c.txt || exit 1; \
+	  python3 ../tools/mkcourse.py --dump $$f > build/course_py.txt || exit 1; \
+	  cmp build/course_c.txt build/course_py.txt || { echo "course: C and Python read $$f differently"; exit 1; }; \
+	  echo "  round trip: $$f"; done
+	@echo "sim course: OK"
+
+build/course_test: tests/course_test.c $(FW)/course.c $(FW)/course.h
+	@mkdir -p build
+	$(CC) -O2 -Wall -Wextra -I$(FW) tests/course_test.c $(FW)/course.c -o $@
 
 # ---- sudoku: host gate for the pure Sudoku logic (generation + rules, no LVGL). ----
 sudoku: build/sudoku_test
@@ -262,7 +284,7 @@ build/dash_test: tests/dash_test.c $(BR)/dash.c $(BR)/dash.h
 	$(CC) -O2 -Wall -I$(BR) tests/dash_test.c $(BR)/dash.c -o $@ -lm
 
 # ---- games: every game's logic gate in one go (what CI runs). ----
-games: poolparity mines wordie sudoku zip clock coach guru gurupool dash
+games: poolparity mines wordie sudoku zip clock coach guru gurupool dash course
 
 # ---- wasm: everything compiled by emcc in one shot (CI build; no local emcc needed).
 # 32-bit wasm => the TRUE device-sized pool applies (see lv_conf.h). main() boots

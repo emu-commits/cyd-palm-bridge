@@ -27,7 +27,9 @@ before touching anything.
   - `make test` and `make ftest` (host);
   - `sudo mkdir -p /sdcard && sudo chmod 777 /sdcard`, then `make -C sim`
     with the targets `poolparity nosecrets secretscan data graf mines wordie
-    sudoku zip clock coach guru gurupool dash smoke smoke32`;
+    sudoku zip clock coach guru gurupool dash course smoke smoke32`;
+  - `python3 tests/mkcourse_test.py` (the course builder; needs the Pillow
+    in `tools/requirements-course.txt`, and downloads the pinned font);
   - the firmware build in the `espressif/idf:release-v5.5` container
     (`idf.py set-target esp32 && idf.py build` in `firmware/`);
   - `make -C sim wasm` if emsdk is available.
@@ -63,7 +65,7 @@ before touching anything.
   the working branch isn't touched. The container is wiped between sessions:
   anything not committed and pushed is lost, including earlier spike code.
 
-## Current work: the SRS app, S0 next (approved 2026-09-29)
+## Current work: the SRS app, S2 next (approved 2026-09-29)
 
 **The app platform is on hold** (`APP_PLATFORM_PLAN.md`, status block and
 §11 decision 7). The user's main goal is one first-class SRS app
@@ -122,27 +124,33 @@ resident RAM (with the `secretscan` gate), the firmware version in Settings ▸
 About, and the Planner (To Do and Memo in one launcher tile, position 7 held
 open for Study). Their bench checks are `[d]` items in `BACKLOG.md`.
 
-1. **SRS S0: the course format and demo content** (`SRS_PLAN.md` §4, §9,
-   §10). **This is next.**
-   - Turn §4 into `docs/COURSE_FORMAT.md`: exact byte layouts
-     (little-endian, each section's offset, length and CRC32), the source
-     format, and an authoring guide that uses the demo as its example.
-   - Write the demo course source in `courses/demo-kanji/`: two levels,
-     about 10 radicals, 12 kanji and 20 words each, with a README walking
-     through every file.
-   - Write the test-only generic front/back deck in `tests/data/study/`.
-   - Add an appendix mapping the Albanian course's fields onto the format
-     (a paper check; read its repo, copy nothing).
-   - **Then stop for the user's review** of the format and the demo content
-     before S1. The format is the one thing that's hard to change once real
-     courses exist.
-2. **S1 onward** as `SRS_PLAN.md` §10 describes, keeping to its §7 budgets:
-   - pure-C `course.c` and `srs.c` in `firmware/main/`, with no LVGL and the
-     time passed in, tested the way `wordie.c` and `coach.c` are;
+**Done 2026-09-30:** the password editor's peek and Show/Hide; then **SRS S0
+and S1**, which the owner asked for together:
+- `docs/COURSE_FORMAT.md` is the format (byte layouts, source format,
+  authoring guide, and Appendix A, the Albanian paper check).
+- `courses/demo-kanji/` is the demo (78 items; facts checked against
+  KANJIDIC2 and JMdict, the rest original). `tests/data/study/` holds two
+  test decks: `cards` (TSV, sm2) and `features` (every field and link).
+- `tools/mkcourse.py` builds and checks courses, reproducibly (pinned font
+  by SHA-256, Pillow by version, layout engine BASIC).
+  `firmware/main/course.c` reads them.
+- Gates: `make -C sim course` (C checks plus a three-way dump round trip),
+  `make ftest` (`course_fuzz`: truncations, every bit flip caught, and
+  CRC-fixed hostile files under ASan and UBSan), `smoke32` (the checks
+  32-bit), and `tests/mkcourse_test.py` (byte-for-byte rebuilds, the
+  `ids.tsv` rules, refusals).
+- **The owner's review of the format and the demo is still open.** Wait for
+  it before anything that would make the format expensive to change (S3
+  shipping the demo in the firmware). S2 doesn't depend on it much.
+
+1. **S2 onward** as `SRS_PLAN.md` §10 describes, keeping to its §7 budgets:
+   - pure-C `srs.c` in `firmware/main/`, beside `course.c`, with no LVGL and
+     the time passed in, tested the way `wordie.c` and `coach.c` are;
    - new host gates added to `ci.yml` and to the gate list above;
-   - the reader fuzzed under ASan and UBSan;
    - screens checked by smoke screenshots before any `[s]`;
    - Study's tile goes in the empty launcher slot (`APPS[6]` is `NULL`).
+   - Keep `mkcourse.py`'s dump and `course_test.c`'s dump in step if the
+     format grows: the round trip compares them byte for byte.
 
 **Gate-running notes from 2026-09-29:**
 - Run `make -C sim clean` before the sim gates if `smoke32` ran last: it

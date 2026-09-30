@@ -16,6 +16,104 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-30 — Study S0 and S1: the course format, the demo, the builder and the reader
+
+The owner asked for S0 and S1 together, so S0's stop for review became a
+review of both. **Nothing is on screen yet** (that's S3). What exists is the
+file format, a course in it, a tool that builds it, and the reader the
+device will use, with gates on all four.
+
+**For the owner's review** (S0's exit; the format is hard to change once
+real courses exist): `docs/COURSE_FORMAT.md` and `courses/demo-kanji/`.
+The choices most worth a look:
+1. **65,535 items per course**, so the app can keep due lists as 2-byte item
+   numbers. The Albanian course has 4,087; WaniKani's full set is about
+   9,000.
+2. **Pictures are 1 bit per pixel**, 64 px for a lone kanji, 40 px for a
+   word, 24 px for sentences, wrapped at 232 px. They read well in a
+   rendered sheet; S3 judges them on the screen, and 2 bpp stays reserved in
+   the format in case small kanji need it.
+3. **The picture font (Noto Sans JP) has no Arabic, Hebrew or accented
+   Greek.** Measured, not assumed: the plan had said Arabic would become a
+   picture. Such text is stripped instead (`render.strip`), which suits
+   etymologies, the only place the Albanian course has it.
+4. **The demo waits as WaniKani does:** a kanji's lesson opens once its
+   radicals reach stage 5, three and a half days at the soonest. A faster
+   demo is one number (`known`) in `course.json`.
+5. **The demo's stage names are its own** (Learning, Known, Strong, Deep,
+   Retired): WaniKani's are theirs, and "Guru" is already an app here.
+6. **8 radicals in level 1 and 6 in level 2** (the plan said about 10
+   each): exactly the ones its kanji are built from.
+7. **Readings inside mnemonics and notes are in romaji.** Mixed English
+   and kana must be a picture; written in kana, the demo was 142 KB instead
+   of 82 KB.
+
+**The format** (`COURSE_FORMAT.md` §3): a 32-byte header, a section table,
+and seven sections (META, LEVL, ITEM, TEXT, BMP, LINK, IDX), all
+little-endian and 4-aligned with zero padding. **Every byte is covered by a
+CRC or the zero rule**: the header's own CRC, the table's (which doubles as
+the course's fingerprint), each section's, and each item's, level's and
+picture's. So "Check course" catches any corruption, and the fuzz gate
+proves it for every single-bit flip.
+
+**Paper check against the Albanian course** (Appendix A, read at
+`82ac18d`, nothing copied): it fits. 4,087 words in 592 levels (up from
+3,731 in 543 on 2026-09-29). Its scheduler constants are the `sm2` example
+value for value. The largest word encodes to 3,439 B, inside the 4,096 B
+item limit, as long as a converter doesn't store the gloss list twice
+(4.8 KB if it did).
+
+**The demo** (`courses/demo-kanji/`, CC0): 78 items (14 radicals, 24 kanji,
+40 words) in two levels. **Every kanji reading was checked by script
+against KANJIDIC2, and every word's written form and reading against
+JMdict** (from the `jamdict-data` package, used locally, not committed): all
+match. Radical names, mnemonics and sentences are original.
+
+**`tools/mkcourse.py`** builds a source folder into `course.srs`, `--check`s
+a built file, and `--dump`s either one as canonical text.
+- It refuses anything the device would have to guess about, naming the file
+  and line.
+- It keeps `ids.tsv`: numbers are appended and never reused.
+- **Builds are byte-for-byte reproducible.** The font is pinned by SHA-256
+  (downloaded to `~/.cache/cyd-palm/`), Pillow by version
+  (`tools/requirements-course.txt`), and the layout engine is forced to
+  BASIC so libraqm can't change the shaping. The same bytes came out on
+  Python 3.11 and 3.12, and with the font from the cache or from `--font`.
+
+**`firmware/main/course.c`** is the reader: pure C and stdio, no statics.
+- A `Course` is about 1.3 KB.
+- `course_open` checks the header, the table, META, LEVL and IDX, and
+  briefly mallocs META (≤ 4 KB).
+- Each item is two reads, its CRC checked before use; text is checked as
+  strict UTF-8 in the range its drawing allows.
+- `course_verify` checks everything.
+- The CRC-32 is nibble-at-a-time (a 64-byte table). The first table had one
+  wrong entry, and the check-value test caught it.
+
+**Gates:**
+- **`make -C sim course`**: reader checks on the three committed files; then
+  the round trip, where the C reader's dump of each file must equal
+  `mkcourse.py --dump` of it byte for byte. (Also checked by hand: the dump
+  of the *source* equals both.)
+- **`make ftest` gains `course_fuzz`** (ASan and UBSan, 24 s):
+  - 8,762 truncations, all refused;
+  - 51,136 single-bit flips, **every one caught** by open or verify;
+  - 43,000 hostile files with every CRC fixed up after the damage, 22,480 of
+    which opened and were walked in full with no sanitizer report.
+  - Deleting one bounds check from the reader makes it fail at once with a
+    heap overflow, so the gate has teeth.
+- **`smoke32`** also runs the reader's checks built 32-bit.
+- **`tests/mkcourse_test.py`**, a new CI job "Course builder": every
+  committed course rebuilds to the same bytes, the `ids.tsv` rules hold,
+  and 17 kinds of bad source are refused with the right message.
+
+**Numbers:**
+- The demo course is 81,756 B: 66,784 B of pictures (91 of them, the radical
+  and kanji 一 sharing one), 10,360 B of text.
+- The firmware image is unchanged at 1,586,112 B, and static DRAM at
+  160,540 B. `course.c` compiles into it, but nothing calls it until S3, so
+  the linker drops it.
+
 ### 2026-09-30 — the password editor lets you see what you typed
 
 **From the bench:** typing a password blind, one `*` per key, on this screen

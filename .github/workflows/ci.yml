@@ -27,6 +27,27 @@ jobs:
       - name: Weather gate (Open-Meteo CSV -> WxCache, live fixtures)
         run: make wx_test && cd tests && ../wx_test
 
+  # The course builder: every committed course.srs must rebuild from its source
+  # to the same bytes, with the pinned Pillow and the pinned font (which
+  # mkcourse downloads and checks by SHA-256). tests/mkcourse_test.py also checks
+  # the ids.tsv rules and that bad sources are refused.
+  course-builder:
+    name: Course builder (mkcourse, byte-for-byte rebuild)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Pinned Pillow
+        run: pip install -r tools/requirements-course.txt
+      - name: Rebuild every course, ids.tsv rules, refusals
+        run: python3 tests/mkcourse_test.py
+      - name: The demo course passes --check
+        run: python3 tools/mkcourse.py --check courses/demo-kanji/course.srs
+
   sync-gates:
     name: Sync gates (Radicale)
     runs-on: ubuntu-latest
@@ -122,6 +143,8 @@ jobs:
         run: make -C sim gurupool
       - name: Lock-screen dashboard gate (weather age + freshness cut)
         run: make -C sim dash
+      - name: Study course reader gate (checks + the C/Python round trip)
+        run: make -C sim course
       - name: Build + run the scripted UI tour (real ui.c, screenshots)
         run: make -C sim smoke
       - name: Convert screenshots to PNG

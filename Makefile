@@ -104,6 +104,11 @@ toobig: tests/toobig.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 fuzz_test: tests/fuzz_test.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -o $@ $^
 
+# the Study course reader eats files off the SD card: truncated, bit-flipped and
+# hostile (CRC-fixed) copies of the committed courses, under sanitizers
+course_fuzz: tests/course_fuzz.c firmware/main/course.c firmware/main/course.h | dirs
+	$(CC) $(CFLAGS) -Ifirmware/main -fsanitize=address,undefined -fno-sanitize-recover=all -o $@ tests/course_fuzz.c firmware/main/course.c
+
 # the RSS parser eats untrusted network bytes -> also run its gate under sanitizers
 rss_asan: tests/rss_test.c bridge/rss.c | dirs
 	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -o $@ $^
@@ -123,9 +128,10 @@ test: roundtrip find_test calc_test config_test streamparse rss_test news_test w
 	./break_test
 
 # parser hardening sweep (sanitizer build; a bit slower)
-ftest: fuzz_test rss_asan
+ftest: fuzz_test rss_asan course_fuzz
 	./fuzz_test
 	./rss_asan
+	./course_fuzz
 
 # needs Radicale running on localhost:5232 (see README)
 itest: incremental bridge_cli
@@ -147,7 +153,7 @@ mtest: multiapp
 
 clean:
 	rm -f roundtrip bridge_cli incremental synctoken category bigsync multiapp \
-	      uidmatch idempotent massdel streamparse find_test calc_test config_test fuzz_test \
+	      uidmatch idempotent massdel streamparse find_test calc_test config_test fuzz_test course_fuzz \
 	      rss_test rss_asan news_test feeds_test break_test geoip_test toobig safefile_test \
 	      pdb/_rt_*.pdb
 

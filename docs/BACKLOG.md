@@ -25,7 +25,9 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 ## RESUME HERE — the SRS app, the Planner, and two firmware items (approved 2026-09-29)
 
 **Done 2026-09-29:** the two firmware items and the Planner (`[s]` below;
-their `[d]` checks are open). **Next: SRS S0.**
+their `[d]` checks are open). **Done 2026-09-30:** SRS S0 and S1 (the course
+format, the demo course, the builder and the reader). **Open: the owner's
+review of `COURSE_FORMAT.md` and the demo content; then S2.**
 
 **The app platform is on hold.** The main goal is one first-class SRS app
 (WaniKani/Anki-style, with a large course on the SD card), and it's being
@@ -44,8 +46,9 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 - [ ] Planner on glass: the To Do / Memo switch, a checklist memo (the [X] button, tick and untick by box and by words), and To Do still syncs `[d]` (2026-09-30: the user reports the Planner "looks great" on the device; the box is theirs to tick)
 
 **SRS app** (phases in `SRS_PLAN.md` §10)
-- [ ] S0 — `docs/COURSE_FORMAT.md`, the two-level demo kanji course source, and the Albanian fit check; **stop for the user's review**
-- [ ] S1 — `course.c` reader and `tools/mkcourse.py`, with round-trip, fuzz and demo-rebuild gates in CI `[s]`
+- [x] S0 — `docs/COURSE_FORMAT.md`, the two-level demo kanji course source (`courses/demo-kanji/`), the test decks (`tests/data/study/`), and the Albanian fit check (its Appendix A) (2026-09-30)
+- [ ] **The owner's review of `COURSE_FORMAT.md` and the demo content** (S0's exit; the format is hard to change once real courses exist). Points worth a look are listed at the top of `BUILD_PROGRESS.md`'s 2026-09-30 S0/S1 entry.
+- [x] S1 — `course.c` reader and `tools/mkcourse.py`, with round-trip, fuzz and demo-rebuild gates in CI (2026-09-30)
 - [ ] S2 — `srs.c` with both schedulers and crash-safe progress, with host tests in CI `[s]`
 - [ ] S3 — launcher tile (position 7), the user's finished portrait (`docs/img/study_face.png`), course picker, dashboard, lessons and reviews, and the demo installed on first run, in the sim `[s]`
 - [ ] S4 — typed answers: romaji to kana on the Graffiti strip, meaning matching `[s]`
