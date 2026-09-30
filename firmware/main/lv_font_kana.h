@@ -5,4 +5,7 @@
 #define LV_FONT_KANA_H
 #include "lvgl.h"
 extern const lv_font_t lv_font_kana;
+/* the same kana at 20 px, for Study's readings (tools/gen_kana_font.py);
+ * anything else in a reading falls back to lv_font_palm */
+extern const lv_font_t lv_font_kana_20;
 #endif

@@ -63,6 +63,8 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 - [x] S4b — the Week screen, as Coach and Guru have it: `history.dat` per course, the chart, this week against last, streak, right %, stage groups, her advice `[s]` (2026-09-30; `study_week`, and the history's host tests)
 - [ ] The Week screen on glass: after a few days of use, the bars match what was done, the streak holds overnight, Undo takes a review back off the count `[d]`
 - [x] S5 — the reviews due on the lock screen (AHEAD's STUDY row) and the launcher (a badge), from `summary.bin`, totalled across courses; the Week screen's forecast `[s]` (2026-09-30; `study_lock_due`, `study_lock_caught_up`, `study_launcher_badge`, `study_week`)
+- [x] Lesson cards cleaned up (from the bench: the readings' kana were twice the size needed and ran off the screen): readings a line per type in a 20 px kana font, the meaning big, beside a single kanji `[s]` (2026-09-30; `study_kanji_card`)
+- [ ] The cleaned-up cards on glass: the 20 px kana read well, a kanji's readings on the first screen `[d]`
 - [ ] S5 on glass: the lock's STUDY row and the weather box above it read well, the air quality beside the reading, the badge on the icon, the count going up on its own as reviews come due (the lock repaints each minute) `[d]`
 - [ ] S6 — a full course on the real card: open time, next-card time, heap, battery pull, kanji readability `[d]`
 

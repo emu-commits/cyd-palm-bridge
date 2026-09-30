@@ -16,6 +16,7 @@ pinned font, which mkcourse downloads; or COURSE_FONT=/path/to/the/font.
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -162,12 +163,22 @@ def text_rules():
     print("  text rules")
 
 
+def reading_font():
+    """The firmware's reading font is drawn from the pinned picture font: it
+    must be exactly what tools/gen_kana_font.py draws."""
+    r = subprocess.run([sys.executable, str(ROOT / "tools/gen_kana_font.py"), "--check"],
+                       capture_output=True, text=True)
+    check(r.returncode == 0, "lv_font_kana_20.c is what gen_kana_font.py draws: " + (r.stdout + r.stderr).strip())
+    print("  reading font")
+
+
 def main():
     print("mkcourse_test:")
     rebuild_all()
     ids_rules()
     refusals()
     text_rules()
+    reading_font()
     print("mkcourse_test: %s" % ("FAILED" if fails else "OK"))
     sys.exit(1 if fails else 0)
 

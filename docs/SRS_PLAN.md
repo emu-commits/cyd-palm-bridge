@@ -635,9 +635,11 @@ mock-ups: §11 decision 10).
    stable item id, through `ids.tsv`, and kept apart from the course.
 3. **Text the Palm fonts can draw (U+0020–U+00FF) is drawn directly.
    Everything else is a pre-rendered bitmap**, including all kanji. The
-   firmware ships no new fonts; the one addition (2026-09-30, from the
-   bench) is the Palm bold font pixel-doubled for answers, generated from
-   the existing one, the same glyphs at twice the size.
+   firmware ships no new fonts, with two additions from the bench
+   (2026-09-30): the Palm bold font pixel-doubled for answers, and kana at
+   20 px for a card's readings (the 38 px Kana-trainer font was twice what
+   a line of readings needs). Both are generated: the first from the Palm
+   font, the second from the pinned picture font.
 4. **Two schedulers**, stage-based (WaniKani) and SM-2 (Anki), chosen and
    tuned by the course.
 5. **A demo kanji course of two levels ships with the firmware** and is the

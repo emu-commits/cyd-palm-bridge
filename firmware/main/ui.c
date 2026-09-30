@@ -10943,6 +10943,8 @@ static void show_coach(void){
 #define ST_PIC_ROWS  400                      /* the tallest picture drawn */
 #define ST_TXT       1024
 #define ST_ASK_PROMPT_H 76                    /* the prompt's box on a question */
+#define ST_RD_NAME_W 64                       /* a card's reading line: "Kun'yomi" */
+#define ST_TERM_BOX  70                       /* a card's picture term: a kanji is 64 */
 
 typedef struct {
     Course    c;
@@ -11087,16 +11089,17 @@ static lv_obj_t *st_label(lv_obj_t *par, const char *text, const lv_font_t *font
  * of the screen's width: 1 if it was made big. The pixel-doubled font is the
  * same face, so a big answer reads as the rest of the UI. Otherwise the label
  * is left as it was. */
-static int st_big(lv_obj_t *l, int lines){
+static int st_big_w(lv_obj_t *l, int lines, int w){
     lv_point_t sz;
-    lv_text_get_size(&sz, lv_label_get_text(l), &lv_font_palm_bold_2x, 0, 0, LCD_W - 12, LV_TEXT_FLAG_NONE);
+    lv_text_get_size(&sz, lv_label_get_text(l), &lv_font_palm_bold_2x, 0, 0, w, LV_TEXT_FLAG_NONE);
     if(sz.y > lines * lv_font_palm_bold_2x.line_height) return 0;
     lv_obj_set_style_text_font(l, &lv_font_palm_bold_2x, 0);
     lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(l, LCD_W - 12);
+    lv_obj_set_width(l, w);
     lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
     return 1;
 }
+static int st_big(lv_obj_t *l, int lines){ return st_big_w(l, lines, LCD_W - 12); }
 
 static lv_obj_t *st_btn(lv_obj_t *par, int x, int y, int w, int h, const char *text,
                         lv_event_cb_t cb, intptr_t ud, int bold){
@@ -11211,8 +11214,9 @@ static void st_term(lv_obj_t *par, int max_h){
     CourseField f;
     if(!st_find(CF_TERM, 0, &f)) return;
     lv_obj_t *o = st_field(par, &f, &lv_font_palm_bold, max_h);
-    if(o && !(f.attr & (CF_A_PICTURE | CF_A_KANA)) && !st_big(o, 2))
-        lv_obj_set_style_text_align(o, LV_TEXT_ALIGN_CENTER, 0);
+    if(!o || !lv_obj_check_type(o, &lv_label_class)) return;
+    /* a label is the row's width: its text is what gets centred */
+    if((f.attr & CF_A_KANA) || !st_big(o, 2)) lv_obj_set_style_text_align(o, LV_TEXT_ALIGN_CENTER, 0);
 }
 
 /* "Built from: sun + moon": the linked items' own meanings. Reads each target
@@ -11261,49 +11265,110 @@ static void st_card(lv_obj_t *page){
     snprintf(head + strlen(head), sizeof head - strlen(head), "  \xC2\xB7  level %u", it->level);
     lv_obj_t *h = st_label(page, head, NULL, 0);
     lv_obj_set_style_text_color(h, COL_DIM, 0);
-    lv_obj_t *row = lv_obj_create(page);                  /* the term, centred */
-    /* a fixed box, the term centred in it: a picture is cropped to its ink,
-     * and 一 on its own would otherwise be a rule under the heading */
-    lv_obj_set_size(row, LCD_W - 8, 70);
+    /* The term, centred. A picture gets a fixed box, centred in it: it's
+     * cropped to its ink, and 一 on its own would otherwise be a rule under
+     * the heading. A picture no wider than the box (a single kanji) has the
+     * meaning beside it rather than under it, which brings the readings up
+     * onto the first screen. Text is as tall as it is. */
+    CourseField tf;
+    CoursePic tp;
+    int pic_term = st_find(CF_TERM, 0, &tf) && (tf.attr & CF_A_PICTURE);
+    int side = pic_term && !course_pic(&g_st->c, tf.pic, &tp) && tp.w <= ST_TERM_BOX;
+    lv_obj_t *row = lv_obj_create(page);
+    lv_obj_set_size(row, LCD_W - 8, pic_term ? ST_TERM_BOX : LV_SIZE_CONTENT);
     lv_obj_set_style_border_width(row, 0, 0);
     lv_obj_set_style_pad_all(row, 0, 0);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(row, side ? LV_FLEX_ALIGN_START : LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-    st_term(row, ST_PIC_ROWS);
+    lv_obj_t *mcol = page;                                /* where the meanings go */
+    int mw = LCD_W - 12;
+    if(side){
+        lv_obj_t *box = lv_obj_create(row);
+        lv_obj_set_size(box, ST_TERM_BOX, ST_TERM_BOX);
+        lv_obj_set_style_border_width(box, 0, 0);
+        lv_obj_set_style_pad_all(box, 0, 0);
+        lv_obj_set_flex_flow(box, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(box, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+        st_term(box, ST_PIC_ROWS);
+        mw = LCD_W - 8 - ST_TERM_BOX - 4;
+        mcol = lv_obj_create(row);
+        lv_obj_set_size(mcol, mw, LV_SIZE_CONTENT);
+        lv_obj_set_style_border_width(mcol, 0, 0);
+        lv_obj_set_style_pad_all(mcol, 0, 0);
+        lv_obj_set_style_pad_row(mcol, 2, 0);
+        lv_obj_set_flex_flow(mcol, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(mcol, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(mcol, LV_OBJ_FLAG_SCROLLABLE);
+    } else st_term(row, ST_PIC_ROWS);
 
     uint32_t pos;
     CourseField f;
-    /* meanings: the first, then the rest as "also" */
+    /* the meaning big, as a question shows it; the others under it, small */
     int nm = 0;
     char also[200];
     int ak = 0;
     also[0] = 0;
     for(pos = 0; course_field_next(g_st->buf, it->text_len, &pos, &f) == 1; ) if(f.tag == CF_MEANING){
-        if(!nm++){ st_label(page, "Meaning", &lv_font_palm_bold, 0); st_field(page, &f, NULL, ST_PIC_ROWS); }
+        if(!nm++){
+            lv_obj_t *o = st_field(mcol, &f, &lv_font_palm_bold, ST_PIC_ROWS);
+            if(o && lv_obj_check_type(o, &lv_label_class) && !st_big_w(o, 2, mw)){
+                lv_obj_set_width(o, mw);
+                lv_obj_set_style_text_align(o, LV_TEXT_ALIGN_CENTER, 0);
+            }
+        }
         else if(!(f.attr & CF_A_PICTURE) && ak < (int)sizeof also - 40)
             ak += snprintf(also + ak, sizeof also - ak, "%s%.*s", ak ? ", " : "also: ", (int)f.len, f.text);
     }
-    if(ak) st_label(page, also, NULL, LCD_W - 12);
-    /* readings, grouped by type, each in its own label (the kana font has no space) */
+    if(ak) lv_obj_set_style_text_align(st_label(mcol, also, NULL, mw), LV_TEXT_ALIGN_CENTER, 0);
+    /* Readings, a line per type: its name, then the readings in the 20 px
+     * reading font (kana; anything else falls back to Palm), joined with 、.
+     * A reading that is a picture can't join a line of text, so a type with
+     * one keeps a row of its own pieces, wrapped. */
     static const char *const RT[] = { "Reading", "On'yomi", "Kun'yomi", "Nanori" };
+    int first_rd = 1;
     for(int t = 0; t < 4; t++){
-        lv_obj_t *grp = NULL;
+        char line[160];
+        int k = 0, n = 0, kana = 0, pic = 0;
         for(pos = 0; course_field_next(g_st->buf, it->text_len, &pos, &f) == 1; ){
             if(f.tag != CF_READING || (f.attr & CF_A_VALUE) != t) continue;
-            if(!grp){
-                lv_obj_t *hd = st_label(page, RT[t], &lv_font_palm_bold, 0);
-                lv_obj_set_style_pad_top(hd, 4, 0);
-                grp = lv_obj_create(page);
-                lv_obj_set_size(grp, LCD_W - 8, LV_SIZE_CONTENT);
-                lv_obj_set_style_border_width(grp, 0, 0);
-                lv_obj_set_style_pad_all(grp, 0, 0);
-                lv_obj_set_style_pad_column(grp, 12, 0);
-                lv_obj_set_flex_flow(grp, LV_FLEX_FLOW_ROW_WRAP);
-                lv_obj_clear_flag(grp, LV_OBJ_FLAG_SCROLLABLE);
-            }
-            lv_obj_t *o = st_field(grp, &f, &lv_font_palm_bold, 60);
-            if(o && lv_obj_check_type(o, &lv_label_class)) lv_obj_set_width(o, LV_SIZE_CONTENT);
+            n++;
+            if(f.attr & CF_A_PICTURE){ pic = 1; continue; }
+            if(f.attr & CF_A_KANA) kana = 1;
+            if(k < (int)sizeof line - 8)
+                k += snprintf(line + k, sizeof line - k, "%s%.*s",
+                              !k ? "" : kana ? "\xE3\x80\x81" : ", ", (int)f.len, f.text);
+        }
+        if(!n) continue;
+        lv_obj_t *row = lv_obj_create(page);
+        lv_obj_set_size(row, LCD_W - 8, LV_SIZE_CONTENT);
+        lv_obj_set_style_border_width(row, 0, 0);
+        lv_obj_set_style_pad_all(row, 0, 0);
+        lv_obj_set_style_pad_column(row, 6, 0);
+        if(first_rd){ lv_obj_set_style_pad_top(row, 4, 0); first_rd = 0; }
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_t *hd = st_label(row, RT[t], &lv_font_palm_bold, 0);
+        lv_obj_set_width(hd, ST_RD_NAME_W);
+        const int vw = LCD_W - 8 - ST_RD_NAME_W - 6;
+        if(!pic){
+            st_label(row, line, kana ? &lv_font_kana_20 : NULL, vw);
+            continue;
+        }
+        lv_obj_t *grp = lv_obj_create(row);
+        lv_obj_set_size(grp, vw, LV_SIZE_CONTENT);
+        lv_obj_set_style_border_width(grp, 0, 0);
+        lv_obj_set_style_pad_all(grp, 0, 0);
+        lv_obj_set_style_pad_column(grp, 8, 0);
+        lv_obj_set_flex_flow(grp, LV_FLEX_FLOW_ROW_WRAP);
+        lv_obj_clear_flag(grp, LV_OBJ_FLAG_SCROLLABLE);
+        for(pos = 0; course_field_next(g_st->buf, it->text_len, &pos, &f) == 1; ){
+            if(f.tag != CF_READING || (f.attr & CF_A_VALUE) != t) continue;
+            lv_obj_t *o = (f.attr & CF_A_PICTURE) ? st_pic(grp, f.pic, 40) : NULL;
+            if(!o) o = st_label(grp, st_ftext(&f), (f.attr & CF_A_KANA) ? &lv_font_kana_20 : NULL, 0);
         }
     }
     for(pos = 0; course_field_next(g_st->buf, it->text_len, &pos, &f) == 1; )
