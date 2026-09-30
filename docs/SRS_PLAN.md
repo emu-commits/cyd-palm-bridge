@@ -665,3 +665,8 @@ mock-ups: §11 decision 10).
     on the dashboard as necessary"); the launcher shows a count badge on
     Study's icon; the count is the total across every course, and reviews
     only.
+11. **Full screen for lessons and reviews** (2026-09-30, from the bench:
+    "the scrolling is still a poor experience"): nothing on those screens
+    is written, so they hide the Graffiti strip and take its 112 px; Home
+    and Menu move to the title bar. The dashboard, the Week screen and the
+    end of a round keep the strip, where her greetings speak from.

@@ -16,6 +16,60 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-30 — Study full screen: lessons and reviews without the Graffiti strip
+
+From the bench: "the scrolling is still a poor experience. What do you
+think about making the lessons and reviews hide the graffiti pane to give
+them the full space ... We just need to keep the home and menu buttons
+available somehow." Study never takes writing, so its lesson cards,
+questions and the Card view now take the strip's 112 px: 296 px of content
+where there were 184.
+
+**Home and Menu** move to the title bar's right end, the same silkscreen
+icons in white on the black bar, 24×20 buttons with an 8 px click area
+around them (so 40×36 to a finger). Study's title bar has no category
+picker there. The clock stays centred and the screen's title at the left.
+
+**How** (`ui.c`):
+- `ui_full_screen(on)` hides the strip, grows `content`, and makes the two
+  buttons; off shows the strip, shrinks `content` and deletes them. The
+  delete is `lv_obj_delete_async`, because Home's own click is what turns
+  full screen off.
+- `content_clear()` turns it off for every screen swap, so nothing but a
+  screen that asks keeps it. The lock screen, Home, another app: all back
+  to normal. Study, swapping one of its own screens for another
+  (`g_st_keep`), says for itself: `st_screen()` off, `st_screen_full()`
+  on. So going from card to card, or question to question, doesn't rebuild
+  the buttons.
+- The dashboard, the Week screen, the course list and the end of a round
+  keep the strip; her greetings speak from it.
+
+**The screens with the room:**
+- **a lesson card** is 246 px of page (was 150) over 42 px Back and Next
+  buttons (were 30): a radical's card and most of a kanji's fit without
+  scrolling;
+- **a question:** a 24 px banner with 48 px Undo and Card buttons, a
+  104 px prompt box (was 76), an answer area of 114 px (was 50) that
+  takes two lines at 2× and as many "also" lines as fit, and 42 px grade
+  buttons;
+- **the Card** over a question is the lesson card's page.
+
+The smoke tour taps Study's bottom row at y 295, and Home (200,12) and
+Menu (226,12) in the title bar where the screen is full.
+
+**Cost:**
+- Firmware (`espressif/idf:release-v5.5`, LVGL 9.5.0 local): app
+  1,728,144 B, **+560 B**; static DRAM 160,580 B, **+16 B** (the strip's
+  pointer and the two buttons').
+- LVGL pool: the buttons exist only in full screen, so the smoke run's
+  low-water mark is unchanged at 22,464 B. Made up front and hidden, they
+  had cost 1,632 B of it everywhere. A full-screen card leaves 36,744 B
+  free (64-bit sim).
+
+**A lesson from the session:** `pkill -f <pattern>` run from a shell whose
+own command line contains the pattern kills that shell. Stop a background
+wait by its task, not by a pattern.
+
 ### 2026-09-30 — Study's lesson cards: readings at a readable size
 
 From the bench: "once it introduces on'yomi and kunyomi the kana are

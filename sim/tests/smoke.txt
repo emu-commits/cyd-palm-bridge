@@ -1410,7 +1410,9 @@ t 300
 # a lesson (five radical cards, then a quiz on them), two hours later (the
 # `A` command moves Study's clock, UI_DEVTOOLS only) the first reviews,
 # with a wrong answer taken back by Undo, and the next lesson, whose kanji
-# unlocked because their radicals are known now. B/E: leaving Study gives
+# unlocked because their radicals are known now. Lessons, questions and the
+# Card are full screen: no Graffiti strip, Home (200,12) and Menu (226,12) in
+# the title bar, the buttons along the bottom (y 295). B/E: leaving Study gives
 # back every byte of heap it took (SRS_PLAN.md S3's exit condition).
 B
 c 46 160
@@ -1434,38 +1436,38 @@ t 30
 u
 t 400
 s study_card_scrolled
-c 176 191
+c 176 295
 t 300
-c 176 191
+c 176 295
 t 300
-c 176 191
+c 176 295
 t 300
-c 176 191
+c 176 295
 t 300
 s study_card_last
-c 176 191
+c 176 295
 t 300
 s study_quiz
-c 120 189
+c 120 295
 t 300
 s study_quiz_answer
-c 180 189
+c 180 295
 t 300
-c 120 189
+c 120 295
 t 300
-c 180 189
+c 180 295
 t 300
-c 120 189
+c 120 295
 t 300
-c 180 189
+c 180 295
 t 300
-c 120 189
+c 120 295
 t 300
-c 180 189
+c 180 295
 t 300
-c 120 189
+c 120 295
 t 300
-c 180 189
+c 180 295
 t 300
 s study_lesson_done
 c 120 260
@@ -1484,32 +1486,32 @@ s study_dash_reviews_due
 c 180 92
 t 400
 s study_review
-c 120 189
+c 120 295
 t 300
 s study_review_answer
-c 60 189
+c 60 295
 t 300
 s study_review_after_wrong
 c 24 34
 t 300
 s study_review_undone
-c 180 189
+c 180 295
 t 300
-c 120 189
+c 120 295
 t 300
-c 180 189
+c 180 295
 t 300
-c 120 189
+c 120 295
 t 300
-c 180 189
+c 180 295
 t 300
-c 120 189
+c 120 295
 t 300
-c 180 189
+c 180 295
 t 300
-c 120 189
+c 120 295
 t 300
-c 180 189
+c 180 295
 t 300
 s study_reviews_done
 c 120 260
@@ -1528,20 +1530,20 @@ t 400
 # questions come on a black banner and answer in the kana font
 c 61 92
 t 400
-c 176 191
+c 176 295
 t 300
-c 176 191
+c 176 295
 t 300
-c 176 191
+c 176 295
 t 300
 s study_kanji_card
-c 176 191
+c 176 295
 t 300
-c 176 191
+c 176 295
 t 300
 s study_quiz2
 # the menu's Study items: This week, About this course, and Check course
-c 18 300
+c 226 12
 t 400
 s study_menu
 c 60 184
@@ -1549,14 +1551,14 @@ t 400
 s study_about_course
 c 120 160
 t 300
-c 18 300
+c 226 12
 t 400
 c 60 210
 t 600
 s study_check_course
 c 120 160
 t 300
-c 18 225
+c 200 12
 t 300
 E leaving Study
 # S5: Study at a glance, with no course open: the launcher's badge and the

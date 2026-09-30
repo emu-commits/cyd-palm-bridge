@@ -94,6 +94,9 @@ static lv_obj_t *clock_lbl;    /* live clock in the title bar (Palm) */
 #define BATT_W  13             /* body, in px -- sized to the Palm font's cap height */
 #define BATT_H   8
 static lv_obj_t *title_bar;             /* parent for the indicator (outlives content) */
+static lv_obj_t *g_graf;                /* the Graffiti strip, hidden in full screen */
+static lv_obj_t *g_tb_home, *g_tb_menu; /* Home and Menu in the title bar, in full screen */
+static int g_st_keep;                   /* a Study screen replacing another (Study's section) */
 static lv_obj_t *batt_lbl, *batt_body, *batt_fill, *batt_nub;
 static int       g_on_launcher;         /* 1 while the app grid is the content view */
 static void      batt_refresh(void);
@@ -6768,6 +6771,52 @@ static lv_obj_t *mk_silk(lv_obj_t *par, const lv_image_dsc_t *ic, lv_align_t al,
     return b;
 }
 
+/* Home or Menu in the title bar, for a full-screen view: the silkscreen
+ * icon in white on the black bar, with a finger-sized click area around the
+ * 24 px button. Made when full screen starts and deleted when it ends, so
+ * the pool pays for them only then. */
+static lv_obj_t *mk_tb_silk(const lv_image_dsc_t *ic, int x, lv_event_cb_t cb){
+    lv_obj_t *b = lv_obj_create(title_bar);
+    lv_obj_set_size(b, 24, TITLE_H - 4);
+    lv_obj_set_pos(b, x, 1);
+    lv_obj_set_style_radius(b, 0, 0);
+    lv_obj_set_style_border_width(b, 0, 0);
+    lv_obj_set_style_pad_all(b, 0, 0);
+    lv_obj_set_style_bg_color(b, COL_TITLE, 0);
+    lv_obj_set_style_bg_color(b, COL_DIM, LV_STATE_PRESSED);
+    lv_obj_clear_flag(b, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_ext_click_area(b, 8);
+    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *im = lv_image_create(b);
+    lv_image_set_src(im, ic);
+    lv_obj_center(im);
+    lv_obj_set_style_image_recolor(im, COL_TITLE_FG, 0);
+    lv_obj_set_style_image_recolor_opa(im, LV_OPA_COVER, 0);
+    return b;
+}
+
+/* FULL SCREEN, for a view with nothing to write (Study's lessons and
+ * reviews): the Graffiti strip is hidden and its 112 px go to the content
+ * area, and Home and Menu move up into the title bar's right end (a view that
+ * asks for this has no category picker there). content_clear() turns it off,
+ * so it lasts exactly as long as the screen that asked for it. */
+static void ui_full_screen(int on){
+    if(!content || !g_graf || !on == !g_tb_home) return;       /* already so */
+    lv_obj_set_height(content, on ? LCD_H - TITLE_H : PDA_H - TITLE_H);
+    if(on){
+        lv_obj_add_flag(g_graf, LV_OBJ_FLAG_HIDDEN);
+        g_tb_home = mk_tb_silk(&silk_home, LCD_W - 52, home_cb);
+        g_tb_menu = mk_tb_silk(&silk_menu, LCD_W - 26, menu_cb);
+    } else {
+        lv_obj_clear_flag(g_graf, LV_OBJ_FLAG_HIDDEN);
+        /* later, not now: this runs inside Home's own click when it's tapped */
+        lv_obj_delete_async(g_tb_home);
+        lv_obj_delete_async(g_tb_menu);
+        g_tb_home = g_tb_menu = NULL;
+    }
+}
+
 /* refresh the title-bar clock: 12h time + date to its right ("12:34p  Jul 10").
  * Persists across screen swaps since it lives on the title bar, not content. */
 /* Set the level and decide whether the indicator is on screen at all.
@@ -8429,6 +8478,9 @@ static lv_obj_t *g_zp_cv, *g_zp_status, *g_zp_timelbl;
 static void content_clear(void){
     if(!content) return;
     lv_obj_clean(content);
+    /* only the screen that asks for it keeps it; Study, swapping one of its
+     * own screens for another, says for itself (st_screen) */
+    if(!g_st_keep) ui_full_screen(0);
     /* A greeting stands on lv_layer_top() OVER the screen it is greeting, so it
      * is not in `content` and lv_obj_clean() cannot reach it. Every screen swap
      * comes through here -- including the lock raising itself when the screen
@@ -10942,7 +10994,13 @@ static void show_coach(void){
 #define ST_MAXPICS   12
 #define ST_PIC_ROWS  400                      /* the tallest picture drawn */
 #define ST_TXT       1024
-#define ST_ASK_PROMPT_H 76                    /* the prompt's box on a question */
+/* A lesson card, a question and the Card view are full screen
+ * (ui_full_screen): 296 px, not 184, with their buttons along the bottom. */
+#define ST_FULL_H    (LCD_H - TITLE_H)
+#define ST_BTN_H     42                       /* the bottom row's buttons */
+#define ST_BTN_Y     (ST_FULL_H - ST_BTN_H - 4)
+#define ST_BAN_H     24                       /* a question's banner */
+#define ST_ASK_PROMPT_H 104                   /* the prompt's box on a question */
 #define ST_RD_NAME_W 64                       /* a card's reading line: "Kun'yomi" */
 #define ST_TERM_BOX  70                       /* a card's picture term: a kanji is 64 */
 
@@ -10970,7 +11028,7 @@ typedef struct {
 
 static StudyApp *g_st;
 /* g_st_open (declared at the top): Study's items in the menu */
-static int g_st_keep;                         /* a Study screen replacing another */
+/* g_st_keep (declared at the top): a Study screen replacing another */
 #ifdef UI_DEVTOOLS
 static int32_t g_st_skew;                     /* the smoke tour's clock (ui_test_study_skew) */
 #endif
@@ -11071,6 +11129,20 @@ static void st_screen(const char *title){
     content_clear();
     g_st_keep = 0;
     g_st_open = 1;
+    ui_full_screen(0);                        /* st_screen_full() turns it back on */
+    lv_label_set_text(title_lbl, title);
+    update_cat_trigger();
+}
+/* the same, full screen: nothing on these screens is written, so the
+ * Graffiti strip's room is theirs (Home and Menu move to the title bar) */
+static void st_screen_full(const char *title){
+    g_st_keep = 1;                            /* full screen to full screen: no change */
+    kill_kb();
+    cur_app = NULL; cur_uid = 0;
+    content_clear();
+    g_st_keep = 0;
+    g_st_open = 1;
+    ui_full_screen(1);
     lv_label_set_text(title_lbl, title);
     update_cat_trigger();
 }
@@ -11692,13 +11764,12 @@ static void st_lessons_cb(lv_event_t *e){
 static void st_show_card(void){
     char t[32];
     snprintf(t, sizeof t, "Lesson %d of %d", g_st->card + 1, g_st->nlesson);
-    st_screen(t);
-    lv_obj_t *page = st_page(0, (PDA_H - TITLE_H) - 34);
+    st_screen_full(t);
+    lv_obj_t *page = st_page(0, ST_BTN_Y - 4);
     if(st_load(g_st->lesson[g_st->card])) st_label(page, g_st->c.err, NULL, 220);
     else st_card(page);
-    int y = (PDA_H - TITLE_H) - 32;
-    if(g_st->card > 0) st_btn(content, 4, y, 84, 30, "< Back", st_card_nav_cb, -1, 0);
-    st_btn(content, LCD_W - 124, y, 120, 30, g_st->card + 1 < g_st->nlesson ? "Next >" : "Quiz >",
+    if(g_st->card > 0) st_btn(content, 4, ST_BTN_Y, 96, ST_BTN_H, "< Back", st_card_nav_cb, -1, 0);
+    st_btn(content, LCD_W - 132, ST_BTN_Y, 128, ST_BTN_H, g_st->card + 1 < g_st->nlesson ? "Next >" : "Quiz >",
            st_card_nav_cb, 1, 1);
 }
 
@@ -11766,7 +11837,7 @@ static void st_card_back_cb(lv_event_t *e){ (void)e; st_show_ask(); }
 static void st_show_ask(void){
     StQ q;
     if(!g_st || !g_st->round_on || !st_current(&g_st->round, &q)){ st_show_done(); return; }
-    st_screen(g_st->reviewing ? "Reviews" : "Quiz");
+    st_screen_full(g_st->reviewing ? "Reviews" : "Quiz");
     if(st_load(q.item)){ st_notice("Study", g_st->c.err); return; }
     const int reading = q.q == ST_READING;
 
@@ -11775,18 +11846,18 @@ static void st_show_ask(void){
     char kind[32], b[64];
     st_cap_kind(kind, sizeof kind, g_st->it.kind);
     snprintf(b, sizeof b, "%s  \xC2\xB7  %s", kind, reading ? "Reading" : "Meaning");
-    lv_obj_t *ban = panel(content, 0, 0, LCD_W, 20, reading ? COL_LINE : COL_GRAF);
+    lv_obj_t *ban = panel(content, 0, 0, LCD_W, ST_BAN_H, reading ? COL_LINE : COL_GRAF);
     lv_obj_t *bl = st_label(ban, b, &lv_font_palm_bold, 0);
     lv_obj_set_style_text_color(bl, reading ? COL_BODY : COL_LINE, 0);
     lv_obj_center(bl);
     if(g_st->undo_ok){
-        lv_obj_t *u = st_btn(ban, 2, 1, 44, 18, "Undo", st_undo_cb, 0, 0);
+        lv_obj_t *u = st_btn(ban, 2, 2, 48, ST_BAN_H - 4, "Undo", st_undo_cb, 0, 0);
         (void)u;
     }
 
     /* the prompt, centred in its box */
     lv_obj_t *box = lv_obj_create(content);
-    lv_obj_set_pos(box, 0, 22);
+    lv_obj_set_pos(box, 0, ST_BAN_H + 2);
     lv_obj_set_size(box, LCD_W, ST_ASK_PROMPT_H);
     lv_obj_set_style_border_width(box, 0, 0);
     lv_obj_set_style_pad_all(box, 0, 0);
@@ -11798,20 +11869,22 @@ static void st_show_ask(void){
     char left[16];
     snprintf(left, sizeof left, "%d left", st_left(&g_st->round));
     lv_obj_t *ll = st_label(content, left, NULL, 0);
-    lv_obj_align(ll, LV_ALIGN_TOP_RIGHT, -4, 22);
+    lv_obj_align(ll, LV_ALIGN_TOP_RIGHT, -4, ST_BAN_H + 2);
     lv_obj_set_style_text_color(ll, COL_DIM, 0);
 
-    int by = (PDA_H - TITLE_H) - 34;
+    const int by = ST_BTN_Y;
     if(!g_st->revealed){
-        st_btn(content, 20, by, LCD_W - 40, 30, "Show answer", st_reveal_cb, 0, 1);
+        st_btn(content, 20, by, LCD_W - 40, ST_BTN_H, "Show answer", st_reveal_cb, 0, 1);
         return;
     }
-    /* the answer: the primary meaning or reading, big; the other meanings small.
-     * The area is 50 px: one line at twice the size and one of "also", or the
-     * answer at 1x (wrapped) when it's too long to be big. */
+    /* the answer: the primary meaning or reading, big; the other meanings
+     * small. The area is 114 px: two lines at twice the size and the "also"
+     * lines that fit under them, or the answer at 1x (wrapped) when it's too
+     * long to be big. */
+    const int ay = ST_BAN_H + 2 + ST_ASK_PROMPT_H, ah = by - ay - 4;
     lv_obj_t *ans = lv_obj_create(content);
-    lv_obj_set_pos(ans, 0, 22 + ST_ASK_PROMPT_H);
-    lv_obj_set_size(ans, LCD_W, by - (22 + ST_ASK_PROMPT_H) - 2);
+    lv_obj_set_pos(ans, 0, ay);
+    lv_obj_set_size(ans, LCD_W, ah);
     lv_obj_set_style_border_width(ans, 0, 0);
     lv_obj_set_style_pad_all(ans, 0, 0);
     lv_obj_set_style_bg_opa(ans, LV_OPA_TRANSP, 0);
@@ -11819,18 +11892,18 @@ static void st_show_ask(void){
     lv_obj_set_flex_align(ans, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(ans, LV_OBJ_FLAG_SCROLLABLE);
     CourseField f;
-    int big = 0;
+    lv_obj_t *prim = NULL;
     if(reading){
         if(st_find(CF_READING, CF_A_PRIMARY, &f) || st_find(CF_READING, 0, &f)){
-            lv_obj_t *o = st_field(ans, &f, &lv_font_palm_bold, 44);
-            if(o && lv_obj_check_type(o, &lv_label_class) && ((f.attr & CF_A_KANA) || !st_big(o, 1)))
-                lv_obj_set_width(o, LV_SIZE_CONTENT);
+            lv_obj_t *o = st_field(ans, &f, &lv_font_palm_bold, 60);
+            if(o && lv_obj_check_type(o, &lv_label_class) && ((f.attr & CF_A_KANA) || !st_big(o, 2)))
+                lv_obj_set_style_text_align(o, LV_TEXT_ALIGN_CENTER, 0);
         }
     } else {
         if(st_find(CF_MEANING, CF_A_PRIMARY, &f) || st_find(CF_MEANING, 0, &f)){
-            lv_obj_t *o = st_field(ans, &f, &lv_font_palm_bold, 44);
-            if(o && lv_obj_check_type(o, &lv_label_class) && !(big = st_big(o, 1)))
-                lv_obj_set_width(o, LV_SIZE_CONTENT);
+            lv_obj_t *o = prim = st_field(ans, &f, &lv_font_palm_bold, 60);
+            if(o && lv_obj_check_type(o, &lv_label_class) && !st_big(o, 2))
+                lv_obj_set_style_text_align(o, LV_TEXT_ALIGN_CENTER, 0);
         }
         char also[160];
         int ak = 0;
@@ -11845,21 +11918,25 @@ static void st_show_ask(void){
         if(ak){
             lv_obj_t *a = st_label(ans, also, NULL, LCD_W - 16);
             lv_obj_set_style_text_align(a, LV_TEXT_ALIGN_CENTER, 0);
-            if(big){                              /* one line left under it; the rest is on the Card */
+            /* the lines left under the answer; the rest is on the Card */
+            lv_obj_update_layout(ans);
+            int lh = lv_font_get_line_height(lv_obj_get_style_text_font(a, 0));
+            int room = ah - (prim ? lv_obj_get_height(prim) : 0) - 4;
+            if(lv_obj_get_height(a) > room){
                 lv_label_set_long_mode(a, LV_LABEL_LONG_DOT);
-                lv_obj_set_height(a, lv_font_get_line_height(lv_obj_get_style_text_font(a, 0)));
+                lv_obj_set_height(a, room > lh ? room / lh * lh : lh);
             }
         }
     }
-    st_btn(ban, LCD_W - 46, 1, 44, 18, "Card", st_card_over_cb, 0, 0);
+    st_btn(ban, LCD_W - 50, 2, 48, ST_BAN_H - 4, "Card", st_card_over_cb, 0, 0);
 
     /* the grades: Wrong / Right, or Again / Hard / Good / Easy */
     if(g_st->c.grading == 4){
         static const char *const G4[] = { "Again", "Hard", "Good", "Easy" };
-        for(int i = 0; i < 4; i++) st_btn(content, 2 + i * 59, by, 56, 30, G4[i], st_grade_cb, i, i == 2);
+        for(int i = 0; i < 4; i++) st_btn(content, 2 + i * 59, by, 56, ST_BTN_H, G4[i], st_grade_cb, i, i == 2);
     } else {
-        st_btn(content, 4, by, 112, 30, "Wrong", st_grade_cb, SRS_AGAIN, 0);
-        st_btn(content, LCD_W - 116, by, 112, 30, "Right", st_grade_cb, SRS_GOOD, 1);
+        st_btn(content, 4, by, 112, ST_BTN_H, "Wrong", st_grade_cb, SRS_AGAIN, 0);
+        st_btn(content, LCD_W - 116, by, 112, ST_BTN_H, "Right", st_grade_cb, SRS_GOOD, 1);
     }
 }
 
@@ -11868,10 +11945,10 @@ static void st_card_over_cb(lv_event_t *e){
     (void)e;
     StQ q;
     if(!g_st || !st_current(&g_st->round, &q)) return;
-    st_screen("Card");
-    lv_obj_t *page = st_page(0, (PDA_H - TITLE_H) - 34);
+    st_screen_full("Card");
+    lv_obj_t *page = st_page(0, ST_BTN_Y - 4);
     if(!st_load(q.item)) st_card(page);
-    st_btn(content, 4, (PDA_H - TITLE_H) - 32, 120, 30, "< Back", st_card_back_cb, 0, 1);
+    st_btn(content, 4, ST_BTN_Y, 128, ST_BTN_H, "< Back", st_card_back_cb, 0, 1);
 }
 
 /* ---- the end of a round ---- */
@@ -12148,6 +12225,7 @@ void ui_init(void){
     /* Graffiti strip: silkscreen buttons flank the writing area, Palm-style:
      * [Home][Menu] ... abc | 123 ... [Find][Calc] */
     lv_obj_t *graf = panel(scr, 0, PDA_H, LCD_W, GRAFFITI_H, COL_GRAF);
+    g_graf = graf;
     mk_silk(graf, &silk_home, LV_ALIGN_TOP_LEFT,     3,  3, home_cb);
     mk_silk(graf, &silk_menu, LV_ALIGN_BOTTOM_LEFT,  3, -3, menu_cb);
     mk_silk(graf, &silk_find, LV_ALIGN_TOP_RIGHT,   -3,  3, find_cb);
