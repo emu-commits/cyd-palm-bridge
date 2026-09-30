@@ -65,7 +65,7 @@ before touching anything.
   the working branch isn't touched. The container is wiped between sessions:
   anything not committed and pushed is lost, including earlier spike code.
 
-## Current work: the SRS app, S3 next (approved 2026-09-29)
+## Current work: the SRS app, S4 next (approved 2026-09-29)
 
 **The app platform is on hold** (`APP_PLATFORM_PLAN.md`, status block and
 §11 decision 7). The user's main goal is one first-class SRS app
@@ -150,12 +150,24 @@ and S1**, which the owner asked for together:
     web app review for review, bar its float drift;
   - it also cuts the log at every byte and checks remapping and unlocks.
 
-1. **S3 onward** as `SRS_PLAN.md` §10 describes, keeping to its §7 budgets:
-   - the screens use `course.c` and `srs.c` as they are; logic belongs
-     there, not in `ui.c`;
+- **S3, the Study screens**, followed once the owner approved the format
+  ("format and demo look good, start S3"):
+  - the tile at launcher position 7, and the owner's portrait through
+    `gen_faces.py` (it round-trips `docs/img/study_face.png` exactly);
+  - `study.c` holds a round's question queue and the card functions (the
+    demo installed once, courses listed, the last one remembered);
+  - `study_demo.c` is generated from the demo (`gen_study_demo.py --check`
+    runs in `make -C sim course`);
+  - the screens are one section of `ui.c` ("Study: the spaced-repetition
+    app"), in a single heap block freed when the screen leaves Study;
+  - the smoke tour's `B`/`E` commands prove the heap is given back, and `A`
+    moves Study's clock on (UI_DEVTOOLS).
+
+1. **S4 onward** as `SRS_PLAN.md` §10 describes, keeping to its §7 budgets:
+   - the screens use `course.c`, `srs.c` and `study.c` as they are; logic
+     belongs there, not in `ui.c`;
    - new host gates added to `ci.yml` and to the gate list above;
    - screens checked by smoke screenshots before any `[s]`;
-   - Study's tile goes in the empty launcher slot (`APPS[6]` is `NULL`).
    - Keep `mkcourse.py`'s dump and `course_test.c`'s dump in step if the
      format grows: the round trip compares them byte for byte.
 

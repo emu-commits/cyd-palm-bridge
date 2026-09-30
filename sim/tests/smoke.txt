@@ -1404,6 +1404,154 @@ c 120 100
 t 400
 c 18 225
 t 300
+# S3: Study, the spaced-repetition app. Launcher row 3 col 1 (the textbook).
+# The first open installs the demo course on the card and greets from the
+# strip (her portrait is the owner's own art). Then a whole day in the demo:
+# a lesson (five radical cards, then a quiz on them), two hours later (the
+# `A` command moves Study's clock, UI_DEVTOOLS only) the first reviews,
+# with a wrong answer taken back by Undo, and the next lesson, whose kanji
+# unlocked because their radicals are known now. B/E: leaving Study gives
+# back every byte of heap it took (SRS_PLAN.md S3's exit condition).
+B
+c 46 160
+t 400
+s study_greet
+c 120 260
+t 300
+s study_dash
+c 61 92
+t 400
+s study_card
+# the card scrolls: meaning, then the mnemonic below the fold
+d 120 150
+t 30
+m 120 120
+t 30
+m 120 80
+t 30
+m 120 50
+t 30
+u
+t 400
+s study_card_scrolled
+c 176 191
+t 300
+c 176 191
+t 300
+c 176 191
+t 300
+c 176 191
+t 300
+s study_card_last
+c 176 191
+t 300
+s study_quiz
+c 120 189
+t 300
+s study_quiz_answer
+c 180 189
+t 300
+c 120 189
+t 300
+c 180 189
+t 300
+c 120 189
+t 300
+c 180 189
+t 300
+c 120 189
+t 300
+c 180 189
+t 300
+c 120 189
+t 300
+c 180 189
+t 300
+s study_lesson_done
+c 120 260
+t 200
+c 120 130
+t 400
+s study_dash_after_lesson
+A 7300
+c 18 225
+t 300
+c 46 160
+t 400
+c 120 260
+t 200
+s study_dash_reviews_due
+c 180 92
+t 400
+s study_review
+c 120 189
+t 300
+s study_review_answer
+c 60 189
+t 300
+s study_review_after_wrong
+c 24 34
+t 300
+s study_review_undone
+c 180 189
+t 300
+c 120 189
+t 300
+c 180 189
+t 300
+c 120 189
+t 300
+c 180 189
+t 300
+c 120 189
+t 300
+c 180 189
+t 300
+c 120 189
+t 300
+c 180 189
+t 300
+s study_reviews_done
+c 120 260
+t 200
+c 120 130
+t 400
+s study_dash_after_reviews
+# the next lesson: the last three radicals, then kanji -- whose reading
+# questions come on a black banner and answer in the kana font
+c 61 92
+t 400
+c 176 191
+t 300
+c 176 191
+t 300
+c 176 191
+t 300
+s study_kanji_card
+c 176 191
+t 300
+c 176 191
+t 300
+s study_quiz2
+# the menu's Study items: About this course, and Check course
+c 18 300
+t 400
+s study_menu
+c 60 158
+t 400
+s study_about_course
+c 120 160
+t 300
+c 18 300
+t 400
+c 60 184
+t 600
+s study_check_course
+c 120 160
+t 300
+c 18 225
+t 300
+E leaving Study
 # I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.
 # (CI starts on a fresh /sdcard, so the seed + manifest exist here.)
 c 18 225

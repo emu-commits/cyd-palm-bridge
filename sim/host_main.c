@@ -26,6 +26,11 @@
  *   P <who> <hex>   fail unless the store holds that password for <who>: `a` for
  *                   the account, or a Wi-Fi slot 1..4. Proves the typing landed,
  *                   so an X that finds nothing means "wiped", not "never typed"
+ *   A <seconds>     move Study's clock on (ui_test_study_skew): reviews come
+ *                   due hours after a lesson, and the tour can't wait for them
+ *   B               remember the heap in use now...
+ *   E <what>        ...and fail unless it's the same again: a screen that was
+ *                   opened and left must give back every byte it took
  *   q               quit (implicit at EOF)
  *
  * Usage: sim_host [shotdir] < script      (shotdir default "build/shots")
@@ -212,7 +217,8 @@ static int shot(const char *name){
                 (unsigned)mon.free_biggest_size);
         s_pool_bad = 1;
     }
-    fprintf(stderr, "shot: %s | pool free=%u\n", path, (unsigned)mon.free_size);
+    fprintf(stderr, "shot: %s | pool free=%u | heap used=%zu\n", path, (unsigned)mon.free_size,
+            sim_heap_used());
     return 0;
 }
 
@@ -238,6 +244,7 @@ int main(int argc, char **argv){
 
     char line[256];
     int rc = 0;
+    size_t heap_mark = 0;
     while(fgets(line, sizeof line, stdin)){
         int x, y, ms;
         char name[128];
@@ -280,6 +287,19 @@ int main(int argc, char **argv){
                 h += 2;
             }
             sim_step(60);
+        }
+        else if(line[0] == 'A' && line[1] == ' '){ ui_test_study_skew((int32_t)atol(line + 2)); sim_step(60); }
+        else if(line[0] == 'B' && (line[1] == '\n' || !line[1])){
+            heap_mark = sim_heap_used();
+            fprintf(stderr, "heap: %zu bytes in use (marked)\n", heap_mark);
+        }
+        else if(line[0] == 'E' && line[1] == ' '){
+            size_t now = sim_heap_used();
+            fprintf(stderr, "heap: %zu bytes in use after %s (marked %zu)\n", now, line + 2, heap_mark);
+            if(now != heap_mark){
+                fprintf(stderr, "HEAP: %zd bytes not given back after %s\n", (ssize_t)(now - heap_mark), line + 2);
+                rc = 1;
+            }
         }
         else if(line[0] == 'X' && line[1] == ' '){ if(secret_scan(line + 2, 0)) rc = 1; }
         else if(line[0] == 'Y' && line[1] == ' '){ if(secret_scan(line + 2, 1)) rc = 1; }

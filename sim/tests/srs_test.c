@@ -7,11 +7,13 @@
  * Run from sim/ (the course paths are relative to it); it works in
  * build/srs_tmp/. Built with ASan and UBSan. */
 #include "srs.h"
+#include "study.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #define DEMO     "../courses/demo-kanji/course.srs"
 #define CARDS    "../tests/data/study/cards/course.srs"
@@ -457,6 +459,129 @@ static void scanning(void){
     course_close(c); free(c);
 }
 
+/* ---- a round's queue (study.c) ---- */
+
+static void rounds(void){
+    StSession s;
+    uint16_t items[3] = { 10, 20, 30 };
+    uint8_t quiz[3] = { ST_MEANING | ST_READING, ST_MEANING, ST_MEANING | ST_READING };
+    CHECK(st_begin(&s, items, quiz, 3, 1234) == 0 && st_left(&s) == 5, "5 questions for 3 items");
+    /* all right: each item finishes once, with its last question */
+    int finished[3] = { 0 }, asked[3] = { 0 };
+    StQ q;
+    StItem done;
+    while(st_current(&s, &q)){
+        int k = q.item / 10 - 1;
+        asked[k] |= q.q;
+        int r = st_answer(&s, SRS_GOOD, &done);
+        if(r){ CHECK(done.item == q.item && done.grade == SRS_GOOD && !done.wrong, "item %u done right", q.item);
+               CHECK(asked[k] == quiz[k], "item %u finished only after all its questions", q.item);
+               finished[k]++; }
+    }
+    CHECK(finished[0] == 1 && finished[1] == 1 && finished[2] == 1 && s.items_done == 3 && s.missed == 0, "each once");
+    st_end(&s);
+
+    /* a wrong answer: the question comes back 2 to 5 on, the item's grade
+     * is the worst it got */
+    CHECK(st_begin(&s, items, quiz, 3, 99) == 0, "begin");
+    st_current(&s, &q);
+    StQ first = q;
+    CHECK(st_answer(&s, SRS_AGAIN, &done) == 0 && st_left(&s) == 5 && s.missed == 1, "wrong: requeued");
+    int back = -1;
+    for(int i = s.pos; i < s.nq; i++) if(s.q[i].item == first.item && s.q[i].q == first.q){ back = i - s.pos; break; }
+    CHECK(back >= 1 && back <= 4, "it comes back %d questions later", back + 1);
+    /* undo the wrong answer: the requeue goes away, the question returns */
+    uint16_t it;
+    CHECK(st_undo(&s, &it) == 0 && it == first.item && st_left(&s) == 5 && s.missed == 0, "undo a wrong answer");
+    CHECK(st_current(&s, &q) && q.item == first.item && q.q == first.q, "the same question again");
+    CHECK(st_undo(&s, &it) == -1, "one level of undo");
+    /* now answer everything, the first question wrong once */
+    int n = 0, wrong_once = 0;
+    while(st_current(&s, &q)){
+        int g = SRS_GOOD;
+        if(q.item == first.item && q.q == first.q && !wrong_once){ g = SRS_AGAIN; wrong_once = 1; }
+        if(st_answer(&s, g, &done) && done.item == first.item)
+            CHECK(done.wrong && done.grade == SRS_AGAIN, "the item that was missed is graded Again");
+        if(++n > 20) break;
+    }
+    CHECK(s.items_done == 3 && s.items_wrong == 1 && s.answered == 6, "3 done, 1 wrong, 6 answers: %u %u %u",
+          s.items_done, s.items_wrong, s.answered);
+    st_end(&s);
+
+    /* undo after an item finishes: the caller is told, to put its record back */
+    uint16_t one[1] = { 7 };
+    uint8_t m[1] = { ST_MEANING };
+    st_begin(&s, one, m, 1, 5);
+    CHECK(st_answer(&s, SRS_EASY, &done) == 1 && done.grade == SRS_EASY && st_left(&s) == 0, "a one-question item");
+    CHECK(st_undo(&s, &it) == 1 && it == 7 && st_left(&s) == 1 && s.items_done == 0, "undo reopens it");
+    st_end(&s);
+
+    /* random rounds: whatever the answers, every item finishes exactly once,
+     * after every one of its questions was answered right */
+    uint16_t many[40];
+    uint8_t mq[40];
+    for(int i = 0; i < 40; i++){ many[i] = (uint16_t)(i + 1); mq[i] = (uint8_t)(1 + i % 3); }
+    uint32_t x = 7;
+    for(int seed = 1; seed <= 300; seed++){
+        CHECK(st_begin(&s, many, mq, 40, (uint32_t)seed) == 0, "begin %d", seed);
+        int fin[41] = { 0 }, steps = 0;
+        uint8_t right[41] = { 0 };
+        while(st_current(&s, &q) && steps < 2000){
+            x = x * 1103515245u + 12345u;
+            int g = (x >> 16) % 4 == 0 ? SRS_AGAIN : SRS_GOOD;
+            if(g != SRS_AGAIN) right[q.item] |= q.q;
+            if(st_answer(&s, g, &done)){
+                fin[done.item]++;
+                if((right[done.item] & mq[done.item - 1]) != mq[done.item - 1]) { CHECK(0, "finished early"); }
+            }
+            if((x >> 20) % 7 == 0 && st_undo(&s, &it) >= 0){
+                /* an undo, then the same answer again */
+                st_current(&s, &q);
+                if(st_answer(&s, g, &done)) { /* counted above already */ fin[done.item] += 0; }
+            }
+            steps++;
+        }
+        int all = 1;
+        for(int i = 1; i <= 40; i++) if(fin[i] > 1) all = 0;
+        CHECK(!st_current(&s, &q) && s.items_done == 40 && all, "seed %d: every item once (%u)", seed, s.items_done);
+        st_end(&s);
+    }
+}
+
+/* ---- the card: installing the demo, listing courses ---- */
+
+static void card(void){
+    const char *root = "build/srs_root";
+    char p[160];
+    mkdir(root, 0777);
+    st_remove_course(root, "demo-kanji");
+    snprintf(p, sizeof p, "%s/study/.demo", root); remove(p);
+    snprintf(p, sizeof p, "%s/study/last.txt", root); remove(p);
+    CHECK(st_install_demo(root, 0) == 1, "the first open installs the demo");
+    static uint8_t a[100000], b[100000];
+    snprintf(p, sizeof p, "%s/study/demo-kanji/course.srs", root);
+    long na = slurp(p, a, sizeof a), nb = slurp(DEMO, b, sizeof b);
+    CHECK(na == nb && na > 0 && !memcmp(a, b, na), "the installed course is the demo, byte for byte");
+    CHECK(st_install_demo(root, 0) == 0, "only once");
+    char ids[8][ST_ID_MAX];
+    CHECK(st_list_courses(root, ids, 8) == 1 && !strcmp(ids[0], "demo-kanji"), "one course on the card");
+    CHECK(st_remove_course(root, "demo-kanji") == 0 && st_list_courses(root, ids, 8) == 0, "removed");
+    CHECK(st_install_demo(root, 0) == 0, "removing it keeps it removed");
+    CHECK(st_install_demo(root, 1) == 1 && st_list_courses(root, ids, 8) == 1, "reinstalled on request");
+    CHECK(st_remove_course(root, "../x") == -1, "an id can't climb out of study/");
+    snprintf(p, sizeof p, "%s/study/b-course", root); mkdir(p, 0777);
+    snprintf(p, sizeof p, "%s/study/b-course/course.srs", root); spit(p, b, 10);
+    snprintf(p, sizeof p, "%s/study/empty", root); mkdir(p, 0777);
+    CHECK(st_list_courses(root, ids, 8) == 2 && !strcmp(ids[0], "b-course") && !strcmp(ids[1], "demo-kanji"),
+          "sorted, and a folder without a course.srs isn't one");
+    st_remove_course(root, "b-course");
+    snprintf(p, sizeof p, "%s/study/empty", root); rmdir(p);
+    char id[ST_ID_MAX];
+    CHECK(st_last_get(root, id) == 0 && !id[0], "no last course yet");
+    st_last_set(root, "demo-kanji");
+    CHECK(st_last_get(root, id) == 1 && !strcmp(id, "demo-kanji"), "the last course");
+}
+
 int main(int argc, char **argv){
     if(argc == 3 && !strcmp(argv[1], "sm2trace")){
         Course *c = open_course(CARDS);
@@ -472,6 +597,8 @@ int main(int argc, char **argv){
     remap();
     unlocks();
     scanning();
+    rounds();
+    card();
     printf("srs_test (%zu-bit): %s\n", sizeof(void *) * 8, fails ? "FAILED" : "OK");
     return fails ? 1 : 0;
 }

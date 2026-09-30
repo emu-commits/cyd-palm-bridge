@@ -37,6 +37,11 @@ const char *ui_screen_name(void);
  * The simulator always defines UI_DEVTOOLS; the firmware only with
  * CONFIG_CYD_DEVTOOLS (menuconfig, off by default). */
 void ui_test_type(const char *text);
+/* Move Study's clock on by `seconds` (it keeps its own offset from the real
+ * one), so the smoke tour can reach reviews that come due hours after a
+ * lesson without waiting for them. */
+#include <stdint.h>
+void ui_test_study_skew(int32_t seconds);
 #endif
 
 #endif

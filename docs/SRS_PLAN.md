@@ -1,7 +1,8 @@
 # SRS plan — Study, a built-in spaced-repetition app
 
-> **Status: S0, S1 and S2 done 2026-09-30; S3 is next.** `firmware/main/srs.c`
-> holds the schedulers and progress. The format is
+> **Status: S0 to S3 done 2026-09-30; S4 (typed answers) is next.** Study is
+> on the launcher and runs the demo end to end in the simulator; its checks
+> on the device are open. The format is
 > `COURSE_FORMAT.md` (awaiting the owner's review), the demo is
 > `courses/demo-kanji/`, `tools/mkcourse.py` builds courses and
 > `firmware/main/course.c` reads them. Approved 2026-09-29; the name, launcher

@@ -28,7 +28,8 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 their `[d]` checks are open). **Done 2026-09-30:** SRS S0 and S1 (the course
 format, the demo course, the builder and the reader). **Open: the owner's
 review of `COURSE_FORMAT.md` and the demo content.** S2 (the schedulers and
-progress) is done too; **S3, the screens, is next.**
+progress) is done too, and so is S3, the screens (2026-09-30). **Open: S3's
+checks on the device; then S4, typed answers.**
 
 **The app platform is on hold.** The main goal is one first-class SRS app
 (WaniKani/Anki-style, with a large course on the SD card), and it's being
@@ -48,10 +49,11 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 
 **SRS app** (phases in `SRS_PLAN.md` §10)
 - [x] S0 — `docs/COURSE_FORMAT.md`, the two-level demo kanji course source (`courses/demo-kanji/`), the test decks (`tests/data/study/`), and the Albanian fit check (its Appendix A) (2026-09-30)
-- [ ] **The owner's review of `COURSE_FORMAT.md` and the demo content** (S0's exit; the format is hard to change once real courses exist). Points worth a look are listed at the top of `BUILD_PROGRESS.md`'s 2026-09-30 S0/S1 entry.
+- [x] **The owner's review of `COURSE_FORMAT.md` and the demo content** (S0's exit): approved 2026-09-30 ("format and demo look good, start S3").
 - [x] S1 — `course.c` reader and `tools/mkcourse.py`, with round-trip, fuzz and demo-rebuild gates in CI (2026-09-30)
 - [x] S2 — `srs.c` with both schedulers and crash-safe progress, with host tests in CI (2026-09-30; sm2 matches the Albanian web app review for review)
-- [ ] S3 — launcher tile (position 7), the user's finished portrait (`docs/img/study_face.png`), course picker, dashboard, lessons and reviews, and the demo installed on first run, in the sim `[s]`
+- [x] S3 — launcher tile (position 7), the user's finished portrait (`docs/img/study_face.png`), course picker, dashboard, lessons and reviews, and the demo installed on first run, in the sim `[s]` (2026-09-30; the `study_*` smoke shots)
+- [ ] Study on glass: the tile and portrait, a lesson and its quiz, reviews two hours later (Undo, the Card view), the kana answers, and whether 1-bit kanji read well at 64 and 24 px `[d]`
 - [ ] S4 — typed answers: romaji to kana on the Graffiti strip, meaning matching `[s]`
 - [ ] S5 — due counts on the lock screen and launcher, forecast and stats `[s]`
 - [ ] S6 — a full course on the real card: open time, next-card time, heap, battery pull, kanji readability `[d]`

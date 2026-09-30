@@ -45,7 +45,7 @@ CFLAGS := -O2 -g -Wall $(SIMDEF) $(INC)
 APP_SRCS := \
     $(FW)/ui.c $(FW)/data.c $(FW)/graffiti.c $(FW)/appcfg.c $(FW)/secretstore.c $(FW)/clock.c \
     $(FW)/lv_font_palm.c $(FW)/lv_font_palm_bold.c $(FW)/lv_font_kana.c $(FW)/palm_icons.c \
-    $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(BR)/dash.c $(FW)/minesweeper.c $(FW)/wordie.c $(FW)/sudoku.c $(FW)/zip.c $(FW)/coach.c $(FW)/guru.c $(FW)/guru_pool.c $(FW)/gurupool.c $(FW)/course.c $(FW)/srs.c \
+    $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(BR)/dash.c $(FW)/minesweeper.c $(FW)/wordie.c $(FW)/sudoku.c $(FW)/zip.c $(FW)/coach.c $(FW)/guru.c $(FW)/guru_pool.c $(FW)/gurupool.c $(FW)/course.c $(FW)/srs.c $(FW)/study.c $(FW)/study_demo.c \
     $(BR)/pdb.c $(BR)/datebook.c $(BR)/address.c $(BR)/todo.c $(BR)/appinfo.c \
     $(BR)/ical.c $(BR)/vcard.c $(BR)/tz.c $(BR)/charset.c \
     $(BR)/find.c $(BR)/calc.c $(BR)/config.c $(BR)/rss.c $(BR)/news.c $(BR)/feeds.c \
@@ -111,7 +111,7 @@ smoke32: lvgl-src
 	@ls build/shots/*.ppm >/dev/null
 	$(CC) -m32 -O2 -Wall -Wextra -I$(FW) tests/course_test.c $(FW)/course.c -o build/course_test32
 	./build/course_test32
-	$(CC) -m32 -O2 -Wall -Wextra -I$(FW) -I$(BR) tests/srs_test.c $(FW)/srs.c $(FW)/course.c -o build/srs_test32
+	$(CC) -m32 -O2 -Wall -Wextra -I$(FW) -I$(BR) tests/srs_test.c $(FW)/srs.c $(FW)/study.c $(FW)/study_demo.c $(FW)/course.c -o build/srs_test32
 	./build/srs_test32
 	@echo "sim smoke32 (true device-sized pool): OK"
 
@@ -194,6 +194,7 @@ COURSE_FILES := ../courses/demo-kanji/course.srs ../tests/data/study/cards/cours
                 ../tests/data/study/features/course.srs ../tests/data/study/remap-v1/course.srs \
                 ../tests/data/study/remap-v2/course.srs
 course: build/course_test
+	python3 ../tools/gen_study_demo.py --check
 	./build/course_test
 	@for f in $(COURSE_FILES); do \
 	  ./build/course_test dump $$f > build/course_c.txt || exit 1; \
@@ -214,10 +215,11 @@ build/course_test: tests/course_test.c $(FW)/course.c $(FW)/course.h
 srs: build/srs_test
 	./build/srs_test
 
-build/srs_test: tests/srs_test.c $(FW)/srs.c $(FW)/srs.h $(FW)/course.c $(FW)/course.h $(BR)/safefile.h
+build/srs_test: tests/srs_test.c $(FW)/srs.c $(FW)/srs.h $(FW)/study.c $(FW)/study.h $(FW)/course.c \
+                $(FW)/course.h $(FW)/study_demo.c $(BR)/safefile.h
 	@mkdir -p build
 	$(CC) -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all -I$(FW) -I$(BR) \
-	    tests/srs_test.c $(FW)/srs.c $(FW)/course.c -o $@
+	    tests/srs_test.c $(FW)/srs.c $(FW)/study.c $(FW)/study_demo.c $(FW)/course.c -o $@
 
 # ---- sudoku: host gate for the pure Sudoku logic (generation + rules, no LVGL). ----
 sudoku: build/sudoku_test

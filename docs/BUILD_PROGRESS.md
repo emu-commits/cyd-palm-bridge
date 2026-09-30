@@ -16,6 +16,102 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-09-30 — Study S3: the screens, and the demo on the card
+
+The owner approved the format and the demo ("format and demo look good,
+start S3"). Study is on the launcher now, and runs the demo end to end in
+the simulator: a lesson, its quiz, reviews two hours later, and the next
+lesson, whose kanji have unlocked. The smoke tour walks all of it (the
+`study_*` shots), and every screen was looked at.
+
+**The tile and the speaker.**
+- Position 7 on the launcher: a closed textbook knocked out of the black
+  disc, 24×22 A8 like the rest (`tools/gen_study_icon.py`, art kept as
+  text).
+- **The owner's portrait** went into `tools/gen_faces.py` as `STUDY`, read
+  pixel for pixel from `docs/img/study_face.png`. A `--preview` of it
+  round-trips to the identical PNG. The one blank row at its top is kept,
+  as it's the owner's framing.
+- She greets from the Graffiti strip once per unlock session, as Coach and
+  Guru do. The line depends on what's waiting: a first visit, reviews due,
+  lessons available, or nothing. She also speaks at the end of every round.
+
+**The screens** (`ui.c`, the "Study" section; `study.c` for the logic):
+- **The dashboard:** the course and its level; two big buttons with their
+  counts, Lessons and Reviews, greyed at 0; the count in each stage group
+  (the course's own names); when the next review comes due; and items
+  started. With the clock unset (a year before 2024), it says so and
+  offers nothing to schedule.
+- **A lesson:** the batch's cards (5 in the demo) with Back and Next.
+  - Each card shows the term, meaning, readings by type (in the kana
+    font), senses, what it's built from (the parts' own meanings, "Built
+    from: sun + moon"), mnemonics, examples with translations, forms,
+    etymology and notes.
+  - It scrolls, with a thin grey scrollbar.
+  - Then a quiz on the batch. Only when an item's questions are all right
+    does it start on the schedule.
+- **Reviews:** everything due, shuffled.
+  - Meaning and reading are separate questions on one item. Reading's
+    banner is inverted, so the two are told apart at a glance.
+  - Show answer, then Wrong / Right (or Again / Hard / Good / Easy for an
+    sm2 course).
+  - A miss comes back 2–5 questions later, and the item takes the worst
+    grade it got.
+  - **Undo** takes back the last answer, and the record if it had been
+    graded.
+  - **Card** opens the whole card over the question.
+- **Courses:** the demo is installed once (a `.demo` marker keeps a
+  removed demo removed). The last course is remembered, and a list shows
+  when there's more than one course. The menu has *Courses*, *About this
+  course*, *Check course* (`course_verify`), *Remove course* (with a
+  confirmation), and *Reinstall demo* when it's gone.
+- **Pictures** are the course's 1-bit bitmaps copied into I1 canvases, the
+  format every canvas here already uses. Term pictures sit centred in a
+  fixed box, since a picture is cropped to its ink and 一 alone would read
+  as a rule.
+
+**`study.c`** (host-tested in the `srs` gate):
+- The round's queue: a seeded shuffle, the requeue, the worst grade, one
+  level of undo; and 300 random rounds with random undos, where every item
+  finishes exactly once, after all its questions were right.
+- The card: installing the demo (byte for byte, once, reinstalled on
+  request), listing courses (sorted, only folders with a `course.srs`),
+  removing one (no `..` in an id), and the last course opened.
+
+**The demo in the firmware:** `tools/gen_study_demo.py` turns
+`courses/demo-kanji/course.srs` into `firmware/main/study_demo.c` (const,
+so flash). Its `--check` runs in `make -C sim course`.
+
+**Memory, measured:**
+- **Heap:** a Study session is one block of 8.9–9.4 KB in the simulator
+  (the course, its progress, the item on screen, and the pictures), inside
+  the 24 KB budget. The whole smoke tour peaked at 13.9 KB.
+  - **Leaving Study gives back every byte:** the smoke tour now marks the
+    heap on the launcher (`B`) and fails unless it's the same after Study
+    (`E`).
+  - Opened and not left, the `E` check fails with the 8,856 bytes, so it
+    has teeth.
+- **Static DRAM:** 160,556 B, +16 over S2. The budget was 256 B. A first
+  build was +1,032, from five `static char` message buffers. The label, the
+  balloon and the alert all copy their text, so those buffers went to the
+  stack, and the course info to the session's own text buffer.
+- **The LVGL pool:** Study's screens leave 31–40 KB free in the 64-bit
+  simulator; `smoke32` runs the same tour at the device's true pool size.
+- **Flash:** the image is 1,700,736 B (+114,624):
+  - the demo course, 81,760;
+  - the portrait and the icon, 4,308;
+  - code and strings, the rest.
+  That's 57 % of the 3 MB app partition.
+
+**1-bit pictures:** kept for now. At 64 px (kanji and radicals), 40 px
+(words) and 24 px (sentences), the simulator's shots read cleanly. 2 bpp
+stays reserved in the format. Whether they read as well on the real 2.8"
+panel is a `[d]` check.
+
+**Harness additions:** `A <seconds>` moves Study's clock on (UI_DEVTOOLS
+only), so the tour reaches reviews that come due 2 hours after a lesson.
+`B`/`E` are the heap check. Each shot line now also prints the heap in use.
+
 ### 2026-09-30 — Study S2: the schedulers and progress on the card
 
 `firmware/main/srs.c` holds both schedulers and the progress files. It is
