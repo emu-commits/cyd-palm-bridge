@@ -635,9 +635,10 @@ text. A meaning of one to four words; a mnemonic of two or three
 sentences; examples short enough to fit on two lines. `--check` prints the
 largest items.
 
-**Give answers as a list.** `meanings` is what a typed answer (S4) will be
-matched against. Put the one to show first and the other acceptable ones
-after it: `["bright", "light"]`.
+**Give answers as a list.** Put the one to show first and the others
+after it: `["bright", "light"]`. The first is the answer shown big on a
+question; the rest are shown under it as "also". (Answers are self-graded;
+there's no typing on the device, `SRS_PLAN.md` §11 decision 9.)
 
 **Check facts against open sources.** For Japanese, KANJIDIC2 and JMdict
 (EDRDG, CC BY-SA 4.0); for other languages, Wiktionary (CC BY-SA). The

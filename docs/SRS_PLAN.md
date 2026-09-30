@@ -1,8 +1,9 @@
 # SRS plan — Study, a built-in spaced-repetition app
 
-> **Status: S0 to S3 done 2026-09-30; S4 (typed answers) is next.** Study is
-> on the launcher and runs the demo end to end in the simulator; its checks
-> on the device are open. The format is
+> **Status: S0 to S3 done 2026-09-30, and S4 replanned the same day: no
+> typed answers (§11 decision 9). S4 is now readability and the Week
+> screen; S5 (due counts at a glance) comes after it.** Study is on the
+> launcher and runs the demo end to end; the owner has it on the device. The format is
 > `COURSE_FORMAT.md` (awaiting the owner's review), the demo is
 > `courses/demo-kanji/`, `tools/mkcourse.py` builds courses and
 > `firmware/main/course.c` reads them. Approved 2026-09-29; the name, launcher
@@ -99,17 +100,22 @@ shared with other people's devices. Keeping the SRS logic free of LVGL
 - **Clock guard:** with no valid time (never synced), the app shows the
   course but doesn't schedule. It says to set the clock or HotSync.
 
-**Later (S4–S5):**
-- **Typed answers:**
-  - readings drawn in romaji on the Graffiti strip and converted to kana;
-  - meanings matched against the alternatives, with typo tolerance;
-  - letters written without their accent count as "close enough", with a
-    gentle correction. Graffiti writes plain letters, so for Albanian `e`
-    stands for `ë` and `c` for `ç`.
+**S4 (replanned 2026-09-30):**
+- **The answer at twice the size**, in the Palm font doubled.
+- **A Week screen**, as Coach and Guru have: the last seven days as a
+  chart, this week against last, the streak, how many were right, where
+  the items stand, and her advice.
+
+**Later (S5):**
 - **Due counts on the lock screen and launcher**, for example "42 reviews".
-- **A forecast and stats screen.**
+- **A forecast:** how many reviews come due in the next 24 hours and on
+  each of the next seven days.
 
 **Not planned:**
+- **typed answers** (§11 decision 9, 2026-09-30). Writing on a 2.8"
+  touchscreen is slow and easy to get wrong, so every question is shown,
+  revealed and self-graded: no romaji-to-kana on the Graffiti strip, no
+  meaning matching, no "close enough" for a missing accent;
 - syncing progress to a server;
 - audio;
 - editing cards on the device;
@@ -125,6 +131,7 @@ shared with other people's devices. Keeping the SRS logic free of LVGL
     course.srs        the course: read-only, replaced as a whole to update
     progress.dat      one 16 B record per started item, sorted by item id
     progress.log      grades since the last fold, appended
+    history.dat       one 12 B record per day studied: the Week screen (S4)
   demo-kanji/         the demo course, written on first run (§9)
   last.txt            the course last opened
   .demo               marker: the demo has been installed once
@@ -136,7 +143,6 @@ shared with other people's devices. Keeping the SRS logic free of LVGL
 |---|---|---|
 | `firmware/main/course.c/.h` | Reads and checks `course.srs`: header, sections, items, levels, text fields, links and bitmaps. No LVGL, no ESP-IDF. | Yes: reader test, damaged-file fuzz with ASan and UBSan |
 | `firmware/main/srs.c/.h` | Both schedulers (§5), lesson unlocks, the progress file and log, folding, and remapping after a course update. Takes the time as an argument. | Yes: a simulated year of reviews, a battery pull at every byte of the log |
-| `firmware/main/romaji.c/.h` (S4) | Romaji to kana, and answer matching | Yes |
 | `firmware/main/study_demo.c` | The demo course as a C array, generated from `courses/demo-kanji/course.srs` (the same way `guru_pool.c` is generated) | Checked to match the built file |
 | Screens | Course picker, dashboard, lesson, review, stats | Sim smoke tour and screenshots |
 | `tools/mkcourse.py` | Builds `course.srs` from a course source folder (§4.5); `--check` validates an existing file and prints its sizes | Yes: round-trip in a host gate |
@@ -311,7 +317,8 @@ data is copied into this repo or used in tests. Measured 2026-09-29:
 4. typed links (built from, family) instead of prerequisites only;
 5. the text rules in §6: Albanian's ë and ç are in the Palm font, but its
    etymologies quote Arabic, Greek and Old Albanian script;
-6. "close enough" for letters typed without their accent (§2).
+6. "close enough" for letters typed without their accent (§2). Dropped
+   with typed answers (§11 decision 9).
 
 ## 5) Progress and the schedulers
 
@@ -576,15 +583,25 @@ only.
   round in the sim. The heap is back to its opening value after closing,
   and the budgets in §7 are met.
 
-**S4 — Typed answers.**
-- Romaji to kana with Graffiti in the strip, and meaning matching with typo
-  tolerance.
-- "Close enough" for a letter written without its accent, or a small typo,
-  with the correct answer shown as WaniKani does it.
+**S4 — Readability and the week** (replanned 2026-09-30, when typed
+answers were dropped: §11 decision 9).
+- The answer at twice the size: the Palm bold font pixel-doubled
+  (`tools/gen_font_2x.py`), for the primary meaning, a reading in Latin
+  letters, and a term that's words. 1× when it doesn't fit.
+- **The Week screen**, built as Coach's and Guru's are:
+  - a day-by-day history per course (`history.dat`, in `study.c`, with
+    host tests), written as each item finishes and taken back by Undo;
+  - the last seven days as a chart, this week against last, the streak
+    and the best, how many were right, and the stage groups;
+  - her advice from the strip, chosen in `study.c` (host-tested).
+- **Exit:** smoke shots of both, looked at; the history's tests in CI.
 
 **S5 — Glanceable.**
-- `summary.bin`, due counts on the lock screen and the launcher tile, and
-  a forecast and stats screen.
+- `summary.bin` per course, written when a round ends: the due count and
+  the next due time, so nothing has to open a course to show them.
+- Due counts on the lock screen and the launcher tile.
+- A forecast of reviews coming due: the next 24 hours, and each of the
+  next seven days (on the Week screen).
 
 **S6 — On the bench** `[d]`:
 - the demo, then a full course on the real card: open time, due scan,
@@ -616,3 +633,10 @@ only.
 8. **Accepted 2026-09-29:** JSON Lines as the source format, CC0 for the
    demo content, and the demo's kanji list (§9). The written format
    (`COURSE_FORMAT.md`) still gets the owner's review at the end of S0.
+9. **No typed answers** (2026-09-30, from the bench). Typing isn't
+   practical on the 2.8" touchscreen, so every question is shown, revealed
+   and self-graded. The old S4 (romaji to kana on the Graffiti strip,
+   meaning matching with typo tolerance, "close enough" accents) is
+   dropped, and `romaji.c` won't be written. The owner liked WaniKani's
+   kana appearing as you type, but it doesn't suit this screen. S4 became
+   the answer at twice the size and the Week screen.

@@ -28,8 +28,10 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 their `[d]` checks are open). **Done 2026-09-30:** SRS S0 and S1 (the course
 format, the demo course, the builder and the reader). **Open: the owner's
 review of `COURSE_FORMAT.md` and the demo content.** S2 (the schedulers and
-progress) is done too, and so is S3, the screens (2026-09-30). **Open: S3's
-checks on the device; then S4, typed answers.**
+progress) is done too, and so is S3, the screens (2026-09-30). **S4 was
+replanned from the bench the same day: no typed answers on the device
+(`SRS_PLAN.md` §11 decision 9). It's now the answer at 2x (done) and a
+Week screen; then S5, due counts at a glance.**
 
 **The app platform is on hold.** The main goal is one first-class SRS app
 (WaniKani/Anki-style, with a large course on the SD card), and it's being
@@ -38,7 +40,7 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 
 **Firmware groundwork** (from the old Phase 1; one commit each)
 - [x] Passwords out of resident RAM, with a sim `secretscan` gate `[s]` (2026-09-29; `BUILD_PROGRESS.md`)
-- [ ] Wi-Fi join and an iCloud HotSync still work after that change `[d]`
+- [ ] Wi-Fi join and an iCloud HotSync still work after that change `[d]` (2026-09-30: the user reports "wifi password and sync works fine"; the box is theirs to tick)
 - [x] Password editor: the character just typed shows for a second, "Show"/"Hide" shows it all, and the end stays in view, still outside LVGL (`secretscan`'s new `Y`) `[s]` (2026-09-30, from the bench)
 - [ ] Password entry on glass: the peek is long enough to read, Show/Hide, a long password scrolls with `<` `[d]`
 - [x] Firmware version from `git describe`, shown in Settings ▸ About `[s]` (2026-09-29)
@@ -54,8 +56,10 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 - [x] S2 — `srs.c` with both schedulers and crash-safe progress, with host tests in CI (2026-09-30; sm2 matches the Albanian web app review for review)
 - [x] S3 — launcher tile (position 7), the user's finished portrait (`docs/img/study_face.png`), course picker, dashboard, lessons and reviews, and the demo installed on first run, in the sim `[s]` (2026-09-30; the `study_*` smoke shots)
 - [ ] Study on glass: the tile and portrait, a lesson and its quiz, reviews two hours later (Undo, the Card view), the kana answers, and whether 1-bit kanji read well at 64 and 24 px `[d]`
-- [ ] S4 — typed answers: romaji to kana on the Graffiti strip, meaning matching `[s]`
-- [ ] S5 — due counts on the lock screen and launcher, forecast and stats `[s]`
+- [x] S4a — the answer at 2x: the Palm bold font pixel-doubled (`tools/gen_font_2x.py`), for the answer and a term that's words `[s]` (2026-09-30; `study_review_answer`)
+- [ ] S4a on glass: the 2x answer reads well, and a long one falls back to 1x `[d]`
+- [ ] S4b — the Week screen, as Coach and Guru have it: `history.dat` per course, the chart, this week against last, streak, right %, stage groups, her advice `[s]`
+- [ ] S5 — due counts on the lock screen and launcher (`summary.bin`), and a forecast of reviews coming due `[s]`
 - [ ] S6 — a full course on the real card: open time, next-card time, heap, battery pull, kanji readability `[d]`
 
 ---
