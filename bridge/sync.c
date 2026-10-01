@@ -23,6 +23,7 @@
 #include "palm.h"
 #include "appinfo.h"
 #include "sync.h"
+#include "dav_xml.h"   /* dav_parse_multiget_stream: the batched fetch */
 
 /* The `[sync]` lines that fire on every HEALTHY sync (per-collection read +
  * push/pull summary, and the per-relocation trace) are gated behind SYNC_DEBUG
@@ -422,6 +423,15 @@ void sync_free_scratch(void){
 #define SV_RAW  STATE_DIR "/.sv.raw"   /* server enum,  key=href     */
 #define SV_IDX  STATE_DIR "/.sv.idx"   /* server objs,  key=objhash  */
 #define SV_MO   STATE_DIR "/.sv.mo"    /* map-only rows, flushed once trust is known */
+#define SV_PEND STATE_DIR "/.sv.pend"  /* server-only objects: name etag (key=href)  */
+#define NEED    STATE_DIR "/.need"     /* names whose bodies the merge will want     */
+#define BC_DAT  STATE_DIR "/.bc.dat"   /* fetched object bodies, back to back        */
+#define BC_IDX  STATE_DIR "/.bc.idx"   /* name -> offset,length (fixed width, key=name) */
+#define MG_SPOOL STATE_DIR "/.mget"    /* one multiget reply                         */
+
+/* ---- the time window (contract in sync.h) ---- */
+static long long s_win_start, s_win_end;
+void sync_set_window(long long start, long long end){ s_win_start = start; s_win_end = end; }
 
 /* compare two lines by their first field (up to the first TAB). Every index
  * file leads with its sort key zero-padded (objhash %016llx / palmuid %010u) or
@@ -719,11 +729,25 @@ static FILE* reopenTrunc(FILE*f,const char*path){
  * a PROPFIND all succeeded), or -1 if every attempt failed/was truncated. On -1
  * the caller must NOT treat the (empty/partial) SV_RAW as "the server deleted
  * everything" -- see sync_one. */
-static int enumServer(const DavCtx*d,const char*coll,const char*token,
-                      char*newtok,int tokcap,int*incremental){
-    *incremental=0; newtok[0]=0;
+static int enumServer(const DavCtx*d,const char*coll,int kind,const char*token,
+                      char*newtok,int tokcap,int*incremental,int*windowed){
+    *incremental=0; *windowed=0; newtok[0]=0;
     RawEnum re; re.f=fopen(SV_RAW,"w");
     int done=0, ok=0;
+    /* A calendar with a window: list only what's in it. The listing is the
+     * whole truth about the window, so it is never a delta; an object missing
+     * from it is "not listed", which the merge treats as outside the window,
+     * not as deleted (see sync.h). A server that doesn't answer the query is
+     * enumerated whole, as before. */
+    if(kind==KIND_CAL && s_win_end > s_win_start){
+        if(dav_query_window(d,coll,s_win_start,s_win_end,rawListCb,&re)>=0){
+            if(re.f) fclose(re.f);
+            *windowed=1;
+            return 0;
+        }
+        fprintf(stderr,"[sync] %s: the window query wasn't answered -- syncing the whole collection\n",coll);
+        re.f=reopenTrunc(re.f,SV_RAW);
+    }
     if(token[0]){
         int rc=dav_sync_report(d,coll,token,rawReportCb,&re,newtok,tokcap);
         if(rc==0){ done=1; ok=1; *incremental=1; }
@@ -740,28 +764,124 @@ static int enumServer(const DavCtx*d,const char*coll,const char*token,
     if(re.f) fclose(re.f);
     return ok ? 0 : -1;
 }
+/* ---- the body cache: objects fetched in batches -----------------------------
+ * The merge wants the body of every object that is new or changed on the
+ * server. Fetching them one GET at a time is a round trip each (and a new
+ * object used to take two: one for its UID, one for its body). prefetch()
+ * asks for them in batches with a multiget, streams each reply onto the card,
+ * and indexes the bodies by name in fixed-width rows, so a lookup is a binary
+ * search with no RAM to speak of. Anything not in the cache (a server that
+ * doesn't do multiget, a name too long to index) falls back to a GET. */
+#define BC_KEY   127                        /* names longer than this aren't cached */
+#define BC_W     (BC_KEY+1+10+1+10+1)       /* one index row, newline included      */
+#define MG_BATCH 16                         /* objects per multiget                 */
+
+typedef struct { FILE*idx; } BcSink;
+static int s_fetch_batched, s_fetch_single;
+void sync_fetch_counts(int *batched, int *single){
+    if(batched) *batched = s_fetch_batched;
+    if(single)  *single  = s_fetch_single;
+}
+static void bcCb(const char*name,const char*etag,long off,long len,void*ctx){
+    (void)etag; BcSink*b=ctx;
+    if(b->idx && strlen(name)<=BC_KEY) fprintf(b->idx,"%-127s\t%010ld\t%010ld\n",name,off,len);
+}
+static void bcReset(void){ remove(BC_DAT); remove(BC_IDX); remove(NEED); remove(SV_PEND); remove(MG_SPOOL); }
+
+/* the cached body of `name` into out (NUL-terminated); its length (capped at
+ * cap-1, which callers read as "too big"), or -1 if it isn't cached */
+static int cacheGet(const char*name,char*out,int cap){
+    if(strlen(name)>BC_KEY) return -1;
+    FILE*f=fopen(BC_IDX,"rb"); if(!f) return -1;
+    fseek(f,0,SEEK_END); long n=ftell(f)/BC_W;
+    char key[BC_KEY+1]; snprintf(key,sizeof key,"%-127s",name);
+    long lo=0, hi=n-1, off=-1, len=0;
+    char row[BC_W+1];
+    while(lo<=hi){
+        long mid=(lo+hi)/2;
+        if(fseek(f,mid*BC_W,SEEK_SET) || fread(row,1,BC_W,f)!=BC_W) break;
+        int c=memcmp(row,key,BC_KEY);
+        if(c==0){ row[BC_W]=0; off=strtol(row+BC_KEY+1,NULL,10); len=strtol(row+BC_KEY+12,NULL,10); break; }
+        if(c<0) lo=mid+1; else hi=mid-1;
+    }
+    fclose(f);
+    if(off<0) return -1;
+    FILE*d=fopen(BC_DAT,"rb"); if(!d) return -1;
+    long want = len < cap-1 ? len : cap-1;
+    int got = (fseek(d,off,SEEK_SET)==0) ? (int)fread(out,1,(size_t)want,d) : -1;
+    fclose(d);
+    if(got!=want) return -1;
+    out[got]=0;
+    return len >= cap-1 ? cap-1 : got;
+}
+/* a body: from the cache, else one GET */
+static int fetchBody(const DavCtx*d,const char*coll,const char*name,char*out,int cap){
+    int got=cacheGet(name,out,cap);
+    if(got>=0) return got;
+    s_fetch_single++;
+    return dav_get(d,coll,name,out,cap);
+}
+
+static void prefetch(const DavCtx*d,const char*coll,int kind){
+    FILE*need=fopen(NEED,"r"); if(!need) return;
+    FILE*dat=fopen(BC_DAT,"w+b"), *idx=fopen(BC_IDX,"w");
+    char (*nm)[BC_KEY+1] = malloc((size_t)MG_BATCH*sizeof *nm);
+    const char*np[MG_BATCH];
+    if(!dat || !idx || !nm){ if(dat)fclose(dat); if(idx)fclose(idx); free(nm); fclose(need); return; }
+    BcSink b={ .idx=idx };
+    int batches=0, got=0, eof=0;
+    while(!eof){
+        int k=0; char ln[300];
+        while(k<MG_BATCH){
+            if(!fgets(ln,sizeof ln,need)){ eof=1; break; }
+            size_t l=strlen(ln); while(l && (ln[l-1]=='\n'||ln[l-1]=='\r')) ln[--l]=0;
+            if(!l || l>BC_KEY) continue;              /* too long to index: it'll be a GET */
+            memcpy(nm[k],ln,l+1); np[k]=nm[k]; k++;
+        }
+        if(!k) break;
+        int st=dav_multiget(d,coll,kind==KIND_CARD,np,k,MG_SPOOL);
+        batches++;
+        if(st!=207){
+            /* no multiget here: everything left is fetched one at a time */
+            fprintf(stderr,"[sync] %s: multiget answered %d -- fetching one by one\n",coll,st);
+            break;
+        }
+        FILE*sp=fopen(MG_SPOOL,"rb");
+        if(sp){ int n=dav_parse_multiget_stream(sp,dat,bcCb,&b); if(n>0){ got+=n; s_fetch_batched+=n; } fclose(sp); }
+        remove(MG_SPOOL);
+    }
+    free(nm); fclose(need); fclose(dat); fclose(idx);
+    SYNC_LOG("[sync] %s: prefetched %d objects in %d request(s)\n",coll,got,batches);
+    CHK("bc-built"); sortFile(BC_IDX); CHK("bc-sorted");
+}
+
 /* Resolve every server object to an objhash and write SV_IDX (key=objhash):
  * "objhash href etag present". Joins SV_RAW (key href) with MP_HREF (key href):
- *   both        -> objhash from the map (no GET); etag/present from enumeration.
- *   map only    -> unchanged (incremental) present w/ map etag, else deleted.
- *   server only -> a new object: GET it once to read its UID -> objhash.
+ *   both        -> objhash from the map (no fetch); etag/present from enumeration.
+ *   map only    -> unchanged (incremental) present w/ map etag; in a window's
+ *                  listing "not listed" (present=2); else deleted.
+ *   server only -> a new object: its body says its UID -> objhash.
+ * In two passes with the batched fetch between: resolveList() needs no body and
+ * writes the list of bodies the merge will want; resolvePending() reads the new
+ * objects' UIDs from the fetched bodies.
  *
- * Returns 1 if ANY server-only object could NOT be UID-resolved (its GET failed,
- * truncated on the small no-PSRAM fetch buffer, or was unparseable), else 0.
- * Such an object is DEFERRED, not force-identified: falling back to
- * uidHash(href) would mint a divergent identity for what is really an already
- * mapped record -- so the mapped copy looked server-deleted (spurious delete) AND
- * the object looked brand-new (phantom pull). That split is the on-device
- * duplication seen against iCloud (relocated photo-vCards overflow the 8 KB
- * buffer). Instead we skip the object this round and tell the caller to SUPPRESS
- * DELETES (so a transient GET failure can never delete the mapped local record),
- * and it retries cleanly next sync. Map-only rows are therefore staged to SV_MO
- * and only flushed as deletes once we know the enumeration was fully resolved. */
-static int resolveServer(const DavCtx*d,const char*coll,int incremental){
+ * resolvePending() returns 1 if ANY server-only object could NOT be
+ * UID-resolved (its fetch failed, was truncated on the small no-PSRAM fetch
+ * buffer, or was unparseable), else 0. Such an object is DEFERRED, not
+ * force-identified: falling back to uidHash(href) would mint a divergent
+ * identity for what is really an already mapped record -- so the mapped copy
+ * looked server-deleted (spurious delete) AND the object looked brand-new
+ * (phantom pull). That split is the on-device duplication seen against iCloud
+ * (relocated photo-vCards overflow the 8 KB buffer). Instead we skip the
+ * object this round and tell the caller to SUPPRESS DELETES (so a transient
+ * fetch failure can never delete the mapped local record), and it retries
+ * cleanly next sync. Map-only rows are therefore staged to SV_MO and only
+ * flushed as deletes once we know the enumeration was fully resolved. */
+static void resolveList(void){
     CHK("sv-raw-built"); sortFile(SV_RAW); CHK("sv-raw-sorted");  /* merge-join needs it keyed (by href) */
     FILE*s=fopen(SV_RAW,"r"),*m=fopen(MP_HREF,"r"),*o=fopen(SV_IDX,"w");
     FILE*mo=fopen(SV_MO,"w");                  /* map-only rows, present decided after merge */
-    int unresolved=0;
+    FILE*pend=fopen(SV_PEND,"w"),*need=fopen(NEED,"w");
     char sl[512],ml[512];
     int haveS=s&&fgets(sl,sizeof sl,s), haveM=m&&fgets(ml,sizeof ml,m);
     while(haveS||haveM){
@@ -771,20 +891,16 @@ static int resolveServer(const DavCtx*d,const char*coll,int incremental){
         if(haveM) sscanf(ml,"%127[^\t]\t%llx\t%47[^\t]\t%159[^\t\r\n]",mh,&moh,mou,me);
         int cmp = (haveS&&haveM)?strcmp(sh,mh):(haveS?-1:1);
         if(cmp==0){                       /* in both: map objhash, enum etag/present */
-            if(sp){ if(o) fprintf(o,"%016llx\t%s\t%s\t%d\n",moh,mh,se,1); }
+            if(sp){
+                if(o) fprintf(o,"%016llx\t%s\t%s\t%d\n",moh,mh,se,1);
+                if(need && strcmp(se,me)) fprintf(need,"%s\n",mh);   /* changed: wanted */
+            }
             else if(mo) fprintf(mo,"d\t%016llx\t%s\t%s\n",moh,mh,me);  /* delta-DELETE: stage */
             haveS=s&&fgets(sl,sizeof sl,s)!=NULL; haveM=m&&fgets(ml,sizeof ml,m)!=NULL;
         } else if(cmp<0){                 /* server only */
-            if(sp){                       /* a new present object -> GET for its UID */
-                char objuid[48]=""; uint64_t oh;
-                int got=dav_get(d,coll,sh,g_objbuf,OBJ_FETCH_CAP);
-                if(got>0 && got<OBJ_FETCH_CAP-1 && objuid_of(g_objbuf,objuid,sizeof objuid)==0){
-                    oh=uidHash(objuid);
-                    if(o) fprintf(o,"%016llx\t%s\t%s\t%d\n",(unsigned long long)oh,sh,se,1);
-                } else {                  /* UID unreadable -> DEFER (never mint an href identity) */
-                    fprintf(stderr,"[sync] UID-resolve FAILED for server href=%s (got=%d) -- deferring, suppressing deletes this round\n",sh,got);
-                    unresolved=1;
-                }
+            if(sp){                       /* a new present object: its UID is in its body */
+                if(pend) fprintf(pend,"%s\t%s\n",sh,se);
+                if(need) fprintf(need,"%s\n",sh);
             }                             /* else: delete of an object we never tracked -> ignore */
             haveS=s&&fgets(sl,sizeof sl,s)!=NULL;
         } else {                          /* map only: stage ('m'); present decided post-merge */
@@ -794,9 +910,33 @@ static int resolveServer(const DavCtx*d,const char*coll,int incremental){
     }
     if(s){fclose(s);} if(m){fclose(m);}
     if(mo) fclose(mo);
-    /* Flush staged rows. Two kinds, different "is it really gone?" semantics:
+    if(pend) fclose(pend);
+    if(need) fclose(need);
+    if(o) fclose(o);
+}
+static int resolvePending(const DavCtx*d,const char*coll,int incremental,int windowed){
+    int unresolved=0;
+    FILE*o=fopen(SV_IDX,"a"), *pend=fopen(SV_PEND,"r");
+    char pl[512];
+    while(pend && fgets(pl,sizeof pl,pend)){
+        char sh[128]="",se[160]="";
+        if(sscanf(pl,"%127[^\t]\t%159[^\t\r\n]",sh,se)<1) continue;
+        char objuid[48]="";
+        int got=fetchBody(d,coll,sh,g_objbuf,OBJ_FETCH_CAP);
+        if(got>0 && got<OBJ_FETCH_CAP-1 && objuid_of(g_objbuf,objuid,sizeof objuid)==0){
+            if(o) fprintf(o,"%016llx\t%s\t%s\t%d\n",(unsigned long long)uidHash(objuid),sh,se,1);
+        } else {                          /* UID unreadable -> DEFER (never mint an href identity) */
+            fprintf(stderr,"[sync] UID-resolve FAILED for server href=%s (got=%d) -- deferring, suppressing deletes this round\n",sh,got);
+            unresolved=1;
+        }
+    }
+    if(pend) fclose(pend);
+    /* Flush staged rows. Three kinds of "is it really gone?":
      *   'm' map-only  : absent from the enumeration. In an incremental delta that
-     *                   means UNCHANGED (present); in a full report it means DELETED.
+     *                   means UNCHANGED (present); in a window's listing it means
+     *                   NOT LISTED (present=2: outside the window, or deleted --
+     *                   the merge finds out which only if it matters); in a full
+     *                   report it means DELETED.
      *   'd' delta-del : the delta explicitly reported this href deleted (only ever
      *                   happens incrementally) -> a real DELETE.
      * BUT if ANY object was deferred (unresolved) this round, no delete can be
@@ -808,7 +948,7 @@ static int resolveServer(const DavCtx*d,const char*coll,int incremental){
         while(fgets(l,sizeof l,mr)){
             char ty=0; unsigned long long moh=0; char mh[128]="",me[160]="";
             if(sscanf(l,"%c\t%llx\t%127[^\t]\t%159[^\t\r\n]",&ty,&moh,mh,me)>=3){
-                int present = unresolved ? 1 : (ty=='m' ? incremental : 0);
+                int present = unresolved ? 1 : (ty=='m' ? (incremental ? 1 : windowed ? 2 : 0) : 0);
                 fprintf(o,"%016llx\t%s\t%s\t%d\n",moh,mh, present?me:"", present);
             }
         }
@@ -877,7 +1017,7 @@ static void keepBytes(Sink*k,uint32_t uid,uint8_t attr,const uint8_t*data,int le
  * it is skipped with a warning rather than silently truncated. */
 static int keepFromServer(const DavCtx*d,const char*coll,int kind,Sink*k,
                           uint32_t uid,const char*name,const char*etag){
-    int got=dav_get(d,coll,name,g_objbuf,OBJ_FETCH_CAP);
+    int got=fetchBody(d,coll,name,g_objbuf,OBJ_FETCH_CAP);
     if(got<=0){ fprintf(stderr,"warning: could not fetch %s -- dropped\n",name); return -1; }
     if(got>=OBJ_FETCH_CAP-1){             /* hit the buffer limit => truncated */
         fprintf(stderr,"warning: %s exceeds %d bytes (large PHOTO?) -- dropped\n",name,OBJ_FETCH_CAP);
@@ -961,8 +1101,9 @@ static int pushLocal(const DavCtx*d,const char*coll,int kind,Sink*k,
 static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
                     ConflictPolicy pol,PdbW*w,int pullCat,SyncStats*st,
                     const CatRoute*rt,const char*Ccoll){
-    uint32_t maxuid=0; int incremental=0;
+    uint32_t maxuid=0; int incremental=0, windowed=0;
     s_too_big = 0; s_too_big_bytes = 0;                      /* per collection */
+    bcReset();
     buildMapIdx(mapfile,s->token,sizeof s->token,&maxuid);   /* MP_IDX/MP_HREF/MP_PALM + token */
     if(s_too_big) return -1;
 #ifdef ESP_PLATFORM
@@ -976,7 +1117,8 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
     s->token[0]=0;
 #endif
     bulk_free();          /* 16 KB back: the enumeration needs it more than we do */
-    int enumOk = enumServer(d,coll,s->token,s->newToken,sizeof s->newToken,&incremental); /* SV_RAW */
+    int enumOk = enumServer(d,coll,s->kind,s->token,s->newToken,sizeof s->newToken,
+                            &incremental,&windowed);            /* SV_RAW */
     if(enumOk!=0){
         /* The server could not be enumerated (all reports/PROPFIND failed or were
          * truncated). SV_RAW is empty/partial and MUST NOT be read as "the server
@@ -986,15 +1128,18 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
          * changes, so every record is kept as-is and the collection is a no-op
          * this round (it retries next sync). Also drop any stale new token. */
         fprintf(stderr,"[sync] %s: server enumeration failed -- keeping all local records (no deletes)\n",coll);
-        incremental=1; s->newToken[0]=0;
+        incremental=1; windowed=0; s->newToken[0]=0;
     }
+    resolveList();                                           /* SV_IDX (known), SV_PEND, NEED */
+    if(s_too_big) return -1;
+    prefetch(d,coll,s->kind);                                /* BC_DAT/BC_IDX: batched bodies */
     if(!need_objbuf()){
         fprintf(stderr,"[sync] %s: could not retake the %d-byte fetch buffer after the "
                        "enumeration -- abandoning this collection instead of running "
                        "without it\n", coll, (int)OBJ_FETCH_CAP);
         return -1;
     }
-    int unresolved = resolveServer(d,coll,incremental);      /* SV_IDX (GETs new objects) */
+    int unresolved = resolvePending(d,coll,incremental,windowed); /* SV_IDX: new objects' UIDs */
     if(s_too_big) return -1;
     if(unresolved){
         /* Some server object's UID could not be read this round; resolveServer
@@ -1088,15 +1233,19 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         int hasL   = lc.v&&lc.oh==mn;
         int hasMap = mp.v&&mp.oh==mn;
         /* consume ALL server rows at this objhash, preferring a present one: a
-         * deleted row and its relocated replacement share a UID hash, and only
-         * the present one is the live object. */
+         * deleted (or not listed) row and its relocated replacement share a UID
+         * hash, and only the present one is the live object. Rank: present (1),
+         * then not listed (2), then deleted (0). */
         SvRow se; se.v=0;
+        #define SVRANK(p) ((p)==1 ? 2 : (p)==2 ? 1 : 0)
         while(sv.v && sv.oh==mn){
-            if(!se.v || (sv.present && !se.present)) se=sv;
+            if(!se.v || SVRANK(sv.present) > SVRANK(se.present)) se=sv;
             svRead(fsv,&sv);
         }
+        #undef SVRANK
         int hasSraw= se.v;
-        int hasSrv = se.v && se.present;         /* a present=0 (deleted) srv row => no server object */
+        int hasSrv = se.v && se.present==1;      /* a present=0 (deleted) srv row => no server object */
+        int sOut   = se.v && se.present==2;      /* mapped, but not in the window's listing */
 
         uint32_t uid = hasL?lc.uid : (hasMap?mp.uid : nameToUid(se.href));
         Loc Lv; const Loc*L=NULL;
@@ -1107,6 +1256,7 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         const char*mObjuid= hasMap?mp.objuid:NULL;
         const char*sName  = hasSrv?se.href:"";
         const char*sEtag  = hasSrv?se.etag:"";
+        char pEtag[160];                          /* a probed object's etag */
         int ldel = L && (L->attr & REC_ATTR_DELETE);
 
         enum { LABSENT, LNEW, LMOD, LDEL, LCLEAN } lcs;
@@ -1116,12 +1266,29 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         else if(L->hash!=mHash) lcs=LMOD;
         else                 lcs=LCLEAN;
 
-        enum { SABSENT, SNEW, SMOD, SDEL, SCLEAN } scs;
+        /* SOUT: not in the window's listing -- outside the window, or deleted.
+         * SKEEP: we asked and couldn't tell; leave everything as it is. */
+        enum { SABSENT, SNEW, SMOD, SDEL, SCLEAN, SOUT, SKEEP } scs;
         if(!hasMap &&  hasSrv) scs=SNEW;
         else if(!hasMap)       scs=SABSENT;
-        else if(!hasSrv)       scs=SDEL;
+        else if(!hasSrv)       scs= sOut ? SOUT : SDEL;
         else if(strcmp(sEtag,mEtag)) scs=SMOD;
         else                   scs=SCLEAN;
+
+        /* Not listed, and the device has something to say about it (an edit, a
+         * tombstone, or a record gone without one): which of the two it is now
+         * matters, so ask the server about this one object. Still there -> it's
+         * just outside the window, and the ordinary rules apply to it; gone ->
+         * a server delete. No answer -> keep everything for next time. An
+         * unchanged copy needs no question: either way it leaves the device. */
+        if(scs==SOUT && (lcs==LMOD || lcs==LDEL || (lcs==LABSENT && !massGuard))){
+            int ps=dav_probe(d,coll,mHref,pEtag,sizeof pEtag);
+            if(ps==207 || ps==200){
+                hasSrv=1; sName=mHref; sEtag=pEtag;
+                scs = strcmp(pEtag,mEtag) ? SMOD : SCLEAN;
+            } else if(ps==404 || ps==410) scs=SDEL;
+            else scs=SKEEP;
+        }
 
         char lname[64]; snprintf(lname,sizeof lname,"%u.%s",(unsigned)uid,ext);
         const char*srvName = hasSrv?sName:(hasMap?mHref:lname);
@@ -1136,7 +1303,27 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         int conflict = (lcs==LMOD||lcs==LDEL||lcs==LNEW) && (scs==SMOD||scs==SNEW||scs==SDEL)
                        && !(lcs==LNEW&&scs==SABSENT) && !(lcs==LDEL&&scs==SDEL);
 
-        if(conflict){
+        if(scs==SOUT){
+            /* Outside the window: off the device, and nothing is sent. (The only
+             * local states left here are an unchanged copy, and a record gone
+             * from the device while the mass-delete guard holds.) */
+            if(L) st->pruned++;
+        }
+        else if(scs==SKEEP){
+            /* Couldn't tell: keep the record exactly as it is -- flags and all,
+             * so an edit or a tombstone is still pending -- and its old map row,
+             * and decide at the next sync. */
+            if(L){
+                if(locBytes(s,L,g_lrec,PALM_REC_MAX)==L->len){
+                    if(pdbw_rec(k->w,uid,L->attr,g_lrec,L->len)!=0){
+                        fprintf(stderr,"[sync] OUTPUT FULL at uid=%u\n",(unsigned)uid); s_too_big=1; }
+                } else fprintf(stderr,"[sync] lazy read failed for uid=%u\n",(unsigned)uid);
+            }
+            if(k->mapf && mHref[0])
+                fprintf(k->mapf,"%u\t%s\t%s\t%llu\t%s\n",(unsigned)uid,mHref,mEtag,
+                        (unsigned long long)mHash,mObjuid?mObjuid:"");
+        }
+        else if(conflict){
             st->conflicts++;
             int serverWins = (pol==POL_SERVER);
             int localWins  = (pol==POL_LOCAL);
@@ -1232,6 +1419,7 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         (void)hasSraw;
     }
     CHK("merge-done");
+    bcReset();
     if(guardedDel)
         fprintf(stderr,"[sync] MASS-DELETE GUARD held back %d deletion(s) for %s "
                        "and RESTORED %d record(s) from the server\n",
@@ -1267,6 +1455,7 @@ int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
     if(!scratch_alloc()){ fprintf(stderr,"sync_collection: out of memory\n"); return -1; }
     S *s = g_state; memset(s,0,sizeof *s);
     s->kind=kind; snprintf(s->pdbpath,sizeof s->pdbpath,"%s",localpdb);
+    s_fetch_batched = s_fetch_single = 0;
     static uint8_t ai[512]; int ailen=pdb_read_appinfo(localpdb,ai,sizeof ai); if(ailen<0)ailen=0;
     int nin = countRecs(localpdb);
     SYNC_LOG("[sync] read %s: recs=%d ailen=%d\n",localpdb,nin,ailen);
@@ -1296,7 +1485,7 @@ int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
     /* SAFETY: never overwrite a local PDB that HAD records with an empty result.
      * A read glitch, a parse failure, or an unexpectedly-empty server must not be
      * allowed to wipe the on-device data. Discard the streamed output, keep local. */
-    if(nin > 0 && nrec == 0){
+    if(nin > 0 && nrec == 0 && st->pruned < nin){
         fprintf(stderr,"[sync] REFUSED overwrite of %s (had %d recs) with 0 -- keeping local\n",outpdb,nin);
         pdbw_abort(w); return -2;
     }
@@ -1317,6 +1506,7 @@ int sync_categorized(const DavCtx*d,const char*localpdb,const char*outpdb,
     static uint8_t ai[512]; int ailen=pdb_read_appinfo(localpdb,ai,sizeof ai); if(ailen<0)ailen=0;
     S *s = g_state; memset(s,0,sizeof *s);
     s->kind=kind; snprintf(s->pdbpath,sizeof s->pdbpath,"%s",localpdb);
+    s_fetch_batched = s_fetch_single = 0;
     SyncStats z={0}; if(!st) st=&z;
 
     PdbW *w = pdbw_begin(OUT_TMP);

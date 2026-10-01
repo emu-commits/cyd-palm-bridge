@@ -80,6 +80,12 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 - [ ] S5 on glass: the lock's STUDY row and the weather box above it read well, the air quality beside the reading, the badge on the icon, the count going up on its own as reviews come due (the lock repaints each minute) `[d]`
 - [ ] S6 — a full course on the real card: open time, next-card time, heap, battery pull, kanji readability `[d]`
 
+**Sync for a real account** (built 2026-10-01; `BUILD_PROGRESS.md`)
+- [x] The sort in runs on the card, a calendar window (default yesterday to two weeks ahead, Settings ▸ Sync ▸ Calendar), the pruning rule, batched downloads; gated by `sort_test`, `mget_test`, `window` and `bigsync` `[s]`
+- [ ] Against the real iCloud account: Date Book comes down to the window only; the log line shows `pruned=` and `fetched=N batched+0 single`; nothing disappears from iCloud on the phone `[d]`
+- [ ] Settings ▸ Sync ▸ Calendar: widen to a month, sync, the extra events arrive; narrow again, they leave the device and stay on the phone `[d]`
+- [ ] An event edited on the device, then left behind by the window, shows the edit on the phone `[d]`
+
 ---
 
 ## RESUME HERE — 2026-09-23
@@ -392,8 +398,11 @@ R and the robustness work).
    intermittently.
 4. **iCloud data hygiene** — one-time removal of the seed contacts and duplicate
    events left in the real account from the broken-sync era.
-5. **PROPOSAL (2026-10-01, not approved): sync a window, not the whole
-   account.** A real account holds years of events and thousands of
+5. **Sync a window, not the whole account.** The window, the pruning rule
+   and batched downloads were **built 2026-10-01** (the owner asked for them,
+   with "a very tight time window"; `BUILD_PROGRESS.md`). Still open from
+   this plan: To Do (open tasks only) and Address (no photos, or one
+   group). The original proposal: A real account holds years of events and thousands of
    contacts; today the first sync enumerates every object, GETs each one, and
    refuses a collection past a few hundred records (item 1). Proposed:
    - **Date Book: a time window**, e.g. 30 days back and 12 months ahead

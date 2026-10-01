@@ -9,9 +9,9 @@ CORE    = bridge/pdb.c bridge/datebook.c bridge/address.c bridge/ical.c bridge/v
 
 PROGS   = roundtrip bridge_cli incremental synctoken category bigsync multiapp \
           uidmatch idempotent massdel streamparse find_test calc_test config_test rss_test news_test wx_test \
-          feeds_test break_test geoip_test toobig safefile_test sort_test fuzz_test course_fuzz rss_asan
+          feeds_test break_test geoip_test toobig safefile_test sort_test window mget_test fuzz_test course_fuzz rss_asan mget_asan
 
-all: $(addprefix $(B)/,$(filter-out fuzz_test course_fuzz rss_asan,$(PROGS)))
+all: $(addprefix $(B)/,$(filter-out fuzz_test course_fuzz rss_asan mget_asan,$(PROGS)))
 
 # `make wx_test` builds build/wx_test
 $(PROGS): %: $(B)/%
@@ -109,6 +109,17 @@ $(B)/break_test: tests/break_test.c bridge/dav_break.c | dirs
 $(B)/sort_test: tests/sort_test.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
+# the multiget reply parser: entities, CDATA, big objects, every truncation (offline)
+$(B)/mget_test: tests/mget_test.c bridge/dav_xml.c bridge/dav.c bridge/dav_break.c | dirs
+	$(CC) $(CFLAGS) -o $@ $^
+# ...and under sanitizers: it reads untrusted network bytes
+$(B)/mget_asan: tests/mget_test.c bridge/dav_xml.c bridge/dav.c bridge/dav_break.c | dirs
+	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -o $@ $^
+
+# a calendar through a time window: what leaves it leaves the device, never the server
+$(B)/window: tests/window.c bridge/dav.c bridge/sync.c $(CORE) | dirs
+	$(CC) $(CFLAGS) -o $@ $^
+
 $(B)/toobig: tests/toobig.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
@@ -125,7 +136,7 @@ $(B)/course_fuzz: tests/course_fuzz.c firmware/main/course.c firmware/main/cours
 $(B)/rss_asan: tests/rss_test.c bridge/rss.c | dirs
 	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -o $@ $^
 
-test: roundtrip find_test calc_test config_test streamparse rss_test news_test wx_test feeds_test break_test geoip_test safefile_test sort_test
+test: roundtrip find_test calc_test config_test streamparse rss_test news_test wx_test feeds_test break_test geoip_test safefile_test sort_test mget_test
 	./$(B)/roundtrip
 	./$(B)/find_test
 	./$(B)/calc_test
@@ -139,12 +150,14 @@ test: roundtrip find_test calc_test config_test streamparse rss_test news_test w
 	./$(B)/feeds_test
 	./$(B)/break_test
 	./$(B)/sort_test
+	./$(B)/mget_test
 
 # parser hardening sweep (sanitizer build; a bit slower)
-ftest: fuzz_test rss_asan course_fuzz
+ftest: fuzz_test rss_asan course_fuzz mget_asan
 	./$(B)/fuzz_test
 	./$(B)/rss_asan
 	./$(B)/course_fuzz
+	./$(B)/mget_asan
 
 # needs Radicale running on localhost:5232 (see README)
 itest: incremental bridge_cli

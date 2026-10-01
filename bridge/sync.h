@@ -27,7 +27,32 @@ typedef struct {
      * local database as they are, never pushed and never mapped. Also outside
      * the ops sums -- nothing was transmitted. */
     int held;
+    /* Calendar records that left the time window (sync_set_window): dropped
+     * from the device, never deleted on the server. Outside the ops sums --
+     * nothing was transmitted. */
+    int pruned;
 } SyncStats;
+
+/* ---- the time window (calendars) -------------------------------------------
+ * When set, a KIND_CAL collection syncs only the events with an occurrence in
+ * [start, end) (UTC epoch seconds): the server lists them with a CalDAV
+ * time-range query, and only those are fetched and kept on the device.
+ *
+ * THE RULE THAT MAKES THIS SAFE: an object that is not in the window's listing
+ * is NOT a deletion. Its unchanged local copy is pruned from the device and
+ * nothing is sent; a copy changed on the device is checked against the server
+ * by itself first (dav_probe), so an edit is pushed and a delete is sent only
+ * for an object that is really still there. A listing that fails prunes
+ * nothing. Records created on the device are pushed wherever their date is,
+ * and leave the device at the next sync if it's outside the window.
+ *
+ * 0,0 (the default) syncs the whole collection. A server that doesn't support
+ * the query is synced whole, as before. */
+void sync_set_window(long long start, long long end);
+
+/* How the last sync_collection/sync_categorized call got object bodies: in
+ * batches (multiget) and one GET at a time. For the gates and the log. */
+void sync_fetch_counts(int *batched, int *single);
 
 /* Hold back new local records from the push. `fn(uid, ctx)` is asked about each
  * record that exists only on the device; a nonzero answer keeps it local and

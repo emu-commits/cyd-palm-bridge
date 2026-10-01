@@ -94,6 +94,7 @@ run "massdel (guard fires, heals, and stays out of the way)" clean ./build/massd
 run "bigsync (device-sized, 90 recs)"  clean ./build/bigsync
 run "multiapp (To Do + Address sync)"  clean ./build/multiapp
 run "toobig (refuses, changes nothing)" clean ./build/toobig
+run "window (a time window: prune, never delete)" clean ./build/window
 run "dav_roundtrip (PDB->server->PDB)" clean ./tests/dav_roundtrip.sh
 
 echo

@@ -98,6 +98,11 @@ typedef struct {
     int  backlight_sec;        /* idle seconds -> dim backlight, 0=never  */
     int  clock24;              /* 0 = 12-hour clock, 1 = 24-hour          */
     int  policy;               /* CFG_POL_*                              */
+    /* Date Book syncs a window of days, not the whole account (sync_set_window):
+     * from cal_back days before today to cal_ahead days after it. cal_ahead 0
+     * syncs the whole calendar. */
+    int  cal_back;             /* days before today, 0..366 (default 1)  */
+    int  cal_ahead;            /* days after today, 0..730 (default 14)  */
 } Config;
 
 /* populate with safe defaults (empty creds, sensible timers). */

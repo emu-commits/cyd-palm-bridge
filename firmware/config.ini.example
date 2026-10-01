@@ -35,3 +35,10 @@ longitude     = -74.0060
 brightness    = 80                        # backlight 0..100
 backlight_sec = 30                        # dim after N idle seconds (0 = never)
 policy        = server                    # conflict policy: server | local | both
+
+# Date Book keeps a window of your calendar, not its years of history: from
+# this many days before today to this many after. Events outside it stay in
+# iCloud, untouched. cal_days_ahead = 0 syncs the whole calendar (slow on a
+# big account). Settings > Sync > Calendar sets the same thing.
+cal_days_back  = 1
+cal_days_ahead = 14

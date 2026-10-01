@@ -225,7 +225,13 @@ host build in `build/`.
 with the external sort, the window and pruning rule, batched downloads.
 Focus on a very tight time window"). The plan is `BACKLOG.md` §Engine,
 items 1 and 5. The rule that makes a window safe: **an object leaving the
-window is pruned on the device and never deleted on the server.**
+window is pruned on the device and never deleted on the server.** Built the
+same day: the sort in runs on the card (`sync_sort_file`), the window
+(`sync_set_window`, config `cal_days_back`/`cal_days_ahead`, Settings ▸
+Sync ▸ Calendar), and batched downloads (multiget into a body cache on the
+card); gates `sort_test`, `mget_test` (+`mget_asan`), `window`. Its bench
+checks are `[d]` items in `BACKLOG.md`'s first RESUME HERE. Still open:
+To Do (open tasks only) and Address (no photos, or one group).
 
 1. **S6, the bench**, is the owner's (`[d]` items in `BACKLOG.md`). Any
    further work follows `SRS_PLAN.md` §10, keeping to its §7 budgets:

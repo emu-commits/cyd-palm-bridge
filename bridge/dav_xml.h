@@ -42,6 +42,23 @@ int dav_parse_report_stream(FILE*f,int status,dav_sync_cb cb,void*ctx,
                             char*newtoken,int tokcap);
 int dav_parse_collections_stream(FILE*f,dav_coll_cb cb,void*ctx);
 
+/* ---- request bodies shared by both transports ---- */
+/* the calendar-query for a time window (UTC epoch seconds). Length, or -1. */
+int dav_body_window(char*out,int cap,long long start,long long end);
+/* a calendar-multiget (card=0) / addressbook-multiget (card=1) naming each
+ * member by its path: the path part of `base`, then coll, then the name.
+ * Length, or -1 if it doesn't fit `cap`. */
+int dav_body_multiget(char*out,int cap,const char*base,const char*coll,int card,
+                      const char*const*names,int n);
+
+/* Stream a multiget reply (or any multistatus carrying calendar-data or
+ * address-data) one character at a time: each member's data is un-escaped
+ * (entities and CDATA) and appended to `body`, then cb(name, etag, offset,
+ * length) fires. RAM is a few small buffers whatever the objects' size.
+ * Returns the number of members with data, or -1 if it wasn't a multistatus. */
+typedef void (*dav_obj_cb)(const char*name,const char*etag,long off,long len,void*ctx);
+int dav_parse_multiget_stream(FILE*in,FILE*body,dav_obj_cb cb,void*ctx);
+
 /* walk a PROPFIND with resourcetype/displayname: cb(href, kind, dn). count. */
 int dav_parse_collections(const char*buf,dav_coll_cb cb,void*ctx);
 /* pull the inner <href> of the element named by `propOpen` (e.g.

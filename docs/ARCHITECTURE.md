@@ -70,6 +70,17 @@ without `sync-collection` falls back to `PROPFIND`. The token is kept as a
 `#synctoken` line in the map. iCloud supports it, so syncs after the first
 are deltas.
 
+**A real account.** Date Book syncs a window of days (`sync_set_window`;
+by default yesterday to two weeks ahead), listed with a CalDAV time-range
+query that the server applies to recurrences. An object that leaves the
+window leaves the device and is never deleted on the server; one the device
+changed is checked with a one-object PROPFIND first, so an edit still goes
+up and a tombstone still deletes. Bodies are fetched in batches
+(`calendar-multiget` / `addressbook-multiget`), streamed onto the card and
+looked up there, rather than one GET each. The index files are sorted in a
+4 KB buffer, or in runs on the card when they don't fit, so a collection's
+size costs card space rather than RAM.
+
 **Safety.** Every durable file is replaced whole (crash-safe writes). A sync
 that would delete most of a collection is held back (the mass-delete guard),
 deletions travel as tombstones, the demo records are never pushed, and a

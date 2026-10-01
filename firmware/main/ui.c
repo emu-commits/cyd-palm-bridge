@@ -4219,8 +4219,8 @@ static const char *SET_BLURB[SET_N] = {
                     "backlight is most of the battery.",
     /* Location  */ "Where you are, so the lock screen can show your weather. A "
                     "sync sharpens this unless you have set it yourself.",
-    /* Sync      */ "Which calendar and address book HotSync uses, and who wins "
-                    "when both sides changed.",
+    /* Sync      */ "How much of your calendar HotSync keeps, which calendars "
+                    "it uses, and who wins when both sides changed.",
     /* Owner     */ "Your name, on the lock screen, so a device found on a desk "
                     "can be given back.",
     /* About     */ "What this is, what it was built from, and the licence it "
@@ -4567,6 +4567,35 @@ static void sp_pol_pick_cb(lv_event_t *e){ (void)e;
     pick_open("Conflicts", "When the same thing changed on both sides since the "
                            "last sync, this decides which copy survives.",
               POL_NAMES, 3, appcfg()->policy, pol_done);
+}
+
+/* How much of the calendar the device keeps: a window from yesterday on, not
+ * the account's years of history (sync.h, sync_set_window). Tight by default,
+ * because every event in it is fetched, kept and sorted on this device. */
+static const char *const WIN_NAMES[] = {
+    "The next 2 weeks", "The next month", "The next 3 months", "Everything (slow)",
+};
+static const int WIN_DAYS[] = { 14, 31, 92, 0 };
+static int win_index(int ahead){
+    for(int i = 0; i < 4; i++) if(WIN_DAYS[i] == ahead) return i;
+    return -1;                                   /* a value set in config.ini */
+}
+static void win_label(char *b, size_t n, int ahead){
+    int i = win_index(ahead);
+    if(i == 0)      snprintf(b, n, "Calendar: next 2 weeks");
+    else if(i == 1) snprintf(b, n, "Calendar: next month");
+    else if(i == 2) snprintf(b, n, "Calendar: next 3 months");
+    else if(i == 3) snprintf(b, n, "Calendar: everything");
+    else            snprintf(b, n, "Calendar: next %d days", ahead);
+}
+static void win_done(int i){
+    if(i >= 0 && i < 4){ appcfg_mut()->cal_ahead = WIN_DAYS[i]; appcfg_save(); }
+    show_set_panel(SET_SYNC);
+}
+static void sp_win_pick_cb(lv_event_t *e){ (void)e;
+    pick_open("Calendar", "How far ahead Date Book keeps your iCloud calendar. "
+                          "Events outside it stay in iCloud, untouched.",
+              WIN_NAMES, 4, win_index(appcfg()->cal_ahead), win_done);
 }
 
 /* Location, as a list of places. The zone table carries each city's coordinates
@@ -4952,6 +4981,8 @@ static void show_set_panel(int tile){
         }
         break;
     case SET_SYNC:
+        win_label(row, sizeof row, c->cal_ahead);
+        pf_add(list, row, sp_win_pick_cb, 0);
         snprintf(row, sizeof row, "Conflicts: %s", pol_name(c->policy));
         pf_add(list, row, sp_pol_pick_cb, 0);
         sp_field_row(list, tile, PF_CAL);

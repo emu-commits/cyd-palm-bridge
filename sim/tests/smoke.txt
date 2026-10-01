@@ -793,10 +793,19 @@ t 400
 c 46 160
 t 400
 s w9_sync
+# The first row is how much of the calendar Date Book keeps (a window of days,
+# not the account's history); pick "The next month".
 c 120 37
 t 400
+s w9_calendar_pick
+c 120 59
+t 400
+s w9_sync_calendar
+# The second row is the conflict policy; pick "Keep both copies".
+c 120 63
+t 400
 s w9_policy_pick
-c 120 93
+c 120 81
 t 400
 s w9_sync_set
 c 18 225

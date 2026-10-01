@@ -16,6 +16,75 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-01 — Sync for a real account: the sort on the card, a calendar window, batched downloads
+
+From the owner: "start with the external sort, the window and pruning rule,
+batched downloads. Focus on a very tight time window". A real iCloud account
+holds years of events; the first sync enumerated every object, fetched each
+one with its own GET (two for a new one), and refused any collection whose
+index files didn't fit in one block of RAM, a few hundred records.
+
+**The sort** (`sync_sort_file()`, `bridge/sync.c`) works in a bounded buffer,
+4 KB on the device: a file that fits is sorted there; a bigger one is cut
+into sorted runs on the card and merged four at a time, in as many passes as
+it takes. RAM is the same whatever the size: ~5.1 KB building a run, ~5.3 KB
+merging (four 512 B line buffers and five open files), inside HotSync's
+6 KB sort reserve. The only refusal left is a line longer than the budget.
+
+**The window** (`sync_set_window()`): Date Book is listed with a CalDAV
+`calendar-query` and a `time-range` filter, which the server applies to
+recurrences too. Default: yesterday to two weeks ahead (`cal_days_back = 1`,
+`cal_days_ahead = 14`; Settings ▸ Sync ▸ Calendar offers 2 weeks, a month,
+3 months or everything). **The pruning rule:** a mapped object missing from
+the listing is *not listed* (a new state, not a deletion):
+- an unchanged copy is pruned from the device and nothing is sent;
+- a copy the device edited, tombstoned, or lost is checked first with a
+  one-object PROPFIND (`dav_probe`): still there, and the ordinary rules
+  apply (the edit is pushed, the tombstone deletes); gone, and it's a server
+  delete; no answer, and everything is kept for next time;
+- a listing that fails, or an object whose UID can't be read, prunes
+  nothing; a server that doesn't answer the query is synced whole;
+- a record made on the device outside the window is pushed, then pruned at
+  the next sync;
+- a window that empties the device is allowed (it was refused as a glitch).
+HotSync skips Date Book if the clock reads before 2025, since the window
+needs today's date.
+
+**Batched downloads:** the bodies the merge will want (new and changed
+objects) are fetched with `calendar-multiget` / `addressbook-multiget`, 16
+per request, before the fetch buffer is retaken (so the TLS receive buffer
+has the room). The reply is streamed onto the card a character at a time by
+`dav_parse_multiget_stream()` (entities, CDATA), and indexed by name in
+fixed-width rows, so a lookup is a binary search. Anything not cached falls
+back to one GET. A new object now costs no GET at all where it cost two.
+
+**Also fixed:** `dav_strip_quotes` left the quotes on a weak ETag (`W/"x"`),
+because it looked for quotes before removing the `W/`.
+
+**Gates:**
+- `tests/sort_test.c` (offline, `make test`): random files at five budgets,
+  up to ~225 runs and four merge passes, against a plain sort; clean under
+  ASan/UBSan.
+- `tests/mget_test.c` (`make test`; `mget_asan` in `make ftest`): escaped and
+  CDATA data, a 60 KB object, a 404 member, every truncation, hostile input.
+- `tests/window.c` (`run_gates.sh`, Radicale): five events (two near, one two
+  months out, one past, one weekly since a year ago); the window takes three,
+  fetched in one batch with no single GETs; moving the window prunes and
+  pulls without deleting anything on the server; an edit to an event that
+  then left the window reaches the server; a tombstone deletes; a far-future
+  device record goes up and then leaves; an empty window empties the device;
+  no window brings everything back.
+- `bigsync` gains a phase with a 1 KB sort budget: a fresh device pulls 201
+  records with every index sorted in runs, then a no-op resync.
+
+**Measured** (IDF build in `espressif/idf:release-v5.5`, LVGL v9.5.0 vendored
+locally): app 1,738,304 B (+9,904 B since the README work: the sort +1,072,
+the window and multiget +8,832); static DRAM 160,612 B (+32: the two config
+fields and the engine's window and fetch counters).
+
+**Not yet seen on the device:** the window and multiget against real iCloud
+(the bench checks in `BACKLOG.md`).
+
 ### 2026-10-01 — Full screen: a wider Home button
 
 From the owner: "in the fullscreen modes, make the home button as wide as

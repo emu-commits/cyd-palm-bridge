@@ -899,6 +899,23 @@ static void hotsync_task(void *arg){
         dav_transport_reset();
         sync_set_check(hs_heap_check);
         dav_set_check(hs_heap_check);
+        /* Date Book syncs a window of days around today, not the account's
+         * years of history (sync.h, sync_set_window). The window needs today's
+         * date: a clock that was never set would put it in 1970 and prune
+         * everything from the device, so without one Date Book waits. */
+        sync_set_window(0, 0);
+        if(t->kind == KIND_CAL && cfg->cal_ahead > 0){
+            time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
+            if(tm.tm_year + 1900 < 2025){
+                ESP_LOGW(TAG,"%s: the clock isn't set -- skipped this run (its window needs today's date)",t->name);
+                continue;
+            }
+            tm.tm_hour = tm.tm_min = tm.tm_sec = 0; tm.tm_isdst = -1;
+            long long mid = (long long)mktime(&tm);
+            sync_set_window(mid - (long long)cfg->cal_back * 86400LL,
+                            mid + (long long)(cfg->cal_ahead + 1) * 86400LL);
+            ESP_LOGI(TAG,"%s: window %d day(s) back, %d ahead",t->name,cfg->cal_back,cfg->cal_ahead);
+        }
         SyncStats st={0};
         s_demo_n = data_demo_count(app_of(i));
         sync_set_hold(s_demo_n ? hold_demo : NULL, NULL);
@@ -917,10 +934,12 @@ static void hotsync_task(void *arg){
          * is a record that was already gone on both sides, so nothing was sent.
          * Counting it in pushDel would report deletions this device never
          * made. */
-        ESP_LOGI(TAG,"%s: rc=%d up +%d~%d-%d down +%d~%d-%d%s heap=%lu",t->name,n,
-                 st.pushNew,st.pushMod,st.pushDel, st.pullNew,st.pullMod,st.pullDel,
-                 st.bothDel ? " (+already gone)" : "",
-                 (unsigned long)esp_get_free_heap_size());
+        { int fb = 0, fs = 0; sync_fetch_counts(&fb, &fs);
+          ESP_LOGI(TAG,"%s: rc=%d up +%d~%d-%d down +%d~%d-%d%s pruned=%d fetched=%d batched+%d single heap=%lu",
+                   t->name,n, st.pushNew,st.pushMod,st.pushDel, st.pullNew,st.pullMod,st.pullDel,
+                   st.bothDel ? " (+already gone)" : "", st.pruned, fb, fs,
+                   (unsigned long)esp_get_free_heap_size()); }
+        sync_set_window(0, 0);
         if(n == -2) protec++;
         else if(n < 0){ failed++;
             if(n == -3)      diskerr++;

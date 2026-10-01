@@ -73,10 +73,11 @@ into its own flash and blanks them on the card ([`SECURITY.md`](SECURITY.md)).
 - **To Do syncs to iCloud's CalDAV task lists.** The iPhone's Reminders app
   shows them only if you add iCloud as a CalDAV account (Settings → Calendar
   → Add CalDAV Account), not under the built-in iCloud reminders.
-- **Very large calendars and address books:** the device has very little
-  RAM, and a collection of more than a few hundred records is refused rather
-  than synced partly. This is being worked on (`docs/BACKLOG.md`, the sync
-  engine).
+- **Date Book keeps a window of your calendar**, by default from yesterday
+  to two weeks ahead (Settings ▸ Sync ▸ Calendar). Everything outside it
+  stays in iCloud, untouched; an event you add on the device further out
+  goes up to iCloud and then leaves the device. To Do and Address sync
+  whole.
 
 ## Study courses
 

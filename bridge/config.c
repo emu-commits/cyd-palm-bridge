@@ -26,6 +26,8 @@ void config_defaults(Config *c){
     c->backlight_sec = 30;     /* dim after 30 s idle */
     c->clock24       = 0;      /* 12-hour by default */
     c->policy        = CFG_POL_SERVER;
+    c->cal_back      = 1;      /* yesterday ...                          */
+    c->cal_ahead     = 14;     /* ... to two weeks ahead (a tight window) */
     c->loc_auto      = -1;     /* "the file has not said"; see config.h */
 }
 
@@ -118,6 +120,8 @@ static void apply(Config *c, ConfigSecrets *sec, const char *key, const char *va
     else if(!strcasecmp(key,"backlight_sec")) c->backlight_sec = clampi(atoi(val),0,3600);
     else if(!strcasecmp(key,"clock24"))       c->clock24       = clampi(atoi(val),0,1);
     else if(!strcasecmp(key,"policy"))        c->policy        = config_policy_from_str(val);
+    else if(!strcasecmp(key,"cal_days_back"))  c->cal_back      = clampi(atoi(val),0,366);
+    else if(!strcasecmp(key,"cal_days_ahead")) c->cal_ahead     = clampi(atoi(val),0,730);
     /* unknown key: ignored */
 }
 
@@ -179,5 +183,7 @@ int config_save(const char *path, const Config *c, const ConfigSecrets *sec){
     fprintf(f,"backlight_sec = %d\n", c->backlight_sec);
     fprintf(f,"clock24 = %d\n",       c->clock24);
     fprintf(f,"policy = %s\n",        config_policy_to_str(c->policy));
+    fprintf(f,"cal_days_back = %d\n",  c->cal_back);
+    fprintf(f,"cal_days_ahead = %d\n", c->cal_ahead);
     return sf_commit(&sf, !ferror(f));
 }

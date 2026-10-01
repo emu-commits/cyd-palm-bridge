@@ -190,3 +190,54 @@ int dav_list_collections(const DavCtx*d,const char*path,dav_coll_cb cb,void*ctx)
     free(buf);
     return count;
 }
+
+/* ---------------- a time window, multiget, a probe ---------------- */
+int dav_query_window(const DavCtx*d,const char*coll,long long start,long long end,
+                     dav_list_cb cb,void*ctx){
+    { char body[1024]; if(dav_body_window(body,sizeof body,start,end)<0) return -1;
+      FILE*f=fopen("state/.wreq","wb"); if(!f) return -1; fputs(body,f); fclose(f); }
+    char cmd[1024];
+    snprintf(cmd,sizeof cmd,
+        "curl -s -L -o state/.wrep -w '%%{http_code}' -u %s:%s -X REPORT "
+        "-H 'Depth: 1' -H 'Content-Type: application/xml; charset=utf-8' --data-binary @state/.wreq '%s/%s/'",
+        d->user,d->pass,d->base,coll);
+    char code[16]={0}; if(run(cmd,code,sizeof code)<0) return -1;
+    if(atoi(code)!=207) return -1;
+    FILE*f=fopen("state/.wrep","rb"); if(!f) return -1;
+    int n=dav_parse_members_stream(f,cb,ctx);
+    fclose(f);
+    return n;
+}
+
+int dav_multiget(const DavCtx*d,const char*coll,int card,const char*const*names,int n,
+                 const char*spool){
+    { size_t cap=1024+(size_t)n*600; char*body=malloc(cap); if(!body) return -1;
+      if(dav_body_multiget(body,(int)cap,d->base,coll,card,names,n)<0){ free(body); return -1; }
+      FILE*f=fopen("state/.mreq","wb"); if(!f){ free(body); return -1; }
+      fputs(body,f); fclose(f); free(body); }
+    char cmd[1280];
+    snprintf(cmd,sizeof cmd,
+        "curl -s -L -o '%s' -w '%%{http_code}' -u %s:%s -X REPORT "
+        "-H 'Depth: 1' -H 'Content-Type: application/xml; charset=utf-8' --data-binary @state/.mreq '%s/%s/'",
+        spool,d->user,d->pass,d->base,coll);
+    char code[16]={0}; if(run(cmd,code,sizeof code)<0) return -1;
+    return atoi(code);
+}
+
+int dav_probe(const DavCtx*d,const char*coll,const char*name,char*etag,int cap){
+    if(etag&&cap) etag[0]=0;
+    char cmd[1024];
+    snprintf(cmd,sizeof cmd,
+        "curl -s -o state/.prep -w '%%{http_code}' -u %s:%s -X PROPFIND -H 'Depth: 0' "
+        "-H 'Content-Type: application/xml' --data '<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\">"
+        "<d:prop><d:getetag/></d:prop></d:propfind>' '%s/%s/%s'",
+        d->user,d->pass,d->base,coll,name);
+    char code[16]={0}; if(run(cmd,code,sizeof code)<0) return -1;
+    int st=atoi(code); if(st<=0) return -1;
+    if(st==207||st==200){
+        char*buf=slurp("state/.prep",NULL);
+        if(!buf || !dav_xml_text(buf,NULL,"getetag",etag,cap) || !etag[0]){ free(buf); return -1; }
+        dav_strip_quotes(etag); free(buf);
+    }
+    return st;
+}

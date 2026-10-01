@@ -385,3 +385,55 @@ int dav_list_collections(const DavCtx*d,const char*path,dav_coll_cb cb,void*ctx)
     fprintf(stderr,"[dav] PROPFIND collections %s -> st=%d rn=%ld found=%d (stream)\n",path,st,rn,count);
     return count;
 }
+
+/* ---------------- a time window, multiget, a probe ---------------- */
+int dav_query_window(const DavCtx*d,const char*coll,long long start,long long end,
+                     dav_list_cb cb,void*ctx){
+    char body[640]; int bl=dav_body_window(body,sizeof body,start,end);
+    if(bl<0) return -1;
+    char url[512]; snprintf(url,sizeof url,"%s/%s/",d->base,coll);
+    /* spooled and stream-parsed, as the other listings are */
+    FILE*sp=fopen(ENUM_SPOOL,"w+b"); if(!sp){ ESP_LOGW(TAG,"window %s: spool open failed",coll); return -1; }
+    s_spoolfile=sp;
+    int st=davreq(d,HTTP_METHOD_REPORT,url,1,"application/xml; charset=utf-8",NULL,body,bl,
+                  NULL,0,NULL, NULL,0, NULL,0);
+    s_spoolfile=NULL;
+    long rn = ftell(sp); rewind(sp);
+    int count = st==207 ? dav_parse_members_stream(sp,cb,ctx) : -1;
+    fclose(sp); remove(ENUM_SPOOL);
+    fprintf(stderr,"[dav] window %s -> st=%d rn=%ld members=%d\n",coll,st,rn,count);
+    return count;
+}
+
+int dav_multiget(const DavCtx*d,const char*coll,int card,const char*const*names,int n,
+                 const char*spool){
+    int cap = 512 + n*200;
+    char*body=malloc((size_t)cap); if(!body) return -1;
+    int bl=dav_body_multiget(body,cap,d->base,coll,card,names,n);
+    if(bl<0){ free(body); return -1; }
+    char url[512]; snprintf(url,sizeof url,"%s/%s/",d->base,coll);
+    FILE*sp=fopen(spool,"w+b"); if(!sp){ free(body); return -1; }
+    s_spoolfile=sp;
+    int st=davreq(d,HTTP_METHOD_REPORT,url,1,"application/xml; charset=utf-8",NULL,body,bl,
+                  NULL,0,NULL, NULL,0, NULL,0);
+    s_spoolfile=NULL;
+    long rn = ftell(sp);
+    fclose(sp); free(body);
+    fprintf(stderr,"[dav] multiget %s n=%d -> st=%d rn=%ld\n",coll,n,st,rn);
+    return st;
+}
+
+int dav_probe(const DavCtx*d,const char*coll,const char*name,char*etag,int cap){
+    if(etag&&cap) etag[0]=0;
+    char url[512]; snprintf(url,sizeof url,"%s/%s/%s",d->base,coll,name);
+    char body[128]; int bl=body_getetag(body,sizeof body);
+    char buf[1024]; int rn=0;
+    int st=davreq(d,HTTP_METHOD_PROPFIND,url,0,"application/xml",NULL,body,bl,
+                  buf,sizeof buf,&rn, NULL,0, NULL,0);
+    if(st<0) return -1;
+    if(st==207||st==200){
+        if(!dav_xml_text(buf,NULL,"getetag",etag,cap) || !etag[0]) return -1;
+        dav_strip_quotes(etag);
+    }
+    return st;
+}

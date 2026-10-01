@@ -17,6 +17,7 @@ int main(void){
     CK(!strcmp(c.world1,"Europe/London"),"default world clock 1");
     CK(!strcmp(c.world2,"Asia/Tokyo"),"default world clock 2");
     CK(c.policy==CFG_POL_SERVER,"default policy server");
+    CK(c.cal_back==1 && c.cal_ahead==14,"default calendar window: yesterday to two weeks ahead");
     CK(strstr(c.dav_base,"caldav.icloud.com")!=NULL,"default caldav host");
     CK(strstr(c.dav_card_base,"contacts.icloud.com")!=NULL,"default contacts host");
 
@@ -204,6 +205,15 @@ int main(void){
     Config q; config_defaults(&q);
     CK(config_load(PATH,&q,NULL)==0,"reload after promote");
     CK(!strcmp(q.wifi[0].ssid,"C") && !strcmp(q.wifi[2].ssid,"B"),"promoted order round-trips");
+
+    /* the calendar window round-trips, and a hand-edited value is clamped */
+    { Config w; config_defaults(&w); w.cal_back=7; w.cal_ahead=0;
+      CK(config_save(PATH,&w,NULL)==0,"save the window");
+      Config x; config_defaults(&x);
+      CK(config_load(PATH,&x,NULL)==0 && x.cal_back==7 && x.cal_ahead==0,"the window round-trips (0 = everything)");
+      FILE*f=fopen(PATH,"w"); fputs("cal_days_back = -5\ncal_days_ahead = 99999\n",f); fclose(f);
+      Config y; config_defaults(&y); config_load(PATH,&y,NULL);
+      CK(y.cal_back==0 && y.cal_ahead==730,"out-of-range values are clamped"); }
 
     printf("\n%s (%d failures)\n", fails?"FAILURES":"ALL PASS", fails);
     return fails?1:0;
