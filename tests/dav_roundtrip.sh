@@ -10,7 +10,7 @@ CAL=palm/cal
 CARD=palm/card
 
 echo "== regenerate source PDBs =="
-./roundtrip >/dev/null
+./build/roundtrip >/dev/null
 ls -l pdb/DatebookDB.pdb pdb/AddressDB.pdb
 
 echo "== reset server collections + local state =="
@@ -24,7 +24,7 @@ done
 rm -f state/sync_map.tsv
 
 echo "== push =="
-./bridge_cli push pdb/DatebookDB.pdb pdb/AddressDB.pdb
+./build/bridge_cli push pdb/DatebookDB.pdb pdb/AddressDB.pdb
 
 echo "== server now holds (sample GET of 1.ics) =="
 curl -s -u $AUTH "$BASE/$CAL/1.ics" | sed 's/\r$//'
@@ -33,13 +33,13 @@ echo "== sync map written =="
 cat state/sync_map.tsv
 
 echo "== pull into fresh PDBs =="
-./bridge_cli pull pdb/DatebookDB.down.pdb pdb/AddressDB.down.pdb
+./build/bridge_cli pull pdb/DatebookDB.down.pdb pdb/AddressDB.down.pdb
 
 echo "== diff canonical dumps (original vs server-rebuilt) =="
-./bridge_cli dump cal  pdb/DatebookDB.pdb      > state/cal.orig.txt
-./bridge_cli dump cal  pdb/DatebookDB.down.pdb  > state/cal.down.txt
-./bridge_cli dump card pdb/AddressDB.pdb        > state/card.orig.txt
-./bridge_cli dump card pdb/AddressDB.down.pdb   > state/card.down.txt
+./build/bridge_cli dump cal  pdb/DatebookDB.pdb      > state/cal.orig.txt
+./build/bridge_cli dump cal  pdb/DatebookDB.down.pdb  > state/cal.down.txt
+./build/bridge_cli dump card pdb/AddressDB.pdb        > state/card.orig.txt
+./build/bridge_cli dump card pdb/AddressDB.down.pdb   > state/card.down.txt
 
 rc=0
 # CAL preserves order (calendars have no slot ambiguity) -> exact diff.

@@ -58,7 +58,7 @@ curl -s -o /dev/null -u "$U:$P" -X MKCOL -H 'Content-Type: application/xml' \
 
 echo "== building =="
 # `make` (all) does not build the sanitizer fuzz binary -- build it explicitly so
-# the fuzz gate below has ./fuzz_test on a clean checkout (it only "worked" before
+# the fuzz gate below has ./build/fuzz_test on a clean checkout (it only "worked" before
 # if a prior `make ftest` had left the binary behind; CI's clean tree caught this).
 make >/dev/null && make fuzz_test >/dev/null || { echo "build failed"; exit 1; }
 
@@ -80,20 +80,20 @@ run(){   # run <label> <clean-state?> <command...>
     if "$@"; then echo "  -> PASS"; else echo "  -> FAIL"; rc=1; fi
 }
 
-run "roundtrip (codec, offline)" noclean   ./roundtrip
-run "find (global search, offline)" noclean ./find_test
-run "calc (evaluator, offline)"    noclean  ./calc_test
-run "config (prefs, offline)"      noclean  ./config_test
-run "fuzz (parser hardening, ASan)" noclean ./fuzz_test
-run "incremental (two-way + policies)" clean ./incremental
-run "synctoken (RFC 6578 delta)"       clean ./synctoken
-run "category (category->collection)"  clean ./category
-run "uidmatch (UID identity, reloc+foreign)" clean ./uidmatch
-run "idempotent (etag churn + unresolvable reloc)" clean ./idempotent
-run "massdel (guard fires, heals, and stays out of the way)" clean ./massdel
-run "bigsync (device-sized, 90 recs)"  clean ./bigsync
-run "multiapp (To Do + Address sync)"  clean ./multiapp
-run "toobig (refuses, changes nothing)" clean ./toobig
+run "roundtrip (codec, offline)" noclean   ./build/roundtrip
+run "find (global search, offline)" noclean ./build/find_test
+run "calc (evaluator, offline)"    noclean  ./build/calc_test
+run "config (prefs, offline)"      noclean  ./build/config_test
+run "fuzz (parser hardening, ASan)" noclean ./build/fuzz_test
+run "incremental (two-way + policies)" clean ./build/incremental
+run "synctoken (RFC 6578 delta)"       clean ./build/synctoken
+run "category (category->collection)"  clean ./build/category
+run "uidmatch (UID identity, reloc+foreign)" clean ./build/uidmatch
+run "idempotent (etag churn + unresolvable reloc)" clean ./build/idempotent
+run "massdel (guard fires, heals, and stays out of the way)" clean ./build/massdel
+run "bigsync (device-sized, 90 recs)"  clean ./build/bigsync
+run "multiapp (To Do + Address sync)"  clean ./build/multiapp
+run "toobig (refuses, changes nothing)" clean ./build/toobig
 run "dav_roundtrip (PDB->server->PDB)" clean ./tests/dav_roundtrip.sh
 
 echo

@@ -1,160 +1,165 @@
 CC      = cc
 CFLAGS  = -std=gnu99 -Wall -O2 -g
+# every program goes into build/, so the repo root stays clean; `make roundtrip`
+# and the rest still work as names (see PROGS below)
+B       = build
 CORE    = bridge/pdb.c bridge/datebook.c bridge/address.c bridge/ical.c bridge/vcard.c \
           bridge/tz.c bridge/charset.c bridge/appinfo.c bridge/todo.c bridge/dav_xml.c \
           bridge/find.c bridge/dav_break.c
 
-all: roundtrip bridge_cli incremental synctoken category bigsync multiapp \
-     uidmatch idempotent massdel streamparse find_test calc_test config_test rss_test news_test wx_test \
-     feeds_test break_test geoip_test toobig safefile_test
+PROGS   = roundtrip bridge_cli incremental synctoken category bigsync multiapp \
+          uidmatch idempotent massdel streamparse find_test calc_test config_test rss_test news_test wx_test \
+          feeds_test break_test geoip_test toobig safefile_test fuzz_test course_fuzz rss_asan
+
+all: $(addprefix $(B)/,$(filter-out fuzz_test course_fuzz rss_asan,$(PROGS)))
+
+# `make wx_test` builds build/wx_test
+$(PROGS): %: $(B)/%
 
 dirs:
-	@mkdir -p pdb state
+	@mkdir -p pdb state $(B)
 
-roundtrip: tests/roundtrip.c $(CORE) | dirs
+$(B)/roundtrip: tests/roundtrip.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
-bridge_cli: bridge/main.c bridge/dav.c bridge/sync.c $(CORE) | dirs
+$(B)/bridge_cli: bridge/main.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
-incremental: tests/incremental.c bridge/dav.c bridge/sync.c $(CORE) | dirs
+$(B)/incremental: tests/incremental.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
 # the mass-delete guard's POSITIVE path -- it fires, deletions are held back,
 # and the next sync heals the local database. Plus the negative control (a small
 # deletion must still push) without which a guard stuck on would pass. The
 # other gates covered this only by staying silent, which is not coverage.
-massdel: tests/massdel.c bridge/dav.c bridge/sync.c $(CORE) | dirs
+$(B)/massdel: tests/massdel.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
-synctoken: tests/synctoken.c bridge/dav.c bridge/sync.c $(CORE) | dirs
+$(B)/synctoken: tests/synctoken.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
-category: tests/category.c bridge/dav.c bridge/sync.c $(CORE) | dirs
+$(B)/category: tests/category.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
 # built with device working-set sizing (MAXR=96) to prove the streaming engine
 # lifts the old 24-record / 8 KB-arena device cap. See tests/bigsync.c.
-bigsync: tests/bigsync.c bridge/dav.c bridge/sync.c $(CORE) | dirs
+$(B)/bigsync: tests/bigsync.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -DSYNC_DEVICE_SIZES -o $@ $^
 
 # per-app sync_collection coverage for To Do (VTODO) + Address (vCard) -- the
 # exact per-collection path HotSync uses for each app. See tests/multiapp.c.
-multiapp: tests/multiapp.c bridge/dav.c bridge/sync.c $(CORE) | dirs
+$(B)/multiapp: tests/multiapp.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
 # reconciliation is keyed on the object UID, not the href: href relocation and
 # foreign-object edits round-trip without dups. See tests/uidmatch.c.
-uidmatch: tests/uidmatch.c bridge/dav.c bridge/sync.c $(CORE) | dirs
+$(B)/uidmatch: tests/uidmatch.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
 # idempotency under real-iCloud behaviors Radicale's happy path misses: etag
 # churn + an unresolvable relocation. Built with a TINY OBJ_FETCH_CAP so a bloated
 # object overflows the fetch buffer on the host, reproducing the no-PSRAM device
 # truncation that used to duplicate records. See tests/idempotent.c.
-idempotent: tests/idempotent.c bridge/dav.c bridge/sync.c $(CORE) | dirs
+$(B)/idempotent: tests/idempotent.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -DOBJ_FETCH_CAP=4096 -o $@ $^
 
 # offline unit tests (no server needed)
 # sliding-window enumeration parsers == the in-RAM buffer parsers, across window
 # boundaries and for the trailing sync-token. Proves the fix that removed the 8 KB
 # enumeration truncation. See tests/streamparse.c.
-streamparse: tests/streamparse.c $(CORE) | dirs
+$(B)/streamparse: tests/streamparse.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
-find_test: tests/find_test.c $(CORE) | dirs
+$(B)/find_test: tests/find_test.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
-calc_test: tests/calc_test.c bridge/calc.c | dirs
+$(B)/calc_test: tests/calc_test.c bridge/calc.c | dirs
 	$(CC) $(CFLAGS) -o $@ $^ -lm
 
 # dash.c joins the link because the gate now checks the STEP as well as the parse:
 # a cache that parses perfectly and never advances is the bug this pair exists for.
-wx_test: tests/wx_test.c bridge/wxfetch.c bridge/dash.c | dirs
+$(B)/wx_test: tests/wx_test.c bridge/wxfetch.c bridge/dash.c | dirs
 	$(CC) $(CFLAGS) -Ibridge -o $@ tests/wx_test.c bridge/wxfetch.c bridge/dash.c -lm
 
-config_test: tests/config_test.c bridge/config.c | dirs
+$(B)/config_test: tests/config_test.c bridge/config.c | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
 # The reply is POSITIONAL, so the query string and the parser are one decision --
 # this gate holds them together as well as checking the parse.
-geoip_test: tests/geoip_test.c bridge/geoip.c | dirs
+$(B)/geoip_test: tests/geoip_test.c bridge/geoip.c | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
-rss_test: tests/rss_test.c bridge/rss.c | dirs
+$(B)/rss_test: tests/rss_test.c bridge/rss.c | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
-news_test: tests/news_test.c bridge/news.c | dirs
+$(B)/news_test: tests/news_test.c bridge/news.c | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
 # every durable file is replaced whole: the crash states, and the PDB on top
-safefile_test: tests/safefile_test.c $(CORE) | dirs
+$(B)/safefile_test: tests/safefile_test.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
-feeds_test: tests/feeds_test.c bridge/feeds.c | dirs
+$(B)/feeds_test: tests/feeds_test.c bridge/feeds.c | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
-break_test: tests/break_test.c bridge/dav_break.c | dirs
+$(B)/break_test: tests/break_test.c bridge/dav_break.c | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
-toobig: tests/toobig.c bridge/dav.c bridge/sync.c $(CORE) | dirs
+$(B)/toobig: tests/toobig.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
 # malformed-input hardening, built with AddressSanitizer + UBSan
-fuzz_test: tests/fuzz_test.c $(CORE) | dirs
+$(B)/fuzz_test: tests/fuzz_test.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -o $@ $^
 
 # the Study course reader eats files off the SD card: truncated, bit-flipped and
 # hostile (CRC-fixed) copies of the committed courses, under sanitizers
-course_fuzz: tests/course_fuzz.c firmware/main/course.c firmware/main/course.h | dirs
+$(B)/course_fuzz: tests/course_fuzz.c firmware/main/course.c firmware/main/course.h | dirs
 	$(CC) $(CFLAGS) -Ifirmware/main -fsanitize=address,undefined -fno-sanitize-recover=all -o $@ tests/course_fuzz.c firmware/main/course.c
 
 # the RSS parser eats untrusted network bytes -> also run its gate under sanitizers
-rss_asan: tests/rss_test.c bridge/rss.c | dirs
+$(B)/rss_asan: tests/rss_test.c bridge/rss.c | dirs
 	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -o $@ $^
 
 test: roundtrip find_test calc_test config_test streamparse rss_test news_test wx_test feeds_test break_test geoip_test safefile_test
-	./roundtrip
-	./find_test
-	./calc_test
-	./config_test
-	./geoip_test
-	./streamparse
-	./rss_test
-	./news_test
-	./safefile_test
-	cd tests && ../wx_test
-	./feeds_test
-	./break_test
+	./$(B)/roundtrip
+	./$(B)/find_test
+	./$(B)/calc_test
+	./$(B)/config_test
+	./$(B)/geoip_test
+	./$(B)/streamparse
+	./$(B)/rss_test
+	./$(B)/news_test
+	./$(B)/safefile_test
+	cd tests && ../$(B)/wx_test
+	./$(B)/feeds_test
+	./$(B)/break_test
 
 # parser hardening sweep (sanitizer build; a bit slower)
 ftest: fuzz_test rss_asan course_fuzz
-	./fuzz_test
-	./rss_asan
-	./course_fuzz
+	./$(B)/fuzz_test
+	./$(B)/rss_asan
+	./$(B)/course_fuzz
 
 # needs Radicale running on localhost:5232 (see README)
 itest: incremental bridge_cli
-	./incremental
+	./$(B)/incremental
 
 stest: synctoken
-	./synctoken
+	./$(B)/synctoken
 
 ctest: category
-	./category
+	./$(B)/category
 
 # device-sized large-collection stress test (needs Radicale)
 btest: bigsync
-	./bigsync
+	./$(B)/bigsync
 
 # per-app (To Do + Address) sync_collection coverage (needs Radicale)
 mtest: multiapp
-	./multiapp
+	./$(B)/multiapp
 
 clean:
-	rm -f roundtrip bridge_cli incremental synctoken category bigsync multiapp \
-	      uidmatch idempotent massdel streamparse find_test calc_test config_test fuzz_test course_fuzz \
-	      rss_test rss_asan news_test feeds_test break_test geoip_test toobig safefile_test \
-	      pdb/_rt_*.pdb
+	rm -rf $(B) pdb/_rt_*.pdb
 
-.PHONY: all dirs test itest stest ctest btest mtest clean
+.PHONY: all dirs test ftest itest stest ctest btest mtest clean $(PROGS)

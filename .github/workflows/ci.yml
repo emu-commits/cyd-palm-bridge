@@ -25,7 +25,7 @@ jobs:
       - name: Fuzz gate (ASan + UBSan)
         run: make ftest
       - name: Weather gate (Open-Meteo CSV -> WxCache, live fixtures)
-        run: make wx_test && cd tests && ../wx_test
+        run: make wx_test && cd tests && ../build/wx_test
 
   # The course builder: every committed course.srs must rebuild from its source
   # to the same bytes, with the pinned Pillow and the pinned font (which
