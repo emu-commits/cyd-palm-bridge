@@ -441,12 +441,11 @@ follow-ups*.
    Pages build defines `UI_SEED_TESTEVENTS`). Build the showcase without them.
 
 ### Open-source readiness
-1. **README.** Lead with what it is, a photo or GIF, and the "try it in your
-   browser" link; then flashing; then setup through **Settings** (it still
-   says *Preferences → Discover collections*). Move the architecture and build
-   log (half the file) to `docs/ARCHITECTURE.md`. Fix the stale facts: "Status
-   (2026-07-09)", a 24 KB pool (it is 32 KB, `31100` bytes on hardware), and
-   "~$15" in one place and "$12" in another.
+1. ~~**README.**~~ Done 2026-10-01: it leads with what it is, screenshots
+   and the browser link, then installing, setup through Settings, Study
+   courses and the license; the architecture and build notes are in
+   `docs/ARCHITECTURE.md`, with the stale facts fixed. **Still wanted: a
+   photo of the real device** at the top.
 2. **Split `ui.c`** (10.5k lines) into modules behind a private header —
    lock/dashboard, PIM lists and forms, Settings, Coach, Guru, games, Graffiti,
    overlays. It is the single largest barrier to a contributor, and it makes
@@ -463,9 +462,8 @@ follow-ups*.
 5. **Contributor scaffolding.** `CONTRIBUTING.md` (the gates, the design rules,
    the pool budget), issue templates, and tagged releases with a changelog.
    (`SECURITY.md` exists as of the robustness work.)
-6. **Build output out of the root.** The root `Makefile` writes ~20 binaries
-   into the repo root, each needing its own `.gitignore` line (one was committed
-   by accident in September). Build into `build/`.
+6. ~~**Build output out of the root.**~~ Done 2026-10-01: the host programs
+   go into `build/`.
 7. **Static analysis in CI.** `-Wextra`, `cppcheck`, and ASan/UBSan over the
    host gates (today only the RSS parser has an ASan run).
 
