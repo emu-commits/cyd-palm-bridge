@@ -31,11 +31,15 @@ feedback: the 2× answer, the 20 px readings and tidier cards, and full
 screen for lessons and reviews. S4 was replanned: no typed answers
 (`SRS_PLAN.md` §11 decision 9).
 
-**Now (2026-09-30, end of day): the owner is testing on the bench.** The
-next session starts from their report: work through what they found, and
-leave the `[d]` boxes for them to tick. The build under test is `7810d49`
-(CI green; the Pages deploy job fails on a repository setting, not the
-code).
+**Merged to `main` 2026-10-01** (PR #66, `79272fd`). The `[d]` boxes below
+are the owner's bench checklist; leave them for the owner to tick. Still to
+bench besides them: a bigger iCloud sync, and loading a second course into
+Study. (The Pages deploy job fails on a repository setting, Pages source,
+not the code.)
+
+**Now (2026-10-01): the sync engine for a real account**, §Engine items 1
+(the external sort) and 5 (a tight time window with the pruning rule, and
+batched downloads).
 
 **The app platform is on hold.** The main goal is one first-class SRS app
 (WaniKani/Anki-style, with a large course on the SD card), and it's being

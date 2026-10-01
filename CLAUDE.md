@@ -7,8 +7,11 @@ before touching anything.
 
 ## Where things are
 
-- `firmware/`: ESP-IDF v5.5 app. `firmware/main/ui.c` (about 10.6k lines)
-  is the whole UI.
+- `firmware/`: ESP-IDF v5.5 app. `firmware/main/ui.c` (about 12k lines)
+  is the whole UI. The device's DAV transport is
+  `firmware/components/bridge/dav_esp.c`.
+- `docs/ARCHITECTURE.md`: how the pieces fit, the sync engine, and how to
+  build and test each part.
 - `sim/`: the same UI built for desktop and wasm, with a device-sized LVGL
   pool and heap cap.
 - `bridge/`: the Palm↔CalDAV/CardDAV codec and sync (MIT).
@@ -24,7 +27,9 @@ before touching anything.
 ## Rules that always apply
 
 - **Run every gate before a commit, not just the smoke:**
-  - `make test` and `make ftest` (host);
+  - `make test` and `make ftest` (host; the programs build into `build/`);
+  - `./tests/run_gates.sh` (the sync engine against a local Radicale; needs
+    `pip install radicale`) whenever `bridge/` changes;
   - `sudo mkdir -p /sdcard && sudo chmod 777 /sdcard`, then `make -C sim`
     with the targets `poolparity nosecrets secretscan data graf mines wordie
     sudoku zip clock coach guru gurupool dash course srs smoke smoke32`;
@@ -209,9 +214,18 @@ and S1**, which the owner asked for together:
   in the title bar was made as wide as fits (`tb_home_x()`: from the
   clock's widest to Menu), outlined.
 
-**Where things stand (2026-10-01):** the owner is bench-testing build
-`7810d49` (CI green), plus Guru full screen since. Start the next session from their report; the open
-`[d]` items in `BACKLOG.md`'s first RESUME HERE are the checklist.
+**Where things stand (2026-10-01):** all of the above is merged to `main`
+(PR #66, `79272fd`). The owner's bench checks are the open `[d]` items in
+`BACKLOG.md`'s first RESUME HERE; still untested there: a bigger iCloud
+sync and loading a second course into Study. Since the merge: the README
+and `docs/ARCHITECTURE.md`, comments without internal ticket codes, and the
+host build in `build/`.
+
+**Now: the sync engine for a real account** (the owner, 2026-10-01: "start
+with the external sort, the window and pruning rule, batched downloads.
+Focus on a very tight time window"). The plan is `BACKLOG.md` §Engine,
+items 1 and 5. The rule that makes a window safe: **an object leaving the
+window is pruned on the device and never deleted on the server.**
 
 1. **S6, the bench**, is the owner's (`[d]` items in `BACKLOG.md`). Any
    further work follows `SRS_PLAN.md` §10, keeping to its §7 budgets:
