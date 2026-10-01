@@ -385,6 +385,36 @@ R and the robustness work).
    intermittently.
 4. **iCloud data hygiene** — one-time removal of the seed contacts and duplicate
    events left in the real account from the broken-sync era.
+5. **PROPOSAL (2026-10-01, not approved): sync a window, not the whole
+   account.** A real account holds years of events and thousands of
+   contacts; today the first sync enumerates every object, GETs each one, and
+   refuses a collection past a few hundred records (item 1). Proposed:
+   - **Date Book: a time window**, e.g. 30 days back and 12 months ahead
+     (Settings ▸ Sync). Enumerate with a CalDAV `calendar-query` REPORT with a
+     `time-range` filter (RFC 4791 §9.9), which the server applies to
+     recurrences too, so a weekly meeting that began in 2019 is still in.
+     `sync-collection` can't filter, so the window replaces the delta token
+     for calendars: each sync lists the window's hrefs and ETags (small), and
+     only new or changed objects are fetched.
+   - **Leaving the window is not a deletion.** An object that drops out of the
+     listing, or a local record that ages out, is pruned locally and marked in
+     the map, never pushed as a delete. This is the one rule that makes a
+     window safe; the mass-delete guard stays as the backstop.
+   - **To Do: open tasks**, plus those completed in the last couple of weeks
+     (a `prop-filter` on `COMPLETED`; iCloud's support needs checking). Note
+     that reminders upgraded on iOS 13+ may not be reachable over CalDAV at
+     all; check that against the real account first.
+   - **Address: everyone, without photos, or one group.** Contacts have no
+     date to window by. Ask for the fields Palm keeps (CardDAV partial
+     `address-data`, RFC 6352 §10.4.2) so photos never arrive, or sync only
+     the members of a chosen iCloud group. Either way the count needs item 1.
+   - **Fetch in batches.** `calendar-multiget` / `addressbook-multiget`
+     streamed to the card, instead of one GET per object; the first sync of
+     a real account is otherwise minutes of round trips.
+   - **Order:** item 1 (the external sort) first, because it lifts the hard
+     ceiling for every collection; then the window and pruning, tested against
+     Radicale with a generated multi-year calendar; then multiget; then
+     contacts.
 
 ---
 
