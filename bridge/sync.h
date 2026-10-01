@@ -98,10 +98,17 @@ size_t sync_working_set(void);
 /* After a -6, the largest single allocation the collection asked for and did not
  * get. Zero if the limit was the output index rather than a sort. */
 long   sync_too_big_bytes(void);
-/* Ceiling on any single in-RAM sort the engine performs, in bytes. 0 (default)
- * means "whatever the allocator will give". Setting it makes the size limit a
- * decision rather than a discovery, and lets the gates exercise the refusal. */
+/* The RAM one sort may use, in bytes. 0 (default) means the build's own
+ * ceiling (4 KB on the device). A file bigger than this is sorted in runs on
+ * the card and merged, so a collection's size costs card space, not RAM; the
+ * gates set it small to force that path. A budget smaller than one line is
+ * refused (-6), which is what tests/toobig.c exercises. */
 void   sync_set_max_sort(long bytes);
+/* Sort a line file in place by its first field (up to the first TAB), within
+ * the budget above. 1 on success; 0 on refusal, after which the file's
+ * contents are undefined (it is a temp index; the collection is abandoned) and
+ * no run files are left behind. Exposed for the gates. */
+int    sync_sort_file(const char *path);
 
 /* ---- pull-only -------------------------------------------------------------
  * Refuse every write to the server: no PUT, no DELETE. The local PDB is still

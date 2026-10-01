@@ -370,7 +370,10 @@ R and the robustness work).
 
 ## §Engine — the sync engine
 
-1. **External merge sort.** The ceiling is a few hundred records per collection:
+1. ~~**External merge sort.**~~ Done 2026-10-01: `sync_sort_file()` sorts in a
+   4 KB buffer on the device, and a bigger file in runs on the card, merged
+   four at a time (`tests/sort_test.c` offline, a 1 KB-budget phase in
+   `bigsync`). What follows is the original note. The ceiling was a few hundred records per collection:
    `SV_RAW` (~60–80 B/record) must be sorted in one contiguous block, and ~30 KB
    is the largest free block during the sort. A too-big collection is refused
    safely today (`-6`, gated by `tests/toobig.c`). Sort fixed-size runs, spill to

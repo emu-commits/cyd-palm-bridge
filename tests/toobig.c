@@ -16,8 +16,9 @@
  * (SV_RAW is ~60-80 bytes per record), so the failure has to be safe: refuse,
  * change nothing locally, do not republish the map, and say so.
  *
- * sync_set_max_sort() makes the ceiling a decision rather than a discovery,
- * which is also what lets this gate fire it without staging a real OOM.
+ * The sort works in runs on the card now (tests/sort_test.c), so size alone no
+ * longer refuses; what still can is a sort budget smaller than one line.
+ * sync_set_max_sort(16) stages exactly that, without a real OOM.
  *
  * Needs Radicale on localhost:5232 with palm/cal.
  */
@@ -64,7 +65,7 @@ int main(void){
     snprintf(D.base,sizeof D.base,"%s",getenv("DAV_BASE")?getenv("DAV_BASE"):"http://localhost:5232");
     snprintf(D.user,sizeof D.user,"palm"); snprintf(D.pass,sizeof D.pass,"palm");
 
-    printf("== a collection larger than the device can sort ==\n");
+    printf("== a sort the device cannot do: refused, nothing changes ==\n");
     clearColl();
     buildCal(N);
     sync_set_max_sort(0);                       /* no ceiling: establish a good state */

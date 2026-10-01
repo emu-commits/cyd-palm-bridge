@@ -9,7 +9,7 @@ CORE    = bridge/pdb.c bridge/datebook.c bridge/address.c bridge/ical.c bridge/v
 
 PROGS   = roundtrip bridge_cli incremental synctoken category bigsync multiapp \
           uidmatch idempotent massdel streamparse find_test calc_test config_test rss_test news_test wx_test \
-          feeds_test break_test geoip_test toobig safefile_test fuzz_test course_fuzz rss_asan
+          feeds_test break_test geoip_test toobig safefile_test sort_test fuzz_test course_fuzz rss_asan
 
 all: $(addprefix $(B)/,$(filter-out fuzz_test course_fuzz rss_asan,$(PROGS)))
 
@@ -105,6 +105,10 @@ $(B)/feeds_test: tests/feeds_test.c bridge/feeds.c | dirs
 $(B)/break_test: tests/break_test.c bridge/dav_break.c | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
+# the engine's sort, in RAM and in runs on the card, against a plain sort (offline)
+$(B)/sort_test: tests/sort_test.c bridge/dav.c bridge/sync.c $(CORE) | dirs
+	$(CC) $(CFLAGS) -o $@ $^
+
 $(B)/toobig: tests/toobig.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
@@ -121,7 +125,7 @@ $(B)/course_fuzz: tests/course_fuzz.c firmware/main/course.c firmware/main/cours
 $(B)/rss_asan: tests/rss_test.c bridge/rss.c | dirs
 	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -o $@ $^
 
-test: roundtrip find_test calc_test config_test streamparse rss_test news_test wx_test feeds_test break_test geoip_test safefile_test
+test: roundtrip find_test calc_test config_test streamparse rss_test news_test wx_test feeds_test break_test geoip_test safefile_test sort_test
 	./$(B)/roundtrip
 	./$(B)/find_test
 	./$(B)/calc_test
@@ -134,6 +138,7 @@ test: roundtrip find_test calc_test config_test streamparse rss_test news_test w
 	cd tests && ../$(B)/wx_test
 	./$(B)/feeds_test
 	./$(B)/break_test
+	./$(B)/sort_test
 
 # parser hardening sweep (sanitizer build; a bit slower)
 ftest: fuzz_test rss_asan course_fuzz

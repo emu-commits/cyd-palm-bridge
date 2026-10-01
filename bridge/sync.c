@@ -436,13 +436,9 @@ static int cmpLine(const void*a,const void*b){
         x++;y++;
     }
 }
-/* sort a line file in place by first field. Loads it whole into RAM -- the only
- * O(N) step, and it runs with no handshake live so it gets the full free block.
- * (For collections beyond what free heap can sort, an external merge sort is the
- * next increment; Palm-scale data is well within an in-RAM sort.) */
 /* ---- "this collection is bigger than this device" ---------------------------
- * Set when a step fails for SIZE rather than for a transient shortage: an
- * in-RAM sort that will not fit, or an output index that will not grow. It is
+ * Set when a step fails for SIZE rather than for a transient shortage: a line
+ * too long for the sort's buffer, or an output index that will not grow. It is
  * kept apart from an ordinary OOM because the user needs different advice --
  * retrying will not help, and the honest answer is that this collection cannot
  * be synced here.
@@ -451,13 +447,89 @@ static int cmpLine(const void*a,const void*b){
  * file left unsorted and walked by the merge-join as if sorted mis-pairs
  * records into spurious deletes and duplicates; a record dropped from the
  * merged PDB is read by the NEXT sync as locally deleted, and that deletion is
- * pushed to the server. On a real account with years of history both
- * are reachable -- SV_RAW is ~60-80 bytes per record, so a few hundred events
- * already needs more contiguous RAM than this board has. */
-static int sortFile(const char*path){
+ * pushed to the server. */
+
+/* ---- the sort: in RAM when it fits, in runs on the card when it doesn't ----
+ * Every index file is sorted by its first field. A file that fits the sort's
+ * buffer is sorted there in one go. A larger one -- a real account's calendar
+ * is easily tens of kilobytes of index -- is cut into sorted RUNS of one buffer
+ * each, written to the card, and then merged SORT_MERGE_K runs at a time, in as
+ * many passes as it takes, back into the file. RAM is the buffer plus K line
+ * buffers whatever the file's size; the card pays instead.
+ *
+ * The buffer is s_max_sort bytes when that is set (the gates set it small to
+ * force the run path), else SORT_RUN_MAX. If even a smaller buffer can't be
+ * had, the sort halves its request down to SORT_RUN_MIN before giving up. */
+#ifdef ESP_PLATFORM
+#define SORT_RUN_MAX  4096
+#else
+#define SORT_RUN_MAX  (1L<<20)
+#endif
+#define SORT_RUN_MIN  1024
+#define SORT_LINE_MAX 512                  /* longest line any index file holds */
+#define SORT_MERGE_K  4                    /* runs merged at once (open files)  */
+#define SORT_RUN_FMT  STATE_DIR "/.srt%d.%d"
+
+/* Fill `buf` with whole lines from `f` (up to cap bytes, at most maxl lines),
+ * pointers in `lines`. Returns the number of lines; *eof when the file ended.
+ * A line that doesn't fit is left for the next run; -1 if a single line is
+ * longer than the whole buffer (or than SORT_LINE_MAX). */
+static int sortReadRun(FILE*f,char*buf,long cap,char**lines,int maxl,int*eof){
+    long used=0; int n=0; *eof=0;
+    while(n<maxl){
+        long at=ftell(f);
+        long room=cap-used;
+        if(room<2) break;
+        if(!fgets(buf+used,(int)room,f)){ *eof=1; break; }
+        long l=(long)strlen(buf+used);
+        int whole = l>0 && buf[used+l-1]=='\n';
+        if(!whole){
+            int c=fgetc(f);
+            if(c==EOF){                    /* the last line, with no newline */
+                if(used+l+2>cap){ if(!n) return -1; fseek(f,at,SEEK_SET); break; }
+                buf[used+l]='\n'; buf[used+l+1]=0; l++; *eof=1;
+            } else {                       /* didn't fit: carry it to the next run */
+                if(!n) return -1;
+                fseek(f,at,SEEK_SET); break;
+            }
+        }
+        if(l>SORT_LINE_MAX-1) return -1;     /* the merge reads lines into SORT_LINE_MAX */
+        lines[n++]=buf+used; used+=l+1;   /* keep the NUL as the separator */
+        if(*eof) break;
+    }
+    if(n==maxl){ int c=fgetc(f); if(c==EOF) *eof=1; else ungetc(c,f); }
+    return n;
+}
+
+/* Merge the sorted line files in[0..k-1] into out. 0 ok, -1 on a write error. */
+static int sortMerge(FILE**in,int k,FILE*out,char*lb){
+    int have[SORT_MERGE_K];
+    for(int i=0;i<k;i++) have[i] = fgets(lb+i*SORT_LINE_MAX,SORT_LINE_MAX,in[i])!=NULL;
+    for(;;){
+        int best=-1;
+        for(int i=0;i<k;i++){
+            if(!have[i]) continue;
+            const char*a=lb+i*SORT_LINE_MAX;
+            if(best<0){ best=i; continue; }
+            const char*b=lb+best*SORT_LINE_MAX;
+            if(cmpLine(&a,&b)<0) best=i;
+        }
+        if(best<0) return 0;
+        if(fputs(lb+best*SORT_LINE_MAX,out)<0) return -1;
+        have[best] = fgets(lb+best*SORT_LINE_MAX,SORT_LINE_MAX,in[best])!=NULL;
+    }
+}
+
+static void sortFail(const char*path,const char*why,long bytes){
+    fprintf(stderr,"[sync] SORT FAILED for %s: %s.\n"
+                   "       Refusing -- merging against UNSORTED input mis-pairs records.\n",path,why);
+    s_too_big = 1; if(bytes > s_too_big_bytes) s_too_big_bytes = bytes;
+}
+
+int sync_sort_file(const char*path){
     /* The connection stays up across a sort. Disconnecting first, so the sort
      * needn't fight the ~40 KB TLS working set, is the wrong trade (measured
-     * on device): the sort needs 2.5-3.4 KB, while the reconnect it forces
+     * on device): the sort needs a few KB, while the reconnect it forces
      * needs a ~30 KB handshake peak, which can't be mounted with the sync
      * scratch held ("alloc(4770 bytes) failed"). If the server drops it anyway the
      * reconnect is best-effort, and the circuit breaker (dav.h) ends the
@@ -465,36 +537,78 @@ static int sortFile(const char*path){
     FILE*f=fopen(path,"rb"); if(!f) return 1;          /* absent == nothing to sort */
     fseek(f,0,SEEK_END); long sz=ftell(f); fseek(f,0,SEEK_SET);
     if(sz<=0){ fclose(f); return 1; }
-    char*buf = (s_max_sort > 0 && sz+1 > s_max_sort) ? NULL : malloc((size_t)sz+1);
-    if(!buf){
-        fclose(f);
-        fprintf(stderr,"[sync] SORT FAILED for %s: %ld bytes of contiguous RAM needed.\n"
-                       "       Refusing -- merging against UNSORTED input mis-pairs records.\n",
-                path, sz+1);
-        s_too_big = 1; if(sz+1 > s_too_big_bytes) s_too_big_bytes = sz+1;
-        return 0;
+    long cap = s_max_sort > 0 ? s_max_sort : SORT_RUN_MAX;
+    if(cap > sz+2) cap = sz+2;                          /* never more than the file needs */
+    char*buf=NULL; char**lines=NULL; int maxl=0;
+    for(;;){
+        maxl = (int)(cap/16) + 4;                       /* the shortest line is ~28 bytes */
+        buf = malloc((size_t)cap);
+        lines = buf ? malloc((size_t)maxl*sizeof*lines) : NULL;
+        if(buf && lines) break;
+        free(buf); free(lines); buf=NULL; lines=NULL;
+        if(s_max_sort > 0 || cap/2 < SORT_RUN_MIN){
+            fclose(f); sortFail(path,"no RAM for the sort buffer",cap); return 0; }
+        cap/=2;
     }
-    size_t got=fread(buf,1,(size_t)sz,f); buf[got]=0; fclose(f);
-    int cap=64,n=0; char**lines=malloc((size_t)cap*sizeof*lines);
-    if(!lines){ free(buf); s_too_big=1; return 0; }
-    for(char*p=buf;*p;){
-        if(n>=cap){ cap*=2; char**t=realloc(lines,(size_t)cap*sizeof*lines);
-            if(!t){ free(lines); free(buf); s_too_big=1;
-                    fprintf(stderr,"[sync] SORT FAILED for %s: line index (%d rows).\n",path,cap);
-                    return 0; }
-            lines=t; }
-        lines[n++]=p; char*nl=strchr(p,'\n'); if(!nl) break; *nl=0; p=nl+1;
+    int eof=0, nruns=0, ok=1;
+    for(;;){
+        int n=sortReadRun(f,buf,cap,lines,maxl,&eof);
+        if(n<0){ ok=0; sortFail(path,"a line longer than the sort buffer",cap); break; }
+        qsort(lines,n,sizeof*lines,cmpLine);
+        if(eof && nruns==0){                           /* it all fit: write it back */
+            fclose(f); f=NULL;
+            FILE*o=fopen(path,"wb");
+            if(!o){ ok=0; break; }
+            for(int i=0;i<n;i++) if(fputs(lines[i],o)<0){ ok=0; break; }
+            if(fclose(o)!=0) ok=0;
+            if(!ok) sortFail(path,"could not rewrite it",0);
+            free(lines); free(buf);
+            return ok;
+        }
+        char rp[96]; snprintf(rp,sizeof rp,SORT_RUN_FMT,0,nruns);
+        FILE*o=fopen(rp,"wb");
+        if(!o){ ok=0; sortFail(path,"could not write a run to the card",0); break; }
+        for(int i=0;i<n;i++) if(fputs(lines[i],o)<0){ ok=0; break; }
+        if(fclose(o)!=0) ok=0;
+        if(!ok){ sortFail(path,"could not write a run to the card",0); break; }
+        nruns++;
+        if(eof) break;
     }
-    qsort(lines,n,sizeof*lines,cmpLine);
-    FILE*o=fopen(path,"wb");
-    int ok = 1;
-    if(o){ for(int i=0;i<n;i++) if(fprintf(o,"%s\n",lines[i]) < 0){ ok=0; break; }
-           if(fclose(o)!=0) ok=0; }
-    else ok = 0;
-    if(!ok){ fprintf(stderr,"[sync] SORT FAILED for %s: could not rewrite it\n",path); s_too_big=1; }
+    if(f) fclose(f);
     free(lines); free(buf);
+    /* merge: pass p reads runs (p, 0..n-1) and writes runs (p+1, ...), K at a
+     * time, until one pass writes the file itself */
+    char*lb = ok ? malloc((size_t)SORT_MERGE_K*SORT_LINE_MAX) : NULL;
+    if(ok && !lb){ ok=0; sortFail(path,"no RAM for the merge",(long)SORT_MERGE_K*SORT_LINE_MAX); }
+    int pass=0;
+    while(ok){
+        int outs=(nruns+SORT_MERGE_K-1)/SORT_MERGE_K, last=(outs==1);
+        for(int g=0; g<outs && ok; g++){
+            FILE*in[SORT_MERGE_K]; int k=0;
+            for(int r=g*SORT_MERGE_K; r<nruns && k<SORT_MERGE_K; r++){
+                char rp[96]; snprintf(rp,sizeof rp,SORT_RUN_FMT,pass,r);
+                in[k]=fopen(rp,"rb"); if(!in[k]){ ok=0; break; } k++;
+            }
+            char op[96]; if(last) snprintf(op,sizeof op,"%s",path); else snprintf(op,sizeof op,SORT_RUN_FMT,pass+1,g);
+            FILE*o = ok ? fopen(op,"wb") : NULL;
+            if(!o) ok=0;
+            if(ok && sortMerge(in,k,o,lb)!=0) ok=0;
+            if(o && fclose(o)!=0) ok=0;
+            for(int i=0;i<k;i++) fclose(in[i]);
+            for(int r=g*SORT_MERGE_K; r<nruns && r<(g+1)*SORT_MERGE_K; r++){
+                char rp[96]; snprintf(rp,sizeof rp,SORT_RUN_FMT,pass,r); remove(rp); }
+            if(!ok) sortFail(path,"a merge pass failed on the card",0);
+        }
+        if(last) break;
+        nruns=outs; pass++;
+    }
+    free(lb);
+    /* on failure, sweep any runs left behind */
+    if(!ok) for(int p2=0;p2<=pass+1;p2++) for(int r=0;;r++){
+        char rp[96]; snprintf(rp,sizeof rp,SORT_RUN_FMT,p2,r); if(remove(rp)!=0) break; }
     return ok;
 }
+static int sortFile(const char*path){ return sync_sort_file(path); }
 
 /* Stream the on-disk map into three sorted views: by objhash (MP_IDX, a reconcile
  * source), by href (MP_HREF, to resolve server objects without a GET), and by

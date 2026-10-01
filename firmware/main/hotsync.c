@@ -828,7 +828,10 @@ static void hotsync_task(void *arg){
      *
      * Each open file also carries a FatFs sector cache of FF_MAX_SS bytes; with
      * CONFIG_WL_SECTOR_SIZE_512 that is 512, not 4096. */
-    #define HS_SORT_RESERVE 6144            /* sortFile observed at 2515..3399 B */
+    /* The sort is bounded whatever the collection's size (sync.c): a run is a
+     * 4 KB buffer and its 1 KB line index; a merge is 4 line buffers (2 KB)
+     * and five more open files (~3.2 KB). */
+    #define HS_SORT_RESERVE 6144
     #define HS_FILE_CACHE   (6 * 512)       /* 5 held across the loop, +1 transient */
     {
         size_t freeh  = (size_t)esp_get_free_heap_size();
