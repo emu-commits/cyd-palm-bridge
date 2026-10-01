@@ -70,6 +70,8 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 - [ ] Full screen on glass: Home and Menu in the title bar are easy to hit, the strip is back on the dashboard, a lesson card mostly without scrolling `[d]`
 - [x] Guru's list and a habit full screen too, her week as it was `[s]` (2026-10-01, from the owner; the `guru_*` shots)
 - [ ] Guru full screen on glass: the list scrolls and ticks better, the greeting still dismisses, Home and Menu work there `[d]`
+- [x] Full screen's Home as wide as fits (clock to Menu, 43 px, outlined) `[s]` (2026-10-01, from the owner)
+- [ ] The wide Home on glass: easy to hit, never touching the clock `[d]`
 - [ ] The cleaned-up cards on glass: the 20 px kana read well, a kanji's readings on the first screen `[d]`
 - [ ] S5 on glass: the lock's STUDY row and the weather box above it read well, the air quality beside the reading, the badge on the icon, the count going up on its own as reviews come due (the lock repaints each minute) `[d]`
 - [ ] S6 — a full course on the real card: open time, next-card time, heap, battery pull, kanji readability `[d]`

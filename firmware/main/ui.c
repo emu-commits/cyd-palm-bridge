@@ -6775,9 +6775,9 @@ static lv_obj_t *mk_silk(lv_obj_t *par, const lv_image_dsc_t *ic, lv_align_t al,
  * icon in white on the black bar, with a finger-sized click area around the
  * 24 px button. Made when full screen starts and deleted when it ends, so
  * the pool pays for them only then. */
-static lv_obj_t *mk_tb_silk(const lv_image_dsc_t *ic, int x, lv_event_cb_t cb){
+static lv_obj_t *mk_tb_silk(const lv_image_dsc_t *ic, int x, int w, lv_event_cb_t cb){
     lv_obj_t *b = lv_obj_create(title_bar);
-    lv_obj_set_size(b, 24, TITLE_H - 4);
+    lv_obj_set_size(b, w, TITLE_H - 4);
     lv_obj_set_pos(b, x, 1);
     lv_obj_set_style_radius(b, 0, 0);
     lv_obj_set_style_border_width(b, 0, 0);
@@ -6796,6 +6796,32 @@ static lv_obj_t *mk_tb_silk(const lv_image_dsc_t *ic, int x, lv_event_cb_t cb){
     return b;
 }
 
+/* Home's left end in full screen: just right of the widest the centred clock
+ * can ever be ("12:58p  May 30", built from the widest digit and month), so
+ * Home is as wide as the bar allows and doesn't move as the time changes.
+ * Measured once; the font doesn't change. */
+static int dash_text_w(const char *t, const lv_font_t *font);
+static int tb_home_x(void){
+    static int x;
+    if(x) return x;
+    const lv_font_t *f = lv_obj_get_style_text_font(clock_lbl, LV_PART_MAIN);
+    char d[2] = "0", wd = '0', b[32];
+    int best = 0, mw = 0;
+    const char *mon = CAL_MON[1];
+    for(char c = '0'; c <= '9'; c++){
+        d[0] = c;
+        int w = dash_text_w(d, f);
+        if(w > best){ best = w; wd = c; }
+    }
+    for(int m = 1; m <= 12; m++){
+        int w = dash_text_w(CAL_MON[m], f);
+        if(w > mw){ mw = w; mon = CAL_MON[m]; }
+    }
+    snprintf(b, sizeof b, "%c%c:%c%cp  %s %c%c", wd, wd, wd, wd, mon, wd, wd);
+    x = (LCD_W + dash_text_w(b, f) + 1) / 2 + 6;
+    return x;
+}
+
 /* FULL SCREEN, for a view with nothing to write (Study's lessons and
  * reviews, Guru's list and habits): the Graffiti strip is hidden and its 112 px go to the content
  * area, and Home and Menu move up into the title bar's right end (a view that
@@ -6806,8 +6832,13 @@ static void ui_full_screen(int on){
     lv_obj_set_height(content, on ? LCD_H - TITLE_H : PDA_H - TITLE_H);
     if(on){
         lv_obj_add_flag(g_graf, LV_OBJ_FLAG_HIDDEN);
-        g_tb_home = mk_tb_silk(&silk_home, LCD_W - 52, home_cb);
-        g_tb_menu = mk_tb_silk(&silk_menu, LCD_W - 26, menu_cb);
+        /* Home as wide as fits, from the clock to Menu: it's the way out */
+        int hx = tb_home_x();
+        g_tb_home = mk_tb_silk(&silk_home, hx, LCD_W - 28 - hx, home_cb);
+        g_tb_menu = mk_tb_silk(&silk_menu, LCD_W - 26, 24, menu_cb);
+        /* outlined like the category picker, so its width shows on the bar */
+        lv_obj_set_style_border_width(g_tb_home, 1, 0);
+        lv_obj_set_style_border_color(g_tb_home, COL_TITLE_FG, 0);
     } else {
         lv_obj_clear_flag(g_graf, LV_OBJ_FLAG_HIDDEN);
         /* later, not now: this runs inside Home's own click when it's tapped */

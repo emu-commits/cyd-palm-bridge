@@ -205,7 +205,9 @@ and S1**, which the owner asked for together:
   Home at (200,12), Menu at (226,12) and Study's buttons at y 295 there.
 
 - **Then (2026-10-01): Guru full screen too.** Her list and a habit call
-  `ui_full_screen(1)`; her week keeps the strip for her verdict.
+  `ui_full_screen(1)`; her week keeps the strip for her verdict. Then Home
+  in the title bar was made as wide as fits (`tb_home_x()`: from the
+  clock's widest to Menu), outlined.
 
 **Where things stand (2026-10-01):** the owner is bench-testing build
 `7810d49` (CI green), plus Guru full screen since. Start the next session from their report; the open

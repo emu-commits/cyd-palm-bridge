@@ -16,6 +16,22 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-01 — Full screen: a wider Home button
+
+From the owner: "in the fullscreen modes, make the home button as wide as
+will fit naturally". Home now runs from just right of the clock to just
+short of Menu: x 169 to 212, 43 px where it was 24, with the same 8 px of
+extra click area. Its left end is `tb_home_x()`, measured once from the
+widest the centred clock can ever be (the widest digit and month: "12:58p
+May 30" in effect), so the button doesn't move as the time changes. It has
+the category picker's 1 px white outline, so the width shows on the black
+bar. Menu stays 24 px. Smoke's Home tap (200,12) is inside both the old and
+new button; the title bars in the `guru_*` and `study_*` shots were looked
+at on a fresh card.
+
+Measured (IDF build in `espressif/idf:release-v5.5`, LVGL v9.5.0 vendored
+locally): app 1,728,400 B (+240 B); static DRAM 160,580 B (unchanged).
+
 ### 2026-10-01 — Guru full screen: her list and a habit without the Graffiti strip
 
 From the owner: "just like we did for the Study app, apply the full-screen
