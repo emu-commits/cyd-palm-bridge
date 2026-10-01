@@ -450,10 +450,13 @@ follow-ups*.
    lock/dashboard, PIM lists and forms, Settings, Coach, Guru, games, Graffiti,
    overlays. It is the single largest barrier to a contributor, and it makes
    every simulator rebuild recompile everything.
-3. **Comments that outsiders can read.** Many comments carry history ("used
-   to", "was tried and rejected") and internal ticket codes (R4, W3, Q5, P10)
-   that mean nothing outside this backlog. Keep the *why* in the code, move
-   the *story* to `BUILD_PROGRESS.md`, and name things instead of numbering them.
+3. ~~**Comments that outsiders can read.**~~ Done 2026-10-01 for the C
+   sources: the internal ticket codes (R4, W3, Q5, P10...) are gone, and the
+   comments that told a history now say why (the story is already in
+   `BUILD_PROGRESS.md`). Coach's and Guru's R0-R5 stay: they are the advice
+   rules, numbered where they are defined. **Left:** the smoke tour
+   (`sim/tests/smoke.txt`) still names its screenshots and steps by code
+   (`r5_locked`, `w6_discover`); renaming means renaming the shots.
 4. **One `make check`.** The rule "every gate, not just the smoke" lives in
    this file and in a maintainer's head. One target that runs the host gates,
    the twelve sim gates, `smoke32` and (when available) the wasm and IDF builds

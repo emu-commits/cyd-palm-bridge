@@ -130,7 +130,7 @@ int main(void){
     CHECK(news_commit(), "identity: commit");
     CHECK(!news_is_read(0), "feed is part of the identity, so this one is unread");
 
-    /* --- R14: sources take turns ---------------------------------------------
+    /* --- sources take turns ---------------------------------------------
      * A fetch writes feed by feed. The reader walks the index in order, so
      * without interleaving you read every BBC story before the first NPR one.
      * After commit the index must go round-robin -- first of each, then second

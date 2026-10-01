@@ -41,7 +41,7 @@
  * bounds ONLY the legacy full-sync primitives sync_push/sync_pull (used by the
  * bridge_cli one-shot commands, not by HotSync). SYNC_DEVICE_SIZES still forces
  * device sizing on a host build so tests/bigsync.c can prove the streaming engine
- * scales past the old 24-record wall on the desktop. */
+ * scales past MAXR records on the desktop. */
 #if defined(ESP_PLATFORM) || defined(SYNC_DEVICE_SIZES)
   #define MAXR       24
   #define ARENA_CAP  (8*1024)          /* sync_pull only */
@@ -65,7 +65,8 @@
  * heap-allocated for the sync's LIFETIME rather than resident in BSS:
  * scratch_alloc() acquires them at each public sync entry and sync_free_scratch()
  * releases them, so ~20 KB (BODY_CAP + PALM_REC_MAX + OBJ_FETCH_CAP) returns to
- * the interactive UI between syncs on the no-PSRAM device (the U0 rule). */
+ * the interactive UI between syncs on the no-PSRAM device: a working set
+ * that only a sync needs is never resident. */
 #define BODY_CAP 8192
 static char   *g_body;    /* emit scratch: one object body at a time (BODY_CAP) */
 static uint8_t *g_lrec;   /* one lazily-read local record (PALM_REC_MAX)        */
@@ -231,7 +232,7 @@ static uint32_t nameToUid(const char*name){
 }
 /* reconciliation identity: a 64-bit hash of an object's iCal/vCard UID. This
  * (not the href name) is what matches a local record to its server object, so a
- * relocated href or a lost map row no longer splits one record into two. */
+ * relocated href or a lost map row doesn't split one record into two. */
 static uint64_t uidHash(const char*u){ return fnv1a(u); }
 /* the UID a never-synced local record will carry: palm-<uid>@cyd (what the
  * emitters synthesize), so its identity is stable from the very first push. */
@@ -446,22 +447,19 @@ static int cmpLine(const void*a,const void*b){
  * retrying will not help, and the honest answer is that this collection cannot
  * be synced here.
  *
- * It exists because both of those failures used to be SILENT AND WORSE THAN A
- * CRASH. sortFile returned with the file unsorted and the merge-join then
- * walked it as if sorted, mis-pairing records into spurious deletes and
- * duplicates; pdbw_rec's return was never checked, so records were dropped from
- * the merged PDB and the NEXT sync read them as locally deleted and pushed
- * those deletions to the server. On a real account with years of history both
+ * Both failures must be loud, because silent they are WORSE THAN A CRASH. A
+ * file left unsorted and walked by the merge-join as if sorted mis-pairs
+ * records into spurious deletes and duplicates; a record dropped from the
+ * merged PDB is read by the NEXT sync as locally deleted, and that deletion is
+ * pushed to the server. On a real account with years of history both
  * are reachable -- SV_RAW is ~60-80 bytes per record, so a few hundred events
  * already needs more contiguous RAM than this board has. */
 static int sortFile(const char*path){
-    /* This used to dav_disconnect() first, on the reasoning that a sort must not
-     * fight the ~40 KB TLS working set. Measured on device, that trade is the
-     * wrong way round: the sort needs 2.5-3.4 KB, while the reconnect it forces
-     * needs a ~30 KB handshake peak -- with the sync scratch held, that handshake
-     * cannot be mounted, and the deliberate disconnect was itself manufacturing
-     * the failure it meant to avoid ("alloc(4770 bytes) failed"). So the
-     * connection now stays up across a sort. If the server drops it anyway the
+    /* The connection stays up across a sort. Disconnecting first, so the sort
+     * needn't fight the ~40 KB TLS working set, is the wrong trade (measured
+     * on device): the sort needs 2.5-3.4 KB, while the reconnect it forces
+     * needs a ~30 KB handshake peak, which can't be mounted with the sync
+     * scratch held ("alloc(4770 bytes) failed"). If the server drops it anyway the
      * reconnect is best-effort, and the circuit breaker (dav.h) ends the
      * collection in seconds with local data untouched. */
     FILE*f=fopen(path,"rb"); if(!f) return 1;          /* absent == nothing to sort */
@@ -636,8 +634,8 @@ static int enumServer(const DavCtx*d,const char*coll,const char*token,
  *
  * Returns 1 if ANY server-only object could NOT be UID-resolved (its GET failed,
  * truncated on the small no-PSRAM fetch buffer, or was unparseable), else 0.
- * Such an object is DEFERRED, not force-identified: the old code fell back to
- * uidHash(href), which minted a divergent identity for what is really an already
+ * Such an object is DEFERRED, not force-identified: falling back to
+ * uidHash(href) would mint a divergent identity for what is really an already
  * mapped record -- so the mapped copy looked server-deleted (spurious delete) AND
  * the object looked brand-new (phantom pull). That split is the on-device
  * duplication seen against iCloud (relocated photo-vCards overflow the 8 KB
@@ -918,12 +916,11 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
     /* ---- mass-delete guard --------------------------------------------------
      * "Present in the map, absent locally" means the user deleted it, and the
      * engine pushes that deletion to the server. That inference is only sound
-     * while the local database is intact. It was not always intact: a crash
-     * during kindCommit used to leave the PDB truncated (it was opened "wb"),
-     * and the next boot reseeded an ABSENT database with demo rows -- after
-     * which every real record looked locally deleted and a two-way sync would
-     * erase the whole collection from the account. Writes are swapped in whole
-     * now (safefile.h), and the device keeps tombstones, so the guard is the
+     * while the local database is intact. If it isn't -- a PDB truncated by a
+     * crash mid-write, then reseeded with demo rows as ABSENT on the next
+     * boot -- every real record looks locally deleted, and a two-way sync
+     * would erase the whole collection from the account. Writes are swapped
+     * in whole (safefile.h), and the device keeps tombstones, so the guard is the
      * second line of defence rather than the only one; it stays, because a
      * card can still read short for reasons no write discipline prevents.
      *

@@ -1,5 +1,5 @@
 /* data.c -- read PDB records from the SD card and hand them to the UI as display
- * strings. Also seeds demo PDBs so the views have content before a HotSync (U7).
+ * strings. Also seeds demo PDBs so the views have content before a HotSync.
  * Uses the shared codec (bridge component) directly; one record in RAM at a time.
  */
 #include "data.h"
@@ -15,7 +15,7 @@
 #define DB_ADDR "/sdcard/AddressDB.pdb"
 #define DB_TODO "/sdcard/ToDoDB.pdb"
 #define DB_MEMO "/sdcard/MemoDB.pdb"
-/* I2: records the demo seed so "Remove demo data" can delete exactly what was
+/* records the demo seed so "Remove demo data" can delete exactly what was
  * seeded (per-app record count; seeds always take uniqueIDs 1..nr, and new/synced
  * records get max+1, so 1..nr uniquely identifies the demo rows). */
 #define DEMO_MANIFEST "/sdcard/.demoseed"
@@ -71,8 +71,9 @@ int data_get_categories(int app, CatTable *t){
 }
 
 /* ------------------------- demo seeding -------------------------
- * Enough rows to overflow the list (scroll test). This overwrites each boot for
- * now; U7 HotSync replaces it with real synced data. */
+ * Enough rows to overflow a list, so a fresh device shows something to scroll.
+ * Only a database that doesn't exist yet is seeded, and the seeded records are
+ * never pushed to an account (see data_demo_*). */
 #define SEEDMAX 32
 static int seed_datebook(void){
     uint8_t *arena = malloc(SEEDMAX*96); if(!arena) return 0; PdbRec r[SEEDMAX]; int nr=0, used=0;
@@ -194,7 +195,7 @@ static void db_ident(int app, const char **nm, uint32_t *type, uint32_t *creator
     }
 }
 
-/* C4: write a new category table into the app's PDB AppInfo, preserving every
+/* write a new category table into the app's PDB AppInfo, preserving every
  * record (the low-nibble category on each record is untouched). Mirrors
  * ensure_appinfo's rewrite; 1 on success, 0 on failure. */
 int data_set_categories(int app, const CatTable *t){
@@ -220,7 +221,7 @@ void data_seed_if_empty(void){
     if(!file_exists(DB_ADDR)) seeded[APP_ADDR] = seed_address();
     if(!file_exists(DB_TODO)) seeded[APP_TODO] = seed_todo();
     if(!file_exists(DB_MEMO)) seeded[APP_MEMO] = seed_memo();
-    /* I2: if we seeded anything this boot, record it so the demo rows can be
+    /* if we seeded anything this boot, record it so the demo rows can be
      * removed as a set before the first HotSync (don't push fake data to iCloud) */
     int any = 0;
     for(int i=0;i<4;i++) if(seeded[i] > 0) any = 1;
@@ -239,7 +240,7 @@ void data_seed_if_empty(void){
     ensure_appinfo(DB_MEMO,"MemoDB",    0x44415441,0x6D656D6F);
 }
 
-/* I2: is the (still-untouched) demo seed present? Drives the "Remove demo data"
+/* is the (still-untouched) demo seed present? Drives the "Remove demo data"
  * menu item. The manifest is deleted once the demo rows are removed. */
 int data_demo_present(void){ return file_exists(DEMO_MANIFEST); }
 
@@ -346,7 +347,7 @@ int data_remove_test_events(void){
     return t.matched;
 }
 
-/* I2: delete exactly the demo-seeded records (uniqueIDs 1..nr per app from the
+/* delete exactly the demo-seeded records (uniqueIDs 1..nr per app from the
  * manifest -- ONE rewrite per app, not per record), then drop the manifest.
  * Returns the number of records removed. User-added / synced records
  * (uniqueID > nr) are never touched. */

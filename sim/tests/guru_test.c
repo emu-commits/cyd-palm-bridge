@@ -394,7 +394,7 @@ int main(void){
         #undef FOLD
     }
 
-    /* ------------------------------- R4: the week screens' day window (daycal.h) */
+    /* ------------------------------- the week screens' day window (daycal.h) */
     {
         /* T0 is a Monday. "Now" is Sunday 09:00 UTC, six days on. */
         uint32_t now = AT(6);

@@ -1,11 +1,10 @@
-/* hotsync.c -- background sync to iCloud (U7).
+/* hotsync.c -- background sync to iCloud.
  *
  * Reuses the proven engine (dav.h + sync.h). Runs on its own task with a live
  * status string the UI polls. DEFENSIVE: no ESP_ERROR_CHECK -- every step checks
  * its return and fails to a status message, so a network/RAM problem can't crash
- * the interactive UI. Wi-Fi is brought up only for the sync (the roadmap's
- * mode-switch); RAM headroom for Wi-Fi+TLS+sync while LVGL is up is the thing to
- * validate on-device -- if it's tight, tear down the LVGL draw buffer first.
+ * the interactive UI. Wi-Fi is brought up only for the sync, beside the live
+ * UI; the heap it leaves is logged at every phase (hs_heap_check).
  */
 #include "hotsync.h"
 #include "data.h"       /* data_demo_count(): the seed is never pushed */
@@ -54,8 +53,8 @@ static const char *TAG = "hotsync";
  * -- once inside lwIP's receive path, once inside our own largest-free-block
  * logging. Two days of "out of memory" were this.
  *
- * Heap is no longer the binding constraint (66 KB free at wifi-up, up from 44),
- * so the stack is back to 32 KB and hs_heap_check() now reports the high-water
+ * Heap isn't the binding constraint (66 KB free at wifi-up), so the stack is
+ * 32 KB, and hs_heap_check() now reports the high-water
  * mark at every phase, on runs that reach the end. Raise it only against THAT
  * log, and only from a run that completed. */
 #define HOTSYNC_STACK 32768
@@ -179,9 +178,7 @@ static void hs_prog_cb(int done,int total,void *ctx){
  * collection. The PDB/map paths and kinds are device-local constants; the
  * COLLECTION for each app is runtime config (appcfg(), from config.ini), so an
  * app with an empty collection stays off until it's configured. */
-/* These three used to come from the compile-time secrets.h (the Date Book one
- * ONLY from there), which is gone -- see appcfg.c. They are the same paths the
- * data layer uses. */
+/* the same paths the data layer uses */
 #define SYNC_PDB      "/sdcard/DatebookDB.pdb"
 #define SYNC_TODO_PDB "/sdcard/ToDoDB.pdb"
 #define SYNC_CARD_PDB "/sdcard/AddressDB.pdb"
@@ -201,9 +198,8 @@ static const SyncApp s_apps[] = {
 };
 #define N_APPS ((int)(sizeof s_apps / sizeof s_apps[0]))
 
-/* The demo seed is held back from every push: it is sample data, and the first
- * sync used to copy it into the user's real account (the README had to tell
- * people to delete it there by hand). The seed is uids 1..n per app. */
+/* The demo seed is held back from every push: it is sample data, and it must
+ * never land in the user's real account. The seed is uids 1..n per app. */
 static int s_demo_n;
 static int hold_demo(uint32_t uid, void *ctx){ (void)ctx; return uid >= 1 && (int)uid <= s_demo_n; }
 static int app_of(int i){ return i==0 ? APP_CAL : i==1 ? APP_TODO : APP_ADDR; }
@@ -293,7 +289,7 @@ static int radio_up(void){
 static int wifi_up(void){
     if(!radio_up()) return 0;
 
-    /* W5: up to four remembered networks, in the order the config holds them,
+    /* up to four remembered networks, in the order the config holds them,
      * which is most-recently-connected first. The FIRST one gets the long wait
      * (25 s) because in the overwhelmingly common case you are where you were
      * last time and it is going to work; the rest get a short one, because four
@@ -422,16 +418,14 @@ static char *abspath(char *href, DavCtx *d){
     return href;
 }
 
-/* ---- News feeds (RSS reader, roadmap #4 stage C) ----------------------------
+/* ---- News feeds -------------------------------------------------------------
  * After the PIM sync (Wi-Fi still up), stream each ENABLED feed to SD, parse it
  * in a sliding window, and rebuild the news store. Bounded RAM: the fetch spools
  * to SD (dav_fetch_url), the parser keeps only one item, news_add writes to SD.
  * Feed sources come from the on-SD feed list (bridge/feeds.c), edited in
- * Preferences > News feeds. No credentials -- feeds are public. Compile-verified
- * here; runtime-verified on device. */
+ * Settings > News. No credentials -- feeds are public. */
 #define NEWS_TMP        "/sdcard/.rsstmp"
-/* The store used to stop at 30 articles across 15 per feed, which with ten feeds
- * meant most sources never got a look in. Nothing here is held in RAM -- the
+/* Generous enough that ten feeds all get a look in. Nothing here is held in RAM -- the
  * fetch spools to SD, the parser keeps one item, and the reader seeks one record
  * at a time -- so the cap is really about SD space and sync time, not memory:
  * 240 articles is ~41 KB of index and a few hundred KB of text. */
@@ -525,7 +519,7 @@ static void fetch_news(void){
         } else {
             /* st < 0 means the request never completed (DNS, TCP or TLS); a
              * positive status means the server answered and refused. Those are
-             * different problems and used to print identically. */
+             * different problems and must not print identically. */
             if(!s_news_why[0]){
                 if(st < 0) snprintf(s_news_why,sizeof s_news_why,"%.30s unreachable", f->name);
                 else       snprintf(s_news_why,sizeof s_news_why,"%.28s HTTP %d", f->name, st);
@@ -582,9 +576,8 @@ static void locate_by_ip(Config *cfg){
     /* THE TEST IS "IS THIS LOCATION APPROXIMATE", not "is it missing", and the
      * difference is the whole point. Picking a city off a list of two dozen is
      * not "I am in New York", it is "New York is the nearest one you offered
-     * me" -- so the person most in need of a refined coordinate was exactly the
-     * person the first version refused to refine, having decided their tap made
-     * it sacred. An approximate location is re-derived every sync, which also
+     * me" -- so the person who picked from the list is exactly the one who
+     * needs a refined coordinate. An approximate location is re-derived every sync, which also
      * means the weather follows a device that travels; a typed one never is. */
     s_geo_why[0] = 0;
     if(!cfg->loc_auto && cfg->latitude[0] && cfg->longitude[0]){
@@ -764,7 +757,7 @@ static void hotsync_task(void *arg){
      * stages -- host resolve, login, collections -- need iCloud credentials, and
      * a device with none, or with wrong ones, must still come away with a
      * corrected clock and fresh feeds. So a failure here SKIPS the rest of the
-     * account work; it no longer ends the sync. `dav_why` carries the reason
+     * account work; it doesn't end the sync. `dav_why` carries the reason
      * into the final status line, because a silent skip reads as a silent
      * success and would hide a bad password indefinitely. */
     /* ntgt also sizes the progress bar: each configured collection owns a band
@@ -796,9 +789,9 @@ static void hotsync_task(void *arg){
         setst("Checking login...");
         char principal[256]="";
         if(dav_prop_href(&d,"/","<d:current-user-principal/>","",principal,sizeof principal)!=0 || !principal[0]){
-            /* A rejected password and an unreachable server are different faults
-             * and used to print the same line ("login failed (HTTP 0)"), which
-             * sent us looking at the password when the request never left. */
+            /* A rejected password and an unreachable server are different faults;
+             * one line for both ("login failed (HTTP 0)") sends you looking at the
+             * password when the request never left. */
             if(dav_last_status == 401 || dav_last_status == 403)
                 snprintf(dav_why,sizeof dav_why,"password rejected");
             else if(dav_last_status == 0)
@@ -834,7 +827,7 @@ static void hotsync_task(void *arg){
      * breaker ends the collection in seconds with local data untouched.
      *
      * Each open file also carries a FatFs sector cache of FF_MAX_SS bytes; with
-     * CONFIG_WL_SECTOR_SIZE_512 that is 512, not the 4096 it used to be. */
+     * CONFIG_WL_SECTOR_SIZE_512 that is 512, not 4096. */
     #define HS_SORT_RESERVE 6144            /* sortFile observed at 2515..3399 B */
     #define HS_FILE_CACHE   (6 * 512)       /* 5 held across the loop, +1 transient */
     {
@@ -919,8 +912,8 @@ static void hotsync_task(void *arg){
          * sends the next hour of debugging the wrong way. */
         /* bothDel is logged separately from pushDel and only when non-zero: it
          * is a record that was already gone on both sides, so nothing was sent.
-         * It used to be added to pushDel, which reported deletions this device
-         * never made. */
+         * Counting it in pushDel would report deletions this device never
+         * made. */
         ESP_LOGI(TAG,"%s: rc=%d up +%d~%d-%d down +%d~%d-%d%s heap=%lu",t->name,n,
                  st.pushNew,st.pushMod,st.pushDel, st.pullNew,st.pullMod,st.pullDel,
                  st.bothDel ? " (+already gone)" : "",
@@ -985,9 +978,8 @@ static void hotsync_task(void *arg){
         snprintf(msg,sizeof msg,"%.23s; %.47s%.32s%.40s; no records - %.30s",
                  clk,nws,wxs,geo,dav_why);
     else if(did==0 && failed>0){
-        /* This used to say "low memory" for every failure, heap reading attached,
-         * which is an assertion the code was in no position to make -- an SD card
-         * that would not take the output temp reported itself as a RAM problem. */
+        /* Name the cause, not "low memory" for every failure: an SD card that
+         * won't take the output temp is not a RAM problem. */
         if(toobig)
             snprintf(msg,sizeof msg,"%.23s too big for this device - nothing changed",
                      toobig_name[0] ? toobig_name : "Collection");
@@ -1246,9 +1238,9 @@ void hotsync_start(void){
      * reconcile's merge loop calls DAV ops (each a full mbedTLS handshake, whose
      * stack spikes past the ~8 KB estimate on iCloud's cert chain) from a frame
      * that also holds the row structs + line buffers, and resolveServer nests a
-     * GET per relocated object -- 20 KB overflowed at ~30 records. The old worry
-     * that 32 KB starves the heap no longer holds: streaming shrank the S struct
-     * from ~16 KB to ~3 KB, so the contiguous block it needs is tiny now. */
+     * GET per relocated object -- 20 KB overflowed at ~30 records. 32 KB doesn't
+     * starve the heap: the streaming reconcile's S struct is ~3 KB, so the
+     * contiguous block it needs is small. */
     if(xTaskCreate(hotsync_task, "hotsync", HOTSYNC_STACK, NULL, 4, NULL) != pdPASS){
         setst("Could not start sync task"); s_busy = 0;
     }

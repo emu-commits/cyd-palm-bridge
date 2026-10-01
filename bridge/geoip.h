@@ -7,7 +7,7 @@
  * locate itself to the nearest town, which is all a forecast is good for.
  *
  * WHY NOT WI-FI POSITIONING: settled in PRODUCT_PLAN.md (2026-08-19) and not
- * reopened by the Wi-Fi scan that W5 added. A forecast's resolution is
+ * reopened by the Wi-Fi scan the setup wizard added. A forecast's resolution is
  * kilometres, so locating the device to tens of metres is precision that gets
  * discarded on arrival; Mozilla's free service retired in 2024, and Google's is
  * billable with a key that would have to ship inside the device, where it leaks.

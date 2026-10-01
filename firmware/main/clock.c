@@ -360,7 +360,7 @@ void clock_zone_hhmm(const char *iana, time_t t, char *out, int cap){
     tzset();
 }
 
-/* ---- setting the clock by hand (W8) --------------------------------------
+/* ---- setting the clock by hand --------------------------------------
  * The device has no RTC, so after a flat battery it wakes in 1970 and stays
  * there until a sync runs SNTP -- and a sync needs Wi-Fi, which is one of the
  * things you may be here to set up. So the clock has to be settable by hand,

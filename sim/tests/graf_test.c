@@ -116,7 +116,7 @@ static int run_set(int which, int digits, int punct, const char *label, float si
     return ok;
 }
 
-/* ---- R12: the space and backspace swipes, drawn the way a hurried hand does --
+/* ---- the space and backspace swipes, drawn the way a hurried hand does --
  * Short, sloped, slightly bowed and jittery. Each trial is a straight-ish
  * horizontal flick of 18..80 px at up to +/-24 degrees, with a bow of up to 4 px
  * at its middle; half go right (space), half go left (backspace). The swipe is
@@ -158,7 +158,7 @@ static int run_swipes(float pass){
     return r >= pass;
 }
 
-/* R13: the ways out of an accidental punctuation shift. A backspace swipe while
+/* the ways out of an accidental punctuation shift. A backspace swipe while
  * armed must disarm and type NOTHING (not '.', not a backspace), and the stroke
  * after it must read as an ordinary letter again. The explicit cancel the UI
  * calls (tap the marker, or the timeout) must do the same. */

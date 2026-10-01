@@ -13,7 +13,7 @@
  * storage. Records/prefs persist; secrets don't. (Sync is stubbed in the sim,
  * so stored credentials would be pure risk with zero benefit.)
  *
- * Memory model: the LVGL pool is exact device parity (24 KB, lv_conf.h) and
+ * Memory model: the LVGL pool is exact device parity (32 KB, lv_conf.h) and
  * sim_boot arms the general-heap budget (sim_heap.h) so big allocations fail
  * like the hardware's ~140 KB interactive free heap. */
 #include <string.h>

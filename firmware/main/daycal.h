@@ -47,7 +47,7 @@ static inline int cal_mod(int32_t a, int m){
     return r < 0 ? r + m : r;
 }
 
-/* ---- a window of whole local days ending today (the week screens, R4) ----
+/* ---- a window of whole local days ending today (the week screens) ----
  * Which slot of an `n`-day window ending on the local day of `now` does `epoch`
  * fall on? 0 is the oldest day, n-1 is today, -1 is outside the window (earlier,
  * or later than today). Bucketing by local DAY rather than by "the last n*86400

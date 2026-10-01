@@ -160,11 +160,10 @@ int wx_parse_file(const char *path, int64_t now, WxCache *out){
         if(line[0] == '\r' || line[0] == '\n' || line[0] == 0){ block = 0; continue; }
 
         if(header_is(line, "temperature_2m")){
-            /* Both the current and hourly blocks start with temperature_2m. They
-             * used to be told apart by weather_code, which only the current block
-             * carried -- until the hourly block started carrying it too. The
-             * discriminator is now precipitation_probability, which is asked for
-             * ONLY in the hourly block, so the test cannot go stale the same way. */
+            /* Both the current and hourly blocks start with temperature_2m. The
+             * discriminator is precipitation_probability, which is asked for ONLY
+             * in the hourly block -- not a field the server might add to the
+             * other block one day (weather_code did exactly that). */
             block = strstr(line, "precipitation_probability") ? 2 : 1;
             continue;
         }

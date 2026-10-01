@@ -1,6 +1,7 @@
-/* graffiti.h -- unistroke text entry ($1 recognizer). U6 framework: the pipeline
- * (stroke capture -> recognize -> char) is here; template set + thresholds need
- * on-device tuning. */
+/* graffiti.h -- unistroke text entry ($1 recognizer): stroke capture ->
+ * recognize -> character. The templates and thresholds are gated by
+ * `make -C sim graf`; Train mode records a per-device template for a hand the
+ * built-ins misread. */
 #ifndef GRAFFITI_RECOGNIZER_H   /* not GRAFFITI_H -- collides with display.h's strip-height macro */
 #define GRAFFITI_RECOGNIZER_H
 
@@ -13,7 +14,7 @@
  * follows the shift -- i.e. two taps, exactly as on PalmOS. */
 #define GRAF_PUNCT '\x02'
 
-/* R13: disarm a punctuation shift without reading a stroke (tap-to-cancel and the
+/* disarm a punctuation shift without reading a stroke (tap-to-cancel and the
  * timeout in the UI; a right-to-left swipe while armed also cancels, inside
  * graffiti_recognize, and returns 0 rather than a backspace). */
 void graffiti_punct_cancel(void);

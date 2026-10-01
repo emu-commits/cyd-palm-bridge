@@ -305,8 +305,8 @@ int pdbw_commit(PdbW *w, const char *path, const char *name,
     fflush(w->tmp);
     for(int i=0;i<nrecs;i++){
         long remaining = w->ent[i].len;
-        /* a failure here used to fclose() the half-built PDB and leave it as
-         * THE database; now the live file is never touched unless it all worked */
+        /* the live file is never touched unless it all worked: a half-built PDB
+         * must never become THE database */
         if(fseek(w->tmp, w->ent[i].tmpoff, SEEK_SET)!=0){ sf_abort(&sf); pdbw_abort(w); return -1; }
         while(remaining>0){
             size_t chunk = remaining < (long)sizeof cbuf ? (size_t)remaining : sizeof cbuf;

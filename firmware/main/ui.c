@@ -1,13 +1,14 @@
-/* ui.c -- Palm-style app shell (LVGL): launcher + navigation.
+/* ui.c -- the whole UI (LVGL): the launcher, every app, Settings, the lock
+ * screen and the Graffiti strip.
  *
  * Layout (portrait 240x320):
- *   title bar   0..24    navy, home button (left) + current-screen title
- *   content    24..208   the active view (launcher list, or an app screen)
- *   Graffiti  208..320   input strip (letters | numbers) -- wired up in U6
+ *   title bar   0..24    the screen's title, the clock, a category picker
+ *   content    24..208   the active view (the launcher, or an app's screen)
+ *   Graffiti  208..320   the silkscreen buttons and the two writing pads
+ * A full-screen view (ui_full_screen) hides the Graffiti strip and takes its
+ * room, with Home and Menu in the title bar.
  *
- * U3.2 launcher lists the classic Palm apps; U3.3 navigation opens a placeholder
- * per app and returns home. Real data views arrive in U4, authentic fonts/icons
- * in U3a.
+ * Each app is one section of this file, headed by a ==== banner.
  */
 #include "ui.h"
 #include "display.h"      /* LCD_W, PDA_H, GRAFFITI_H */
@@ -22,7 +23,7 @@
 #include "feeds.h"        /* RSS feed list (Preferences manager + HotSync fetch) */
 #include "esp_app_desc.h" /* the build's version: `git describe`, stamped by ESP-IDF */
 #include "lv_font_kana.h" /* hiragana+katakana bitmap subset (Kana trainer) */
-#include "kana_data.h"    /* ordered gojuon table (Kana trainer, roadmap #3) */
+#include "kana_data.h"    /* ordered gojuon table (Kana trainer) */
 #include "kana_strokes.h" /* per-kana stroke polylines (Tier 2 writing challenge) */
 #include "kana_write.h"   /* per-stroke $1 matcher (Tier 2) */
 #include "appcfg.h"
@@ -37,7 +38,7 @@
 #include "coach.h"        /* Coach: ritual focus timer (pure logic + rule engine) */
 #include "guru.h"         /* Guru: daily longevity habits (pure logic + target)   */
 #include "gurupool.h"     /* ...and the editable habit list on the card           */
-#include "daycal.h"       /* local-day windows for the week charts (R4)           */
+#include "daycal.h"       /* local-day windows for the week charts           */
 #include "safefile.h"     /* crash-safe replacement of every durable file         */
 #include "course.h"       /* Study: the course file reader                        */
 #include "srs.h"          /* Study: the schedulers and the progress on the card   */
@@ -66,8 +67,8 @@ static void content_clear(void);
 static void spk_pane_close(void);   /* a speaker's overlay: it is on lv_layer_top(),
                                        so only content_clear() can be trusted to
                                        take it down when the screen changes */
-static void assistant_greet(void);  /* W3: her hello, over the Settings grid */
-static void assist_say(const char *text);  /* W4: her, explaining this screen */
+static void assistant_greet(void);  /* her hello, over the Settings grid */
+static void assist_say(const char *text);  /* her, explaining this screen */
 /* "America/New_York" is a zone identifier; this is the city out of it. Declared
  * here because the zone picker (which places the device) sits above the Location
  * panel (which names the place), and both want the same two lines of string
@@ -113,18 +114,15 @@ static uint8_t g_greet_last[GREET_NSPEAKER];  /* index of the line last shown   
  *
  * NINE apps, three rows, no fourth. The grid is three wide and the content area
  * holds exactly three rows of 52 px cells, so everything a new user needs to find
- * is on screen without scrolling. A fourth row was tried twice -- once by
- * shrinking every cell to fit it, once by leaving it below the fold -- and both
- * were wrong: the first made the whole launcher pay for one button, and the
- * second hid HotSync from anyone who did not already know to swipe for it.
+ * is on screen without scrolling. A fourth row would either shrink every cell
+ * (the whole launcher paying for one button) or sit below the fold (hiding
+ * whatever is there from anyone who doesn't know to scroll).
  *
- * Graffiti is NOT here any more: it lives in the Games folder, which is where the
- * other practice-and-score screens already are. Kana travels with it, since Kana
- * has always been reached from inside Graffiti.
+ * Graffiti practice lives in the Games folder, with the other practice-and-score
+ * screens, and Kana is reached from inside it.
  *
  * Anything that reads a launcher position -- notably sim/tests/smoke.txt, which
- * taps cells by coordinate -- must be re-pointed when this changes. That file
- * already carries a scar from an earlier reorder. */
+ * taps cells by coordinate -- must be re-pointed when this changes. */
 /* The Planner is To Do and Memo in one tile (list_view switches between them),
  * which is what freed position 7 for Study (docs/SRS_PLAN.md); Guru and Coach
  * stay where people's thumbs already know them. A NULL would be an empty cell
@@ -139,7 +137,7 @@ static const lv_image_dsc_t *APP_ICONS[] = { &icon_datebook, &icon_address, &ico
 #define NAPPS ((int)(sizeof(APPS)/sizeof(APPS[0])))
 
 static void show_launcher(void);
-/* Study, at a glance (S5): the lock's STUDY row and the launcher's badge */
+/* Study, at a glance: the lock's STUDY row and the launcher's badge */
 static void st_glance_text(char *b, int cap, uint32_t *change);
 static uint32_t st_glance_due(void);
 static uint32_t st_now(void);                 /* Study's clock (the smoke tour can move it) */
@@ -258,7 +256,7 @@ static void      secret_key(char c);   /* ...and how a key reaches it */
 
 /* To Do due-date picker state: edited via the due popup, written on Save. */
 static int g_due_has, g_due_y, g_due_m, g_due_d;
-/* Q2: the SAME date popup now serves the To Do's due date and the Date Book's
+/* the SAME date popup now serves the To Do's due date and the Date Book's
  * event date. One popup, one set of state, one label -- writing a second
  * calendar is how the two end up disagreeing about which day a tap means, and
  * this one carries a hard-won fix (see due_cal_cb on
@@ -266,7 +264,7 @@ static int g_due_has, g_due_y, g_due_m, g_due_d;
  * have no due date and an event must have a date, so "No Date" is offered to
  * one and not the other. */
 static int g_due_optional = 1;
-/* Q3: the event's start time, picked from a list. Kept beside the date for the
+/* the event's start time, picked from a list. Kept beside the date for the
  * same reason -- the form holds it until Save, and nothing types it. */
 static int g_ev_h, g_ev_m;
 static lv_obj_t *g_time_lbl;
@@ -298,7 +296,7 @@ static void list_view(const AppDef *ad);
 static void show_detail(uint32_t uid);
 static void show_edit(uint32_t uid);
 static void show_prefs(void);
-static void show_settings(void);        /* W1: Menu > Settings, the nine tiles */
+static void show_settings(void);        /* Menu > Settings, the nine tiles */
 static void show_dash_settings(void);                          /* Lock Screen settings sub-screen */
 static void world_tag(const char *zone, char *out, int cap);   /* 3-letter world-clock tag */
 static lv_obj_t *pf_add(lv_obj_t *list, const char *text, lv_event_cb_t cb, int ud);
@@ -308,11 +306,11 @@ static void show_feed_edit(int idx);
 static void update_cat_trigger(void);
 static void cat_trigger_cb(lv_event_t *e);
 static void details_open(void);
-static void toast_show(const char *msg);   /* I4: transient save/delete feedback */
+static void toast_show(const char *msg);   /* transient save/delete feedback */
 static void due_open(void);
 static void due_btn_cb(lv_event_t *e);
 static void due_set_label(void);
-static void time_btn_cb(lv_event_t *e);   /* Q3: the start-time list */
+static void time_btn_cb(lv_event_t *e);   /* the start-time list */
 static void time_set_label(void);
 static void time_close(void);
 static void br_open(void);
@@ -351,16 +349,16 @@ static int disc_built;
  * Graffiti-only (no on-screen keyboard), so there's no overlay to drop here. */
 static void free_rowuids(void);
 static void free_finds(void);
-static void gref_free(void);        /* Q4: the stroke sheet's heap canvas */
-static void wk_free(void);          /* R4: the week chart's heap canvas   */
-static void wifi_scan_kill(void);   /* W5: the scan poll timer (see the wizard) */
+static void gref_free(void);        /* the stroke sheet's heap canvas */
+static void wk_free(void);          /* the week chart's heap canvas   */
+static void wifi_scan_kill(void);   /* the scan poll timer (see the wizard) */
 static lv_obj_t *g_listtbl;           /* current record table (partial rebuild) */
 /* The list top bar's field (list_top_bar). Kept in its own handle rather than
  * read back off active_ta: active_ta is "where Graffiti writes", which a modal
  * can legitimately move, and quick_add_cb must always mean THIS field. */
 static lv_obj_t *g_barta;
 
-/* ---- what a text field is FOR (R8, R9) ---------------------------------------
+/* ---- what a text field is FOR ---------------------------------------
  * A handful of fields want more than "Graffiti writes here": a name should come
  * out Capitalised Word By Word, a note should start with a capital, and a phone
  * number should not be written at all when a keypad can be tapped. The mode is
@@ -384,7 +382,7 @@ static int ta_mode(lv_obj_t *ta, const char **name){
     return TA_PLAIN;
 }
 
-/* R9: should the letter about to land at the cursor be a capital?
+/* should the letter about to land at the cursor be a capital?
  * FIRST: only if nothing but spaces comes before it -- the first letter of the
  * field. WORDS: if it starts a word (the start, or after a space or newline).
  * The cursor is a CHARACTER index and the text is UTF-8, so the walk to the
@@ -887,12 +885,11 @@ static void lookup_ta_cb(lv_event_t *e){
     build_record_table();
 }
 
-/* ---- the record list's top bar (Q6, Q7, Q8) ------------------------------
+/* ---- the record list's top bar ------------------------------
  * [ word ][ field ][ New ] across the top of a list, and ONE builder for all
- * three apps that have one. Q8 asked for that explicitly and it is worth
- * saying why: two bars that merely resemble each other drift, one gains a
- * couple of pixels of padding, and a year later nobody can tell which is the
- * right one. P10 was built to stop exactly that.
+ * three apps that have one. Two bars that merely resemble each other drift:
+ * one gains a couple of pixels of padding, and a year later nobody can tell
+ * which is the right one.
  *
  * The bar is the same everywhere; what differs is what the FIELD means, and
  * that is a real difference, not drift:
@@ -947,7 +944,7 @@ static lv_obj_t *list_top_bar(const char *word, const char *seed, int maxlen,
     lv_textarea_set_max_length(ta, maxlen);
     lv_textarea_set_text(ta, seed);       /* set BEFORE the cb so it doesn't fire */
     /* From the word's slot to the button, so the field shrinks by exactly what
-     * the button takes -- Q6's "shorten the lookup box" is this subtraction. */
+     * the button takes. */
     lv_obj_set_width(ta, LCD_W - LIST_BAR_LBLW - LIST_BAR_NEWW - 10);
     lv_obj_set_pos(ta, LIST_BAR_LBLW, 2);
     if(on_type) lv_obj_add_event_cb(ta, on_type, LV_EVENT_VALUE_CHANGED, NULL);
@@ -955,7 +952,7 @@ static lv_obj_t *list_top_bar(const char *word, const char *seed, int maxlen,
     return ta;
 }
 
-/* Quick add (Q7 and Q8): make a record out of whatever is in the field, clear
+/* Quick add: make a record out of whatever is in the field, clear
  * it, and rebuild the list so the new row is visible immediately. To Do and
  * Memo share this body rather than having one each.
  *
@@ -1029,7 +1026,7 @@ static void list_view(const AppDef *ad){
         else if(ad->app == APP_MEMO)
             active_ta = list_top_bar("Memo",  "", LIST_BAR_ADD_MAX, NULL, quick_add_cb,
                                      planner_switch_cb);
-        /* R9: the quick-add field IS the record's first line, so it starts with
+        /* the quick-add field IS the record's first line, so it starts with
          * a capital. Look Up (above) does not: it is a filter, not text. */
         if(ad->app == APP_TODO || ad->app == APP_MEMO)
             ta_mode_set(active_ta, TA_CAP_FIRST, NULL);
@@ -1120,9 +1117,9 @@ static void del_btn_cb(lv_event_t *e){ ask_delete((uint32_t)(uintptr_t)lv_event_
  * the device like every memo (memos have no server copy). Tapping an item --
  * its box or its words -- ticks or unticks it.
  *
- * There used to be a "make this line a To Do" here. It was taken out
- * (2026-09-29): To Do has one server list, so moving an item out of its memo
- * lost the project the memo was. A better way between the two is open.
+ * There is no "make this line a To Do": To Do has one server list, so an item
+ * moved out of its memo would lose the project the memo is (BACKLOG.md,
+ * Parked).
  *
  * The detail screen shows such a memo as a list -- the same one lv_table and the
  * same drawn boxes as the To Do list, so no screen gains a per-line object. The
@@ -1279,7 +1276,7 @@ static void show_detail(uint32_t uid){
 
 /* ------------------------- edit form ------------------------- */
 
-/* ---- R8: the phone keypad ------------------------------------------------------
+/* ---- the phone keypad ------------------------------------------------------
  * Phone and Zip are digits, and writing digits one Graffiti stroke at a time is
  * the slowest way there is to enter a phone number. Tapping either field opens
  * this: the classic 3x4 phone pad, read across -- 1 2 3 / 4 5 6 / 7 8 9 /
@@ -1425,7 +1422,7 @@ static void kp_open(lv_obj_t *ta, const char *name){
 
 /* tapping a field just makes it the Graffiti target (and shows its cursor);
  * there is no on-screen keyboard -- all text entry is via the Graffiti strip.
- * R8: except Phone and Zip, which open the keypad above as well. */
+ * except Phone and Zip, which open the keypad above as well. */
 static void ta_click_cb(lv_event_t *e){
     lv_obj_t *ta = (lv_obj_t *)lv_event_get_target(e);
     if(active_ta && active_ta != ta) lv_obj_clear_state(active_ta, LV_STATE_FOCUSED);
@@ -1436,12 +1433,12 @@ static void ta_click_cb(lv_event_t *e){
     if(ta_mode(ta, &name) == TA_KEYPAD) kp_open(ta, name);
 }
 
-/* R9/R8: give the field just added by form_field() its input mode. */
+/* give the field just added by form_field() its input mode. */
 static void field_mode(int mode, const char *name){
     if(g_nfields > 0) ta_mode_set(g_fields[g_nfields - 1], mode, name);
 }
 
-/* ---- R7: To Do priority, tapped rather than typed ------------------------------
+/* ---- To Do priority, tapped rather than typed ------------------------------
  * Four targets, 1 to 4, in one button matrix (one object), one checked at a
  * time. Palm allows 5; a record that arrives from a sync at 5 shows nothing
  * picked and keeps its 5 unless a number is tapped -- the form must never
@@ -1491,7 +1488,7 @@ static void save_cb(lv_event_t *e){
     if(cur_app->app == APP_CAL){
         Appt a; if(!data_get_cal(edit_uid,&a)) default_appt(&a);
         snprintf(a.description,sizeof a.description,"%s",fv(0));
-        /* Q2/Q3: picked, not parsed. The old sscanf pair accepted anything that
+        /* picked, not parsed. The old sscanf pair accepted anything that
          * looked vaguely like a date or a time and silently kept the record's
          * previous value when it did not -- so a mistyped date looked saved and
          * was not. A picked value cannot be malformed. */
@@ -1508,7 +1505,7 @@ static void save_cb(lv_event_t *e){
         Todo t; if(!data_get_todo(edit_uid,&t)) memset(&t,0,sizeof t);
         snprintf(t.description,sizeof t.description,"%s",fv(0));
         snprintf(t.note,sizeof t.note,"%s",fv(1));
-        if(g_todo_pri >= 1) t.priority = g_todo_pri;     /* R7 */
+        if(g_todo_pri >= 1) t.priority = g_todo_pri;
         t.hasDue = g_due_has;
         if(g_due_has){ t.dueY=g_due_y; t.dueM=g_due_m; t.dueD=g_due_d; }
         data_save_todo(edit_uid,edit_cat,&t);
@@ -1586,7 +1583,7 @@ static void show_edit(uint32_t uid){
     content_clear();
     lv_label_set_text(title_lbl, uid ? "Edit" : "New");
 
-    /* C4: Palm form contract -- the action row lives across the BOTTOM of the
+    /* Palm form contract -- the action row lives across the BOTTOM of the
      * form (Palm's Done/Details convention), Done leftmost. Done saves (Palm
      * edits committed on Done); Details is the category trigger; Cancel
      * discards. The fields fill the space above. */
@@ -1618,7 +1615,7 @@ static void show_edit(uint32_t uid){
         Appt a; if(!data_get_cal(uid,&a)) default_appt(&a);
         g_ev_alarm  = a.hasAlarm;                              /* Details sheet state */
         g_ev_repeat = a.hasRepeat ? a.repeatType : repeatNone;
-        /* Q2 + Q3: the date and the time were TYPED, in two formats a person had
+        /* the date and the time were TYPED, in two formats a person had
          * to know -- "M/D/YYYY" and "h:mm" -- and a typo in either was accepted
          * silently by sscanf and written to the record. Both are now taps: the
          * date on the calendar the To Do due picker already uses, the time from
@@ -1661,7 +1658,7 @@ static void show_edit(uint32_t uid){
         Todo t; if(!data_get_todo(uid,&t)) memset(&t,0,sizeof t);
         g_due_has=t.hasDue; g_due_y=t.dueY; g_due_m=t.dueM; g_due_d=t.dueD;
         g_due_optional = 1;                    /* a To Do may have no due date */
-        /* R7 reshaped this form. Description, then Due and Priority as compact
+        /* Description, then Due and Priority as compact
          * rows with the label BESIDE the control -- the way Palm's own To Do
          * Details laid them out -- then Note. Stacked label-over-field, four rows
          * are 208 px against 146 of form, so Priority would have been below the
@@ -1688,7 +1685,7 @@ static void show_edit(uint32_t uid){
         due_set_label();
         y += 36;
 
-        /* R7: priority. A new to do starts at 1, which is what the quick-add
+        /* priority. A new to do starts at 1, which is what the quick-add
          * bar has always filed it under and what Palm defaults to. */
         g_todo_pri = uid ? t.priority : 1;
         lv_obj_t *plab = lv_label_create(form);
@@ -1729,8 +1726,8 @@ static void show_edit(uint32_t uid){
         Addr a; if(!data_get_addr(uid,&a)) memset(&a,0,sizeof a);
         /* the scrollable form now exposes the common Palm Address fields (was just
          * 5); fv() indices below must stay in lock-step with save_cb's APP_ADDR arm */
-        /* R9: the name-like fields capitalise Each Word, the note only its first
-         * letter; R8: Phone and Zip open the keypad when tapped. */
+        /* the name-like fields capitalise Each Word, the note only its first
+         * letter; Phone and Zip open the keypad when tapped. */
         form_field(form,"Last",a.fields[F_name],40,&y);       /* fv0 */
         field_mode(TA_CAP_WORDS, NULL);
         form_field(form,"First",a.fields[F_firstName],40,&y); /* fv1 */
@@ -1785,7 +1782,7 @@ static void show_edit(uint32_t uid){
     if(g_nfields > 0){ active_ta = g_fields[0]; lv_obj_add_state(g_fields[0], LV_STATE_FOCUSED); }
 }
 
-/* U7: HotSync screen (Sync Now + a status line polled from the background task) */
+/* HotSync screen (Sync Now + a status line polled from the background task) */
 /* Progress is TEXT, not an lv_bar. On this no-PSRAM device the heap is badly
  * fragmented during a sync (Wi-Fi + TLS hold the big blocks), and an lv_bar
  * forces LVGL to allocate a draw-LAYER buffer to composite its indicator -- that
@@ -1895,10 +1892,10 @@ static void hs_confirm_open(void){
 }
 
 /* ---- no Wi-Fi: go where it gets fixed ---------------------------------------
- * A sync that cannot get online used to end on "Wi-Fi failed" in the status
- * line, which says what went wrong and nothing about what to do. Every sync
- * needs Wi-Fi first, so the answer is always the same screen: open the Wi-Fi
- * panel and have the Assistant say what happened and what to tap there.
+ * "Wi-Fi failed" in the status line would say what went wrong and nothing
+ * about what to do. Every sync needs Wi-Fi first, so the answer is always the
+ * same screen: open the Wi-Fi panel and have the Assistant say what happened
+ * and what to tap there.
  *
  * Only from the HotSync screen, and only for a run started there: a sync that
  * fails while you are somewhere else does not get to pull you out of it. */
@@ -1937,7 +1934,7 @@ static void show_hotsync(void){
     lv_label_set_text(title_lbl, "HotSync");
     update_cat_trigger();
 
-    /* C2: the classic HotSync moment -- the logo front and centre, the status
+    /* the classic HotSync moment -- the logo front and centre, the status
      * ("Synchronizing <app>... N%") beneath it. Progress stays TEXT (never an
      * lv_bar: its draw-layer alloc fails mid-sync on the fragmented no-PSRAM
      * heap and live-locks LVGL -- see the note at hs_tick). The icon is drawn
@@ -1959,10 +1956,9 @@ static void show_hotsync(void){
     lv_obj_set_style_text_align(hs_status, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(hs_status, hotsync_status());
 
-    /* W10: what a sync will do RIGHT NOW, given what is configured. The device
-     * used to imply that a sync needed iCloud and stop there; it does not -- the
-     * clock and the news need nothing but a network, and they are the two things
-     * that go stale fastest. So this says what you will get either way, and
+    /* what a sync will do RIGHT NOW, given what is configured. A sync doesn't
+     * need iCloud: the clock and the news need nothing but a network, and they
+     * are the two things that go stale fastest. So this says what you will get either way, and
      * mentions the account as the thing that ADDS records, not as a precondition
      * that is missing. It is read before the button is pressed, which is the
      * moment the question is actually being asked. */
@@ -1976,7 +1972,7 @@ static void show_hotsync(void){
       lv_obj_set_style_text_align(what, LV_TEXT_ALIGN_CENTER, 0);
       lv_obj_align(what, LV_ALIGN_TOP_MID, 0, 88);
       /* Three lines is the whole budget: the status line is above and the
-       * button is below, and the first draft ran into the button. */
+       * button is below. */
       if(acct && coll)
           lv_label_set_text(what, "Clock, news, weather, and your\n"
                                   "calendar and contacts.");
@@ -2096,7 +2092,7 @@ static void show_datebook_day(int y,int m,int d){
      * readable form are two different jobs, and the data layer owns the first. */
     for(int i=0;i<g_ndayrows;i++) day_row_clock(g_dayrows[i].txt, sizeof g_dayrows[0].txt);
 
-    /* Q1: the list gives up its last row so New can be a FIXED button rather
+    /* the list gives up its last row so New can be a FIXED button rather
      * than the final entry in a scrolling list. A day with eight events would
      * have pushed that entry below the fold, and "add an event" is the one
      * thing on this screen that must never be hidden by how full the day is. */
@@ -2279,7 +2275,7 @@ static void show_app(const char *name){
     lv_obj_center(l);
 }
 
-/* ===================== Graffiti Trainer (roadmap #2) =========================
+/* ===================== Graffiti Trainer =========================
  * A learn-to-write drill: shows a target glyph + its stroke guide (drawn from the
  * recognizer's own template), you draw it in the Graffiti strip, and it scores the
  * stroke and schedules the next with a DETERMINISTIC spaced-repetition system --
@@ -2505,7 +2501,7 @@ static void tr_mode_toggle(lv_event_t *e){
 
 static void graffiti_to_kana_cb(lv_event_t *e){ (void)e; show_kana(); }
 
-/* ==== Q4: the stroke reference ==============================================
+/* ==== the stroke reference ==============================================
  * Every stroke the recogniser knows, on one sheet you can scroll. Not a drill
  * and not a quiz -- the thing you look at when you cannot remember which way
  * round 'k' goes, which on a device whose only text input is Graffiti is a
@@ -2710,7 +2706,7 @@ static void show_trainer(void){
     lv_obj_center(tr_mode_lbl);
     lv_obj_add_event_cb(mb, tr_mode_toggle, LV_EVENT_CLICKED, NULL);
 
-    /* Q4: the stroke reference -- every glyph on one sheet, for when you cannot
+    /* the stroke reference -- every glyph on one sheet, for when you cannot
      * remember which way round 'k' goes. */
     lv_obj_t *rb = lv_button_create(content);
     lv_obj_set_size(rb, 56, 26);
@@ -2759,7 +2755,7 @@ static void tr_reset_progress(void){
     tr_save();
 }
 
-/* ===================== Kana Trainer (roadmap #3, Tiers 1-2) ==================
+/* ===================== Kana Trainer (Tiers 1-2) ==================
  * A learn-the-syllabary app with TWO challenges per kana, each on the same
  * deterministic SRS (level 1..5, burn past 5, smallest-due pick):
  *
@@ -3093,7 +3089,7 @@ static void kana_build(int mode){
     } else {                                       /* WRITE layout */
         ka_strokes_lbl = lv_label_create(content);
         lv_obj_set_style_text_font(ka_strokes_lbl, &lv_font_palm, 0);
-        /* the top-left the prompt used to crowd: clear of the ABC button */
+        /* top left, clear of the prompt and the ABC button */
         lv_obj_align(ka_strokes_lbl, LV_ALIGN_TOP_LEFT, 6, 8);
 
         ka_model = lv_canvas_create(content);
@@ -3131,7 +3127,7 @@ static void ka_reset_progress(void){
     ka_save();
 }
 
-/* ===================== News (RSS reader, roadmap #4) =========================
+/* ===================== News (an RSS reader) ===================================
  * A one-item-per-view, vertical-swipe feed reader (headline + text, no images).
  * Articles are fetched during HotSync and stored on SD (bridge/news.c); the reader
  * holds only the current article in RAM (read from SD on each swipe), so it scales
@@ -3247,9 +3243,9 @@ static void show_news(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0;
     news_seed_if_empty();
-    /* Resume at the first story not yet read. Reopening used to snap back to
-     * article 1, so every visit replayed what had already been flipped through.
-     * Everything read -> stay at the end rather than restart from the top. */
+    /* Resume at the first story not yet read, so a visit doesn't replay what
+     * was already flipped through. Everything read -> stay at the end rather
+     * than restart from the top. */
     {
         int fu = news_first_unread();
         int n  = news_count();
@@ -3304,7 +3300,7 @@ static void show_news(void){
 /* ONE icon cell, for BOTH icon grids -- the launcher's nine apps and Settings'
  * nine tiles. They were duplicated boilerplate that happened to agree, which is
  * the arrangement that drifts: the two grids are supposed to look identical
- * (W1's whole premise is that Settings is an app), so they are now one function.
+ * (Settings is an app, as Prefs was on Palm), so they are one function.
  *
  * NOT SCROLLABLE, and that is not cosmetic. An lv_obj scrolls by default, so a
  * label wider than the 68 px cell makes the cell scrollable, and LVGL draws the
@@ -3338,7 +3334,7 @@ static lv_obj_t *icon_cell(lv_obj_t *grid, const lv_image_dsc_t *icon,
     return cell;
 }
 
-/* S5: the reviews due in every course, as a count at the icon's shoulder,
+/* the reviews due in every course, as a count at the icon's shoulder,
  * like a phone's. Nothing when there are none; 99+ past two digits. Kept
  * inside the cell: anything standing proud of it is clipped. */
 static void st_badge(lv_obj_t *cell, uint32_t n){
@@ -3390,19 +3386,11 @@ static void show_launcher(void){
         lv_obj_clear_flag(gap, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     }
 
-    /* W10 REMOVED THE ONBOARDING HINT that used to hang off the end of this grid.
-     * Three faults, and the third is fatal on its own:
-     *
-     *   It dead-ended -- "edit config.ini on the card" is not something a person
-     *   holding the device can do. It read as an unfinished-setup nag, which
-     *   item 17 rejects: a sync without an account is a supported way to use
-     *   this thing, not a half-finished one. And the app grid is three rows of
-     *   52 px in a 184 px area, so the hint sat BELOW THE FOLD and the launcher
-     *   had to be scrolled to read it -- a notice nobody sees is not a notice.
-     *
-     * What it was genuinely for -- "those contacts are not yours, they are
-     * samples" -- now lives on the HotSync screen, which is where somebody is
-     * actually asking what syncing would do for them. */
+    /* No setup hint under the grid: three rows of 52 px fill the 184 px area,
+     * so anything below them is below the fold, and a sync without an account
+     * is a supported way to use the device, not an unfinished setup. "These
+     * records are samples" is said on the HotSync screen instead, where
+     * somebody is asking what a sync would do for them. */
 
     /* LAST, so the app grid gets the pool first. If there is not enough left for
      * four small objects, the right thing to lose is the charge readout, not an
@@ -3410,7 +3398,7 @@ static void show_launcher(void){
     batt_refresh();
 }
 
-/* ============ P1.5: Preferences + collection discovery ============ */
+/* ============ Preferences + collection discovery ============ */
 
 /* A dismissable one-shot alert (Save feedback, discovery errors). Tapping
  * anywhere closes it. */
@@ -3446,7 +3434,7 @@ static void alert_show(const char *msg){
     lv_label_set_text(l, msg);
 }
 
-/* I4: a transient, auto-dismissing confirmation (Palm-style). Unlike alert_show
+/* a transient, auto-dismissing confirmation (Palm-style). Unlike alert_show
  * (a modal you tap to close), this is a non-clickable pill just above the Graffiti
  * strip that clears itself after ~900 ms -- for closing the loop on save/delete
  * without demanding a tap. A plain label with a solid fill allocates no draw
@@ -3489,7 +3477,7 @@ static void toast_show(const char *msg){
 enum { PF_SSID, PF_WPASS, PF_USER, PF_PASS, PF_CALB, PF_CARDB,
        PF_CAL, PF_TODO, PF_CARD, PF_TZ, PF_N,
        PF_LAT = PF_N, PF_LON, PF_OWNER,
-       /* W5, Wi-Fi slots 2..4. Slot 1 is PF_SSID/PF_WPASS above. These sit PAST
+       /* Wi-Fi slots 2..4. Slot 1 is PF_SSID/PF_WPASS above. These sit PAST
         * PF_N deliberately, like latitude and owner: everything below PF_N is
         * what the one-list Preferences view iterates, and that list is already at
         * the object-pool ceiling (see show_prefs -- three extra rows once crashed
@@ -3513,13 +3501,10 @@ static int pf_is_secret(int i){
 }
 /* Which screen an edit returns to.
  *
- * This used to be derived from the FIELD (`pf_is_dash_field`: latitude and
- * longitude came from the Lock Screen panel, everything else from the
- * Preferences list). W1 broke that: the same field editor is now reachable
- * from a third place -- a Settings tile -- and latitude is reachable from
- * both the Lock Screen panel and the Location tile, so the field no longer
- * says where the user came from. Only the caller knows, so the caller sets it
- * on the way IN and `set_return()` reads it on the way out. */
+ * The FIELD can't say: the same field editor is reached from the Preferences
+ * list, the Lock Screen panel and the Settings tiles, and latitude from both
+ * the Lock Screen panel and the Location tile. Only the caller knows, so the
+ * caller sets it on the way IN and `set_return()` reads it on the way out. */
 enum { RET_PREFS = -1, RET_DASH = -2, RET_WIFI = -3 };  /* >= 0 is a tile index */
 static int g_set_ret = RET_PREFS;
 static int g_wifi_slot;    /* which network's screen RET_WIFI goes back to */
@@ -3582,10 +3567,10 @@ static void pf_edit_save_cb(lv_event_t *e){ (void)e;
     }
     appcfg_save();            /* persist to SD now -> survives reboot */
     pf_edit_back();
-    toast_show("Saved");      /* I4: same transient feedback as record save/delete */
+    toast_show("Saved");      /* same transient feedback as record save/delete */
 }
 
-/* I1.2: on-screen keyboard for the Preferences fields. Entering a 19-character
+/* on-screen keyboard for the Preferences fields. Entering a 19-character
  * app-specific password stroke-by-stroke through an untuned recognizer was the
  * single biggest setup blocker, so config fields get a tap keyboard: ONE
  * lv_buttonmatrix (the calculator's proven pattern -- a single object, sizes
@@ -3821,7 +3806,7 @@ static void show_secret_edit(int i){
  * The list persists to feeds.txt on every change, and HotSync fetches the enabled
  * feeds. See bridge/feeds.c. */
 static void feeds_add_cb(lv_event_t *e){ (void)e; show_feed_edit(-1); }
-/* W7: put the ten built-ins back. They are seeded on a fresh card and then
+/* put the ten built-ins back. They are seeded on a fresh card and then
  * editable, so the only way to lose one permanently was to delete it -- and the
  * URL is the one thing here nobody can retype from memory. Adding is a no-op for
  * a feed already in the list (feeds_add refuses duplicates), so this restores
@@ -3849,7 +3834,7 @@ static void show_feeds(void){
     lv_label_set_text(title_lbl, "News");
     update_cat_trigger();
 
-    /* W7: this IS the News tile's panel now, not a sub-screen of a list of
+    /* this IS the News tile's panel now, not a sub-screen of a list of
      * settings, so there is no "Prefs" button on it -- Home is the way out
      * (design rule 3), the same as every other tile. The two buttons that are
      * left both DO something to the list. */
@@ -3971,9 +3956,8 @@ static char *zone_target_buf(Config *c, int *cap){
     }
 }
 /* The picker goes back wherever it was opened from -- same reasoning as the
- * field editor above. It used to decide from the TARGET (system zone -> the
- * Preferences list, world clock -> the Lock Screen panel), which stopped being
- * true when the Date & Time tile started opening all three. */
+ * field editor above: the TARGET can't say, because the Date & Time tile opens
+ * the system zone and both world clocks. */
 static void zone_picker_return(void){ set_return(); }
 static void tz_cancel_cb(lv_event_t *e){ (void)e; zone_picker_return(); }
 static void tz_tbl_click_cb(lv_event_t *e){
@@ -4122,7 +4106,7 @@ static void pf_bright_row_cb(lv_event_t *e){ (void)e; br_open(); }
 static void pf_feeds_row_cb(lv_event_t *e){ (void)e; show_feeds(); }
 static void pf_saverow_cb(lv_event_t *e){ (void)e;
     int rc = appcfg_save();
-    /* I4: success is a transient toast (like record save); a write FAILURE stays a
+    /* success is a transient toast (like record save); a write FAILURE stays a
      * modal alert -- the user must notice the card didn't take their settings. */
     if(rc==0) toast_show("Saved to config.ini");
     else      alert_show("Could not write config.ini (SD card?)");
@@ -4179,7 +4163,7 @@ static void show_prefs(void){
     pf_add(list, "Save to config.ini", pf_saverow_cb, 0);
 }
 
-/* ============ W1: Settings -- nine tiles instead of one long list ============
+/* ============ Settings -- nine tiles instead of one long list ============
  *
  * Menu > Preferences is now Menu > Settings, and it opens an icon grid rather
  * than a fourteen-row list. Two reasons, and the second is the real one:
@@ -4189,8 +4173,8 @@ static void show_prefs(void){
  *     (a resistive panel plus LVGL's drag threshold). Nine tiles fit outright.
  *   * A flat list of "Calendar coll" and "CardDAV host" asks the user to know
  *     what those ARE. Grouping them behind Accounts and Sync means a wizard can
- *     later ask a question instead of naming a field -- which is what W5..W9
- *     are for. The grid is the seam that makes that replacement one tile at a
+ *     later ask a question instead of naming a field -- which is what the
+ *     Wi-Fi, Accounts and Location wizards do. The grid is the seam that makes that replacement one tile at a
  *     time instead of one big rewrite.
  *
  * The grid is show_launcher()'s geometry deliberately: same 68x52 cells, same
@@ -4199,9 +4183,9 @@ static void show_prefs(void){
  * smoke script already uses for a launcher cell. It also means Settings LOOKS
  * like the launcher, which is the point -- on Palm, Prefs was an app.
  *
- * Home exits, as it does everywhere else. There is no Back button: P10 settled
- * that argument (a Back button below the fold makes leaving the hardest thing
- * on the screen), and the silkscreen Home is always on glass.
+ * Home exits, as it does everywhere else. There is no Back button: a Back
+ * button below the fold makes leaving the hardest thing on the screen, and the
+ * silkscreen Home is always on glass.
  *
  * The old show_prefs() list is NOT deleted. Every field it holds is reachable
  * from a tile, but it stays reachable from Settings > About while the wizards
@@ -4217,7 +4201,7 @@ static const char *SET_NAMES[SET_N] = {
     "Wi-Fi", "Accounts", "News", "Date & Time", "Display",
     "Location", "Sync", "Owner", "About",
 };
-/* W4: what the Assistant says when a tile opens. Each one says what the setting
+/* what the Assistant says when a tile opens. Each one says what the setting
  * IS FOR -- the thing you cannot work out from the field names, and the thing
  * that decides whether you need it at all -- never what to tap next, which the
  * screen underneath her is already showing. Under ~115 characters (five lines in
@@ -4311,7 +4295,7 @@ static void sp_field_row(lv_obj_t *list, int tile, int f){
     pf_add(list, row, sp_field_cb, (tile << 8) | f);
 }
 
-/* ==== W9: one pick-one-of-N screen, used by every panel that has a choice ===
+/* ==== one pick-one-of-N screen, used by every panel that has a choice ===
  * Three settings in Settings are "choose one from a short fixed set": how long
  * the backlight stays on, which side wins a sync conflict, and which city you
  * are in. Three cycling rows would have been less code -- tap to advance, no
@@ -4365,8 +4349,8 @@ static void show_pick_screen(void){
         /* THE MARKER IS PLAIN ASCII. The first version used a bullet, on the
          * reasoning that a bullet is in every font there is -- it is not in this
          * one. lv_font_palm is a 32..255 Latin subset with no symbol range at
-         * all, which is the same wall C7 hit looking for a check mark and the
-         * same one the calendar's month arrows hit. Anything outside ASCII here
+         * all, which is the same wall a check mark and the calendar's month
+         * arrows hit. Anything outside ASCII here
          * draws as an empty box, and an empty box next to the CURRENT setting is
          * worse than no marker at all. */
         snprintf(row, sizeof row, "%s %s", i == g_pick_cur ? ">" : "  ",
@@ -4377,7 +4361,7 @@ static void show_pick_screen(void){
     if(g_pick_help) assist_say(g_pick_help);
 }
 
-/* ==== W8: setting the clock by hand ========================================
+/* ==== setting the clock by hand ========================================
  * A device with no RTC wakes from a flat battery in 1970, and the thing that
  * fixes that -- SNTP inside a sync -- needs Wi-Fi, which is one of the things
  * you may be standing here to set up. So the clock is settable by hand, and
@@ -4543,7 +4527,7 @@ static void show_set_date(void){
 static void sp_clock_cb(lv_event_t *e){ (void)e; show_set_clock(); }
 static void sp_date_cb(lv_event_t *e){ (void)e; show_set_date(); }
 
-/* ---- W9: the choices behind Display, Sync and Location ------------------- */
+/* ---- the choices behind Display, Sync and Location ------------------- */
 
 /* Backlight timeout. The values are the ones a person actually wants, not a
  * range: anything under 15 s blanks while you are reading, and "never" has to be
@@ -4659,7 +4643,7 @@ static const char *loc_city_name(const Config *c){
     return NULL;
 }
 
-/* ==== W5: the Wi-Fi wizard =================================================
+/* ==== the Wi-Fi wizard =================================================
  * Four remembered networks, tried in the order the list shows them, with the one
  * that worked last at the top (bridge/config.c: config_wifi_promote).
  *
@@ -4865,7 +4849,7 @@ static void show_wifi_pick(int slot){
 
 static void show_set_panel(int tile){
     if(tile < 0 || tile >= SET_PANEL_N) return;
-    /* W7: News has no panel of its own. The tile opens the feed list directly,
+    /* News has no panel of its own. The tile opens the feed list directly,
      * because a panel holding one row that says "News feeds..." is a screen
      * whose only content is the name of the next screen. */
     if(tile == SET_NEWS){ show_feeds(); return; }
@@ -4885,7 +4869,7 @@ static void show_set_panel(int tile){
     char row[80], tag[8];
     switch(tile){
     case SET_WIFI:
-        /* W5: four remembered networks, in the order they are tried. Four rows
+        /* four remembered networks, in the order they are tried. Four rows
          * is the whole point of four -- it fits without a scrollbar. */
         for(int i = 0; i < CFG_WIFI_N; i++){
             const char *s = c->wifi[i].ssid;
@@ -4896,7 +4880,7 @@ static void show_set_panel(int tile){
         }
         break;
     case SET_ACCT:
-        /* W6: two things to type and then a button that finds the rest. The two
+        /* two things to type and then a button that finds the rest. The two
          * server addresses moved behind "Advanced": they default to iCloud,
          * nobody with an Apple ID ever needs them, and sitting in the account
          * flow they read as two more required fields. */
@@ -4911,7 +4895,7 @@ static void show_set_panel(int tile){
         break;
 
     case SET_TIME: {
-        /* W8: the clock itself comes FIRST. Everything under it describes how the
+        /* the clock itself comes FIRST. Everything under it describes how the
          * time is displayed; these two are the time. Six rows, which is what fits
          * without a scrollbar -- a seventh would cost the whole panel its rule. */
         time_t now = 0; time(&now);
@@ -4942,7 +4926,7 @@ static void show_set_panel(int tile){
     case SET_DISP:
         snprintf(row, sizeof row, "Brightness: %d%%", c->brightness);
         g_pf_bright_btn = pf_add(list, row, pf_bright_row_cb, 0);
-        /* W9: the backlight timeout was in config.ini and NOWHERE in the UI --
+        /* the backlight timeout was in config.ini and NOWHERE in the UI --
          * the one setting that decides most of the battery life, editable only
          * by pulling the card. */
         snprintf(row, sizeof row, "Screen off: %s", bl_name(c->backlight_sec));
@@ -4983,7 +4967,7 @@ static void show_set_panel(int tile){
         sp_field_row(list, tile, PF_OWNER);
         break;
     case SET_ABOUT:
-        /* W9: the tile said "About" and showed one row that was not about
+        /* the tile said "About" and showed one row that was not about
          * anything. The provenance belongs here, where someone looking for it
          * will look; the whole-list view stays underneath it as the escape
          * hatch for a config.ini that has gone wrong. */
@@ -5000,7 +4984,7 @@ static void show_set_panel(int tile){
         break;
     }
 
-    /* W4: she explains what this tile is FOR, every time it opens -- this is the
+    /* she explains what this tile is FOR, every time it opens -- this is the
      * panel's caption, not a greeting, so it is not rationed to once per unlock.
      * It costs the screen nothing: the strip has no job on a panel of buttons. */
     assist_say(tile < SET_N ? SET_BLURB[tile]
@@ -5040,7 +5024,7 @@ static void show_settings(void){
     for(int i = 0; i < SET_N; i++)
         icon_cell(grid, SET_ICONS[i], SET_NAMES[i], sp_tile_cb, (void *)(intptr_t)i);
 
-    /* W3: the Assistant, once per unlock session, standing OVER the finished grid
+    /* the Assistant, once per unlock session, standing OVER the finished grid
      * rather than in place of it -- so the greeting costs the nine tiles no room
      * and dismissing her rebuilds nothing. */
     assistant_greet();
@@ -5119,7 +5103,7 @@ static void disc_row_cb(lv_event_t *e){
         role_btn(panel, "Address book",         idx, 'a');
     }
 }
-/* W6: back to whoever opened discovery -- the Accounts tile, the Sync tile, or
+/* back to whoever opened discovery -- the Accounts tile, the Sync tile, or
  * the one-list view. It always went to the Preferences list before, which was
  * the only caller there was; now it is the wrong answer two times out of three. */
 static void disc_back_cb(lv_event_t *e){ (void)e; set_return(); }
@@ -5199,7 +5183,7 @@ static void show_discover(void){
     disc_timer = lv_timer_create(disc_tick, 400, NULL);
 }
 
-/* ------------------------- F1: menu bar ------------------------- */
+/* ------------------------- menu bar ------------------------- */
 static lv_obj_t *g_menu;   /* menu overlay root, or NULL */
 static void menu_close(void){
     if(g_menu){ lv_obj_del(g_menu); g_menu=NULL; }
@@ -5283,7 +5267,7 @@ static void act_toggle_sort(lv_event_t *e){ (void)e; menu_close();
 /* debug: seed 30 test appointments into the Date Book so a >24-record collection
  * can be pushed to iCloud to exercise the streaming reconcile. Each is a new
  * record (uid 0 => data layer assigns a fresh uniqueID); the next HotSync pushes
- * all of them up. C5: dev scaffolding.
+ * all of them up. Development scaffolding.
  *
  * Guarded by UI_SEED_TESTEVENTS rather than UI_DEVTOOLS, and that define is set
  * for SIM BUILDS ONLY. It was harmless while the sync could not complete; now
@@ -5311,7 +5295,7 @@ static void act_gentest(lv_event_t *e){ (void)e; menu_close();
 }
 #endif /* UI_SEED_TESTEVENTS */
 
-/* I2: remove the demo seed before the first HotSync, so Johnny Appleseed and the
+/* remove the demo seed before the first HotSync, so Johnny Appleseed and the
  * fake meetings never get pushed into the user's real iCloud. Deletes only the
  * seeded records (the manifest tracks them); user edits/additions are kept. */
 static void act_remove_demo(lv_event_t *e){ (void)e; menu_close();
@@ -5588,7 +5572,7 @@ static void show_power(void){
     lv_obj_t *rl = lv_label_create(rf); lv_label_set_text(rl, "Refresh"); lv_obj_center(rl);
 }
 static void act_power(lv_event_t *e){ (void)e; menu_close(); show_power(); }
-/* R5: lock by hand. Offered on the launcher only: the lock clears the content
+/* lock by hand. Offered on the launcher only: the lock clears the content
  * area on the way up, so from inside an app it would throw away whatever was on
  * screen -- a half-edited record included. The grid has nothing to lose. */
 static void act_lock(lv_event_t *e){ (void)e; menu_close(); ui_show_lock(); }
@@ -5799,7 +5783,7 @@ static void calc_bm_cb(lv_event_t *e){
     if(!txt) return;
     calc_apply(txt[0]=='<' ? '<' : txt[0]);
 }
-/* R10: the keys painted by kind, the way a real calculator separates them --
+/* the keys painted by kind, the way a real calculator separates them --
  * digits grey, operators and functions white, "=" solid black. All from a draw
  * hook over the one button matrix, so the grouping costs no objects: a grey
  * digit is a fill colour, not a widget. A pressed key inverts, whatever its
@@ -5917,9 +5901,9 @@ int ui_discrete_taps(void){
     return (g_calc && !lv_obj_has_flag(g_calc, LV_OBJ_FLAG_HIDDEN)) || g_kp != NULL;
 }
 
-/* ------------------------- F2: category picker ------------------------- */
+/* ------------------------- category picker ------------------------- */
 static lv_obj_t *cat_trigger, *cat_label, *g_catpop;
-static void ce_edit_item(lv_obj_t *par);   /* "Edit Categories" tail item (C4) */
+static void ce_edit_item(lv_obj_t *par);   /* "Edit Categories" tail item */
 
 static void catpop_close(void){ if(g_catpop){ lv_obj_del(g_catpop); g_catpop=NULL; } }
 static void catpop_backdrop_cb(lv_event_t *e){ (void)e; catpop_close(); }
@@ -5987,14 +5971,14 @@ static void cat_trigger_cb(lv_event_t *e){
     ce_edit_item(panel);   /* Palm: the picker's last row edits the categories */
 }
 
-/* ---------------- C4: Edit Categories (rename existing / add new) ----------------
+/* ---------------- Edit Categories (rename existing / add new) ----------------
  * Palm's "Edit Categories" from the tail of the category picker. Renames land in
  * the app's PDB AppInfo immediately (data_set_categories preserves records; a
  * record's category nibble is unchanged, so a rename retags everything in that
  * category). "Unfiled" (slot 0) is reserved and not listed. Delete is out of
  * scope here -- it would need to recategorise the affected records to Unfiled.
  * All widgets are the pool-safe kind: a list of buttons, and for naming, one
- * textarea + one button-matrix keyboard (the Preferences I1.2 pattern). */
+ * textarea + one button-matrix keyboard (the Preferences keyboard's pattern). */
 static int g_ce_app;    /* app whose categories are being edited */
 static int g_ce_slot;   /* category slot (1..15) being named */
 static void show_cat_edit(void);
@@ -6113,7 +6097,7 @@ static void ce_edit_item(lv_obj_t *par){
     lv_obj_add_event_cb(b, ce_open_cb, LV_EVENT_CLICKED, NULL);
 }
 
-/* ------------------------- F4: Details (category) ------------------------- */
+/* ------------------------- Details (category) ------------------------- */
 static lv_obj_t *g_details;
 static void details_close(void){ if(g_details){ lv_obj_del(g_details); g_details=NULL; } }
 static void details_backdrop_cb(lv_event_t *e){ (void)e; details_close(); }
@@ -6335,7 +6319,7 @@ void due_open(void){
 }
 static void due_btn_cb(lv_event_t *e){ (void)e; due_open(); }
 
-/* ==== Q3: the start time, picked from a list ===============================
+/* ==== the start time, picked from a list ===============================
  * Every half hour from 8:00 AM to 9:00 PM -- 27 rows. That is more than fits,
  * and it is allowed to be: design rule 2 bars a scrolling PAGE, and singles out
  * a scrolling LIST as the acceptable case, because a list drags predictably
@@ -6344,8 +6328,8 @@ static void due_btn_cb(lv_event_t *e){ (void)e; due_open(); }
  * default path.
  *
  * The popup is the due-date picker's own furniture -- a dimmed backdrop and a
- * centred panel on lv_layer_top() -- for the same reason Q2 reuses its
- * calendar: two popups that merely resemble each other drift.
+ * centred panel on lv_layer_top() -- for the same reason the due date and the
+ * event date share one calendar: two popups that merely resemble each other drift.
  */
 /* THE WHOLE DAY, every half hour: 48 rows.
  *
@@ -6556,9 +6540,9 @@ void br_open(void){
     br_step_btn(row, "+", br_plus_cb);
 }
 
-/* ------------------------- U6: Graffiti stroke capture ------------------------- */
+/* ------------------------- Graffiti stroke capture ------------------------- */
 
-/* C1: the ink trail. Real Graffiti showed your stroke; without it the user
+/* the ink trail. Real Graffiti showed your stroke; without it the user
  * can't tell whether a stroke registered or where it went wrong. An I1 canvas
  * (2 colors) sits BEHIND the writing pads: 168x106 @ 1bpp is ~2.3 KB in BSS --
  * off the LVGL pool, cheap enough for the no-PSRAM device. Ink is drawn with
@@ -6669,7 +6653,7 @@ static void show_case(void){
 /* punctuation-shift indicator: a tap arms "the next stroke is punctuation", shown
  * here so the user knows the mode is active (like PalmOS's shift dot).
  *
- * R13: it is also a way OUT. A stray tap on the pane arms the shift, and there
+ * it is also a way OUT. A stray tap on the pane arms the shift, and there
  * was no way to disarm it short of writing punctuation you did not want. Now
  * there are three, none of which types anything: tap this marker (it reads
  * "PUNC x" in a black chip, so it looks like the thing you tap), swipe
@@ -6730,7 +6714,7 @@ static void graf_up_cb(lv_event_t *e){
         return;
     }
     if(graf_case != CASE_NONE && c >= 'a' && c <= 'z') c = c - 'a' + 'A';
-    else c = ta_autocap(active_ta, c);                 /* R9: the field's own rule */
+    else c = ta_autocap(active_ta, c);                 /* the field's own rule */
     lv_textarea_add_char(active_ta, c);                /* letter, digit, punct, space, '\n' */
     if(graf_case == CASE_SHIFT){ graf_case = CASE_NONE; show_case(); }
 }
@@ -6934,7 +6918,7 @@ static void clock_tick(lv_timer_t *t){
     lv_label_set_text(clock_lbl, b);
 }
 
-/* ===================== Lock-screen dashboard (roadmap: product) =============
+/* ===================== Lock-screen dashboard ================================
  * A full-screen, info-dense glance view drawn in the mono Palm LCD: big clock,
  * two world times, cached weather (temp / rain / air + a 6-hour strip), battery,
  * next event + next due, sunrise/sunset, and the moon phase. It renders entirely
@@ -6968,10 +6952,9 @@ static void clock_tick(lv_timer_t *t){
 #define DASH_Y_SUN      268              /* SUN & MOON header, open-bottomed */
 #define DASH_H_SUN      36
 
-/* content baselines inside the weather zone. S5 (2026-09-30) took 14 px
- * from it for AHEAD's STUDY row: the air quality moved up beside the
- * reading (and shortens, or goes, when the reading is long), and the rain
- * bars top out at 20 px instead of 24. */
+/* content baselines inside the weather zone. It gives 14 px to AHEAD's
+ * STUDY row: the air quality sits beside the reading (and shortens, or goes,
+ * when the reading is long), and the rain bars top out at 20 px. */
 #define DASH_Y_WXNOW    122              /* the reading; the air at the right */
 #define DASH_Y_COLT     136              /* the six temperatures             */
 #define DASH_Y_BARBASE  173              /* rain bars grow UP to this line   */
@@ -7076,9 +7059,8 @@ static void dfill(int x,int y,int w,int h){
 static void drule(int x0,int x1,int y){ for(int x=x0;x<=x1;x++) dpx(x,y); }
 
 /* A section header's height: 13 clears the Palm font's cap height with a pixel
- * to spare top and bottom. The strip itself used to be a dfill() on this canvas;
- * since Q5 it is the heading label's own grey background (dash_zone_hdr), so
- * only the measurement is still shared. */
+ * to spare top and bottom. The strip is the heading label's own grey
+ * background (dash_zone_hdr); only the measurement is shared with the canvas. */
 #define DASH_BAR_H 13
 
 /* The zone's left and right shoulders: a short vertical tick dropping from the
@@ -7242,7 +7224,7 @@ static int dash_next_due(char *out,int cap){
 }
 
 /* a small left-aligned label on the overlay at (x,y), Palm font, optional bold. */
-/* R6: the unlock band. Its chevrons are painted in dash_paint() at x positions
+/* the unlock band. Its chevrons are painted in dash_paint() at x positions
  * worked out once from the label widths in ui_show_lock() (0 = none), because
  * where they go depends on the owner's name and the text's real width. */
 #define DASH_UNLOCK_Y 306
@@ -7277,7 +7259,7 @@ static lv_obj_t *dash_lbl_rev(int x,int y,const char *txt){
     return l;
 }
 
-/* ---- a zone heading (Q5) -------------------------------------------------
+/* ---- a zone heading -------------------------------------------------
  * The three zone bars are GREY with plain black text, not black with reversed
  * bold: three solid black bars on a 240x320 panel read as three horizon lines
  * and the eye lands on the furniture instead of the data.
@@ -7290,8 +7272,8 @@ static lv_obj_t *dash_lbl_rev(int x,int y,const char *txt){
  *
  * The grey is COL_RULE, deliberately NOT a new one. The hairlines are already
  * that value, so the screen gains a grey AREA without gaining a grey -- which
- * matters because P9 is still asking whether COL_RULE and COL_DIM are
- * distinguishable on the real panel, and a third grey would widen that question
+ * matters because whether COL_RULE and COL_DIM are distinguishable on the
+ * real panel is still an open question, and a third grey would widen that question
  * instead of leaving it alone. */
 static lv_obj_t *dash_zone_hdr(int y,const char *txt){
     lv_obj_t *l = dash_lbl(DASH_MARGIN, y, txt, 0);     /* 0 = not bold */
@@ -7317,7 +7299,7 @@ static void lock_release_cb(lv_event_t *e){ (void)e;
          * up, so it is the one place that defines an "unlock session" -- see the
          * greeting block for why that is the right window. */
         g_greet_due = 0xFF;
-        /* R11: a calculator the lock went over comes back exactly as it was. */
+        /* a calculator the lock went over comes back exactly as it was. */
         if(g_calc) lv_obj_clear_flag(g_calc, LV_OBJ_FLAG_HIDDEN);
         /* the launcher is built lazily on the FIRST unlock (at boot the content area
          * is empty behind the lock, so the launcher grid and the dashboard never share
@@ -7383,7 +7365,7 @@ static void dash_paint(void){
      * here, the word that sits on it is created there. */
     dfill(0,0,DASH_CW,DASH_TOPBAR_H);              /* status strip, reversed   */
 
-    /* The three zone headers are grey now (Q5) and carry their own background
+    /* The three zone headers are grey now and carry their own background
      * from dash_zone_hdr(), built once in ui_show_lock(). Nothing is filled
      * here: a dfill() under a grey label would only show as a black fringe
      * wherever the two disagree by a pixel. */
@@ -7403,7 +7385,7 @@ static void dash_paint(void){
     dshoulder(DASH_MARGIN,        DASH_Y_SUN, DASH_H_SUN);
     dshoulder(DASH_CW-DASH_MARGIN,DASH_Y_SUN, DASH_H_SUN);
 
-    /* R6: the way in. A solid band across the foot of the screen with the
+    /* the way in. A solid band across the foot of the screen with the
      * instruction knocked out of it in bold, and a double chevron pointing the
      * way the finger has to go. It was a 1 px caret and a line of plain text --
      * the quietest thing on the screen, and the only thing on it a new user
@@ -7487,9 +7469,9 @@ void ui_show_lock(void){
      * "how did it go" on the way past. */
     if(co_owns_screen()) return;
     if(g_lock){ dash_paint(); return; }             /* already showing -> just refresh */
-    /* R11: the lock is a child of the SCREEN, and the Calculator (like every
+    /* the lock is a child of the SCREEN, and the Calculator (like every
      * modal) lives on lv_layer_top(), which LVGL always draws above the screen
-     * -- so the lock used to come up UNDERNEATH an open calculator. Hide it
+     * -- so the lock would come up UNDERNEATH an open calculator. Hide it
      * rather than close it: calc_expr is a static, so the sum in progress is
      * still there when the unlock shows it again.
      *
@@ -7582,7 +7564,7 @@ void ui_show_lock(void){
         DASH_DOW_L[ti_wday(now)], month_long(localtime_mon(now)), localtime_mday(now));
       dash_lbl(10,90,db,0); }
 
-    /* ---- the zone headings (Q5) ----
+    /* ---- the zone headings ----
      * Each one IS its own grey bar -- see dash_zone_hdr(). They are the only
      * static furniture labels on the screen, and their y values are the same
      * DASH_Y_* the shoulders and closing rules are drawn from, so the zone
@@ -7637,7 +7619,7 @@ void ui_show_lock(void){
       else                            dash_lbl(DASH_ROW_VX,y1,"nothing upcoming",0);
       if(dash_next_due(e,sizeof e))   dash_lbl(DASH_ROW_VX,y2,e,0);
       else                            dash_lbl(DASH_ROW_VX,y2,"nothing due",0);
-      /* S5: the reviews due in every course, from their summaries -- no course
+      /* the reviews due in every course, from their summaries -- no course
        * is opened. dash_paint() counts again when the next one comes due. */
       st_glance_text(e, sizeof e, &g_dash_study_at);
       g_dash_study = dash_lbl(DASH_ROW_VX,y3,e,0); }
@@ -7661,7 +7643,7 @@ void ui_show_lock(void){
 
     /* ---- unlock hint ---- */
     /* ---- the bottom line: the way in, and whose device this is ----
-     * W9 put the owner's name here, which is the only reason to collect a name
+     * The owner's name goes here, which is the only reason to collect a name
      * at all: a device found face-up on a desk says whose it is without being
      * unlocked. There is exactly ONE line left below the open-bottomed SUN &
      * MOON zone (it closes at 304, of 320), so the two share it -- name to the
@@ -7702,7 +7684,7 @@ static void dash_tick(lv_timer_t *t){ (void)t;
     if(g_lock && !power_screen_off()) dash_paint();
 }
 
-/* ========================= Games (product roadmap) ==========================
+/* ========================= Games ============================================
  * A "Games" launcher app opening a small menu of low-RAM games. First up:
  * Minesweeper -- board logic in minesweeper.c (pure/testable), the view here on a
  * 1-bpp canvas (grid + stipple for unrevealed, the DASH_DIG font for counts, discs
@@ -7996,7 +7978,7 @@ static const uint8_t WD_FONT[26][6] = {
 #define WD_KEYH 16
 /* OK (submit) and DEL (backspace) live in the empty margins beside the guess grid
  * (grid spans x 65..175), not crammed into the bottom key row where their captions
- * used to collide with the Z..M letters. One on each side, vertically centred on
+ * would collide with the Z..M letters. One on each side, vertically centred on
  * the grid. */
 #define WD_BTNW 52
 #define WD_BTNH 24
@@ -8526,12 +8508,12 @@ static void content_clear(void){
     /* edit / preferences forms */
     g_pw_body = NULL;
     g_form = NULL; active_ta = NULL; edit_cat_lbl = NULL; g_due_lbl = NULL;
-    /* Q3: the time popup is on lv_layer_top(), so leaving the form does not take
+    /* the time popup is on lv_layer_top(), so leaving the form does not take
      * it with it -- the same trap the HotSync confirmation documents. */
     time_close(); g_time_lbl = NULL;
     for(int i = 0; i < 12; i++) g_fields[i] = NULL;
     g_nfields = 0;
-    g_ntamode = 0;        /* R8/R9: the modes named fields that are gone */
+    g_ntamode = 0;        /* the modes named fields that are gone */
     kp_close();           /* the keypad is on lv_layer_top(): not in `content` */
     /* record + search tables */
     g_listtbl = NULL; g_findtbl = NULL;
@@ -8540,8 +8522,8 @@ static void content_clear(void){
     g_hs_watch = 0;       /* a run left behind must not pull you back later */
     /* Graffiti + Kana trainers */
     tr_guide = tr_prompt = tr_score = tr_feedback = tr_mode_lbl = NULL;
-    gref_free();          /* Q4: the sheet's canvas is heap, not a static buffer */
-    wk_free();            /* R4: so is the week chart's */
+    gref_free();          /* the sheet's canvas is heap, not a static buffer */
+    wk_free();            /* so is the week chart's */
     ka_kana = ka_prompt = ka_answer = ka_typed = ka_feedback = ka_score = NULL;
     ka_strokes_lbl = ka_model = ka_modelbl = NULL;
     /* News reader */
@@ -9409,10 +9391,7 @@ static lv_obj_t *co_link(lv_obj_t *par, lv_event_cb_t cb){
 }
 static void co_back_link(lv_obj_t *par){ co_link(par, co_back_cb); }
 static void co_home_link(lv_obj_t *par){ co_link(par, co_home_cb); }
-/* The week screen used to carry one of these too, placed down the page rather
- * than at the bottom of the frame. It does not any more: a speaker screen is a
- * single tap target now (tap_anywhere), so the button it needed scrolling to
- * reach is gone and the whole page takes you back. */
+/* The week screen has no back link: it's one tap target (tap_anywhere). */
 
 /* Each step carries a line of plain English under the question. A bare "Energy?"
  * over three buttons tells a first-time user nothing about what is being asked or
@@ -9835,11 +9814,10 @@ static void spk_tail_line(lv_draw_buf_t *db, int x0, int y0, int x1, int y1){
  *                                  the balloon stands beside the portrait.
  *
  * Transposing one wedge is what stops the two from becoming two wedges that
- * merely resemble each other -- the mistake P10's shared week page was built to
- * avoid. The base row is the bubble's own border, continued across the canvas
+ * merely resemble each other -- the mistake the shared week page avoids. The base row is the bubble's own border, continued across the canvas
  * except where the wedge opens into it, which is what makes the tail read as a
  * hole in the balloon rather than a sticker on it. */
-/* side = 2 (R3) mirrors side 1: base along the LEFT column, apex to the right,
+/* side = 2 mirrors side 1: base along the LEFT column, apex to the right,
  * for a speaker standing at the right-hand end of the strip. */
 static void spk_tail_plot(lv_draw_buf_t *db, int u, int v, int side){
     if(side == 2) i1_px(db, SPK_TAIL_H - 1 - v, u, 1);
@@ -9861,10 +9839,8 @@ static void spk_tail_paint_dir(lv_obj_t *cv, int side){
     lv_obj_invalidate(cv);                      /* exactly one, for the whole tail */
 }
 
-/* R3/R4 retired the arrangement that stood a speaker ABOVE a balloon on a
- * scrolling page (the greeting over the week, and the week's own verdict). All
- * three speakers now stand in the Graffiti strip -- speaker_aside() below -- so
- * the geometry that page needed is gone with it. */
+/* All three speakers stand in the Graffiti strip (speaker_aside() below),
+ * never above a balloon on a scrolling page. */
 
 /* ---- the three pieces every speaker screen is built from ----
  * Pulled out of speaker_say() when the Assistant needed the same portrait and
@@ -9960,7 +9936,7 @@ static const char *greet_pick(const char *const *lines, int n, uint8_t *last){
     return lines[i];
 }
 
-/* ==== a greeting that does NOT take the screen away (W3) ====================
+/* ==== a greeting that does NOT take the screen away ====================
  * Coach and Guru greet you over their own week screen, which works because they
  * HAVE one: a page you were going to look at anyway. Settings has nine tiles and
  * no such page, and the pair (portrait + tail + balloon) is 164 px tall against a
@@ -10030,7 +10006,7 @@ static lv_obj_t *spk_pane(int x, int y, int w, int h){
 #define SPK_AS_BUB_H  86                       /* 5 * 14 text + pad + border      */
 /* `right` stands the portrait at the RIGHT end of the strip with the balloon to
  * its left -- where Coach and Guru have always stood, beside what they are
- * talking about (R3). The Assistant stands at the left. One function, mirrored,
+ * talking about. The Assistant stands at the left. One function, mirrored,
  * rather than two arrangements that merely resemble each other. */
 static void speaker_aside_ex(const lv_image_dsc_t *face, const char *line,
                              const char *hint, lv_event_cb_t on_tap, int right){
@@ -10101,11 +10077,11 @@ static const char *const AS_GREETINGS[] = {
 
 static void as_greet_tap_cb(lv_event_t *e){ (void)e; spk_pane_close(); }
 
-/* W4: the Assistant explaining the screen you are on, as opposed to greeting you
+/* the Assistant explaining the screen you are on, as opposed to greeting you
  * at the door. Same pane, same one-tap-puts-her-away rule, no hint line.
  *
  * She can be on EVERY step, which the plan was unsure about, and the thing that
- * settles it is where the keyboard lives: the I1.2 tap keyboard is an
+ * settles it is where the keyboard lives: the tap keyboard is an
  * lv_buttonmatrix inside the CONTENT area, not in the Graffiti strip. So there
  * is no screen in Settings -- not even entering a password -- where she and the
  * input want the same pixels. What she does cost on those screens is Graffiti as
@@ -10131,11 +10107,10 @@ static void assistant_greet(void){
                   "tap to continue", as_greet_tap_cb);
 }
 
-/* ==== R4: the week screens =================================================
- * Coach and Guru each have a "this week" screen, and both used to be a column
- * of monospace text with '#' bars, standing beside a portrait on a scrolling
- * page. The brief was that it be clear at a glance, intuitive, and sticky --
- * the screen should make you want to beat it. What that became:
+/* ==== the week screens =================================================
+ * Coach, Guru and Study each have a "this week" screen. The brief: clear at a
+ * glance, intuitive, and sticky -- the screen should make you want to beat it.
+ * So:
  *
  *   - THIS WEEK AGAINST LAST WEEK in the headline. A total on its own is a
  *     number; a total against the last one is a score. Behind, it names the
@@ -10480,7 +10455,7 @@ static const char *const GU_GREETINGS[] = {
 };
 #define GU_NGREET ((int)(sizeof(GU_GREETINGS) / sizeof(GU_GREETINGS[0])))
 
-/* R3: she greets you from the strip, over a home screen that is already built
+/* she greets you from the strip, over a home screen that is already built
  * and live, so the tap that dismisses her only puts her away. */
 static void gu_greet_tap_cb(lv_event_t *e){ (void)e; spk_pane_close(); }
 
@@ -10493,13 +10468,11 @@ static void gu_tbl_click_cb(lv_event_t *e);
  * Rebuilt in place on every tick rather than by reopening the screen, so the
  * list does not lose its scroll position when you check something off halfway
  * down it. That is the whole reason this is its own function. */
-/* R1: two rows now. The list used to be sized `lv_pct(100) - GU_HDR_H`, which
- * LVGL reads as 80 PERCENT (a percentage is a tagged value, and subtracting
- * from it moves the percentage, not the pixels) -- so it started 37 px down
- * under a 20 px header, and the 17 px between was a blank row nobody chose.
- * That row now says what the app is for, and the Week button sits at the right
- * across both rows, with the streak moved left to make room. The list's height
- * is plain pixels computed from the same constant. */
+/* Two rows: the count, then what the app is for, with the Week button at the
+ * right across both and the streak beside it. The list's height is plain
+ * pixels from the same constant. Not `lv_pct(100) - GU_HDR_H`: LVGL reads
+ * that as 80 PERCENT (a percentage is a tagged value, and subtracting from it
+ * moves the percentage, not the pixels). */
 #define GU_HDR_H  38
 #define GU_WEEK_W 54
 /* The list and a habit are full screen (ui_full_screen), as Study's lessons
@@ -10534,10 +10507,9 @@ static void gu_build_header(void){
         lv_label_set_text(wl, "Week");
         lv_obj_center(wl);
 
-        /* ONE streak label, retitled like the count. It used to be created on
-         * every call -- that is, on every tick -- so each habit ticked stacked
-         * another label on the last one and cost the pool another object for
-         * as long as the screen was up. */
+        /* ONE streak label, made once and retitled like the count: made on
+         * every call (every tick), each habit ticked would stack another label
+         * and cost the pool another object for as long as the screen is up. */
         g_gu_stk = lv_label_create(content);
         lv_obj_align(g_gu_stk, LV_ALIGN_TOP_RIGHT, -(4 + GU_WEEK_W + 8), 2);
     }
@@ -10809,7 +10781,7 @@ static void gu_days(int d[WK_N], uint32_t now, int tz){
     for(int i = 0; i < WK_N; i++) if(d[i] < 0) d[i] = 0;
 }
 
-/* Her week. See the R4 block by show_coach_report for the design; what is
+/* Her week. See the week screens' block by show_coach_report for the design; what is
  * hers is the target line, which is the same rolling average the home screen
  * asks you to reach today, and the split, which shows all five categories so
  * that an empty one is visible as a gap rather than silently absent. */
@@ -10869,7 +10841,7 @@ static void show_guru(void){
     gu_build_header();
     gu_build_list();
 
-    /* R3: first time in since the lock came up, she says hello FROM THE STRIP,
+    /* first time in since the lock came up, she says hello FROM THE STRIP,
      * over the list -- which is built and live underneath her. Her greeting used
      * to replace the screen with her week, so hello was a screen to be got
      * through before you could tick anything; there is nothing to block now.
@@ -10896,7 +10868,7 @@ static const char *const CO_GREETINGS[] = {
 };
 #define CO_NGREET ((int)(sizeof(CO_GREETINGS) / sizeof(CO_GREETINGS[0])))
 
-/* R3: as Guru's -- he stands in the strip over a finished home screen, so the
+/* as Guru's -- he stands in the strip over a finished home screen, so the
  * tap only puts him away. */
 static void co_greet_tap_cb(lv_event_t *e){ (void)e; spk_pane_close(); }
 
@@ -10996,7 +10968,7 @@ static void show_coach(void){
     lv_obj_add_event_cb(wk, co_week_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *wl = lv_label_create(wk); lv_label_set_text(wl, "Week"); lv_obj_center(wl);
 
-    /* R3: first time in since the lock came up, he says hello from the strip,
+    /* first time in since the lock came up, he says hello from the strip,
      * over this screen -- built and live underneath him. (A running or
      * reflecting session returned above: a live Pomodoro is not a thing to
      * interrupt with hello.) Spent when shown. */
@@ -11080,7 +11052,7 @@ static uint32_t st_now(void){
 static int32_t st_tz(void){ return (int32_t)ui_tz() * 60; }
 static int32_t st_today(void){ return cal_day_index(st_now(), ui_tz()); }
 
-/* ---- at a glance (S5) ----
+/* ---- at a glance ----
  * The lock screen and the launcher read every course's summary.bin (study.c),
  * so they never open a course. Study writes a course's summary whenever its
  * dashboard counts it, and when it closes with grades the summary hasn't
@@ -11677,7 +11649,7 @@ static void st_show_dash(void){
 
 static void st_week_back_cb(lv_event_t *e){ (void)e; st_show_dash(); }
 
-/* S5: the week AHEAD, under the week behind -- the same seven columns, but
+/* the week AHEAD, under the week behind -- the same seven columns, but
  * the bars outlined, since none of it has happened yet. Today's column is
  * everything due by midnight, what's waiting now included. */
 #define ST_FC_Y    (WK_ROW_Y + 2)              /* its heading, clear of the chart's day letters */
@@ -12214,7 +12186,7 @@ void ui_init(void){
      * first run so News works out of the box (edit via Preferences > News feeds). */
     feeds_load_or_seed(FEEDS_PATH);
 
-    /* title bar: app title + category picker (F2), black rule underneath (Palm).
+    /* title bar: app title + category picker, black rule underneath (Palm).
      * Home/Menu live on the silkscreen buttons below, not here. */
     lv_obj_t *bar = panel(scr, 0, 0, LCD_W, TITLE_H, COL_TITLE);
     lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_BOTTOM, 0);
@@ -12235,7 +12207,7 @@ void ui_init(void){
     clock_tick(NULL);
     lv_timer_create(clock_tick, 15000, NULL);
 
-    /* F2: category pop-up trigger (top-right, Palm convention) */
+    /* category pop-up trigger (top-right, Palm convention) */
     cat_trigger = lv_button_create(bar);
     lv_obj_set_height(cat_trigger, TITLE_H - 4);
     lv_obj_align(cat_trigger, LV_ALIGN_RIGHT_MID, -2, 0);
@@ -12268,7 +12240,7 @@ void ui_init(void){
     mk_silk(graf, &silk_find, LV_ALIGN_TOP_RIGHT,   -3,  3, find_cb);
     mk_silk(graf, &silk_calc, LV_ALIGN_BOTTOM_RIGHT,-3, -3, calc_cb);
 
-    /* C1: the ink canvas sits UNDER the pads (created first = behind); the pads
+    /* the ink canvas sits UNDER the pads (created first = behind); the pads
      * stay the clickable surfaces and feed both the recognizer and the ink. */
     ink_canvas = lv_canvas_create(graf);
     lv_canvas_set_buffer(ink_canvas, ink_buf, INK_W, INK_H, LV_COLOR_FORMAT_I1);
@@ -12279,7 +12251,7 @@ void ui_init(void){
     lv_obj_clear_flag(ink_canvas, LV_OBJ_FLAG_CLICKABLE);
     ink_clear();
 
-    /* U6: two Graffiti writing pads between the silkscreen buttons -- abc (left)
+    /* two Graffiti writing pads between the silkscreen buttons -- abc (left)
      * writes letters, 123 (right) writes digits; strokes -> $1 -> active field.
      * Swipe L->R = space, R->L = backspace. There is no on-screen keyboard. */
     int gx0 = 36, gx1 = LCD_W - 36;          /* clear of the 30px silk buttons */
@@ -12300,7 +12272,7 @@ void ui_init(void){
     graf_punct_lbl = lv_label_create(graf);
     lv_label_set_text(graf_punct_lbl, "");
     lv_obj_set_style_text_font(graf_punct_lbl, &lv_font_palm_bold, 0);
-    /* R13: a black chip, because it is a button while it shows. Hidden rather
+    /* a black chip, because it is a button while it shows. Hidden rather
      * than empty when off, so it can never swallow a stroke that starts there. */
     lv_obj_set_style_bg_color(graf_punct_lbl, COL_LINE, 0);
     lv_obj_set_style_bg_opa(graf_punct_lbl, LV_OPA_COVER, 0);

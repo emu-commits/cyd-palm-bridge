@@ -163,7 +163,7 @@ int main(void){
     CK(lv.loc_auto == 0, "an unsettled flag is written as pinned, never as -1");
     CK(!strcmp(lb.loc_name,"Washington, D.C."),"a place name with a comma round-trips");
 
-    /* W5: FOUR networks.
+    /* FOUR networks.
      *
      * The back-compat case is the one that matters on a device that is already
      * in the field: a config.ini written when there was only one network has an
@@ -175,7 +175,7 @@ int main(void){
     fclose(f);
     Config o; config_defaults(&o);
     ConfigSecrets os; memset(&os,0,sizeof os);
-    CK(config_load(PATH,&o,&os)==0,"pre-W5 config loads");
+    CK(config_load(PATH,&o,&os)==0,"a one-network config from before the four slots loads");
     CK(!strcmp(o.wifi[0].ssid,"OldCard"),"a one-network card lands in slot 1");
     CK(!strcmp(os.wifi_pass[0],"oldpw"),"...with its password");
     CK(o.wifi[1].ssid[0]==0 && o.wifi[3].ssid[0]==0,"...and the other slots stay empty");

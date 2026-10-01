@@ -1,7 +1,7 @@
 /* host_main.c -- native headless frontend for the simulator.
  *
  * Boots the REAL firmware UI (ui_init from firmware/main/ui.c) against the sim
- * port and drives it from a tiny stdin script, dumping screenshots as PPM (P6).
+ * port and drives it from a tiny stdin script, dumping screenshots as PPM.
  * This is both the local development loop (render -> look at the PNG -> choose
  * the next tap) and the CI smoke gate (scripted run must exit 0).
  *
@@ -271,7 +271,7 @@ int main(int argc, char **argv){
         }
         /* L -- raise the lock screen over whatever is showing, exactly as the
          * port layer does when the screen sleeps. The lock's relationship to
-         * the screens and overlays under it (R11: an open Calculator) was
+         * the screens and overlays under it (an open Calculator, say) was
          * otherwise untestable: the script has no way to let the device sleep. */
         else if(line[0] == 'L' && (line[1] == '\n' || !line[1])){ ui_show_lock(); sim_step(100); }
         /* K <hex>: type a password without the plain text ever being in the

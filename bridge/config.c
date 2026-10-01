@@ -43,11 +43,11 @@ const char *config_policy_to_str(int policy){
 /* Cut an INLINE comment off a value: everything from a '#' that FOLLOWS
  * whitespace to the end of the line. Deliberately NOT any bare '#' -- a password
  * or an SSID may legitimately contain one ("P#ssw0rd" survives; "pass # note"
- * does not, which is the documented cost of the syntax). This exists because
- * config.ini.example ships `timezone = America/New_York   # empty = floating`
- * and the parser used to keep the comment as part of the value: the zone then
- * matched nothing and silently fell back to UTC, and the same line shape on
- * `dav_pass` silently appended a comment to the password. */
+ * does not, which is the documented cost of the syntax). It matters because
+ * config.ini.example ships `timezone = America/New_York   # empty = floating`:
+ * kept as part of the value, the comment makes the zone match nothing (a
+ * silent fall back to UTC), and the same line shape on `dav_pass` would append
+ * a comment to the password. */
 static void cut_comment(char *s){
     for(char *p = s; *p; p++)
         if(*p=='#' && p>s && (p[-1]==' '||p[-1]=='\t')){ *p = 0; return; }
