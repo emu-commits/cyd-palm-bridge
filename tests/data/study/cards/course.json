@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "id": "test-cards",
+  "title": "Capitals (test deck)",
+  "licence": "CC0-1.0",
+  "description": "A test-only front/back deck: no levels, the SM-2 scheduler, four grades.",
+  "scheduler": {
+    "type": "sm2",
+    "ladder": ["1d", "2d", "4d", "8d", "16d"],
+    "multiplier": {"hard": 0.6, "good": 1.0, "easy": 1.6},
+    "ease": {"start": 2.5, "min": 1.3},
+    "relearn": "10m",
+    "day_aligned": true
+  }
+}

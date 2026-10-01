@@ -15,13 +15,20 @@
  * this buys is that the secrets are not on the removable card. See SECURITY.md.
  *
  * The simulator keeps them in RAM for the life of the process, which is the
- * rule it already had: a browser never persists a password. */
+ * rule it already had: a browser never persists a password. It stands in for
+ * FLASH, not RAM, so it holds them masked: a plain copy anywhere in the
+ * simulator's memory is a leak, which is what `make -C sim secretscan` looks for.
+ *
+ * Callers that read a password hold it in a short-lived buffer and wipe it
+ * (config_wipe) as soon as it has been used. */
 #ifndef SECRETSTORE_H
 #define SECRETSTORE_H
 #include <stddef.h>
 
 /* 1 and fills `out` if the key holds a value; 0 (and out = "") if not. */
 int  secret_get(const char *key, char *out, size_t cap);
+/* 1 if the key holds a value, without copying the value anywhere. */
+int  secret_has(const char *key);
 /* store `val`, or erase the key when val is NULL or "". 0 on success. */
 int  secret_set(const char *key, const char *val);
 /* forget every stored secret (before rewriting the whole set). */

@@ -7,12 +7,14 @@ extern const lv_image_dsc_t icon_graffiti;
 extern const lv_image_dsc_t icon_news;
 extern const lv_image_dsc_t icon_kana;      /* Kana trainer (roadmap #3, Tier 1) */
 extern const lv_image_dsc_t icon_games;     /* Games launcher (product roadmap) */
+extern const lv_image_dsc_t icon_planner;   /* Planner: To Do + Memo (gen_planner_icon.py) */
 extern const lv_image_dsc_t icon_mines;     /* Minesweeper (Games sub-launcher) */
 extern const lv_image_dsc_t icon_wordie;    /* Wordie (Games sub-launcher) */
 extern const lv_image_dsc_t icon_sudoku;    /* Sudoku (Games sub-launcher) */
 extern const lv_image_dsc_t icon_zip;       /* Zip path puzzle (Games sub-launcher) */
 extern const lv_image_dsc_t icon_coach;     /* Coach focus timer (ritual Pomodoro) */
 extern const lv_image_dsc_t icon_guru;      /* Guru longevity habits (gen_guru_icon.py) */
+extern const lv_image_dsc_t icon_study;     /* Study, the SRS app (gen_study_icon.py) */
 /* The speakers: a portrait stands in the right-hand margin of a screen that has
  * something to say, beside the content and attached to a speech bubble. Coach's
  * is on the weekly report; the Assistant and the Guru are for the screens that
@@ -22,6 +24,7 @@ extern const lv_image_dsc_t icon_guru;      /* Guru longevity habits (gen_guru_i
 extern const lv_image_dsc_t coach_face;        /* 60x66, 3960 bytes */
 extern const lv_image_dsc_t assistant_face;    /* 60x77, 4620 bytes */
 extern const lv_image_dsc_t guru_face;         /* 60x74, 4440 bytes */
+extern const lv_image_dsc_t study_face;        /* 60x63, 3780 bytes: the owner's art */
 /* The nine Settings tiles (W2). All 24x22 A8, all knocked out of one shared ink
  * disk, all from tools/gen_settings_icons.py -- regenerate the whole set, never
  * one of them, or the disk drifts and the grid stops looking like a set.

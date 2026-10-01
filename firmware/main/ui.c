@@ -20,6 +20,7 @@
 #include "find.h"         /* global search engine (bridge/find.c) */
 #include "news.h"         /* RSS reader's on-SD article store */
 #include "feeds.h"        /* RSS feed list (Preferences manager + HotSync fetch) */
+#include "esp_app_desc.h" /* the build's version: `git describe`, stamped by ESP-IDF */
 #include "lv_font_kana.h" /* hiragana+katakana bitmap subset (Kana trainer) */
 #include "kana_data.h"    /* ordered gojuon table (Kana trainer, roadmap #3) */
 #include "kana_strokes.h" /* per-kana stroke polylines (Tier 2 writing challenge) */
@@ -38,6 +39,9 @@
 #include "gurupool.h"     /* ...and the editable habit list on the card           */
 #include "daycal.h"       /* local-day windows for the week charts (R4)           */
 #include "safefile.h"     /* crash-safe replacement of every durable file         */
+#include "course.h"       /* Study: the course file reader                        */
+#include "srs.h"          /* Study: the schedulers and the progress on the card   */
+#include "study.h"        /* Study: a round's questions, and the courses on the card */
 #include "lvgl.h"
 #include <string.h>
 #include <strings.h>      /* strncasecmp for the Address Look Up filter */
@@ -90,6 +94,9 @@ static lv_obj_t *clock_lbl;    /* live clock in the title bar (Palm) */
 #define BATT_W  13             /* body, in px -- sized to the Palm font's cap height */
 #define BATT_H   8
 static lv_obj_t *title_bar;             /* parent for the indicator (outlives content) */
+static lv_obj_t *g_graf;                /* the Graffiti strip, hidden in full screen */
+static lv_obj_t *g_tb_home, *g_tb_menu; /* Home and Menu in the title bar, in full screen */
+static int g_st_keep;                   /* a Study screen replacing another (Study's section) */
 static lv_obj_t *batt_lbl, *batt_body, *batt_fill, *batt_nub;
 static int       g_on_launcher;         /* 1 while the app grid is the content view */
 static void      batt_refresh(void);
@@ -97,7 +104,7 @@ static void      batt_refresh(void);
 /* Which speakers still owe a greeting this unlock session -- declared up here
  * because the lock's release handler resets it long before the greeting code
  * that reads it. See "greetings" further down for the rules. */
-enum { GREET_COACH, GREET_GURU, GREET_ASSIST, GREET_NSPEAKER };
+enum { GREET_COACH, GREET_GURU, GREET_ASSIST, GREET_STUDY, GREET_NSPEAKER };
 static uint8_t g_greet_due = 0xFF;            /* bit per speaker; all owed at boot */
 static uint8_t g_greet_last[GREET_NSPEAKER];  /* index of the line last shown      */
 
@@ -118,16 +125,24 @@ static uint8_t g_greet_last[GREET_NSPEAKER];  /* index of the line last shown   
  * Anything that reads a launcher position -- notably sim/tests/smoke.txt, which
  * taps cells by coordinate -- must be re-pointed when this changes. That file
  * already carries a scar from an earlier reorder. */
-static const char *APPS[] = { "Date Book", "Address", "To Do List",
-                              "Memo Pad", "HotSync", "Games",
-                              "News", "Guru", "Coach" };
-/* authentic Palm app launcher icons (from PumpkinOS), Guru's drawn to match */
-static const lv_image_dsc_t *APP_ICONS[] = { &icon_datebook, &icon_address, &icon_todo,
-                                             &icon_memo, &icon_hotsync, &icon_games,
-                                             &icon_news, &icon_guru, &icon_coach };
+/* The Planner is To Do and Memo in one tile (list_view switches between them),
+ * which is what freed position 7 for Study (docs/SRS_PLAN.md); Guru and Coach
+ * stay where people's thumbs already know them. A NULL would be an empty cell
+ * that keeps its place in the grid. */
+static const char *APPS[] = { "Date Book", "Address", "Planner",
+                              "News", "HotSync", "Games",
+                              "Study", "Guru", "Coach" };
+/* authentic Palm app launcher icons (from PumpkinOS), Guru's and Study's drawn to match */
+static const lv_image_dsc_t *APP_ICONS[] = { &icon_datebook, &icon_address, &icon_planner,
+                                             &icon_news, &icon_hotsync, &icon_games,
+                                             &icon_study, &icon_guru, &icon_coach };
 #define NAPPS ((int)(sizeof(APPS)/sizeof(APPS[0])))
 
 static void show_launcher(void);
+/* Study, at a glance (S5): the lock's STUDY row and the launcher's badge */
+static void st_glance_text(char *b, int cap, uint32_t *change);
+static uint32_t st_glance_due(void);
+static uint32_t st_now(void);                 /* Study's clock (the smoke tour can move it) */
 static void show_trainer(void);
 static void show_kana(void);
 static void show_news(void);
@@ -142,6 +157,10 @@ static void co_show_sigil(void);
 static void show_minesweeper(void);
 static void show_wordie(void);
 static void show_sudoku(void);
+static void show_study(void);
+static void st_free(void);       /* Study's session, when the screen leaves it */
+static void st_menu(lv_obj_t *panel);
+static int  g_st_open;
 static void show_app(const char *name);
 
 /* a borderless, non-scrolling panel with a solid fill */
@@ -216,6 +235,12 @@ static const AppDef APPDEFS[] = {
     { "Memo Pad",   APP_MEMO, data_memo     },
 };
 #define NAPPDEFS ((int)(sizeof(APPDEFS)/sizeof(APPDEFS[0])))
+#define APPDEF_TODO (&APPDEFS[2])
+#define APPDEF_MEMO (&APPDEFS[3])
+/* The Planner remembers which half was open last, for the life of the boot, so
+ * the tile goes back to where you were. */
+static int g_planner_memo;
+static int is_planner(const AppDef *ad){ return ad && (ad->app == APP_TODO || ad->app == APP_MEMO); }
 static const AppDef *cur_app;   /* the data app whose list/detail is showing */
 static uint32_t cur_uid;        /* the record currently in detail/edit (0 = none) */
 
@@ -228,6 +253,8 @@ static lv_obj_t *edit_cat_lbl;         /* label on the edit-form category trigge
 static lv_obj_t *g_fields[12];         /* edit-form textareas (also the Preferences form) */
 static int g_nfields;
 static lv_obj_t *active_ta;            /* last-focused textarea (Graffiti target) */
+static char     *g_secret;             /* the password editor's own buffer, or NULL */
+static void      secret_key(char c);   /* ...and how a key reaches it */
 
 /* To Do due-date picker state: edited via the due popup, written on Save. */
 static int g_due_has, g_due_y, g_due_m, g_due_d;
@@ -450,6 +477,7 @@ static void kill_kb(void){
     g_trainer_open=0; g_kana_open=0; g_ms_active=0; g_sd_active=0; g_zp_active=0;
     g_co_open=0; g_co_view=CO_VIEW_OTHER; g_co_reflect=0;
     g_gu_open=0;
+    g_st_open=0;
     free_rowuids();
     free_finds();
     kill_hs();
@@ -886,11 +914,27 @@ static void lookup_ta_cb(lv_event_t *e){
 #define LIST_BAR_FIND_MAX ((int)sizeof g_lookup - 1)
 #define LIST_BAR_ADD_MAX  (QUICK_ADD_MAX - 1)
 
+/* `on_word` makes the word a button (the Planner's To Do / Memo switch); NULL
+ * leaves it a label. */
 static lv_obj_t *list_top_bar(const char *word, const char *seed, int maxlen,
-                              lv_event_cb_t on_type, lv_event_cb_t on_new){
-    lv_obj_t *l = lv_label_create(content);
-    lv_label_set_text(l, word);
-    lv_obj_set_pos(l, 4, 8);
+                              lv_event_cb_t on_type, lv_event_cb_t on_new,
+                              lv_event_cb_t on_word){
+    if(on_word){
+        lv_obj_t *wb = lv_button_create(content);
+        lv_obj_set_size(wb, LIST_BAR_LBLW - 6, 28);
+        lv_obj_set_pos(wb, 2, 1);
+        lv_obj_set_style_radius(wb, 0, 0);
+        lv_obj_set_style_pad_all(wb, 0, 0);
+        lv_obj_t *wl = lv_label_create(wb);
+        lv_label_set_text(wl, word);
+        lv_obj_set_style_text_font(wl, &lv_font_palm_bold, 0);
+        lv_obj_center(wl);
+        lv_obj_add_event_cb(wb, on_word, LV_EVENT_CLICKED, NULL);
+    } else {
+        lv_obj_t *l = lv_label_create(content);
+        lv_label_set_text(l, word);
+        lv_obj_set_pos(l, 4, 8);
+    }
 
     lv_obj_t *nb = lv_button_create(content);
     lv_obj_set_size(nb, LIST_BAR_NEWW, 28);
@@ -950,25 +994,41 @@ static void quick_add_cb(lv_event_t *e){ (void)e;
 static void list_new_cb(lv_event_t *e){ (void)e; if(cur_app) show_edit(0); }
 
 /* scrolling list of records for one app (virtualized lv_table + per-app lens) */
+/* The Planner's switch: To Do <-> Memo. Categories belong to each half's own
+ * database (a To Do category is not a Memo one), so the filter resets to All. */
+static void list_view(const AppDef *ad);
+static void planner_switch_cb(lv_event_t *e){
+    (void)e;
+    if(!cur_app) return;
+    data_set_category(-1);
+    list_view(cur_app->app == APP_TODO ? APPDEF_MEMO : APPDEF_TODO);
+}
+
 static void list_view(const AppDef *ad){
     kill_kb();
     cur_app = ad;
     cur_uid = 0;
     content_clear();
     g_listtbl = NULL;
-    lv_label_set_text(title_lbl, ad->name);
+    if(is_planner(ad)) g_planner_memo = (ad->app == APP_MEMO);
+    lv_label_set_text(title_lbl, is_planner(ad) ? "Planner" : ad->name);
 
     /* The top bar. Graffiti writes into whichever field the bar put there --
      * the Look Up filter on Address, the new record on To Do and Memo. */
     if(ad->app == APP_ADDR){
         active_ta = list_top_bar("Look Up:", g_lookup, LIST_BAR_FIND_MAX,
-                                 lookup_ta_cb, list_new_cb);
+                                 lookup_ta_cb, list_new_cb, NULL);
     } else {
         g_lookup[0] = 0;                               /* filter only applies to Address */
+        /* The Planner: the word at the left of the bar says which half this
+         * is, and tapping it switches to the other -- the one control the merge
+         * added, where the eye already goes to see what the field will make. */
         if(ad->app == APP_TODO)
-            active_ta = list_top_bar("To Do:", "", LIST_BAR_ADD_MAX, NULL, quick_add_cb);
+            active_ta = list_top_bar("To Do", "", LIST_BAR_ADD_MAX, NULL, quick_add_cb,
+                                     planner_switch_cb);
         else if(ad->app == APP_MEMO)
-            active_ta = list_top_bar("Memo:",  "", LIST_BAR_ADD_MAX, NULL, quick_add_cb);
+            active_ta = list_top_bar("Memo",  "", LIST_BAR_ADD_MAX, NULL, quick_add_cb,
+                                     planner_switch_cb);
         /* R9: the quick-add field IS the record's first line, so it starts with
          * a capital. Look Up (above) does not: it is a filter, not text. */
         if(ad->app == APP_TODO || ad->app == APP_MEMO)
@@ -1053,6 +1113,111 @@ static void ask_delete(uint32_t uid){
 }
 static void del_btn_cb(lv_event_t *e){ ask_delete((uint32_t)(uintptr_t)lv_event_get_user_data(e)); }
 
+/* ---- the Planner: checkbox lines in a memo --------------------------------
+ * A memo can hold checklist lines as well as text: "[ ] " or "[x] " at the start
+ * of a line. They are PLAIN TEXT in the memo, so nothing about how a memo is
+ * stored changes, a memo stays readable anywhere a Palm memo is, and it stays on
+ * the device like every memo (memos have no server copy). Tapping an item --
+ * its box or its words -- ticks or unticks it.
+ *
+ * There used to be a "make this line a To Do" here. It was taken out
+ * (2026-09-29): To Do has one server list, so moving an item out of its memo
+ * lost the project the memo was. A better way between the two is open.
+ *
+ * The detail screen shows such a memo as a list -- the same one lv_table and the
+ * same drawn boxes as the To Do list, so no screen gains a per-line object. The
+ * memo is read again for every change and written back whole; the list keeps
+ * only which LINE each row is (in g_rowuids, freed on the way out like any
+ * list's). */
+#define MEMO_CAP 1200                      /* the memo editor's own limit */
+/* 0 = not a box line, 1 = open, 2 = ticked. "[ ]" alone ends the line too. */
+static int memo_box(const char *l){
+    if(l[0] != '[' || (l[1] != ' ' && l[1] != 'x' && l[1] != 'X') || l[2] != ']') return 0;
+    if(l[3] != ' ' && l[3] != '\n' && l[3] != 0) return 0;
+    return l[1] == ' ' ? 1 : 2;
+}
+static int memo_has_boxes(const char *t){
+    for(const char *l = t; l; l = strchr(l, '\n'), l = l ? l + 1 : NULL)
+        if(memo_box(l)) return 1;
+    return 0;
+}
+/* start of line `n` (0-based), or NULL */
+static char *memo_line(char *t, int n){
+    for(char *l = t; l; l = strchr(l, '\n'), l = l ? l + 1 : NULL)
+        if(n-- == 0) return l;
+    return NULL;
+}
+static uint32_t g_chk_uid;                 /* the memo the checklist is showing */
+static void show_detail(uint32_t uid);
+
+/* read the memo, let `fn` change line `n`, write it back under its category */
+static void memo_edit_line(int n, void (*fn)(char *text, char *line)){
+    char *t = malloc(MEMO_CAP);
+    if(!t){ toast_show("(low memory)"); return; }
+    if(data_get_memo(g_chk_uid, t, MEMO_CAP)){
+        char *l = memo_line(t, n);
+        if(l && memo_box(l)){
+            fn(t, l);
+            int rc = data_record_category(APP_MEMO, g_chk_uid);
+            data_save_memo(g_chk_uid, rc < 0 ? 0 : rc, t);
+        }
+    }
+    free(t);
+}
+static void memo_tick(char *t, char *l){ (void)t; l[1] = (l[1] == ' ') ? 'x' : ' '; }
+static void chk_click_cb(lv_event_t *e){
+    lv_obj_t *t = lv_event_get_target(e);
+    uint32_t r = LV_TABLE_CELL_NONE, c = LV_TABLE_CELL_NONE;
+    lv_table_get_selected_cell(t, &r, &c);
+    if(r == LV_TABLE_CELL_NONE || !g_rowuids || (int)r >= g_rowuid_n) return;
+    (void)c;                                          /* the box or the words: the same */
+    if(!list_row_is(t, r, LIST_BOX)) return;          /* a plain line: nothing to do */
+    memo_edit_line((int)g_rowuids[r], memo_tick);
+    show_detail(g_chk_uid);
+}
+/* The checklist body of a memo detail: one row per non-blank line. Returns 0 if
+ * it could not be built (no memory), and the caller shows the plain text. */
+static int memo_checklist(uint32_t uid, int h){
+    char *t = malloc(MEMO_CAP);
+    if(!t) return 0;
+    if(!data_get_memo(uid, t, MEMO_CAP) || !memo_has_boxes(t)){ free(t); return 0; }
+    int n = 0;
+    for(char *l = t; l; l = strchr(l, '\n'), l = l ? l + 1 : NULL) if(*l && *l != '\n') n++;
+    free_rowuids();
+    g_rowuids = calloc(n ? n : 1, sizeof *g_rowuids);
+    if(!g_rowuids){ free(t); return 0; }
+    g_chk_uid = uid;
+
+    lv_obj_t *tb = lv_table_create(content);
+    list_table_style(tb);
+    lv_table_set_column_width(tb, 0, 30);
+    lv_table_set_column_width(tb, 1, LCD_W - 38);
+    lv_obj_set_size(tb, LCD_W, h);
+    lv_obj_set_pos(tb, 0, 0);
+    lv_obj_add_event_cb(tb, chk_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    int row = 0, line = 0;
+    for(char *l = t; l; l = strchr(l, '\n'), l = l ? l + 1 : NULL, line++){
+        char *end = strchr(l, '\n');
+        if(end) *end = 0;                        /* this line alone (restored below) */
+        if(*l){
+            int b = memo_box(l);
+            if(b){
+                lv_table_set_cell_value(tb, row, 1, l + (l[3] == ' ' ? 4 : 3));
+                list_set_box(tb, row, b == 2, 1);
+            } else {
+                lv_table_set_cell_value(tb, row, 0, l);
+                list_cell_ctrl_set(tb, row, 0, LV_TABLE_CELL_CTRL_MERGE_RIGHT);
+            }
+            g_rowuids[row++] = (uint32_t)line;
+        }
+        if(end) *end = '\n';
+    }
+    g_rowuid_n = row;
+    free(t);
+    return 1;
+}
+
 /* read-only detail for one record (scrollable text + Done / Delete / Edit) */
 static void show_detail(uint32_t uid){
     if(!cur_app) return;
@@ -1065,16 +1230,18 @@ static void show_detail(uint32_t uid){
     int ch = PDA_H - TITLE_H;
     int istodo = (cur_app->app == APP_TODO);
     /* leave room for the action row (and a second row for ToDo's Mark Done) */
-    lv_obj_t *box = lv_obj_create(content);       /* scrolls if text overflows */
-    lv_obj_set_size(box, LCD_W, ch - (istodo ? 78 : 40));
-    lv_obj_set_pos(box, 0, 0);
-    lv_obj_set_style_radius(box, 0, 0);
-    lv_obj_set_style_border_width(box, 0, 0);
-    lv_obj_set_style_bg_color(box, COL_BODY, 0);
-    lv_obj_t *l = lv_label_create(box);
-    lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(l, LCD_W - 16);
-    lv_label_set_text(l, buf);
+    if(cur_app->app != APP_MEMO || !memo_checklist(uid, ch - 40)){
+        lv_obj_t *box = lv_obj_create(content);   /* scrolls if text overflows */
+        lv_obj_set_size(box, LCD_W, ch - (istodo ? 78 : 40));
+        lv_obj_set_pos(box, 0, 0);
+        lv_obj_set_style_radius(box, 0, 0);
+        lv_obj_set_style_border_width(box, 0, 0);
+        lv_obj_set_style_bg_color(box, COL_BODY, 0);
+        lv_obj_t *l = lv_label_create(box);
+        lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(l, LCD_W - 16);
+        lv_label_set_text(l, buf);
+    }
 
     /* primary actions, three across: Done | Delete | Edit */
     lv_obj_t *done = lv_button_create(content);
@@ -1385,6 +1552,32 @@ static void set_editcat_label(void){
         lv_label_set_text(edit_cat_lbl, "Unfiled");
 }
 
+/* The memo editor's checkbox button: the line the cursor is on gains "[ ] " at
+ * its start, or loses it if it has one -- one button, both ways. */
+static void memo_box_btn_cb(lv_event_t *e){
+    (void)e;
+    lv_obj_t *ta = g_nfields ? g_fields[0] : NULL;
+    if(!ta) return;
+    const char *t = lv_textarea_get_text(ta);
+    int cur = (int)lv_textarea_get_cursor_pos(ta);
+    int len = (int)strlen(t);
+    if(cur > len) cur = len;
+    int start = cur;
+    while(start > 0 && t[start - 1] != '\n') start--;
+    if(memo_box(t + start)){
+        int n = (t[start + 3] == ' ') ? 4 : 3;
+        lv_textarea_set_cursor_pos(ta, start + n);
+        for(int i = 0; i < n; i++) lv_textarea_delete_char(ta);
+        lv_textarea_set_cursor_pos(ta, cur - n > start ? cur - n : start);
+    } else {
+        lv_textarea_set_cursor_pos(ta, start);
+        lv_textarea_add_text(ta, "[ ] ");
+        lv_textarea_set_cursor_pos(ta, cur + 4);
+    }
+    active_ta = ta;
+    lv_obj_add_state(ta, LV_STATE_FOCUSED);
+}
+
 static void show_edit(uint32_t uid){
     if(!cur_app) return;
     edit_uid = uid; cur_uid = uid; g_nfields = 0;
@@ -1559,7 +1752,7 @@ static void show_edit(uint32_t uid){
         form_field(form,"Note",a.fields[F_note],200,&y);      /* fv9 */
         field_mode(TA_CAP_FIRST, NULL);
     } else if(cur_app->app == APP_MEMO){
-        static char mtext[1200];
+        static char mtext[MEMO_CAP];
         if(!data_get_memo(uid, mtext, sizeof mtext)) mtext[0]=0;
         lv_obj_t *ta = lv_textarea_create(form);       /* one big multi-line field */
         lv_textarea_set_text(ta, mtext);
@@ -1569,6 +1762,23 @@ static void show_edit(uint32_t uid){
         lv_obj_add_event_cb(ta, ta_click_cb, LV_EVENT_CLICKED, NULL);
         g_fields[g_nfields++] = ta;
         field_mode(TA_CAP_FIRST, NULL);
+        /* The Planner: a checkbox button, because "[ ] " is four Graffiti
+         * strokes, two of them punctuation, and nobody should have to know that
+         * is how a checklist is written. It sits IN the action row, so the text
+         * keeps the whole form: Done and Cancel give up 8 px each and the
+         * category button 16, which their labels do not need. */
+        lv_obj_set_width(done, 56);
+        lv_obj_set_width(cancel, 56);
+        lv_obj_set_width(det, 80);
+        lv_obj_align(det, LV_ALIGN_BOTTOM_MID, 18, -3);
+        lv_obj_t *bx = lv_button_create(content);
+        lv_obj_set_size(bx, 34, 30);
+        lv_obj_align(bx, LV_ALIGN_BOTTOM_LEFT, 64, -3);
+        lv_obj_set_style_pad_all(bx, 0, 0);
+        lv_obj_t *bxl = lv_label_create(bx);
+        lv_label_set_text(bxl, "[X]");
+        lv_obj_center(bxl);
+        lv_obj_add_event_cb(bx, memo_box_btn_cb, LV_EVENT_CLICKED, NULL);
     }
 
     /* focus the first field so Graffiti has a target immediately */
@@ -1757,7 +1967,7 @@ static void show_hotsync(void){
      * that is missing. It is read before the button is pressed, which is the
      * moment the question is actually being asked. */
     { const Config *cf = appcfg();
-      int acct = cf->dav_base[0] && cf->dav_user[0] && cf->dav_pass[0];
+      int acct = cf->dav_base[0] && cf->dav_user[0] && cf->dav_has_pass;
       int coll = cf->cal_coll[0] || cf->todo_coll[0] || cf->card_coll[0];
       g_hs_what = lv_label_create(content);
       lv_obj_t *what = g_hs_what;
@@ -2048,12 +2258,18 @@ static void show_app(const char *name){
     }
     for(int i=0;i<NAPPDEFS;i++)
         if(!strcmp(name, APPDEFS[i].name)){ data_set_category(-1); list_view(&APPDEFS[i]); return; }
+    if(!strcmp(name, "Planner")){
+        data_set_category(-1);
+        list_view(g_planner_memo ? APPDEF_MEMO : APPDEF_TODO);
+        return;
+    }
     if(!strcmp(name, "HotSync")){ show_hotsync(); return; }
     if(!strcmp(name, "Graffiti")){ show_trainer(); return; }
     if(!strcmp(name, "News")){ show_news(); return; }
     if(!strcmp(name, "Games")){ show_games(); return; }
     if(!strcmp(name, "Coach")){ show_coach(); return; }
     if(!strcmp(name, "Guru")){ show_guru(); return; }
+    if(!strcmp(name, "Study")){ show_study(); return; }
     cur_app = NULL;
     content_clear();
     lv_label_set_text(title_lbl, name);
@@ -3122,6 +3338,26 @@ static lv_obj_t *icon_cell(lv_obj_t *grid, const lv_image_dsc_t *icon,
     return cell;
 }
 
+/* S5: the reviews due in every course, as a count at the icon's shoulder,
+ * like a phone's. Nothing when there are none; 99+ past two digits. Kept
+ * inside the cell: anything standing proud of it is clipped. */
+static void st_badge(lv_obj_t *cell, uint32_t n){
+    if(!n) return;
+    char b[8];
+    if(n > 99) snprintf(b, sizeof b, "99+"); else snprintf(b, sizeof b, "%u", (unsigned)n);
+    lv_obj_t *bd = lv_label_create(cell);
+    lv_obj_add_flag(bd, LV_OBJ_FLAG_FLOATING);
+    lv_obj_clear_flag(bd, LV_OBJ_FLAG_CLICKABLE);
+    lv_label_set_text(bd, b);
+    lv_obj_set_style_text_font(bd, &lv_font_palm_bold, 0);
+    lv_obj_set_style_text_color(bd, COL_BODY, 0);
+    lv_obj_set_style_bg_color(bd, COL_LINE, 0);
+    lv_obj_set_style_bg_opa(bd, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_hor(bd, 3, 0);
+    lv_obj_set_style_radius(bd, 7, 0);
+    lv_obj_set_pos(bd, 38, -2);
+}
+
 static void show_launcher(void){
     kill_kb();
     cur_app = NULL;
@@ -3141,8 +3377,18 @@ static void show_launcher(void){
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
 
-    for(int i=0;i<NAPPS;i++)
-        icon_cell(grid, APP_ICONS[i], APPS[i], app_cb, (void *)APPS[i]);
+    for(int i=0;i<NAPPS;i++){
+        if(APPS[i]){
+            lv_obj_t *cell = icon_cell(grid, APP_ICONS[i], APPS[i], app_cb, (void *)APPS[i]);
+            if(APP_ICONS[i] == &icon_study) st_badge(cell, st_glance_due());
+            continue;
+        }
+        lv_obj_t *gap = lv_obj_create(grid);           /* a free slot, held open */
+        lv_obj_set_size(gap, 68, 52);
+        lv_obj_set_style_bg_opa(gap, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(gap, 0, 0);
+        lv_obj_clear_flag(gap, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    }
 
     /* W10 REMOVED THE ONBOARDING HINT that used to hang off the end of this grid.
      * Three faults, and the third is fatal on its own:
@@ -3283,19 +3529,23 @@ static const char *pol_name(int p){
          : p==CFG_POL_BOTH  ? "keep both"
          :                    "iCloud wins";
 }
-/* the config buffer + capacity for field i (both read and write go through this) */
+/* Is a password stored for secret field i? The Config holds a flag, never the
+ * password itself (appcfg.h). */
+static int pf_secret_set(const Config *c, int i){
+    if(i == PF_PASS) return c->dav_has_pass;
+    for(int s = 0; s < CFG_WIFI_N; s++) if(i == pf_wifi_pass(s)) return c->wifi[s].has_pass;
+    return 0;
+}
+/* the config buffer + capacity for field i (both read and write go through this).
+ * NULL for a password field: those have no buffer here, and are edited by
+ * show_secret_edit() straight into the store. */
 static char *pf_buf(Config *c, int i, int *cap){
     switch(i){
         case PF_SSID:   *cap=sizeof c->wifi[0].ssid; return c->wifi[0].ssid;
-        case PF_WPASS:  *cap=sizeof c->wifi[0].pass; return c->wifi[0].pass;
         case PF_SSID2:  *cap=sizeof c->wifi[1].ssid; return c->wifi[1].ssid;
-        case PF_WPASS2: *cap=sizeof c->wifi[1].pass; return c->wifi[1].pass;
         case PF_SSID3:  *cap=sizeof c->wifi[2].ssid; return c->wifi[2].ssid;
-        case PF_WPASS3: *cap=sizeof c->wifi[2].pass; return c->wifi[2].pass;
         case PF_SSID4:  *cap=sizeof c->wifi[3].ssid; return c->wifi[3].ssid;
-        case PF_WPASS4: *cap=sizeof c->wifi[3].pass; return c->wifi[3].pass;
         case PF_USER:  *cap=sizeof c->dav_user;      return c->dav_user;
-        case PF_PASS:  *cap=sizeof c->dav_pass;      return c->dav_pass;
         case PF_CALB:  *cap=sizeof c->dav_base;      return c->dav_base;
         case PF_CARDB: *cap=sizeof c->dav_card_base; return c->dav_card_base;
         case PF_CAL:   *cap=sizeof c->cal_coll;      return c->cal_coll;
@@ -3316,8 +3566,11 @@ static void pf_edit_back(void){ set_return(); }
 static void pf_edit_cancel_cb(lv_event_t *e){ (void)e; pf_edit_back(); }
 static void pf_edit_save_cb(lv_event_t *e){ (void)e;
     Config *cfg = appcfg_mut();
+    int wslot = -1;
+    for(int s = 0; s < CFG_WIFI_N; s++) if(pf_edit_idx == pf_wifi_ssid(s)) wslot = s;
     int cap=0; char *dst = pf_buf(cfg, pf_edit_idx, &cap);
-    if(dst && cap) snprintf(dst, cap, "%s", lv_textarea_get_text(g_fields[0]));
+    if(wslot >= 0) appcfg_set_wifi_ssid(wslot, lv_textarea_get_text(g_fields[0]));
+    else if(dst && cap) snprintf(dst, cap, "%s", lv_textarea_get_text(g_fields[0]));
     /* TYPING A COORDINATE PINS IT. Everything else that fills the location is a
      * guess of some kind -- the zone, the city list, the IP lookup -- and a sync
      * is allowed to improve a guess. Numbers somebody entered by hand are the one
@@ -3357,16 +3610,22 @@ static void prefkb_cb(lv_event_t *e){
     lv_obj_t *bm = lv_event_get_target(e);
     uint32_t id = lv_buttonmatrix_get_selected_button(bm);
     const char *t = lv_buttonmatrix_get_button_text(bm, id);
-    if(!t || !active_ta) return;
+    if(!t || (!active_ta && !g_secret)) return;
     if(!strcmp(t, "ABC")){ lv_buttonmatrix_set_map(bm, KB_UPPER); return; }
     if(!strcmp(t, "abc")){ lv_buttonmatrix_set_map(bm, KB_LOWER); return; }
     if(!strcmp(t, "123")){ lv_buttonmatrix_set_map(bm, KB_DIGIT); return; }
+    if(g_secret){
+        secret_key(!strcmp(t, "<-") ? '\b' : !strcmp(t, "space") ? ' ' : t[0]);
+        return;
+    }
     if(!strcmp(t, "<-")) { lv_textarea_delete_char(active_ta); return; }
     if(!strcmp(t, "space")){ lv_textarea_add_char(active_ta, ' '); return; }
     lv_textarea_add_char(active_ta, (uint32_t)t[0]);
 }
 
+static void show_secret_edit(int i);
 static void show_pref_edit(int i){
+    if(pf_is_secret(i)){ show_secret_edit(i); return; }
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0; pf_edit_idx = i;
     content_clear();
@@ -3397,6 +3656,153 @@ static void show_pref_edit(int i){
     lv_obj_add_state(ta, LV_STATE_FOCUSED);
 
     /* the tap keyboard fills the rest of the screen below the field */
+    lv_obj_t *bm = lv_buttonmatrix_create(content);
+    lv_obj_set_size(bm, LCD_W - 4, (PDA_H - TITLE_H) - 92);
+    lv_obj_align(bm, LV_ALIGN_BOTTOM_MID, 0, -2);
+    lv_buttonmatrix_set_map(bm, KB_LOWER);
+    lv_obj_set_style_radius(bm, 0, 0);
+    lv_obj_set_style_radius(bm, 0, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(bm, 0, 0);
+    lv_obj_add_event_cb(bm, prefkb_cb, LV_EVENT_VALUE_CHANGED, NULL);
+}
+
+/* ---- the password editor ------------------------------------------------
+ * PASSWORDS NEVER ENTER LVGL. A textarea keeps its text in the LVGL pool and
+ * grows it by realloc, so every keystroke leaves a longer copy of the password
+ * in freed pool memory, where nothing ever wipes it. So this screen is not a
+ * textarea: the tap keyboard and Graffiti write into g_secret, one heap block
+ * of our own, and the screen shows one '*' per character (but see below). The
+ * block is wiped and freed when the screen goes, however it goes (Save, Cancel,
+ * Home), because that is hung off the display label's DELETE event.
+ *
+ * It starts EMPTY: a stored password is never read back to fill it. Save with
+ * nothing typed leaves the stored one alone, which is also what makes this
+ * screen safe to open just to look.
+ *
+ * Typing blind on a small screen is hard, so the character just typed shows
+ * for SECRET_PEEK_MS before it becomes a '*' (as phones do), and "Show" lets
+ * you see the whole thing. Neither puts the password into LVGL either: what
+ * the label draws is SECRET_DISP, the second half of the same block, handed
+ * over with lv_label_set_text_static so LVGL keeps only the pointer (a label
+ * draws from it without copying; draw tasks copy text only when the caller
+ * sets text_local, which the label never does). It is wiped with the rest.
+ * When the text is wider than the box it shows the end, where you are typing,
+ * behind a '<'. */
+#define SECRET_CAP 64
+#define SECRET_DISP (g_secret + SECRET_CAP)          /* the block is 2 x SECRET_CAP */
+#define SECRET_BOX_W (LCD_W - 16)
+#define SECRET_PEEK_MS 1000
+static int         g_secret_idx;
+static lv_obj_t   *g_secret_lbl;
+static bool        g_secret_reveal;                   /* "Show" is on */
+static bool        g_secret_peek;                     /* the last character shows */
+static lv_timer_t *g_secret_peek_t;
+static int secret_len(void){ return g_secret ? (int)strlen(g_secret) : 0; }
+static void secret_show(void){
+    if(!g_secret_lbl) return;
+    int n = secret_len();
+    if(!n){
+        lv_label_set_text_static(g_secret_lbl, pf_secret_set(appcfg(), g_secret_idx)
+                                 ? "(saved -- type to replace)" : "(none)");
+        return;
+    }
+    char *d = SECRET_DISP;
+    for(int i = 0; i < n; i++)
+        d[i] = (g_secret_reveal || (g_secret_peek && i == n - 1)) ? g_secret[i] : '*';
+    d[n] = 0;
+    /* keep the end in view: drop characters off the front until it fits */
+    const lv_font_t *f = lv_obj_get_style_text_font(g_secret_lbl, LV_PART_MAIN);
+    int avail = SECRET_BOX_W - 2 * 6 - 2 * 1;          /* the box's padding and border */
+    int lt = lv_font_get_glyph_width(f, '<', 0), w = 0, s = 0;
+    for(int i = 0; i < n; i++) w += lv_font_get_glyph_width(f, (unsigned char)d[i], 0);
+    while(s < n - 1 && w + (s ? lt : 0) > avail)
+        w -= lv_font_get_glyph_width(f, (unsigned char)d[s++], 0);
+    if(s) d[--s] = '<';
+    lv_label_set_text_static(g_secret_lbl, d + s);
+}
+static void secret_peek_end_cb(lv_timer_t *t){ (void)t;
+    g_secret_peek_t = NULL; g_secret_peek = false;
+    secret_show();
+}
+static void secret_key(char c){
+    if(!g_secret) return;
+    int n = secret_len();
+    if(c == '\n') return;                            /* one line, like the textarea */
+    if(c == '\b'){ if(n) g_secret[n - 1] = 0; g_secret_peek = false; }
+    else if(n < SECRET_CAP - 1 && (unsigned char)c >= 32){
+        g_secret[n] = c; g_secret[n + 1] = 0;
+        g_secret_peek = true;
+        if(g_secret_peek_t) lv_timer_reset(g_secret_peek_t);
+        else {
+            g_secret_peek_t = lv_timer_create(secret_peek_end_cb, SECRET_PEEK_MS, NULL);
+            lv_timer_set_repeat_count(g_secret_peek_t, 1);
+        }
+    }
+    secret_show();
+}
+static void secret_reveal_cb(lv_event_t *e){
+    g_secret_reveal = !g_secret_reveal;
+    lv_obj_t *btn = lv_event_get_target(e);
+    lv_label_set_text(lv_obj_get_child(btn, 0), g_secret_reveal ? "Hide" : "Show");
+    secret_show();
+}
+static void secret_graf(char c){ secret_key(c); }
+static void secret_gone_cb(lv_event_t *e){
+    (void)e;
+    if(g_secret_peek_t){ lv_timer_delete(g_secret_peek_t); g_secret_peek_t = NULL; }
+    if(g_secret){ config_wipe(g_secret, 2 * SECRET_CAP); free(g_secret); g_secret = NULL; }
+    g_secret_lbl = NULL; g_secret_reveal = g_secret_peek = false;
+}
+static void secret_save_cb(lv_event_t *e){ (void)e;
+    if(!g_secret) { pf_edit_back(); return; }
+    if(!secret_len()){ pf_edit_back(); toast_show("Unchanged"); return; }
+    int r = -1;
+    if(g_secret_idx == PF_PASS) r = appcfg_set_dav_pass(g_secret);
+    else for(int s = 0; s < CFG_WIFI_N; s++)
+        if(g_secret_idx == pf_wifi_pass(s)) r = appcfg_set_wifi_pass(s, g_secret);
+    config_wipe(g_secret, 2 * SECRET_CAP);           /* now, not when the screen goes */
+    appcfg_save();
+    pf_edit_back();
+    toast_show(r == 0 ? "Saved" : "Could not save the password");
+}
+static void show_secret_edit(int i){
+    kill_kb();
+    cur_app = NULL; cur_uid = 0; g_nfields = 0; pf_edit_idx = i; g_secret_idx = i;
+    content_clear();                                  /* frees any previous block */
+    lv_label_set_text(title_lbl, PF_LABELS[i]);
+    update_cat_trigger();
+
+    g_secret = calloc(2, SECRET_CAP);                 /* the text, then SECRET_DISP */
+    if(!g_secret){ toast_show("(low memory)"); pf_edit_back(); return; }
+
+    lv_obj_t *cancel = lv_button_create(content);
+    lv_obj_set_size(cancel, 60, 28); lv_obj_align(cancel, LV_ALIGN_TOP_LEFT, 2, 2);
+    lv_obj_t *cl=lv_label_create(cancel); lv_label_set_text(cl,"Cancel"); lv_obj_center(cl);
+    lv_obj_add_event_cb(cancel, pf_edit_cancel_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *save = lv_button_create(content);
+    lv_obj_set_size(save, 60, 28); lv_obj_align(save, LV_ALIGN_TOP_RIGHT, -2, 2);
+    lv_obj_t *sl=lv_label_create(save); lv_label_set_text(sl,"Save"); lv_obj_center(sl);
+    lv_obj_add_event_cb(save, secret_save_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *show = lv_button_create(content);
+    lv_obj_set_size(show, 60, 28); lv_obj_align(show, LV_ALIGN_TOP_MID, 0, 2);
+    lv_obj_t *shl=lv_label_create(show); lv_label_set_text(shl,"Show"); lv_obj_center(shl);
+    lv_obj_add_event_cb(show, secret_reveal_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *lb = lv_label_create(content);
+    lv_label_set_text(lb, PF_LABELS[i]);
+    lv_obj_set_pos(lb, 4, 38);
+    /* drawn like the textarea it replaces: a bordered one-line box */
+    g_secret_lbl = lv_label_create(content);
+    lv_obj_set_size(g_secret_lbl, SECRET_BOX_W, 30);
+    lv_obj_set_pos(g_secret_lbl, 4, 54);
+    lv_obj_set_style_border_width(g_secret_lbl, 1, 0);
+    lv_obj_set_style_border_color(g_secret_lbl, COL_LINE, 0);
+    lv_obj_set_style_pad_all(g_secret_lbl, 6, 0);
+    lv_label_set_long_mode(g_secret_lbl, LV_LABEL_LONG_CLIP);
+    lv_obj_add_event_cb(g_secret_lbl, secret_gone_cb, LV_EVENT_DELETE, NULL);
+    secret_show();
+    graf_char_hook = secret_graf;                     /* AFTER kill_kb cleared it */
+
     lv_obj_t *bm = lv_buttonmatrix_create(content);
     lv_obj_set_size(bm, LCD_W - 4, (PDA_H - TITLE_H) - 92);
     lv_obj_align(bm, LV_ALIGN_BOTTOM_MID, 0, -2);
@@ -3750,7 +4156,7 @@ static void show_prefs(void){
         int cap=0; const char *v = pf_buf(c, i, &cap);
         char shown[28];
         if(pf_is_secret(i))
-            snprintf(shown, sizeof shown, "%s", (v && v[0]) ? "********" : "(unset)");
+            snprintf(shown, sizeof shown, "%s", pf_secret_set(c, i) ? "********" : "(unset)");
         else if(v && v[0])
             snprintf(shown, sizeof shown, "%.20s%s", v, strlen(v)>20 ? "..." : "");
         else
@@ -3896,7 +4302,7 @@ static void sp_field_row(lv_obj_t *list, int tile, int f){
     int cap = 0; const char *v = pf_buf((Config *)c, f, &cap);
     char shown[28], row[80];
     if(pf_is_secret(f))
-        snprintf(shown, sizeof shown, "%s", (v && v[0]) ? "********" : "(unset)");
+        snprintf(shown, sizeof shown, "%s", pf_secret_set(c, f) ? "********" : "(unset)");
     else if(v && v[0])
         snprintf(shown, sizeof shown, "%.20s%s", v, strlen(v) > 20 ? "..." : "");
     else
@@ -4285,8 +4691,8 @@ static void wifi_forget_cb(lv_event_t *e){
     int slot = (int)(intptr_t)lv_event_get_user_data(e);
     Config *c = appcfg_mut();
     if(slot >= 0 && slot < CFG_WIFI_N){
-        c->wifi[slot].ssid[0] = 0;
-        c->wifi[slot].pass[0] = 0;
+        (void)c;
+        appcfg_set_wifi_ssid(slot, "");   /* and its password, if no slot shares it */
         appcfg_save();
         toast_show("Forgotten");
     }
@@ -4321,7 +4727,7 @@ static void show_wifi_net(int slot){
     pf_add(list, row, wifi_name_cb, slot);
     if(set){
         snprintf(row, sizeof row, "Password:  %s",
-                 c->wifi[slot].pass[0] ? "********" : "(none -- open network)");
+                 c->wifi[slot].has_pass ? "********" : "(none -- open network)");
         pf_add(list, row, wifi_pass_cb, slot);
         if(slot > 0) pf_add(list, "Try this one first", wifi_promote_cb, slot);
         pf_add(list, "Forget this network", wifi_forget_cb, slot);
@@ -4362,9 +4768,8 @@ static void wifi_pick_cb(lv_event_t *e){
     const WifiAP *ap = wifi_scan_get(i);
     if(!ap) return;
     int slot = g_wifi_pick_slot;
-    Config *c = appcfg_mut();
-    snprintf(c->wifi[slot].ssid, sizeof c->wifi[slot].ssid, "%s", ap->ssid);
-    if(!ap->secure) c->wifi[slot].pass[0] = 0;
+    appcfg_set_wifi_ssid(slot, ap->ssid);
+    if(!ap->secure) appcfg_set_wifi_pass(slot, NULL);
     appcfg_save();
     wifi_scan_kill();
     if(ap->secure){ g_set_ret = RET_WIFI; g_wifi_slot = slot; show_pref_edit(pf_wifi_pass(slot)); }
@@ -4485,7 +4890,7 @@ static void show_set_panel(int tile){
         for(int i = 0; i < CFG_WIFI_N; i++){
             const char *s = c->wifi[i].ssid;
             if(s[0]) snprintf(row, sizeof row, "%d.  %.28s%s", i + 1, s,
-                              c->wifi[i].pass[0] ? "" : "   (open)");
+                              c->wifi[i].has_pass ? "" : "   (open)");
             else     snprintf(row, sizeof row, "%d.  (empty)", i + 1);
             pf_add(list, row, wifi_row_cb, i);
         }
@@ -4583,6 +4988,12 @@ static void show_set_panel(int tile){
          * will look; the whole-list view stays underneath it as the escape
          * hatch for a config.ini that has gone wrong. */
         pf_add(list, "CYD Palm Bridge", NULL, 0);
+        /* The build, as `git describe` named it when it was compiled: a tag on a
+         * release, else the commit, with "-dirty" if it was built from edits.
+         * The browser installer and a release's file name use the same string
+         * (tools/package_firmware.py), so this row matches what was installed. */
+        snprintf(row, sizeof row, "Version %.40s", esp_app_get_description()->version);
+        pf_add(list, row, NULL, 0);
         pf_add(list, "A Palm-style PDA on a $12 board", NULL, 0);
         pf_add(list, "GPLv3. Icons + font from PumpkinOS", NULL, 0);
         pf_add(list, "All settings (one list)", sp_prefs_cb, 0);
@@ -4972,16 +5383,20 @@ static void act_about(lv_event_t *e){ (void)e;
                  "less than one a day.\n\n"
                  "%s\n\n"
                  "These are popular wellness habits, not medical advice.\n\n"
-                 "v0.3 - tap to close", src);
+                 "Version %s - tap to close", src, esp_app_get_description()->version);
         lv_label_set_text(body, gbuf);
     }
-    else
-        lv_label_set_text(body, "A pocket PDA that syncs to iCloud. Offline "
-                                "by default. HotSync when you want to. No feed. "
-                                "No ads.\n\n"
-                                "Memos stay on this device. To Dos sync as "
-                                "CalDAV tasks, not the Reminders app.\n\n"
-                                "v0.3 - tap to close");
+    else {
+        char abuf[320];
+        snprintf(abuf, sizeof abuf,
+                 "A pocket PDA that syncs to iCloud. Offline "
+                 "by default. HotSync when you want to. No feed. "
+                 "No ads.\n\n"
+                 "Memos stay on this device. To Dos sync as "
+                 "CalDAV tasks, not the Reminders app.\n\n"
+                 "Version %s - tap to close", esp_app_get_description()->version);
+        lv_label_set_text(body, abuf);
+    }
     lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 20);
 }
 
@@ -5239,6 +5654,7 @@ static void menu_open(void){
         menu_item(panel, "This week",   act_co_week);
         menu_item(panel, "Reset counters", act_co_reset);
     }
+    if(g_st_open) st_menu(panel);                          /* Study only */
     if(data_demo_present())
         menu_item(panel, "Remove demo data", act_remove_demo);
 #ifdef UI_SEED_TESTEVENTS
@@ -6300,7 +6716,13 @@ static void graf_up_cb(lv_event_t *e){
     if(c == GRAF_SHIFT){ graf_case = (graf_case + 1) % 3; show_case(); return; }
     if(c == GRAF_PUNCT){ show_punct(1); return; }       /* tap: arm punctuation */
     show_punct(0);                                      /* any real char clears it */
-    if(graf_char_hook){ graf_char_hook(c); return; }    /* trainer intercepts input */
+    if(g_secret && c != '\b' && graf_case != CASE_NONE && c >= 'a' && c <= 'z')
+        c = c - 'a' + 'A';                              /* the password editor has no autocap */
+    if(graf_char_hook){                                 /* trainer intercepts input */
+        graf_char_hook(c);
+        if(g_secret && graf_case == CASE_SHIFT){ graf_case = CASE_NONE; show_case(); }
+        return;
+    }
     if(!active_ta){ graf_case = CASE_NONE; show_case(); return; }
     if(c == '\b'){                                     /* backspace: keep caps lock */
         lv_textarea_delete_char(active_ta);
@@ -6347,6 +6769,83 @@ static lv_obj_t *mk_silk(lv_obj_t *par, const lv_image_dsc_t *ic, lv_align_t al,
     lv_obj_set_style_image_recolor(im, COL_LINE, 0);
     lv_obj_set_style_image_recolor_opa(im, LV_OPA_COVER, 0);
     return b;
+}
+
+/* Home or Menu in the title bar, for a full-screen view: the silkscreen
+ * icon in white on the black bar, with a finger-sized click area around the
+ * 24 px button. Made when full screen starts and deleted when it ends, so
+ * the pool pays for them only then. */
+static lv_obj_t *mk_tb_silk(const lv_image_dsc_t *ic, int x, int w, lv_event_cb_t cb){
+    lv_obj_t *b = lv_obj_create(title_bar);
+    lv_obj_set_size(b, w, TITLE_H - 4);
+    lv_obj_set_pos(b, x, 1);
+    lv_obj_set_style_radius(b, 0, 0);
+    lv_obj_set_style_border_width(b, 0, 0);
+    lv_obj_set_style_pad_all(b, 0, 0);
+    lv_obj_set_style_bg_color(b, COL_TITLE, 0);
+    lv_obj_set_style_bg_color(b, COL_DIM, LV_STATE_PRESSED);
+    lv_obj_clear_flag(b, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_ext_click_area(b, 8);
+    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *im = lv_image_create(b);
+    lv_image_set_src(im, ic);
+    lv_obj_center(im);
+    lv_obj_set_style_image_recolor(im, COL_TITLE_FG, 0);
+    lv_obj_set_style_image_recolor_opa(im, LV_OPA_COVER, 0);
+    return b;
+}
+
+/* Home's left end in full screen: just right of the widest the centred clock
+ * can ever be ("12:58p  May 30", built from the widest digit and month), so
+ * Home is as wide as the bar allows and doesn't move as the time changes.
+ * Measured once; the font doesn't change. */
+static int dash_text_w(const char *t, const lv_font_t *font);
+static int tb_home_x(void){
+    static int x;
+    if(x) return x;
+    const lv_font_t *f = lv_obj_get_style_text_font(clock_lbl, LV_PART_MAIN);
+    char d[2] = "0", wd = '0', b[32];
+    int best = 0, mw = 0;
+    const char *mon = CAL_MON[1];
+    for(char c = '0'; c <= '9'; c++){
+        d[0] = c;
+        int w = dash_text_w(d, f);
+        if(w > best){ best = w; wd = c; }
+    }
+    for(int m = 1; m <= 12; m++){
+        int w = dash_text_w(CAL_MON[m], f);
+        if(w > mw){ mw = w; mon = CAL_MON[m]; }
+    }
+    snprintf(b, sizeof b, "%c%c:%c%cp  %s %c%c", wd, wd, wd, wd, mon, wd, wd);
+    x = (LCD_W + dash_text_w(b, f) + 1) / 2 + 6;
+    return x;
+}
+
+/* FULL SCREEN, for a view with nothing to write (Study's lessons and
+ * reviews, Guru's list and habits): the Graffiti strip is hidden and its 112 px go to the content
+ * area, and Home and Menu move up into the title bar's right end (a view that
+ * asks for this has no category picker there). content_clear() turns it off,
+ * so it lasts exactly as long as the screen that asked for it. */
+static void ui_full_screen(int on){
+    if(!content || !g_graf || !on == !g_tb_home) return;       /* already so */
+    lv_obj_set_height(content, on ? LCD_H - TITLE_H : PDA_H - TITLE_H);
+    if(on){
+        lv_obj_add_flag(g_graf, LV_OBJ_FLAG_HIDDEN);
+        /* Home as wide as fits, from the clock to Menu: it's the way out */
+        int hx = tb_home_x();
+        g_tb_home = mk_tb_silk(&silk_home, hx, LCD_W - 28 - hx, home_cb);
+        g_tb_menu = mk_tb_silk(&silk_menu, LCD_W - 26, 24, menu_cb);
+        /* outlined like the category picker, so its width shows on the bar */
+        lv_obj_set_style_border_width(g_tb_home, 1, 0);
+        lv_obj_set_style_border_color(g_tb_home, COL_TITLE_FG, 0);
+    } else {
+        lv_obj_clear_flag(g_graf, LV_OBJ_FLAG_HIDDEN);
+        /* later, not now: this runs inside Home's own click when it's tapped */
+        lv_obj_delete_async(g_tb_home);
+        lv_obj_delete_async(g_tb_menu);
+        g_tb_home = g_tb_menu = NULL;
+    }
 }
 
 /* refresh the title-bar clock: 12h time + date to its right ("12:34p  Jul 10").
@@ -6460,22 +6959,27 @@ static void clock_tick(lv_timer_t *t){
 #define DASH_MARGIN     8                /* zone inset from both edges       */
 
 #define DASH_Y_WX       106              /* CONDITIONS header                */
-#define DASH_H_WX       112              /*   ...closing rule at 218         */
-#define DASH_Y_AGENDA   222              /* AHEAD header                     */
-#define DASH_H_AGENDA   44               /*   ...closing rule at 266         */
+#define DASH_H_WX       98               /*   ...closing rule at 204         */
+#define DASH_Y_AGENDA   208              /* AHEAD header                     */
+#define DASH_H_AGENDA   58               /*   ...closing rule at 266         */
+#define DASH_Y_ROW1     224              /* AHEAD's rows: NEXT, DUE, STUDY   */
+#define DASH_ROW_H      14
+#define DASH_ROW_VX     (DASH_MARGIN+50) /* their values' column             */
 #define DASH_Y_SUN      268              /* SUN & MOON header, open-bottomed */
 #define DASH_H_SUN      36
 
-/* content baselines inside the weather zone */
-#define DASH_Y_WXNOW    122
-#define DASH_Y_AIR      136
-#define DASH_Y_COLT     148              /* the six temperatures             */
-#define DASH_Y_BARBASE  188              /* rain bars grow UP to this line   */
-#define DASH_Y_COLH     192              /* hour                             */
-#define DASH_Y_COLR     204              /* rain % -- ends at 216, and the   */
-                                         /* zone's rule is at 218, so it     */
-                                         /* clears. Shrinking the bars was   */
-                                         /* the price of that clearance.     */
+/* content baselines inside the weather zone. S5 (2026-09-30) took 14 px
+ * from it for AHEAD's STUDY row: the air quality moved up beside the
+ * reading (and shortens, or goes, when the reading is long), and the rain
+ * bars top out at 20 px instead of 24. */
+#define DASH_Y_WXNOW    122              /* the reading; the air at the right */
+#define DASH_Y_COLT     136              /* the six temperatures             */
+#define DASH_Y_BARBASE  173              /* rain bars grow UP to this line   */
+#define DASH_BAR_MAX    20
+#define DASH_Y_COLH     175              /* hour                             */
+#define DASH_Y_COLR     188              /* rain % -- ends at 203, and the   */
+                                         /* zone's rule is at 204, so it     */
+                                         /* clears.                          */
 static lv_obj_t *g_lock;                 /* the overlay root, or NULL when unlocked */
 
 /* see ui.h: which screen is up, for the pool monitor (lvgl_port.c) */
@@ -6495,6 +6999,9 @@ static int       g_wxloaded;              /* 1 if a snapshot exists at all (fres
  * text baked in when the lock went up. Built once with their positions; the words
  * arrive on the first paint and change on every subsequent one. */
 static lv_obj_t *g_wx_now_lbl;                          /* "81 deg  Partly cloudy" */
+static lv_obj_t *g_wx_air_lbl;                          /* "Air 41 . Good", beside it */
+static lv_obj_t *g_dash_study;                          /* AHEAD's STUDY row value */
+static uint32_t  g_dash_study_at;                       /* when its count next goes up */
 static lv_obj_t *g_wx_col_t[WX_STRIP];                  /* per-column temperature */
 static lv_obj_t *g_wx_col_h[WX_STRIP];                  /* per-column hour         */
 static lv_obj_t *g_wx_col_r[WX_STRIP];                  /* per-column rain %       */
@@ -6804,7 +7311,7 @@ static void lock_pressing_cb(lv_event_t *e){ (void)e;
 static void lock_release_cb(lv_event_t *e){ (void)e;
     if(g_lock_py - g_lock_ly > 40){                 /* dragged up -> unlock */
         if(g_lock){ lv_obj_del(g_lock); g_lock=NULL; g_dash_cv=NULL; g_dash_db=NULL; g_dash_time_ap=NULL;
-                    g_dash_stat=NULL; g_wx_now_lbl=NULL;
+                    g_dash_stat=NULL; g_wx_now_lbl=NULL; g_wx_air_lbl=NULL; g_dash_study=NULL;
                     for(int i=0;i<WX_STRIP;i++){ g_wx_col_t[i]=g_wx_col_h[i]=g_wx_col_r[i]=NULL; } }
         /* Every speaker owes a greeting again. This is the one place the lock goes
          * up, so it is the one place that defines an "unlock session" -- see the
@@ -6835,6 +7342,14 @@ static void dash_status_text(char *b, size_t n){
 }
 
 /* paint the canvas graphics + (re)set the time labels from the current clock. */
+/* a line's width in `font` (lv_text_get_width is private in LVGL 9.5; this
+ * call is public in both 9.2 and 9.5) */
+static int dash_text_w(const char *t, const lv_font_t *font){
+    lv_point_t sz;
+    lv_text_get_size(&sz, t, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    return sz.x;
+}
+
 static void dash_paint(void){
     if(!g_lock || !g_dash_cv) return;
 
@@ -6855,6 +7370,11 @@ static void dash_paint(void){
     }
     if(g_dash_stat){ char sb[48]; dash_status_text(sb,sizeof sb);
                      lv_label_set_text(g_dash_stat, sb); }
+    if(g_dash_study && g_dash_study_at && st_now() >= g_dash_study_at){
+        char sb[48];                               /* a review came due: count again */
+        st_glance_text(sb, sizeof sb, &g_dash_study_at);
+        lv_label_set_text(g_dash_study, sb);
+    }
 
     /* ---- the furniture: a reversed strip at the top, then one declared zone
      * per kind of data. The bars and their labels are static, so they are built
@@ -6910,6 +7430,16 @@ static void dash_paint(void){
             char wl[48];
             snprintf(wl,sizeof wl,"%d\xC2\xB0  %s", tf, dash_wcode_desc(cd));
             lv_label_set_text(g_wx_now_lbl, wl);
+            /* the air shares the line: whole if it fits, then just the
+             * number, then not at all -- the reading comes first */
+            if(g_wx_air_lbl){
+                int room = DASH_CW - 2*(DASH_MARGIN+4) - 8 - dash_text_w(wl, &lv_font_palm_bold);
+                char al[32];
+                snprintf(al,sizeof al,"Air %d \xC2\xB7 %s",g_wx.aqi,aqi_word(g_wx.aqi));
+                if(dash_text_w(al, &lv_font_palm) > room) snprintf(al,sizeof al,"Air %d",g_wx.aqi);
+                if(dash_text_w(al, &lv_font_palm) > room) al[0] = 0;
+                lv_label_set_text(g_wx_air_lbl, al);
+            }
         }
         int base = dash_wx_index_at(&g_wx, now);
         if(base < 0) base = 0;
@@ -6934,7 +7464,7 @@ static void dash_paint(void){
              * baseline across six columns is what lets them be compared at a
              * glance -- it is the one line on this screen that is doing real
              * work rather than decoration. */
-            int bh = g_wx.hr[k].rain*24/100;
+            int bh = g_wx.hr[k].rain*DASH_BAR_MAX/100;
             dfill(cx-7,DASH_Y_BARBASE-bh,15,bh?bh:1);
             drule(cx-8,cx+8,DASH_Y_BARBASE+1);
         }
@@ -7064,12 +7594,12 @@ void ui_show_lock(void){
 
     /* ---- weather ---- */
     if(havewx){
-        char wl[48];
-        /* AQI is a single daily figure, not an hourly series -- it is the one
-         * reading here that does NOT step, so it is written once. */
         g_wx_now_lbl = dash_lbl(DASH_MARGIN+4,DASH_Y_WXNOW,"",1);
-        if(wx.aqi>=0){ snprintf(wl,sizeof wl,"Air %d \xC2\xB7 %s",wx.aqi,aqi_word(wx.aqi));
-                       dash_lbl(DASH_MARGIN+4,DASH_Y_AIR,wl,0); }
+        /* AQI is a single daily figure, not an hourly series. It sits at the
+         * right of the reading's line, and dash_paint() sizes it to what the
+         * reading (which does step) leaves it. */
+        if(wx.aqi>=0){ g_wx_air_lbl = dash_lbl(0,DASH_Y_WXNOW,"",0);
+                       lv_obj_align(g_wx_air_lbl,LV_ALIGN_TOP_RIGHT,-(DASH_MARGIN+4),DASH_Y_WXNOW); }
         /* 6-hour strip: temp (top), rain bar (canvas), hour + rain% (bottom).
          * Positions only -- which SIX of the cached twenty-four these are is a
          * question about the current time, so dash_paint() answers it. */
@@ -7087,9 +7617,9 @@ void ui_show_lock(void){
         char wl[48];
         snprintf(wl,sizeof wl,"Weather is %s old", dash_age_span(&wx));
         lv_obj_t *o = dash_lbl(0,0,wl,1);
-        lv_obj_align(o,LV_ALIGN_TOP_MID,0,150);
+        lv_obj_align(o,LV_ALIGN_TOP_MID,0,140);
         o = dash_lbl(0,0,"hidden until the next HotSync",0);
-        lv_obj_align(o,LV_ALIGN_TOP_MID,0,170);
+        lv_obj_align(o,LV_ALIGN_TOP_MID,0,160);
     } else {
         dash_lbl(DASH_MARGIN+4,DASH_Y_WXNOW,"Weather syncs on HotSync",0);
     }
@@ -7099,12 +7629,18 @@ void ui_show_lock(void){
       /* the two rows share a label column so the values line up under each
        * other; the zone header already says what the block is, so the row
        * labels shrink to their job of distinguishing the two. */
-      dash_lbl(DASH_MARGIN+4,238,"NEXT",1);
-      dash_lbl(DASH_MARGIN+4,252,"DUE",1);
-      if(dash_next_event(e,sizeof e)) dash_lbl(DASH_MARGIN+44,238,e,0);
-      else                            dash_lbl(DASH_MARGIN+44,238,"nothing upcoming",0);
-      if(dash_next_due(e,sizeof e))   dash_lbl(DASH_MARGIN+44,252,e,0);
-      else                            dash_lbl(DASH_MARGIN+44,252,"nothing due",0); }
+      const int y1 = DASH_Y_ROW1, y2 = y1 + DASH_ROW_H, y3 = y2 + DASH_ROW_H;
+      dash_lbl(DASH_MARGIN+4,y1,"NEXT",1);
+      dash_lbl(DASH_MARGIN+4,y2,"DUE",1);
+      dash_lbl(DASH_MARGIN+4,y3,"STUDY",1);
+      if(dash_next_event(e,sizeof e)) dash_lbl(DASH_ROW_VX,y1,e,0);
+      else                            dash_lbl(DASH_ROW_VX,y1,"nothing upcoming",0);
+      if(dash_next_due(e,sizeof e))   dash_lbl(DASH_ROW_VX,y2,e,0);
+      else                            dash_lbl(DASH_ROW_VX,y2,"nothing due",0);
+      /* S5: the reviews due in every course, from their summaries -- no course
+       * is opened. dash_paint() counts again when the next one comes due. */
+      st_glance_text(e, sizeof e, &g_dash_study_at);
+      g_dash_study = dash_lbl(DASH_ROW_VX,y3,e,0); }
 
     /* ---- sun + moon ---- */
     if(havewx && wx.sunrise_min>=0){
@@ -7973,6 +8509,9 @@ static lv_obj_t *g_zp_cv, *g_zp_status, *g_zp_timelbl;
 static void content_clear(void){
     if(!content) return;
     lv_obj_clean(content);
+    /* only the screen that asks for it keeps it; Study, swapping one of its
+     * own screens for another, says for itself (st_screen) */
+    if(!g_st_keep) ui_full_screen(0);
     /* A greeting stands on lv_layer_top() OVER the screen it is greeting, so it
      * is not in `content` and lv_obj_clean() cannot reach it. Every screen swap
      * comes through here -- including the lock raising itself when the screen
@@ -8020,6 +8559,9 @@ static void content_clear(void){
     g_co_cv = g_co_time = g_co_sub = g_co_status = g_co_hold_lbl = NULL;
     /* Guru */
     g_gu_tbl = g_gu_cnt = g_gu_stk = NULL;
+    /* Study: its pictures' buffers now that their canvases are gone, and the
+     * whole session unless a Study screen is replacing this one */
+    st_free();
 }
 static uint32_t  g_zp_seq;                  /* varies the board each New */
 static PlayClock g_zp_clk;                  /* pausable solve timer (playclock.h) */
@@ -8739,6 +9281,11 @@ int ui_owns_backlight(void){ return g_co_flash != NULL; }
  * which is what makes the Address Look Up filter testable and not just the
  * quick-add bars. */
 void ui_test_type(const char *text){
+    if(g_secret){                               /* the password editor (no textarea) */
+        if(!text){ while(secret_len()) secret_key('\b'); return; }
+        for(const char *p = text; *p; p++) secret_key(*p);
+        return;
+    }
     if(!active_ta) return;
     if(!text){ lv_textarea_set_text(active_ta, ""); return; }   /* clear */
     for(const unsigned char *p = (const unsigned char *)text; *p; p++)
@@ -9955,6 +10502,10 @@ static void gu_tbl_click_cb(lv_event_t *e);
  * is plain pixels computed from the same constant. */
 #define GU_HDR_H  38
 #define GU_WEEK_W 54
+/* The list and a habit are full screen (ui_full_screen), as Study's lessons
+ * are: nothing on them is written, so the Graffiti strip's 112 px go to the
+ * list. Her week stays as it was: her verdict stands in the strip. */
+#define GU_FULL_H (LCD_H - TITLE_H)
 static void gu_week_btn_cb(lv_event_t *e){ (void)e; show_guru_report(); }
 
 static void gu_build_header(void){
@@ -10023,7 +10574,7 @@ static void gu_build_list(void){
     list_table_style(t);
     lv_table_set_column_width(t, 0, 34);
     lv_table_set_column_width(t, 1, LCD_W - 46);
-    lv_obj_set_size(t, lv_pct(100), (PDA_H - TITLE_H) - GU_HDR_H);
+    lv_obj_set_size(t, lv_pct(100), GU_FULL_H - GU_HDR_H);
     lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_add_event_cb(t, gu_tbl_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
@@ -10093,7 +10644,7 @@ static int g_gu_detail_id;
  * TOP, so the two only meet correctly if they agree about the 34px button, its
  * 3px inset and a 4px gap. */
 #define GU_WHY_Y 46
-#define GU_WHY_H ((PDA_H - TITLE_H) - 3 - 34 - 4 - GU_WHY_Y)
+#define GU_WHY_H (GU_FULL_H - 3 - 34 - 4 - GU_WHY_Y)
 
 static void gu_detail_back_cb(lv_event_t *e){ (void)e; show_guru(); }
 
@@ -10114,6 +10665,7 @@ static void gu_show_task(int id){
     kill_kb();
     content_clear();
     g_gu_open = 1;
+    ui_full_screen(1);
     lv_label_set_text(title_lbl, "Guru");
     update_cat_trigger();
 
@@ -10310,6 +10862,7 @@ static void show_guru(void){
     content_clear();
     gu_load();
     g_gu_open = 1;
+    ui_full_screen(1);
     lv_label_set_text(title_lbl, "Guru");
     update_cat_trigger();
 
@@ -10455,6 +11008,1188 @@ static void show_coach(void){
     }
 }
 
+/* ==== Study: the spaced-repetition app (docs/SRS_PLAN.md) ====================
+ * The screens only. What's due, what unlocks, how a grade moves an item and
+ * where it's saved are srs.c; the order a round asks its questions in is
+ * study.c; the course file is course.c. All three are host-tested, and nothing
+ * here decides anything they could.
+ *
+ * MEMORY. One heap block, g_st, holds the whole session while a Study screen
+ * is up: the open course (1.4 KB), its progress (0.4 KB, plus 2 bits an item
+ * and a 1 KB due list inside srs), the item on screen (4.6 KB), and the
+ * pictures on screen (a canvas buffer each, freed with the screen). Static
+ * DRAM is a pointer and three flags. content_clear() frees the lot when the
+ * screen leaves Study -- another app, Home, or the lock going up -- and every
+ * answer was already on the card by then (srs_put fsyncs), so leaving mid-round
+ * loses nothing but the place in the queue.
+ *
+ * PICTURES are the course's 1-bit bitmaps (kanji, and anything else the Palm
+ * font can't draw) copied row by row into an I1 canvas, the same format every
+ * canvas in this file uses. A canvas, not an lv_image: I1 is the path already
+ * proven on this pool and on the device. */
+#define ST_ROOT      "/sdcard"
+#define ST_MAXPICS   12
+#define ST_PIC_ROWS  400                      /* the tallest picture drawn */
+#define ST_TXT       1024
+/* A lesson card, a question and the Card view are full screen
+ * (ui_full_screen): 296 px, not 184, with their buttons along the bottom. */
+#define ST_FULL_H    (LCD_H - TITLE_H)
+#define ST_BTN_H     42                       /* the bottom row's buttons */
+#define ST_BTN_Y     (ST_FULL_H - ST_BTN_H - 4)
+#define ST_BAN_H     24                       /* a question's banner */
+#define ST_ASK_PROMPT_H 104                   /* the prompt's box on a question */
+#define ST_RD_NAME_W 64                       /* a card's reading line: "Kun'yomi" */
+#define ST_TERM_BOX  70                       /* a card's picture term: a kanji is 64 */
+
+typedef struct {
+    Course    c;
+    Srs       srs;
+    uint8_t   course_ok, srs_ok;
+    char      id[ST_ID_MAX];
+    /* a round: a lesson's cards and quiz, or reviews */
+    StSession round;
+    uint8_t   round_on, reviewing, revealed, undo_ok, undo_had, undo_right;
+    uint8_t   sum_dirty;                      /* graded since summary.bin was written */
+    uint16_t  lesson[20];
+    int       nlesson, card;
+    uint16_t  undo_item;
+    SrsRec    undo_rec;                       /* the record before the last grade */
+    uint16_t  learned, right, total;          /* for the summary */
+    /* the item on screen, its text, and its pictures */
+    CourseItem it;
+    uint8_t   buf[COURSE_ITEM_BUF];
+    char      txt[ST_TXT];
+    uint8_t  *pics[ST_MAXPICS];
+    int       npics;
+} StudyApp;
+
+static StudyApp *g_st;
+/* g_st_open (declared at the top): Study's items in the menu */
+/* g_st_keep (declared at the top): a Study screen replacing another */
+#ifdef UI_DEVTOOLS
+static int32_t g_st_skew;                     /* the smoke tour's clock (ui_test_study_skew) */
+#endif
+
+static uint32_t st_now(void){
+    uint32_t t = (uint32_t)time(NULL);
+#ifdef UI_DEVTOOLS
+    t += (uint32_t)g_st_skew;
+#endif
+    return t;
+}
+static int32_t st_tz(void){ return (int32_t)ui_tz() * 60; }
+static int32_t st_today(void){ return cal_day_index(st_now(), ui_tz()); }
+
+/* ---- at a glance (S5) ----
+ * The lock screen and the launcher read every course's summary.bin (study.c),
+ * so they never open a course. Study writes a course's summary whenever its
+ * dashboard counts it, and when it closes with grades the summary hasn't
+ * counted (g_st->sum_dirty). */
+/* Recount the open course and write its summary, so the dashboard's count
+ * and the lock screen's come from one scan. Returns the week ahead (the
+ * caller frees it) or NULL; g_st->srs's counts are fresh either way. Not
+ * written while the clock is unset: its times would be meaningless. */
+static int st_clock_ok(void);
+static SrsSum *st_rescan(void){
+    uint32_t now = st_now();
+    SrsSum *u = st_clock_ok() ? malloc(sizeof *u) : NULL;
+    if(!u){ srs_scan(&g_st->srs, now); return NULL; }
+    if(srs_scan_sum(&g_st->srs, now, st_tz(), u)){ free(u); return NULL; }
+    if(!st_sum_write(ST_ROOT, g_st->id, u)) g_st->sum_dirty = 0;
+    return u;
+}
+
+static uint32_t st_glance_due(void){
+    StGlance g;
+    st_glance(ST_ROOT, st_now(), &g);
+    return g.due;
+}
+
+/* the lock's STUDY row: "42 reviews due", "caught up · next 9:40p" */
+static void st_glance_text(char *b, int cap, uint32_t *change){
+    uint32_t now = st_now();
+    StGlance g;
+    st_glance(ST_ROOT, now, &g);
+    *change = g.change;
+    if(!g.courses){ snprintf(b, cap, "no reviews yet"); return; }
+    if(g.due){ snprintf(b, cap, "%u review%s due", (unsigned)g.due, g.due == 1 ? "" : "s"); return; }
+    if(!g.next){ snprintf(b, cap, "caught up"); return; }
+    time_t tn = (time_t)g.next, t0 = (time_t)now;
+    struct tm a, z;
+    localtime_r(&tn, &a);
+    localtime_r(&t0, &z);
+    char hm[16];
+    fmt_hm(a.tm_hour, a.tm_min, hm, sizeof hm);
+    if(a.tm_year == z.tm_year && a.tm_yday == z.tm_yday)
+        snprintf(b, cap, "caught up \xC2\xB7 next %s", hm);
+    else if(g.next - now < 6 * 86400)
+        snprintf(b, cap, "caught up \xC2\xB7 next %s %s", DASH_DOW_S[a.tm_wday], hm);
+    else snprintf(b, cap, "caught up \xC2\xB7 next %s %d", CAL_MON[a.tm_mon + 1], a.tm_mday);
+}
+/* the same test the rest of the UI uses for "never set": a year before 2024 */
+static int st_clock_ok(void){
+    time_t t = (time_t)st_now();
+    struct tm tmv;
+    localtime_r(&t, &tmv);
+    return tmv.tm_year + 1900 >= 2024;
+}
+
+static void st_free_pics(void){
+    if(!g_st) return;
+    for(int i = 0; i < g_st->npics; i++) free(g_st->pics[i]);
+    g_st->npics = 0;
+}
+static SrsSum *st_rescan(void);
+static void st_close_course(void){
+    if(!g_st) return;
+    /* the lock screen reads summary.bin: bring it up to date on the way out */
+    if(g_st->srs_ok && g_st->sum_dirty) free(st_rescan());
+    if(g_st->round_on){ st_end(&g_st->round); g_st->round_on = 0; }
+    if(g_st->srs_ok){ srs_close(&g_st->srs); g_st->srs_ok = 0; }
+    if(g_st->course_ok){ course_close(&g_st->c); g_st->course_ok = 0; }
+}
+/* content_clear() calls this AFTER the canvases are gone */
+static void st_free(void){
+    if(!g_st) return;
+    st_free_pics();
+    if(g_st_keep) return;
+    st_close_course();
+    free(g_st);
+    g_st = NULL;
+}
+
+/* every Study screen starts here: the old one goes, the session stays */
+static void st_screen(const char *title){
+    g_st_keep = 1;
+    kill_kb();
+    cur_app = NULL; cur_uid = 0;
+    content_clear();
+    g_st_keep = 0;
+    g_st_open = 1;
+    ui_full_screen(0);                        /* st_screen_full() turns it back on */
+    lv_label_set_text(title_lbl, title);
+    update_cat_trigger();
+}
+/* the same, full screen: nothing on these screens is written, so the
+ * Graffiti strip's room is theirs (Home and Menu move to the title bar) */
+static void st_screen_full(const char *title){
+    g_st_keep = 1;                            /* full screen to full screen: no change */
+    kill_kb();
+    cur_app = NULL; cur_uid = 0;
+    content_clear();
+    g_st_keep = 0;
+    g_st_open = 1;
+    ui_full_screen(1);
+    lv_label_set_text(title_lbl, title);
+    update_cat_trigger();
+}
+
+/* ---- building blocks ---- */
+
+static lv_obj_t *st_label(lv_obj_t *par, const char *text, const lv_font_t *font, int w){
+    lv_obj_t *l = lv_label_create(par);
+    if(font) lv_obj_set_style_text_font(l, font, 0);
+    if(w > 0){ lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP); lv_obj_set_width(l, w); }
+    lv_label_set_text(l, text);
+    return l;
+}
+
+/* A label's text in Palm bold at twice the size, if it fits in `lines` lines
+ * of the screen's width: 1 if it was made big. The pixel-doubled font is the
+ * same face, so a big answer reads as the rest of the UI. Otherwise the label
+ * is left as it was. */
+static int st_big_w(lv_obj_t *l, int lines, int w){
+    lv_point_t sz;
+    lv_text_get_size(&sz, lv_label_get_text(l), &lv_font_palm_bold_2x, 0, 0, w, LV_TEXT_FLAG_NONE);
+    if(sz.y > lines * lv_font_palm_bold_2x.line_height) return 0;
+    lv_obj_set_style_text_font(l, &lv_font_palm_bold_2x, 0);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(l, w);
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+    return 1;
+}
+static int st_big(lv_obj_t *l, int lines){ return st_big_w(l, lines, LCD_W - 12); }
+
+static lv_obj_t *st_btn(lv_obj_t *par, int x, int y, int w, int h, const char *text,
+                        lv_event_cb_t cb, intptr_t ud, int bold){
+    lv_obj_t *b = lv_button_create(par);
+    lv_obj_set_size(b, w, h);
+    lv_obj_set_pos(b, x, y);
+    lv_obj_set_style_radius(b, 0, 0);
+    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, (void *)ud);
+    lv_obj_t *l = lv_label_create(b);
+    if(bold) lv_obj_set_style_text_font(l, &lv_font_palm_bold, 0);
+    lv_label_set_text(l, text);
+    lv_obj_center(l);
+    return b;
+}
+
+/* a scrolling column: the lesson card, and the card over a question */
+static lv_obj_t *st_page(int y, int h){
+    lv_obj_t *p = lv_obj_create(content);
+    lv_obj_set_pos(p, 0, y);
+    lv_obj_set_size(p, LCD_W, h);
+    lv_obj_set_style_radius(p, 0, 0);
+    lv_obj_set_style_border_width(p, 0, 0);
+    lv_obj_set_style_bg_color(p, COL_BODY, 0);
+    lv_obj_set_style_pad_all(p, 4, 0);
+    lv_obj_set_style_pad_row(p, 3, 0);
+    lv_obj_set_flex_flow(p, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(p, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_scroll_dir(p, LV_DIR_VER);
+    /* a hairline, not the theme's black bar: it says "there's more", quietly */
+    lv_obj_set_style_width(p, 2, LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(p, COL_DIM, LV_PART_SCROLLBAR);
+    return p;
+}
+
+/* A course picture on an I1 canvas: rows read from the card into the
+ * canvas's own buffer, max_h rows at most. NULL if it can't be (the caller
+ * shows the field's text instead). */
+static lv_obj_t *st_pic(lv_obj_t *par, uint32_t off, int max_h){
+    CoursePic p;
+    if(!g_st || g_st->npics >= ST_MAXPICS || course_pic(&g_st->c, off, &p) || p.bpp != 1) return NULL;
+    int h = p.h < max_h ? p.h : max_h;
+    uint8_t *buf = malloc(LV_CANVAS_BUF_SIZE(p.w, h, 1, 1) + 16);
+    if(!buf) return NULL;
+    lv_obj_t *cv = lv_canvas_create(par);
+    lv_canvas_set_buffer(cv, buf, p.w, h, LV_COLOR_FORMAT_I1);
+    lv_canvas_set_palette(cv, 0, lv_color_to_32(COL_BODY, 0xFF));
+    lv_canvas_set_palette(cv, 1, lv_color_to_32(COL_LINE, 0xFF));
+    lv_draw_buf_t *db = lv_canvas_get_draw_buf(cv);
+    i1_clear(db);
+    /* in strips, through the text buffer: a few freads, not one per row */
+    int per = ST_TXT / p.stride;
+    for(int y = 0; y < h; ){
+        int n = h - y < per ? h - y : per;
+        if(course_pic_rows(&g_st->c, &p, (uint16_t)y, (uint16_t)n, (uint8_t *)g_st->txt, ST_TXT)) break;
+        for(int k = 0; k < n; k++)
+            memcpy(lv_draw_buf_goto_xy(db, 0, (uint32_t)(y + k)), g_st->txt + k * p.stride, p.stride);
+        y += n;
+    }
+    g_st->pics[g_st->npics++] = buf;
+    lv_obj_invalidate(cv);
+    return cv;
+}
+
+/* a field's text as a C string, with SENSE and FORM spelled out */
+static const char *st_ftext(const CourseField *f){
+    char *o = g_st->txt;
+    int n = f->len < ST_TXT - 16 ? f->len : ST_TXT - 16, k = 0, part = 0;
+    for(int i = 0; i < n; i++){
+        char ch = f->text[i];
+        if(ch != 0x1F){ o[k++] = ch; continue; }
+        part++;
+        if(part == 1){ o[k++] = ':'; o[k++] = ' '; }
+        else { o[k++] = ' '; o[k++] = '('; }
+    }
+    if(part >= 2) o[k++] = ')';
+    o[k] = 0;
+    return o;
+}
+
+/* a field shown as whatever it is: a picture, kana, or Palm text */
+static lv_obj_t *st_field(lv_obj_t *par, const CourseField *f, const lv_font_t *font, int max_h){
+    lv_obj_t *o = NULL;
+    if(f->attr & CF_A_PICTURE) o = st_pic(par, f->pic, max_h);
+    if(o) return o;
+    o = st_label(par, st_ftext(f), (f->attr & CF_A_KANA) ? &lv_font_kana : font, LCD_W - 12);
+    return o;
+}
+
+/* load item n into g_st->buf: 0 on success */
+static int st_load(uint32_t n){
+    if(course_item(&g_st->c, n, &g_st->it)) return -1;
+    return course_item_load(&g_st->c, &g_st->it, g_st->buf, sizeof g_st->buf) < 0 ? -1 : 0;
+}
+
+/* the first field of `tag` (with `attr_bits` set, if any) of the loaded item */
+static int st_find(uint8_t tag, uint8_t attr_bits, CourseField *out){
+    uint32_t pos = 0;
+    CourseField f;
+    while(course_field_next(g_st->buf, g_st->it.text_len, &pos, &f) == 1)
+        if(f.tag == tag && (f.attr & attr_bits) == attr_bits){ *out = f; return 1; }
+    return 0;
+}
+
+static void st_cap_kind(char *out, int cap, int kind){
+    snprintf(out, cap, "%s", g_st->c.kinds[kind].name);
+    if(out[0] >= 'a' && out[0] <= 'z') out[0] = (char)(out[0] - 32);
+}
+
+/* the prompt: the item's TERM, big (a word at twice the size, two lines of it
+ * at most: both boxes it's drawn in are 70 px and more) */
+static void st_term(lv_obj_t *par, int max_h){
+    CourseField f;
+    if(!st_find(CF_TERM, 0, &f)) return;
+    lv_obj_t *o = st_field(par, &f, &lv_font_palm_bold, max_h);
+    if(!o || !lv_obj_check_type(o, &lv_label_class)) return;
+    /* a label is the row's width: its text is what gets centred */
+    if((f.attr & CF_A_KANA) || !st_big(o, 2)) lv_obj_set_style_text_align(o, LV_TEXT_ALIGN_CENTER, 0);
+}
+
+/* "Built from: sun + moon": the linked items' own meanings. Reads each target
+ * into a scratch buffer, so the item on screen stays loaded. */
+static void st_links(lv_obj_t *par){
+    static const char *const NAMES[] = { "", "Comes after", "Built from", "Family", "See also" };
+    static const uint8_t ORDER[] = { CL_BUILT_FROM, CL_FAMILY, CL_RELATED, CL_UNLOCK_AFTER };
+    uint8_t *tmp = NULL;
+    for(size_t oi = 0; oi < sizeof ORDER; oi++){
+        int type = ORDER[oi];
+        char line[160];
+        int k = snprintf(line, sizeof line, "%s: ", NAMES[type]), any = 0;
+        for(uint16_t i = 0; i < g_st->it.n_links && k < (int)sizeof line - 24; i++){
+            CourseLink l;
+            course_link(g_st->buf, &g_st->it, i, &l);
+            if(l.type != type) continue;
+            if(!tmp && !(tmp = malloc(COURSE_ITEM_BUF))) return;
+            CourseItem t;
+            const char *name = "?";
+            char nb[40];
+            if(!course_item(&g_st->c, l.target, &t) && course_item_load(&g_st->c, &t, tmp, COURSE_ITEM_BUF) >= 0){
+                uint32_t pos = 0;
+                CourseField f;
+                while(course_field_next(tmp, t.text_len, &pos, &f) == 1)
+                    if(f.tag == CF_MEANING || (f.tag == CF_TERM && !(f.attr & (CF_A_PICTURE | CF_A_KANA)))){
+                        int m = f.len < (int)sizeof nb - 1 ? f.len : (int)sizeof nb - 1;
+                        memcpy(nb, f.text, m); nb[m] = 0; name = nb;
+                        if(f.tag == CF_MEANING) break;
+                    }
+            }
+            k += snprintf(line + k, sizeof line - k, "%s%s", any ? " + " : "", name);
+            any = 1;
+        }
+        if(any) st_label(par, line, NULL, LCD_W - 12);
+    }
+    free(tmp);
+}
+
+/* The whole card for the loaded item: what a lesson teaches, and what
+ * "Card" shows over a question. Order: term; meanings; readings; senses;
+ * what it's built from; mnemonics; examples; forms; etymology; notes. */
+static void st_card(lv_obj_t *page){
+    char head[48];
+    CourseItem *it = &g_st->it;
+    st_cap_kind(head, sizeof head, it->kind);
+    snprintf(head + strlen(head), sizeof head - strlen(head), "  \xC2\xB7  level %u", it->level);
+    lv_obj_t *h = st_label(page, head, NULL, 0);
+    lv_obj_set_style_text_color(h, COL_DIM, 0);
+    /* The term, centred. A picture gets a fixed box, centred in it: it's
+     * cropped to its ink, and 一 on its own would otherwise be a rule under
+     * the heading. A picture no wider than the box (a single kanji) has the
+     * meaning beside it rather than under it, which brings the readings up
+     * onto the first screen. Text is as tall as it is. */
+    CourseField tf;
+    CoursePic tp;
+    int pic_term = st_find(CF_TERM, 0, &tf) && (tf.attr & CF_A_PICTURE);
+    int side = pic_term && !course_pic(&g_st->c, tf.pic, &tp) && tp.w <= ST_TERM_BOX;
+    lv_obj_t *row = lv_obj_create(page);
+    lv_obj_set_size(row, LCD_W - 8, pic_term ? ST_TERM_BOX : LV_SIZE_CONTENT);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, side ? LV_FLEX_ALIGN_START : LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *mcol = page;                                /* where the meanings go */
+    int mw = LCD_W - 12;
+    if(side){
+        lv_obj_t *box = lv_obj_create(row);
+        lv_obj_set_size(box, ST_TERM_BOX, ST_TERM_BOX);
+        lv_obj_set_style_border_width(box, 0, 0);
+        lv_obj_set_style_pad_all(box, 0, 0);
+        lv_obj_set_flex_flow(box, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(box, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+        st_term(box, ST_PIC_ROWS);
+        mw = LCD_W - 8 - ST_TERM_BOX - 4;
+        mcol = lv_obj_create(row);
+        lv_obj_set_size(mcol, mw, LV_SIZE_CONTENT);
+        lv_obj_set_style_border_width(mcol, 0, 0);
+        lv_obj_set_style_pad_all(mcol, 0, 0);
+        lv_obj_set_style_pad_row(mcol, 2, 0);
+        lv_obj_set_flex_flow(mcol, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(mcol, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(mcol, LV_OBJ_FLAG_SCROLLABLE);
+    } else st_term(row, ST_PIC_ROWS);
+
+    uint32_t pos;
+    CourseField f;
+    /* the meaning big, as a question shows it; the others under it, small */
+    int nm = 0;
+    char also[200];
+    int ak = 0;
+    also[0] = 0;
+    for(pos = 0; course_field_next(g_st->buf, it->text_len, &pos, &f) == 1; ) if(f.tag == CF_MEANING){
+        if(!nm++){
+            lv_obj_t *o = st_field(mcol, &f, &lv_font_palm_bold, ST_PIC_ROWS);
+            if(o && lv_obj_check_type(o, &lv_label_class) && !st_big_w(o, 2, mw)){
+                lv_obj_set_width(o, mw);
+                lv_obj_set_style_text_align(o, LV_TEXT_ALIGN_CENTER, 0);
+            }
+        }
+        else if(!(f.attr & CF_A_PICTURE) && ak < (int)sizeof also - 40)
+            ak += snprintf(also + ak, sizeof also - ak, "%s%.*s", ak ? ", " : "also: ", (int)f.len, f.text);
+    }
+    if(ak) lv_obj_set_style_text_align(st_label(mcol, also, NULL, mw), LV_TEXT_ALIGN_CENTER, 0);
+    /* Readings, a line per type: its name, then the readings in the 20 px
+     * reading font (kana; anything else falls back to Palm), joined with 、.
+     * A reading that is a picture can't join a line of text, so a type with
+     * one keeps a row of its own pieces, wrapped. */
+    static const char *const RT[] = { "Reading", "On'yomi", "Kun'yomi", "Nanori" };
+    int first_rd = 1;
+    for(int t = 0; t < 4; t++){
+        char line[160];
+        int k = 0, n = 0, kana = 0, pic = 0;
+        for(pos = 0; course_field_next(g_st->buf, it->text_len, &pos, &f) == 1; ){
+            if(f.tag != CF_READING || (f.attr & CF_A_VALUE) != t) continue;
+            n++;
+            if(f.attr & CF_A_PICTURE){ pic = 1; continue; }
+            if(f.attr & CF_A_KANA) kana = 1;
+            if(k < (int)sizeof line - 8)
+                k += snprintf(line + k, sizeof line - k, "%s%.*s",
+                              !k ? "" : kana ? "\xE3\x80\x81" : ", ", (int)f.len, f.text);
+        }
+        if(!n) continue;
+        lv_obj_t *row = lv_obj_create(page);
+        lv_obj_set_size(row, LCD_W - 8, LV_SIZE_CONTENT);
+        lv_obj_set_style_border_width(row, 0, 0);
+        lv_obj_set_style_pad_all(row, 0, 0);
+        lv_obj_set_style_pad_column(row, 6, 0);
+        if(first_rd){ lv_obj_set_style_pad_top(row, 4, 0); first_rd = 0; }
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_t *hd = st_label(row, RT[t], &lv_font_palm_bold, 0);
+        lv_obj_set_width(hd, ST_RD_NAME_W);
+        const int vw = LCD_W - 8 - ST_RD_NAME_W - 6;
+        if(!pic){
+            st_label(row, line, kana ? &lv_font_kana_20 : NULL, vw);
+            continue;
+        }
+        lv_obj_t *grp = lv_obj_create(row);
+        lv_obj_set_size(grp, vw, LV_SIZE_CONTENT);
+        lv_obj_set_style_border_width(grp, 0, 0);
+        lv_obj_set_style_pad_all(grp, 0, 0);
+        lv_obj_set_style_pad_column(grp, 8, 0);
+        lv_obj_set_flex_flow(grp, LV_FLEX_FLOW_ROW_WRAP);
+        lv_obj_clear_flag(grp, LV_OBJ_FLAG_SCROLLABLE);
+        for(pos = 0; course_field_next(g_st->buf, it->text_len, &pos, &f) == 1; ){
+            if(f.tag != CF_READING || (f.attr & CF_A_VALUE) != t) continue;
+            lv_obj_t *o = (f.attr & CF_A_PICTURE) ? st_pic(grp, f.pic, 40) : NULL;
+            if(!o) o = st_label(grp, st_ftext(&f), (f.attr & CF_A_KANA) ? &lv_font_kana_20 : NULL, 0);
+        }
+    }
+    for(pos = 0; course_field_next(g_st->buf, it->text_len, &pos, &f) == 1; )
+        if(f.tag == CF_SENSE) st_field(page, &f, NULL, ST_PIC_ROWS);
+    st_links(page);
+    static const struct { uint8_t tag; const char *head; } SIDE[] = {
+        { CF_MNEMONIC_MEANING, "Remember the meaning" }, { CF_MNEMONIC_READING, "Remember the reading" },
+        { CF_EXAMPLE, "Example" }, { CF_FORM, NULL }, { CF_ETYMOLOGY, "Where it comes from" }, { CF_NOTE, "Note" },
+    };
+    for(size_t s = 0; s < sizeof SIDE / sizeof SIDE[0]; s++){
+        int first = 1;
+        for(pos = 0; course_field_next(g_st->buf, it->text_len, &pos, &f) == 1; ){
+            if(f.tag != SIDE[s].tag) continue;
+            if(first && SIDE[s].head){
+                lv_obj_t *l = st_label(page, SIDE[s].head, &lv_font_palm_bold, 0);
+                lv_obj_set_style_pad_top(l, 4, 0);
+            }
+            first = 0;
+            st_field(page, &f, NULL, ST_PIC_ROWS);
+            if(f.tag == CF_EXAMPLE){                     /* its translation follows it */
+                CourseField tr;
+                uint32_t p2 = pos;
+                if(course_field_next(g_st->buf, it->text_len, &p2, &tr) == 1 && tr.tag == CF_TRANSLATION){
+                    lv_obj_t *l = st_field(page, &tr, NULL, ST_PIC_ROWS);
+                    lv_obj_set_style_text_color(l, COL_DIM, 0);
+                }
+            }
+        }
+    }
+}
+
+/* ---- the screens ---- */
+
+static void show_study(void);
+static void st_show_dash(void);
+static void st_show_card(void);
+static void st_show_ask(void);
+static void st_show_done(void);
+static void st_show_pick(void);
+static void st_show_week(void);
+
+/* a line of text in the middle of an otherwise empty screen */
+static void st_notice(const char *title, const char *msg){
+    st_screen(title);
+    lv_obj_t *l = st_label(content, msg, NULL, LCD_W - 24);
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 24);
+}
+
+static int st_open_course(const char *id){
+    char path[96];
+    st_close_course();
+    snprintf(g_st->id, sizeof g_st->id, "%s", id);
+    snprintf(path, sizeof path, "%s/study/%s/course.srs", ST_ROOT, id);
+    if(course_open(&g_st->c, path)){
+        char m[200];
+        snprintf(m, sizeof m, "The course \"%s\" can't be opened: %s.", id, g_st->c.err);
+        st_notice("Study", m);
+        return -1;
+    }
+    g_st->course_ok = 1;
+    snprintf(path, sizeof path, "%s/study/%s", ST_ROOT, id);
+    if(srs_open(&g_st->srs, &g_st->c, path, st_now(), st_tz())){
+        char m[240];
+        snprintf(m, sizeof m, "Your progress in \"%s\" can't be read: %s. It has been left as it is.",
+                 g_st->c.title, g_st->srs.err);
+        st_notice("Study", m);
+        return -1;
+    }
+    g_st->srs_ok = 1;
+    st_last_set(ST_ROOT, id);
+    return 0;
+}
+
+/* "3 h 20 min", "2 days" */
+static void st_span(uint32_t s, char *out, int cap){
+    if(s < 3600) snprintf(out, cap, "%u min", (unsigned)(s / 60 ? s / 60 : 1));
+    else if(s < 86400){
+        unsigned h = s / 3600, m = (s % 3600) / 60;
+        if(m) snprintf(out, cap, "%u h %u min", h, m); else snprintf(out, cap, "%u h", h);
+    } else snprintf(out, cap, "%u day%s", (unsigned)(s / 86400), s / 86400 == 1 ? "" : "s");
+}
+
+/* Her hellos, and what she says when a round ends. Short: five lines of the
+ * balloon at most (see AS_GREETINGS for the budget). */
+static const char *const ST_GREET_DUE[] = {
+    "%d reviews are waiting. Clear those before you start anything new.",
+    "%d reviews due. Ten quiet minutes now saves an hour next week.",
+    "Welcome back. %d reviews first -- they're what makes it stick.",
+};
+static const char *const ST_GREET_NEW[] = {
+    "Nothing to review. A good time for a few new ones.",
+    "All caught up. New lessons are waiting when you want them.",
+    "Your reviews are done. Five new items is plenty for one sitting.",
+};
+static const char *const ST_GREET_FIRST =
+    "Hello! Start with a lesson: five new things, then a short quiz on them.";
+static const char *const ST_GREET_IDLE[] = {
+    "All done for now. Come back when your next reviews come round.",
+    "Nothing due. The waiting is part of how it works.",
+    "Everything's scheduled. Rest is part of learning too.",
+};
+static uint8_t g_st_last_line;
+static void st_greet_tap_cb(lv_event_t *e){ (void)e; spk_pane_close(); }
+static void st_week_cb(lv_event_t *e){ (void)e; st_show_week(); }
+
+static void st_lessons_cb(lv_event_t *e);
+static void st_reviews_cb(lv_event_t *e);
+
+static void st_show_dash(void){
+    if(!g_st || !g_st->course_ok || !g_st->srs_ok){ show_study(); return; }
+    st_screen("Study");
+    uint32_t now = st_now();
+    free(st_rescan());
+    uint16_t level = 0;
+    int lessons = srs_lessons(&g_st->srs, NULL, 0, &level);
+    Course *c = &g_st->c;
+
+    lv_obj_t *t = st_label(content, c->title, &lv_font_palm_bold, 170);
+    lv_obj_set_pos(t, 6, 2);
+    char b[96];
+    snprintf(b, sizeof b, "Level %u", level);
+    lv_obj_t *lv = st_label(content, b, NULL, 0);
+    lv_obj_align(lv, LV_ALIGN_TOP_RIGHT, -6, 2);
+    /* the level's title, when it's text */
+    for(uint32_t i = 0; i < c->n_levels; i++){
+        CourseLevel l;
+        if(course_level(c, i, &l) || l.number != level) continue;
+        int n = course_level_load(c, &l, g_st->buf, sizeof g_st->buf);
+        uint32_t pos = 0;
+        CourseField f;
+        while(n > 0 && course_field_next(g_st->buf, (uint32_t)n, &pos, &f) == 1)
+            if(f.tag == CF_LEVEL_TITLE && !(f.attr & (CF_A_PICTURE | CF_A_KANA))){
+                lv_obj_t *lt = st_label(content, st_ftext(&f), NULL, 228);
+                lv_obj_set_pos(lt, 6, 18);
+                lv_obj_set_style_text_color(lt, COL_DIM, 0);
+                break;
+            }
+        break;
+    }
+
+    if(!st_clock_ok()){
+        lv_obj_t *m = st_label(content, "The clock isn't set, so nothing can be scheduled. "
+                                        "HotSync, or set it in Settings, and come back.", NULL, 224);
+        lv_obj_set_pos(m, 8, 44);
+        return;
+    }
+    /* two big doors, the count on each */
+    snprintf(b, sizeof b, "Lessons\n%d", lessons);
+    lv_obj_t *lb = st_btn(content, 6, 40, 110, 56, b, st_lessons_cb, 0, 1);
+    snprintf(b, sizeof b, "Reviews\n%u", (unsigned)g_st->srs.due_total);
+    lv_obj_t *rb = st_btn(content, 124, 40, 110, 56, b, st_reviews_cb, 0, 1);
+    lv_obj_set_style_text_align(lv_obj_get_child(lb, 0), LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_align(lv_obj_get_child(rb, 0), LV_TEXT_ALIGN_CENTER, 0);
+    if(!lessons) lv_obj_add_state(lb, LV_STATE_DISABLED);
+    if(!g_st->srs.due_total) lv_obj_add_state(rb, LV_STATE_DISABLED);
+
+    /* where everything stands, by the course's own group names */
+    char g[200];
+    int k = 0;
+    for(int i = 0; i < c->n_groups && k < (int)sizeof g - 40; i++)
+        k += snprintf(g + k, sizeof g - k, "%s%s %u", i ? "  \xC2\xB7  " : "", c->groups[i].name,
+                      (unsigned)g_st->srs.group_count[i]);
+    if(!c->n_groups) snprintf(g, sizeof g, "%u started", (unsigned)g_st->srs.started);
+    lv_obj_t *gl = st_label(content, g, NULL, 228);
+    lv_obj_set_pos(gl, 6, 104);
+
+    char span[24];
+    if(g_st->srs.due_total) snprintf(b, sizeof b, "Reviews are waiting now.");
+    else if(g_st->srs.next_due){
+        st_span(g_st->srs.next_due - now, span, sizeof span);
+        snprintf(b, sizeof b, "Next review in %s.", span);
+    } else snprintf(b, sizeof b, "%s", g_st->srs.started ? "Nothing is scheduled." : "Start with a lesson.");
+    lv_obj_t *nx = st_label(content, b, NULL, 160);
+    lv_obj_set_pos(nx, 6, 142);
+    snprintf(b, sizeof b, "%u of %u items started", (unsigned)g_st->srs.started, (unsigned)c->n_items);
+    lv_obj_t *st = st_label(content, b, NULL, 160);
+    lv_obj_set_pos(st, 6, 160);
+    lv_obj_set_style_text_color(st, COL_DIM, 0);
+    st_btn(content, LCD_W - 72, 146, 66, 30, "Week", st_week_cb, 0, 0);
+
+    if(greet_due(GREET_STUDY)){
+        greet_done(GREET_STUDY);
+        char line[140];                          /* the balloon copies it */
+        if(!g_st->srs.started) snprintf(line, sizeof line, "%s", ST_GREET_FIRST);
+        else if(g_st->srs.due_total)
+            snprintf(line, sizeof line, greet_pick(ST_GREET_DUE, 3, &g_st_last_line), (int)g_st->srs.due_total);
+        else snprintf(line, sizeof line, "%s", greet_pick(lessons ? ST_GREET_NEW : ST_GREET_IDLE, 3, &g_st_last_line));
+        speaker_aside_ex(&study_face, line, "tap to continue", st_greet_tap_cb, 1);
+    }
+}
+
+/* ---- the week (Coach's and Guru's week screens, for a course) ----
+ * The fortnight comes from history.dat (study.c), which each finished item
+ * adds to; the stage groups are the scan the dashboard already made. The
+ * page is theirs too: wk_page's canvas, freed by content_clear. */
+
+static void st_week_back_cb(lv_event_t *e){ (void)e; st_show_dash(); }
+
+/* S5: the week AHEAD, under the week behind -- the same seven columns, but
+ * the bars outlined, since none of it has happened yet. Today's column is
+ * everything due by midnight, what's waiting now included. */
+#define ST_FC_Y    (WK_ROW_Y + 2)              /* its heading, clear of the chart's day letters */
+#define ST_FC_BASE (WK_ROW_Y + 60)             /* content y of its baseline */
+#define ST_FC_MAX  20
+static void st_forecast(lv_obj_t *page, const SrsSum *u){
+    static const char *DOW[7] = { "S", "M", "T", "W", "T", "F", "S" };
+    char b[40];
+    wk_lbl(page, 8, ST_FC_Y, 1, "Coming up");
+    snprintf(b, sizeof b, "%u in the next 24 h", (unsigned)(u->due + u->in24));
+    wk_lbl_r(page, ST_FC_Y, b);
+    int n[7], top = 1;
+    for(int i = 0; i < 7; i++){ n[i] = u->day[i] + (i ? 0 : (int)u->due); if(n[i] > top) top = n[i]; }
+    int32_t today = st_today();
+    for(int x = 4; x < LCD_W - 4; x++) wk_px(x, ST_FC_BASE);
+    for(int i = 0; i < 7; i++){
+        int cx = WK_COL0 + WK_PITCH / 2 + i * WK_PITCH;
+        int h = n[i] * ST_FC_MAX / top;
+        if(n[i] > 0 && h < 3) h = 3;
+        if(n[i] > 0){
+            wk_frame(cx - WK_BAR_W / 2, ST_FC_BASE - h, WK_BAR_W, h + 1);
+            snprintf(b, sizeof b, "%d", n[i]);
+            lv_obj_t *l = wk_lbl(page, 0, ST_FC_BASE - h - 15, 0, b);
+            lv_obj_update_layout(l);
+            lv_obj_set_x(l, cx - lv_obj_get_width(l) / 2);
+        }
+        lv_obj_t *dl = wk_lbl(page, 0, ST_FC_BASE + 2, i == 0, DOW[cal_weekday(today + i)]);
+        lv_obj_update_layout(dl);
+        lv_obj_set_x(dl, cx - lv_obj_get_width(dl) / 2);
+    }
+}
+
+static void st_week_advice(char *out, int cap, int adv, const StWeek *w, int due){
+    int rv = 0, rt = 0;
+    for(int i = 7; i < ST_WEEK_N; i++){ rv += w->reviews[i]; rt += w->right[i]; }
+    switch(adv){
+    case ST_ADV_START:  snprintf(out, cap, "Nothing yet this week. One lesson is five minutes, and it starts a streak."); break;
+    case ST_ADV_PILE:   snprintf(out, cap, "%d reviews are waiting. Hold off on lessons until they're down -- "
+                                           "new items only add to the pile.", due); break;
+    case ST_ADV_MISSES: snprintf(out, cap, "A lot of misses this week. Take fewer lessons for a few days "
+                                           "and let the reviews catch up."); break;
+    case ST_ADV_STREAK: snprintf(out, cap, "%d days in a row. That's exactly how it sticks.", w->streak); break;
+    case ST_ADV_GAPS:   snprintf(out, cap, "Fewer days than last week. A little every day beats a lot now and then."); break;
+    case ST_ADV_MORE:   snprintf(out, cap, "%d%% right this week. You've room for a few more lessons.",
+                                 rv ? rt * 100 / rv : 100); break;
+    default:            snprintf(out, cap, "A steady week. Keep the reviews at zero and the levels will come."); break;
+    }
+}
+
+static void st_show_week(void){
+    if(!g_st || !g_st->course_ok || !g_st->srs_ok){ show_study(); return; }
+    st_screen("This week");
+    SrsSum *u = st_rescan();
+    StWeek w;
+    st_hist_week(ST_ROOT, g_st->id, st_today(), &w);
+    /* the chart and the headline are reviews (the lessons are "new"), so
+     * the bars, the total and "on last week" all count the same thing */
+    int d[7], last = 0, rv = 0, rt = 0, ls = 0;
+    for(int i = 0; i < 7; i++){
+        last += w.reviews[i];
+        d[i] = w.reviews[7 + i];
+        rv += d[i]; rt += w.right[7 + i]; ls += w.lessons[7 + i];
+    }
+
+    lv_obj_t *page = wk_page();
+    char b[64];
+    snprintf(b, sizeof b, "%d review%s", rv, rv == 1 ? "" : "s");
+    wk_lbl(page, 8, 2, 1, b);
+    wk_delta(b, sizeof b, rv, last);
+    if(b[0]) wk_lbl_r(page, 2, b);
+    if(rv) snprintf(b, sizeof b, "%d new \xC2\xB7 %d%% right", ls, rt * 100 / rv);
+    else   snprintf(b, sizeof b, "%d new", ls);
+    wk_lbl(page, 8, 18, 0, b);
+    snprintf(b, sizeof b, "streak %d \xC2\xB7 best %d", w.streak, w.best);
+    wk_lbl_r(page, 18, b);
+
+    if(g_wk_cv){
+        /* no target line: the day's reviews are whatever came due */
+        wk_chart(page, d, 0, st_today());
+        if(u) st_forecast(page, u);
+    }
+
+    char say[160];
+    st_week_advice(say, sizeof say, st_advise(&w, g_st->srs.due_total), &w, g_st->srs.due_total);
+    free(u);
+    tap_anywhere(page, st_week_back_cb);
+    speaker_aside_ex(&study_face, say, "tap anywhere to go back", st_week_back_cb, 1);
+}
+
+/* ---- lessons: the cards, then a quiz on them ---- */
+
+static void st_card_nav_cb(lv_event_t *e){
+    int d = (int)(intptr_t)lv_event_get_user_data(e);
+    if(!g_st) return;
+    g_st->card += d;
+    if(g_st->card < 0) g_st->card = 0;
+    if(g_st->card < g_st->nlesson){ st_show_card(); return; }
+    /* the quiz: every question of every item in the batch */
+    uint8_t quiz[20];
+    for(int i = 0; i < g_st->nlesson; i++){
+        CourseItem it;
+        quiz[i] = course_item(&g_st->c, g_st->lesson[i], &it) ? ST_MEANING : g_st->c.kinds[it.kind].quiz;
+    }
+    if(g_st->round_on) st_end(&g_st->round);
+    g_st->round_on = st_begin(&g_st->round, g_st->lesson, quiz, g_st->nlesson, st_now()) == 0;
+    g_st->reviewing = 0; g_st->revealed = 0; g_st->undo_ok = 0; g_st->learned = 0;
+    st_show_ask();
+}
+
+static void st_lessons_cb(lv_event_t *e){
+    (void)e;
+    if(!g_st) return;
+    uint16_t level;
+    int batch = g_st->c.batch > 20 ? 20 : g_st->c.batch;
+    int n = srs_lessons(&g_st->srs, g_st->lesson, batch, &level);
+    g_st->nlesson = n < batch ? n : batch;
+    g_st->card = 0;
+    if(g_st->nlesson > 0) st_show_card(); else st_show_dash();
+}
+
+static void st_show_card(void){
+    char t[32];
+    snprintf(t, sizeof t, "Lesson %d of %d", g_st->card + 1, g_st->nlesson);
+    st_screen_full(t);
+    lv_obj_t *page = st_page(0, ST_BTN_Y - 4);
+    if(st_load(g_st->lesson[g_st->card])) st_label(page, g_st->c.err, NULL, 220);
+    else st_card(page);
+    if(g_st->card > 0) st_btn(content, 4, ST_BTN_Y, 96, ST_BTN_H, "< Back", st_card_nav_cb, -1, 0);
+    st_btn(content, LCD_W - 132, ST_BTN_Y, 128, ST_BTN_H, g_st->card + 1 < g_st->nlesson ? "Next >" : "Quiz >",
+           st_card_nav_cb, 1, 1);
+}
+
+/* ---- a question ---- */
+
+static void st_reveal_cb(lv_event_t *e){ (void)e; if(g_st){ g_st->revealed = 1; st_show_ask(); } }
+
+static void st_grade_cb(lv_event_t *e){
+    int grade = (int)(intptr_t)lv_event_get_user_data(e);
+    if(!g_st || !g_st->round_on) return;
+    StItem done;
+    uint32_t now = st_now();
+    int fin = st_answer(&g_st->round, grade, &done);
+    g_st->undo_ok = g_st->reviewing;              /* no undo in a lesson's quiz */
+    g_st->undo_had = 0;
+    if(fin){
+        CourseItem it;
+        if(!course_item(&g_st->c, done.item, &it)){
+            SrsRec r;
+            if(g_st->reviewing){
+                if(srs_get(&g_st->srs, done.item, &r) == 1){
+                    g_st->undo_rec = r; g_st->undo_had = 1; g_st->undo_item = done.item;
+                    g_st->undo_right = !done.wrong;
+                    srs_grade(&g_st->c, &r, done.grade, now, st_tz());
+                    if(srs_put(&g_st->srs, done.item, &r, now)) toast_show("Couldn't save to the card");
+                    else st_hist_add(ST_ROOT, g_st->id, st_today(), 1, !done.wrong, 0);
+                    g_st->sum_dirty = 1;
+                }
+                g_st->total++;
+                if(!done.wrong) g_st->right++;
+            } else {
+                srs_start(&g_st->c, &r, it.id, now, st_tz());
+                if(srs_put(&g_st->srs, done.item, &r, now)) toast_show("Couldn't save to the card");
+                else st_hist_add(ST_ROOT, g_st->id, st_today(), 0, 0, 1);
+                g_st->sum_dirty = 1;
+                g_st->learned++;
+            }
+        }
+    }
+    g_st->revealed = 0;
+    st_show_ask();
+}
+
+static void st_undo_cb(lv_event_t *e){
+    (void)e;
+    if(!g_st || !g_st->undo_ok) return;
+    uint16_t item;
+    int r = st_undo(&g_st->round, &item);
+    if(r == 1 && g_st->undo_had && item == g_st->undo_item){
+        /* the item had been graded: its record goes back as it was */
+        srs_put(&g_st->srs, item, &g_st->undo_rec, st_now());
+        st_hist_add(ST_ROOT, g_st->id, st_today(), -1, -(int)g_st->undo_right, 0);
+        g_st->sum_dirty = 1;
+        g_st->total--;
+        if(g_st->undo_right) g_st->right--;
+    }
+    g_st->undo_ok = 0; g_st->undo_had = 0;
+    g_st->revealed = 1;                            /* back to the answer, to grade again */
+    st_show_ask();
+}
+
+static void st_card_over_cb(lv_event_t *e);
+static void st_card_back_cb(lv_event_t *e){ (void)e; st_show_ask(); }
+
+static void st_show_ask(void){
+    StQ q;
+    if(!g_st || !g_st->round_on || !st_current(&g_st->round, &q)){ st_show_done(); return; }
+    st_screen_full(g_st->reviewing ? "Reviews" : "Quiz");
+    if(st_load(q.item)){ st_notice("Study", g_st->c.err); return; }
+    const int reading = q.q == ST_READING;
+
+    /* the banner: what's being asked. Reading is inverted, as WaniKani
+     * marks it, so the two are told apart before the words are read. */
+    char kind[32], b[64];
+    st_cap_kind(kind, sizeof kind, g_st->it.kind);
+    snprintf(b, sizeof b, "%s  \xC2\xB7  %s", kind, reading ? "Reading" : "Meaning");
+    lv_obj_t *ban = panel(content, 0, 0, LCD_W, ST_BAN_H, reading ? COL_LINE : COL_GRAF);
+    lv_obj_t *bl = st_label(ban, b, &lv_font_palm_bold, 0);
+    lv_obj_set_style_text_color(bl, reading ? COL_BODY : COL_LINE, 0);
+    lv_obj_center(bl);
+    if(g_st->undo_ok){
+        lv_obj_t *u = st_btn(ban, 2, 2, 48, ST_BAN_H - 4, "Undo", st_undo_cb, 0, 0);
+        (void)u;
+    }
+
+    /* the prompt, centred in its box */
+    lv_obj_t *box = lv_obj_create(content);
+    lv_obj_set_pos(box, 0, ST_BAN_H + 2);
+    lv_obj_set_size(box, LCD_W, ST_ASK_PROMPT_H);
+    lv_obj_set_style_border_width(box, 0, 0);
+    lv_obj_set_style_pad_all(box, 0, 0);
+    lv_obj_set_style_bg_opa(box, LV_OPA_TRANSP, 0);
+    lv_obj_set_flex_flow(box, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(box, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+    st_term(box, ST_ASK_PROMPT_H);
+    char left[16];
+    snprintf(left, sizeof left, "%d left", st_left(&g_st->round));
+    lv_obj_t *ll = st_label(content, left, NULL, 0);
+    lv_obj_align(ll, LV_ALIGN_TOP_RIGHT, -4, ST_BAN_H + 2);
+    lv_obj_set_style_text_color(ll, COL_DIM, 0);
+
+    const int by = ST_BTN_Y;
+    if(!g_st->revealed){
+        st_btn(content, 20, by, LCD_W - 40, ST_BTN_H, "Show answer", st_reveal_cb, 0, 1);
+        return;
+    }
+    /* the answer: the primary meaning or reading, big; the other meanings
+     * small. The area is 114 px: two lines at twice the size and the "also"
+     * lines that fit under them, or the answer at 1x (wrapped) when it's too
+     * long to be big. */
+    const int ay = ST_BAN_H + 2 + ST_ASK_PROMPT_H, ah = by - ay - 4;
+    lv_obj_t *ans = lv_obj_create(content);
+    lv_obj_set_pos(ans, 0, ay);
+    lv_obj_set_size(ans, LCD_W, ah);
+    lv_obj_set_style_border_width(ans, 0, 0);
+    lv_obj_set_style_pad_all(ans, 0, 0);
+    lv_obj_set_style_bg_opa(ans, LV_OPA_TRANSP, 0);
+    lv_obj_set_flex_flow(ans, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(ans, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(ans, LV_OBJ_FLAG_SCROLLABLE);
+    CourseField f;
+    lv_obj_t *prim = NULL;
+    if(reading){
+        if(st_find(CF_READING, CF_A_PRIMARY, &f) || st_find(CF_READING, 0, &f)){
+            lv_obj_t *o = st_field(ans, &f, &lv_font_palm_bold, 60);
+            if(o && lv_obj_check_type(o, &lv_label_class) && ((f.attr & CF_A_KANA) || !st_big(o, 2)))
+                lv_obj_set_style_text_align(o, LV_TEXT_ALIGN_CENTER, 0);
+        }
+    } else {
+        if(st_find(CF_MEANING, CF_A_PRIMARY, &f) || st_find(CF_MEANING, 0, &f)){
+            lv_obj_t *o = prim = st_field(ans, &f, &lv_font_palm_bold, 60);
+            if(o && lv_obj_check_type(o, &lv_label_class) && !st_big(o, 2))
+                lv_obj_set_style_text_align(o, LV_TEXT_ALIGN_CENTER, 0);
+        }
+        char also[160];
+        int ak = 0;
+        uint32_t pos = 0;
+        CourseField g;
+        int first = 1;
+        while(course_field_next(g_st->buf, g_st->it.text_len, &pos, &g) == 1 && ak < (int)sizeof also - 30)
+            if(g.tag == CF_MEANING && !(g.attr & CF_A_PICTURE)){
+                if(first){ first = 0; continue; }
+                ak += snprintf(also + ak, sizeof also - ak, "%s%.*s", ak ? ", " : "also: ", (int)g.len, g.text);
+            }
+        if(ak){
+            lv_obj_t *a = st_label(ans, also, NULL, LCD_W - 16);
+            lv_obj_set_style_text_align(a, LV_TEXT_ALIGN_CENTER, 0);
+            /* the lines left under the answer; the rest is on the Card */
+            lv_obj_update_layout(ans);
+            int lh = lv_font_get_line_height(lv_obj_get_style_text_font(a, 0));
+            int room = ah - (prim ? lv_obj_get_height(prim) : 0) - 4;
+            if(lv_obj_get_height(a) > room){
+                lv_label_set_long_mode(a, LV_LABEL_LONG_DOT);
+                lv_obj_set_height(a, room > lh ? room / lh * lh : lh);
+            }
+        }
+    }
+    st_btn(ban, LCD_W - 50, 2, 48, ST_BAN_H - 4, "Card", st_card_over_cb, 0, 0);
+
+    /* the grades: Wrong / Right, or Again / Hard / Good / Easy */
+    if(g_st->c.grading == 4){
+        static const char *const G4[] = { "Again", "Hard", "Good", "Easy" };
+        for(int i = 0; i < 4; i++) st_btn(content, 2 + i * 59, by, 56, ST_BTN_H, G4[i], st_grade_cb, i, i == 2);
+    } else {
+        st_btn(content, 4, by, 112, ST_BTN_H, "Wrong", st_grade_cb, SRS_AGAIN, 0);
+        st_btn(content, LCD_W - 116, by, 112, ST_BTN_H, "Right", st_grade_cb, SRS_GOOD, 1);
+    }
+}
+
+/* the whole card, over a revealed question; Back returns to the grades */
+static void st_card_over_cb(lv_event_t *e){
+    (void)e;
+    StQ q;
+    if(!g_st || !st_current(&g_st->round, &q)) return;
+    st_screen_full("Card");
+    lv_obj_t *page = st_page(0, ST_BTN_Y - 4);
+    if(!st_load(q.item)) st_card(page);
+    st_btn(content, 4, ST_BTN_Y, 128, ST_BTN_H, "< Back", st_card_back_cb, 0, 1);
+}
+
+/* ---- the end of a round ---- */
+
+static void st_done_cb(lv_event_t *e){ (void)e; st_show_dash(); }
+
+static void st_show_done(void){
+    if(!g_st){ show_study(); return; }
+    int reviewing = g_st->reviewing;
+    if(g_st->round_on){ st_end(&g_st->round); g_st->round_on = 0; }
+    st_screen(reviewing ? "Reviews done" : "Lesson done");
+    char line[160];
+    char b[64];
+    if(reviewing){
+        snprintf(b, sizeof b, "%u of %u right", (unsigned)g_st->right, (unsigned)g_st->total);
+        unsigned pct = g_st->total ? g_st->right * 100u / g_st->total : 100;
+        snprintf(line, sizeof line, "%s",
+                 pct >= 90 ? "That's the kind of round that makes it stick. See you at the next one."
+               : pct >= 70 ? "Good work. The ones you missed come back sooner, which is the point."
+               : "Tough round. Missing them is how they get learned -- they'll be back soon.");
+    } else {
+        snprintf(b, sizeof b, "%u new item%s", (unsigned)g_st->learned, g_st->learned == 1 ? "" : "s");
+        char span[24];
+        uint32_t first = g_st->c.scheduler == CS_STAGES ? g_st->c.steps[0] : 0;
+        if(first){
+            st_span(first, span, sizeof span);
+            snprintf(line, sizeof line, "Their first review comes round in %s. Don't worry about "
+                                        "remembering them all yet.", span);
+        } else snprintf(line, sizeof line, "They're in your reviews now. Don't worry about "
+                                           "remembering them all yet.");
+    }
+    lv_obj_t *h = st_label(content, b, &lv_font_palm_bold, 0);
+    lv_obj_align(h, LV_ALIGN_TOP_MID, 0, 24);
+    st_btn(content, 60, 80, LCD_W - 120, 34, "Done", st_done_cb, 0, 1);
+    speaker_aside_ex(&study_face, line, NULL, st_greet_tap_cb, 1);
+}
+
+static void st_reviews_cb(lv_event_t *e){
+    (void)e;
+    if(!g_st) return;
+    srs_scan(&g_st->srs, st_now());
+    int n = g_st->srs.n_due;
+    if(!n){ st_show_dash(); return; }
+    uint8_t *quiz = malloc((size_t)n);
+    if(!quiz){ toast_show("(low memory)"); return; }
+    for(int i = 0; i < n; i++){
+        CourseItem it;
+        quiz[i] = course_item(&g_st->c, g_st->srs.due[i], &it) ? ST_MEANING : g_st->c.kinds[it.kind].quiz;
+    }
+    if(g_st->round_on) st_end(&g_st->round);
+    g_st->round_on = st_begin(&g_st->round, g_st->srs.due, quiz, n, st_now()) == 0;
+    free(quiz);
+    g_st->reviewing = 1; g_st->revealed = 0; g_st->undo_ok = 0; g_st->right = g_st->total = 0;
+    st_show_ask();
+}
+
+/* ---- picking a course, and the empty card ---- */
+
+static void st_pick_cb(lv_event_t *e){
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    char ids[8][ST_ID_MAX];
+    int n = st_list_courses(ST_ROOT, ids, 8);
+    if(!g_st || i >= n) return;
+    if(!st_open_course(ids[i])) st_show_dash();
+}
+
+static void st_reinstall_cb(lv_event_t *e){
+    (void)e;
+    if(st_install_demo(ST_ROOT, 1) != 1){ toast_show("Couldn't write to the card"); return; }
+    toast_show("Demo installed");
+    if(g_st){ st_close_course(); if(!st_open_course("demo-kanji")) st_show_dash(); }
+}
+
+static void st_show_pick(void){
+    char ids[8][ST_ID_MAX];
+    int n = st_list_courses(ST_ROOT, ids, 8);
+    st_screen("Courses");
+    if(!n){
+        lv_obj_t *l = st_label(content, "No courses on the card. Copy a course.srs into "
+                                        "/study/<name>/ on the card, or put the demo back.", NULL, 224);
+        lv_obj_set_pos(l, 8, 12);
+        st_btn(content, 40, 90, LCD_W - 80, 32, "Reinstall demo", st_reinstall_cb, 0, 1);
+        return;
+    }
+    for(int i = 0; i < n; i++) st_btn(content, 8, 8 + i * 36, LCD_W - 16, 32, ids[i], st_pick_cb, i, i == 0);
+}
+
+static void show_study(void){
+    if(!g_st){
+        g_st = calloc(1, sizeof *g_st);
+        if(!g_st){ toast_show("(low memory)"); return; }
+    }
+    st_install_demo(ST_ROOT, 0);                 /* once, the first time */
+    if(g_st->course_ok && g_st->srs_ok){ st_show_dash(); return; }
+    char ids[8][ST_ID_MAX], last[ST_ID_MAX];
+    int n = st_list_courses(ST_ROOT, ids, 8), pick = -1;
+    if(st_last_get(ST_ROOT, last))
+        for(int i = 0; i < n; i++) if(!strcmp(ids[i], last)) pick = i;
+    if(pick < 0 && n == 1) pick = 0;
+    if(pick < 0){ st_show_pick(); return; }
+    if(!st_open_course(ids[pick])) st_show_dash();
+}
+
+/* ---- the menu's Study items ---- */
+
+static void act_st_courses(lv_event_t *e){ (void)e; menu_close(); if(g_st) st_show_pick(); }
+static void act_st_week(lv_event_t *e){ (void)e; menu_close(); st_show_week(); }
+static void act_st_reinstall(lv_event_t *e){ menu_close(); st_reinstall_cb(e); }
+
+static void act_st_info(lv_event_t *e){
+    (void)e;
+    menu_close();
+    if(!g_st || !g_st->course_ok) return;
+    Course *c = &g_st->c;
+    char *m = g_st->txt;                         /* alert_show copies it */
+    const size_t mcap = ST_TXT;
+    char author[64], src[160];
+    course_meta_text(c, 0x0004, author, sizeof author);
+    course_meta_text(c, 0x0008, src, sizeof src);
+    snprintf(m, mcap, "%s%s%s\n%u items in %u levels\n%s%s%s%s",
+             c->title, c->version[0] ? " " : "", c->version,
+             (unsigned)c->n_items, (unsigned)c->n_levels,
+             author[0] ? "by " : "", author, author[0] ? "\n" : "", c->licence[0] ? c->licence : "");
+    if(src[0]) snprintf(m + strlen(m), mcap - strlen(m), "\n%s", src);
+    alert_show(m);
+}
+
+static void act_st_check(lv_event_t *e){
+    (void)e;
+    menu_close();
+    if(!g_st || !g_st->course_ok) return;
+    uint8_t *tmp = malloc(COURSE_VERIFY_BUF);
+    if(!tmp){ toast_show("(low memory)"); return; }
+    int r = course_verify(&g_st->c, tmp, COURSE_VERIFY_BUF);
+    free(tmp);
+    char m[200];
+    if(!r) snprintf(m, sizeof m, "Every part of \"%s\" checks out.", g_st->c.title);
+    else snprintf(m, sizeof m, "This course is damaged (%s). Copy it to the card again; your progress is kept.",
+                  g_st->c.err);
+    alert_show(m);
+}
+
+static lv_obj_t *g_st_confirm;
+static void st_confirm_close(void){ if(g_st_confirm){ lv_obj_del(g_st_confirm); g_st_confirm = NULL; } }
+static void st_confirm_no_cb(lv_event_t *e){ (void)e; st_confirm_close(); }
+static void st_remove_yes_cb(lv_event_t *e){
+    (void)e;
+    st_confirm_close();
+    if(!g_st) return;
+    char id[ST_ID_MAX];
+    snprintf(id, sizeof id, "%s", g_st->id);
+    st_close_course();
+    toast_show(st_remove_course(ST_ROOT, id) ? "Couldn't remove it" : "Removed");
+    show_study();
+}
+static void act_st_remove(lv_event_t *e){
+    (void)e;
+    menu_close();
+    if(!g_st || !g_st->course_ok || g_st_confirm) return;
+    g_st_confirm = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_st_confirm, LCD_W, LCD_H);
+    lv_obj_set_style_bg_color(g_st_confirm, COL_LINE, 0);
+    lv_obj_set_style_bg_opa(g_st_confirm, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(g_st_confirm, 0, 0);
+    lv_obj_add_flag(g_st_confirm, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_st_confirm, st_confirm_no_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *p = lv_obj_create(g_st_confirm);
+    lv_obj_set_size(p, 210, 110);
+    lv_obj_center(p);
+    lv_obj_set_style_bg_color(p, lv_color_white(), 0);
+    lv_obj_set_style_border_width(p, 1, 0);
+    lv_obj_set_style_border_color(p, COL_LINE, 0);
+    lv_obj_set_style_radius(p, 0, 0);
+    lv_obj_set_style_pad_all(p, 8, 0);
+    lv_obj_clear_flag(p, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(p, LV_OBJ_FLAG_CLICKABLE);
+    char q[120];
+    snprintf(q, sizeof q, "Remove \"%s\" and your progress in it from the card?", g_st->c.title);
+    st_label(p, q, NULL, 190);
+    lv_obj_t *no = st_btn(p, 0, 0, 90, 28, "Cancel", st_confirm_no_cb, 0, 0);
+    lv_obj_align(no, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_t *yes = st_btn(p, 0, 0, 90, 28, "Remove", st_remove_yes_cb, 0, 1);
+    lv_obj_align(yes, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+}
+
+static void st_menu(lv_obj_t *panel){
+    menu_header(panel, "Study");
+    menu_item(panel, "Courses", act_st_courses);
+    if(g_st && g_st->course_ok){
+        if(g_st->srs_ok) menu_item(panel, "This week", act_st_week);
+        menu_item(panel, "About this course", act_st_info);
+        menu_item(panel, "Check course", act_st_check);
+        menu_item(panel, "Remove course", act_st_remove);
+    }
+    char p[64];
+    snprintf(p, sizeof p, "%s/study/demo-kanji/course.srs", ST_ROOT);
+    FILE *f = fopen(p, "rb");
+    if(f) fclose(f); else menu_item(panel, "Reinstall demo", act_st_reinstall);
+}
+
+#ifdef UI_DEVTOOLS
+void ui_test_study_skew(int32_t seconds){ g_st_skew += seconds; }
+#endif
+
 void ui_init(void){
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, COL_BODY, 0);
@@ -10527,6 +12262,7 @@ void ui_init(void){
     /* Graffiti strip: silkscreen buttons flank the writing area, Palm-style:
      * [Home][Menu] ... abc | 123 ... [Find][Calc] */
     lv_obj_t *graf = panel(scr, 0, PDA_H, LCD_W, GRAFFITI_H, COL_GRAF);
+    g_graf = graf;
     mk_silk(graf, &silk_home, LV_ALIGN_TOP_LEFT,     3,  3, home_cb);
     mk_silk(graf, &silk_menu, LV_ALIGN_BOTTOM_LEFT,  3, -3, menu_cb);
     mk_silk(graf, &silk_find, LV_ALIGN_TOP_RIGHT,   -3,  3, find_cb);

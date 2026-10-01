@@ -1,0 +1,11 @@
+# front<TAB>back[<TAB>id] -- test-only; checks Latin-1, folding, a picture front
+France	Paris
+Deutschland	Berlin
+España	Madrid
+Österreich	Wien
+Ísland	Reykjavík
+Danmark	København
+Côte d’Ivoire	Yamoussoukro	civ
+“Quoted” — folded	"Quoted" - folded
+ΕΛΛΑΔΑ	ΑΘΗΝΑ	greece
+日本	東京	japan

@@ -16,6 +16,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_log.h"
 #include "mbedtls/base64.h"
+#include "mbedtls/platform_util.h"   /* mbedtls_platform_zeroize */
 #include "dav.h"
 #include "dav_xml.h"
 
@@ -99,10 +100,14 @@ static esp_err_t on_event(esp_http_client_event_t *e){
  * wants auth on the first request rather than after a 401 challenge). */
 static void basic_auth(const DavCtx*d, char*out, int cap){
     if(!d->user[0]){ if(cap) out[0]=0; return; }   /* public GET (empty user): no auth */
+    /* Base64 of user:pass IS the password, so every copy made here is wiped
+     * before it goes out of scope, and davreq wipes `out` when it is done. */
     char up[192]; int n=snprintf(up,sizeof up,"%s:%s",d->user,d->pass);
     unsigned char b64[288]; size_t bl=0;
-    if(mbedtls_base64_encode(b64,sizeof b64,&bl,(const unsigned char*)up,(size_t)n)!=0){ if(cap)out[0]=0; return; }
-    snprintf(out,cap,"Basic %.*s",(int)bl,(const char*)b64);
+    if(mbedtls_base64_encode(b64,sizeof b64,&bl,(const unsigned char*)up,(size_t)n)!=0){ if(cap)out[0]=0; bl=0; }
+    else snprintf(out,cap,"Basic %.*s",(int)bl,(const char*)b64);
+    mbedtls_platform_zeroize(up, sizeof up);
+    mbedtls_platform_zeroize(b64, sizeof b64);
 }
 
 /* One request. `url` is absolute (scheme://host[:port]/path). body may be NULL.
@@ -201,6 +206,7 @@ static int davreq(const DavCtx*d, esp_http_client_method_t method, const char*ur
     if(respn) *respn = acc.len;
     if(acc.truncated) ESP_LOGW(TAG,"response truncated at %d bytes: %s", respcap, url);
     s_acc = NULL;
+    mbedtls_platform_zeroize(auth, sizeof auth);
     /* connection is left OPEN for the next request; dav_disconnect() (engine
      * sortFile / end of sync) frees it before the next heap-heavy sort. */
     return status;

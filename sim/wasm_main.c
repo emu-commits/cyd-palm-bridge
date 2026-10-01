@@ -16,6 +16,7 @@
  * Memory model: the LVGL pool is exact device parity (24 KB, lv_conf.h) and
  * sim_boot arms the general-heap budget (sim_heap.h) so big allocations fail
  * like the hardware's ~140 KB interactive free heap. */
+#include <string.h>
 #include <sys/stat.h>
 #include <emscripten/emscripten.h>
 #include "sim_port.h"
@@ -55,17 +56,18 @@ EMSCRIPTEN_KEEPALIVE const unsigned char *sim_fb(void){
  * IndexedDB never receives a password. */
 EMSCRIPTEN_KEEPALIVE void sim_scrub_config(void){
     Config c;
+    ConfigSecrets sec;
+    memset(&sec, 0, sizeof sec);
     config_defaults(&c);
-    if(config_load("/sdcard/config.ini", &c) != 0) return;   /* no file yet */
+    if(config_load("/sdcard/config.ini", &c, &sec) != 0) return;   /* no file yet */
     /* Every remembered network, not just the first: the browser build persists
      * config.ini into IndexedDB, so a password left in slot 2 is a password
      * written to the user's browser storage. */
-    int dirty = c.dav_pass[0] != 0;
-    for(int i = 0; i < CFG_WIFI_N; i++) if(c.wifi[i].pass[0]) dirty = 1;
+    int dirty = sec.dav_pass[0] != 0;
+    for(int i = 0; i < CFG_WIFI_N; i++) if(sec.wifi_pass[i][0]) dirty = 1;
+    config_wipe(&sec, sizeof sec);
     if(!dirty) return;                                       /* already clean */
-    for(int i = 0; i < CFG_WIFI_N; i++) c.wifi[i].pass[0] = 0;
-    c.dav_pass[0]  = 0;
-    config_save("/sdcard/config.ini", &c);
+    config_save("/sdcard/config.ini", &c, NULL);             /* no passwords */
 }
 
 int main(void){

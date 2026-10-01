@@ -33,14 +33,19 @@ INC    := -I. -Iinclude -Ilvgl -I$(FW) -I$(BR)
 # Defined ONCE, here, because smoke32 rebuilds CFLAGS from scratch and a second
 # hand-copied list is exactly how a build flag silently stops applying to half
 # the gates.
-SIMDEF := -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS -DUI_SEED_TESTEVENTS
+# The version About shows: the same `git describe` ESP-IDF stamps into the
+# device image when a project sets no PROJECT_VER (sim/include/esp_app_desc.h).
+# Passed as a bare token and made a string there: a quoted -D does not survive
+# smoke32, which hands CFLAGS to a sub-make inside double quotes.
+APP_VER := $(shell git describe --tags --always --dirty 2>/dev/null || echo unknown)
+SIMDEF := -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS -DUI_SEED_TESTEVENTS -DSIM_APP_VERSION_RAW=$(APP_VER)
 CFLAGS := -O2 -g -Wall $(SIMDEF) $(INC)
 
 # the REAL firmware UI + data layer + portable modules, unchanged
 APP_SRCS := \
     $(FW)/ui.c $(FW)/data.c $(FW)/graffiti.c $(FW)/appcfg.c $(FW)/secretstore.c $(FW)/clock.c \
-    $(FW)/lv_font_palm.c $(FW)/lv_font_palm_bold.c $(FW)/lv_font_kana.c $(FW)/palm_icons.c \
-    $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(BR)/dash.c $(FW)/minesweeper.c $(FW)/wordie.c $(FW)/sudoku.c $(FW)/zip.c $(FW)/coach.c $(FW)/guru.c $(FW)/guru_pool.c $(FW)/gurupool.c \
+    $(FW)/lv_font_palm.c $(FW)/lv_font_palm_bold.c $(FW)/lv_font_palm_bold_2x.c $(FW)/lv_font_kana.c $(FW)/lv_font_kana_20.c $(FW)/palm_icons.c \
+    $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(BR)/dash.c $(FW)/minesweeper.c $(FW)/wordie.c $(FW)/sudoku.c $(FW)/zip.c $(FW)/coach.c $(FW)/guru.c $(FW)/guru_pool.c $(FW)/gurupool.c $(FW)/course.c $(FW)/srs.c $(FW)/study.c $(FW)/study_demo.c \
     $(BR)/pdb.c $(BR)/datebook.c $(BR)/address.c $(BR)/todo.c $(BR)/appinfo.c \
     $(BR)/ical.c $(BR)/vcard.c $(BR)/tz.c $(BR)/charset.c \
     $(BR)/find.c $(BR)/calc.c $(BR)/config.c $(BR)/rss.c $(BR)/news.c $(BR)/feeds.c \
@@ -53,7 +58,7 @@ WRAP_LD := -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free
 LVGL_SRCS := $(shell find lvgl/src -name '*.c' 2>/dev/null)
 LVGL_OBJS := $(patsubst lvgl/src/%.c,build/lvgl/%.o,$(LVGL_SRCS))
 
-.PHONY: host wasm smoke smoke32 poolparity data graf mines wordie sudoku zip clock coach guru gurupool dash games clean lvgl-src
+.PHONY: host wasm smoke smoke32 secretscan poolparity data graf mines wordie sudoku zip clock coach guru gurupool dash course srs games clean lvgl-src
 
 # LVGL_SRCS is evaluated when make parses this file, so on a clean checkout the
 # source must be fetched BEFORE the build graph is used: the entry points fetch,
@@ -104,6 +109,10 @@ smoke32: lvgl-src
 	rm -rf build/shots && mkdir -p build/shots
 	./build/sim_host build/shots < tests/smoke.txt
 	@ls build/shots/*.ppm >/dev/null
+	$(CC) -m32 -O2 -Wall -Wextra -I$(FW) tests/course_test.c $(FW)/course.c -o build/course_test32
+	./build/course_test32
+	$(CC) -m32 -O2 -Wall -Wextra -I$(FW) -I$(BR) tests/srs_test.c $(FW)/srs.c $(FW)/study.c $(FW)/study_demo.c $(FW)/course.c -o build/srs_test32
+	./build/srs_test32
 	@echo "sim smoke32 (true device-sized pool): OK"
 
 # ---- poolparity: assert sim/lv_conf.h still matches the device's configured
@@ -129,6 +138,25 @@ build/nosecrets: tests/nosecrets.c $(FW)/appcfg.c $(FW)/secretstore.c $(BR)/conf
 	@mkdir -p build
 	$(CC) -O2 -Wall $(SIMDEF) -DCFG_PATH='"/nonexistent/cyd-nosecrets.ini"' $(INC) \
 	    tests/nosecrets.c $(FW)/appcfg.c $(FW)/secretstore.c $(BR)/config.c $(FW)/clock.c -o $@
+
+# ---- secretscan: a password must not outlive its use anywhere in RAM.
+# Types two passwords through the real Settings screens, runs the stubbed sync
+# that reads them the way hotsync.c does, and after each step scans every
+# writable page of the process for them (host_main.c: secret_scan) -- live
+# buffers, freed heap, the LVGL pool, dead stack frames. The passwords are in
+# the script as hex only. Reports where a copy is, never the value. ----
+#
+# It runs on an EMPTY card and puts the old one back afterwards, pass or fail:
+# CI runs it in the same job as `smoke`, whose walk expects a fresh card with no
+# Wi-Fi saved, and this gate saves one.
+secretscan: host
+	rm -rf build/secretshots build/sdcard.keep && mkdir -p build/secretshots build/sdcard.keep
+	cp -a /sdcard/. build/sdcard.keep/
+	find /sdcard -mindepth 1 -delete
+	./build/sim_host build/secretshots < tests/secretscan.txt; rc=$$?; \
+	    find /sdcard -mindepth 1 -delete; cp -a build/sdcard.keep/. /sdcard/; \
+	    rm -rf build/sdcard.keep; exit $$rc
+	@echo "sim secretscan: OK"
 
 # ---- graf: offline Graffiti recognizer accuracy gate (no LVGL/display needed).
 # Synthesizes noisy strokes from the real templates and asserts recognition
@@ -156,6 +184,43 @@ wordie: build/wordie_test
 build/wordie_test: tests/wordie_test.c $(FW)/wordie.c $(FW)/wordie.h
 	@mkdir -p build
 	$(CC) -O2 -Wall -I$(FW) tests/wordie_test.c $(FW)/wordie.c -o $@
+
+# ---- course: the Study course reader (firmware/main/course.c), pure C. Its
+# checks on the committed course files, then the round trip: the C reader's
+# dump of each file must equal tools/mkcourse.py's, byte for byte (the Python
+# side reads the file with its own reader, stdlib only). smoke32 runs the
+# checks again 32-bit, as on the device; make ftest fuzzes the reader. ----
+COURSE_FILES := ../courses/demo-kanji/course.srs ../tests/data/study/cards/course.srs \
+                ../tests/data/study/features/course.srs ../tests/data/study/remap-v1/course.srs \
+                ../tests/data/study/remap-v2/course.srs
+course: build/course_test
+	python3 ../tools/gen_study_demo.py --check
+	python3 ../tools/gen_font_2x.py --check
+	./build/course_test
+	@for f in $(COURSE_FILES); do \
+	  ./build/course_test dump $$f > build/course_c.txt || exit 1; \
+	  python3 ../tools/mkcourse.py --dump $$f > build/course_py.txt || exit 1; \
+	  cmp build/course_c.txt build/course_py.txt || { echo "course: C and Python read $$f differently"; exit 1; }; \
+	  echo "  round trip: $$f"; done
+	@echo "sim course: OK"
+
+build/course_test: tests/course_test.c $(FW)/course.c $(FW)/course.h
+	@mkdir -p build
+	$(CC) -O2 -Wall -Wextra -I$(FW) tests/course_test.c $(FW)/course.c -o $@
+
+# ---- srs: Study's schedulers and progress files (firmware/main/srs.c), under
+# ASan and UBSan. A year through each scheduler (sm2 checked against the web
+# app it copies), the log cut at every byte, a damaged progress.dat left
+# alone, remapping across a course update, the demo's unlocks. smoke32 runs it
+# again 32-bit. ----
+srs: build/srs_test
+	./build/srs_test
+
+build/srs_test: tests/srs_test.c $(FW)/srs.c $(FW)/srs.h $(FW)/study.c $(FW)/study.h $(FW)/course.c \
+                $(FW)/course.h $(FW)/study_demo.c $(BR)/safefile.h
+	@mkdir -p build
+	$(CC) -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all -I$(FW) -I$(BR) \
+	    tests/srs_test.c $(FW)/srs.c $(FW)/study.c $(FW)/study_demo.c $(FW)/course.c -o $@
 
 # ---- sudoku: host gate for the pure Sudoku logic (generation + rules, no LVGL). ----
 sudoku: build/sudoku_test
@@ -238,7 +303,7 @@ build/dash_test: tests/dash_test.c $(BR)/dash.c $(BR)/dash.h
 	$(CC) -O2 -Wall -I$(BR) tests/dash_test.c $(BR)/dash.c -o $@ -lm
 
 # ---- games: every game's logic gate in one go (what CI runs). ----
-games: poolparity mines wordie sudoku zip clock coach guru gurupool dash
+games: poolparity mines wordie sudoku zip clock coach guru gurupool dash course srs
 
 # ---- wasm: everything compiled by emcc in one shot (CI build; no local emcc needed).
 # 32-bit wasm => the TRUE device-sized pool applies (see lv_conf.h). main() boots

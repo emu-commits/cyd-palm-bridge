@@ -16,6 +16,794 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-01 — Full screen: a wider Home button
+
+From the owner: "in the fullscreen modes, make the home button as wide as
+will fit naturally". Home now runs from just right of the clock to just
+short of Menu: x 169 to 212, 43 px where it was 24, with the same 8 px of
+extra click area. Its left end is `tb_home_x()`, measured once from the
+widest the centred clock can ever be (the widest digit and month: "12:58p
+May 30" in effect), so the button doesn't move as the time changes. It has
+the category picker's 1 px white outline, so the width shows on the black
+bar. Menu stays 24 px. Smoke's Home tap (200,12) is inside both the old and
+new button; the title bars in the `guru_*` and `study_*` shots were looked
+at on a fresh card.
+
+Measured (IDF build in `espressif/idf:release-v5.5`, LVGL v9.5.0 vendored
+locally): app 1,728,400 B (+240 B); static DRAM 160,580 B (unchanged).
+
+### 2026-10-01 — Guru full screen: her list and a habit without the Graffiti strip
+
+From the owner: "just like we did for the Study app, apply the full-screen
+mode to the Guru app, which will make scrolling the list and checking items
+easier". Nothing in Guru is written, so her habit list and a habit's page
+call `ui_full_screen(1)` (`show_guru()`, `gu_show_task()`) and size
+themselves from `GU_FULL_H` (296 px): the list shows about 14 rows where it
+showed 8, and a habit's why box grows by the same 112 px, with Did it and
+Back along the bottom. Home and Menu are in the title bar, as in Study.
+**Her week stays as it was**, because her verdict stands in the strip.
+Her greeting still stands in the strip's place, over the bottom of the list,
+until it's tapped.
+
+Smoke: the habit's buttons are tapped at y 300, Menu at (226,12) and Home
+at (200,12) on the list; the `guru_*` shots were looked at on a fresh card.
+
+Measured (IDF build in `espressif/idf:release-v5.5`, LVGL v9.5.0 vendored
+locally): app 1,728,160 B (+16 B); static DRAM 160,580 B (unchanged).
+
+### 2026-09-30 — Study full screen: lessons and reviews without the Graffiti strip
+
+From the bench: "the scrolling is still a poor experience. What do you
+think about making the lessons and reviews hide the graffiti pane to give
+them the full space ... We just need to keep the home and menu buttons
+available somehow." Study never takes writing, so its lesson cards,
+questions and the Card view now take the strip's 112 px: 296 px of content
+where there were 184.
+
+**Home and Menu** move to the title bar's right end, the same silkscreen
+icons in white on the black bar, 24×20 buttons with an 8 px click area
+around them (so 40×36 to a finger). Study's title bar has no category
+picker there. The clock stays centred and the screen's title at the left.
+
+**How** (`ui.c`):
+- `ui_full_screen(on)` hides the strip, grows `content`, and makes the two
+  buttons; off shows the strip, shrinks `content` and deletes them. The
+  delete is `lv_obj_delete_async`, because Home's own click is what turns
+  full screen off.
+- `content_clear()` turns it off for every screen swap, so nothing but a
+  screen that asks keeps it. The lock screen, Home, another app: all back
+  to normal. Study, swapping one of its own screens for another
+  (`g_st_keep`), says for itself: `st_screen()` off, `st_screen_full()`
+  on. So going from card to card, or question to question, doesn't rebuild
+  the buttons.
+- The dashboard, the Week screen, the course list and the end of a round
+  keep the strip; her greetings speak from it.
+
+**The screens with the room:**
+- **a lesson card** is 246 px of page (was 150) over 42 px Back and Next
+  buttons (were 30): a radical's card and most of a kanji's fit without
+  scrolling;
+- **a question:** a 24 px banner with 48 px Undo and Card buttons, a
+  104 px prompt box (was 76), an answer area of 114 px (was 50) that
+  takes two lines at 2× and as many "also" lines as fit, and 42 px grade
+  buttons;
+- **the Card** over a question is the lesson card's page.
+
+The smoke tour taps Study's bottom row at y 295, and Home (200,12) and
+Menu (226,12) in the title bar where the screen is full.
+
+**Cost:**
+- Firmware (`espressif/idf:release-v5.5`, LVGL 9.5.0 local): app
+  1,728,144 B, **+560 B**; static DRAM 160,580 B, **+16 B** (the strip's
+  pointer and the two buttons').
+- LVGL pool: the buttons exist only in full screen, so the smoke run's
+  low-water mark is unchanged at 22,464 B. Made up front and hidden, they
+  had cost 1,632 B of it everywhere. A full-screen card leaves 36,744 B
+  free (64-bit sim).
+
+**A lesson from the session:** `pkill -f <pattern>` run from a shell whose
+own command line contains the pattern kills that shell. Stop a background
+wait by its task, not by a pattern.
+
+### 2026-09-30 — Study's lesson cards: readings at a readable size
+
+From the bench: "once it introduces on'yomi and kunyomi the kana are
+double-sized and scroll off the screen. The kana rendering is maybe 2x what
+it needs to be and the layout needs to be cleaned up." The readings were in
+`lv_font_kana`, the Kana trainer's 38 px font, one label per reading under
+a heading per type, so two readings filled a line and each type took about
+50 px.
+
+**The reading font.** `lv_font_kana_20.c` is kana at 20 px (21 px line),
+generated by `tools/gen_kana_font.py` from the pinned Noto Sans JP that
+course pictures are drawn with, so a reading matches its kanji. It covers
+the Kana trainer's ranges plus 、 and 。, and falls back to the Palm font
+for anything else (a Latin reading, a hyphen). The 1-bit threshold is 72,
+not the pictures' 128: sizes 18, 20 and 22 at 128, 96 and 72 were drawn
+side by side, and at 128 a 20 px kana's strokes break up.
+`tests/mkcourse_test.py` checks the file is what the script draws (it
+already has the pinned font and Pillow).
+
+**The card** (`st_card()`; smoke shots `study_card`, `study_kanji_card`,
+and a scratch run of the `features` deck with everything in one lesson):
+- **readings:** a line per type, its name in a 64 px column ("On'yomi")
+  and the readings joined with 、 ("いち、いつ"). A Latin reading
+  ("ko-MEE-da") is in the Palm font; a type with a reading that is a
+  picture keeps a wrapped row of its pieces;
+- **the meaning:** 2× under the term, as a question shows it, with "also:"
+  under it, in place of a "Meaning" heading and 1× text;
+- **a single kanji** (a picture no wider than 70 px) has its meaning
+  beside it, so on'yomi and kun'yomi are on the first screen without
+  scrolling;
+- **a term that's words** is as tall as it is, rather than centred in the
+  70 px picture box, and **a kana term** (つき) is centred.
+- The question screen's reading answer keeps the 38 px kana: it's the one
+  big answer, like the 2× meaning.
+
+**Cost:**
+- Firmware (`espressif/idf:release-v5.5`, LVGL 9.5.0 local): app
+  1,727,584 B, **+8,352 B** (6,014 B of glyph bitmaps); static DRAM
+  unchanged at 160,564 B.
+- LVGL pool, 64-bit sim, before and after: a radical's card 38,712 →
+  38,304 B free, a kanji's 34,344 → 34,312 B. The heap is unchanged.
+
+### 2026-09-30 — Study S5: the reviews due, at a glance
+
+The owner picked the layouts from simulator mock-ups ("go with A and the
+badge, total across courses, reviews only. air quality can be minimized on
+the dashboard as necessary").
+
+**What shows** (smoke shots `study_lock_caught_up`, `study_lock_due`,
+`study_launcher_none`, `study_launcher_badge`, `study_week`; looked at):
+- **The lock screen:** AHEAD has a third row, STUDY, under NEXT and DUE:
+  "5 reviews due", "caught up · next 9:47p" (a weekday, then a date, when
+  it's further off), or "no reviews yet" before any course has a summary.
+  The lock repaints every minute, and counts again when the next review
+  comes due, so the number rises on its own.
+- **The room for it** came from the CONDITIONS box, 14 px shorter (rule at
+  204, was 218): the air quality moved up to the right of the reading's
+  line, and the hourly strip moved up with the rain bars capped at 20 px
+  (was 24). The air label is fitted on every paint: whole ("Air 120 ·
+  Unhealthy*"), then just the number ("Air 250" beside "104° Thunder +
+  hail"), then nothing. The worst cases were rendered in a scratch copy.
+- **The launcher:** a black count at the Study icon's shoulder ("5"; "99+"
+  at most), none at 0.
+- **The Week screen's lower half is the week ahead:** "Coming up", "N in
+  the next 24 h", and seven outlined bars (today's includes what's waiting
+  now) under the week behind. It replaced the stage-group rows, which the
+  dashboard shows anyway.
+
+**How** (`srs.c`, `study.c`; host tests in `make -C sim srs` and
+`smoke32`):
+- `srs_scan_sum()` is the dashboard's scan, gathering the week ahead as it
+  goes: the count due, the next due time to the second, the count in the
+  next 24 hours, the next seven local days, and the soonest 1,024 due
+  times as minutes after the scan (rounded up, so a count never rises
+  early), kept in a max-heap and heap-sorted at the end.
+- `st_sum_write()` puts it on the card as `<course>/summary.bin` (a 40 B
+  header, 2 B a time, a CRC-32; replaced whole). The dashboard writes it,
+  and so does closing Study with grades since (`sum_dirty`).
+- `st_glance()` totals every course's summary at the time asked: each
+  one's count, plus its minutes that have passed. A damaged summary is
+  left out rather than guessed at; a summary from the future (the clock
+  set back) counts as it was made.
+- Tests: a scan's counts, by-day buckets in two time zones, rounding, a
+  suspended item left out, the 1,024 soonest of 1,500, a round trip, a
+  flipped bit and a short file refused, and totals across two courses as
+  the clock moves (including the minute a review comes due).
+- Removing a course removes its summary.
+
+**Cost:**
+- Firmware (`espressif/idf:release-v5.5`, LVGL 9.5.0 local): app
+  1,719,232 B, **+3,024 B**; static DRAM 160,564 B, **+8 B** (two label
+  pointers and a time).
+- LVGL pool, 64-bit sim: the lock screen leaves 26,632 B free (was
+  27,488: three more labels); the launcher with a badge 30,880 B (31,280
+  without).
+- Heap: the Week screen peaks at 15,416 B while it builds (the session,
+  its chart canvas and the 2.1 KB summary, freed at once). Reading the
+  summaries for the lock or launcher takes 512 B (the course list) and a
+  128 B stack buffer, freed before returning. The smoke run's peak is 15,416 B of the 147,456 B budget.
+- A course with nothing coming up in the week has a 44 B summary; the
+  demo's is 60 B at the end of the smoke tour (eight due times); the most
+  one can be is 2,092 B.
+
+**Found on the way:** `lv_text_get_width` is public in the simulator's
+LVGL 9.2 but private in 9.5 (the device's), and the firmware build failed
+on it. The width now comes from `lv_text_get_size`, public in both. Only
+the firmware build catches this kind of thing, so it stays in the gate
+list.
+
+### 2026-09-30 — Study S4: the Week screen
+
+From the bench: "we need a Week stats screen in study just like how it is
+done in coach and guru". It's built on their page (`wk_page`, `wk_chart`,
+`wk_row`, `wk_delta`) and reached the same two ways: a **Week** button on
+the dashboard, and **This week** in the menu.
+
+**What it shows** (`study_week` in the smoke tour, looked at):
+- "5 reviews" and "+5 on last week"; under it "5 new · 100% right" and
+  "streak 1 · best 1";
+- the last seven days' reviews as bars, today underlined. There's no
+  target line: a day's reviews are whatever came due;
+- the course's stage groups (the demo's Learning, Known, Strong, Deep,
+  Retired) as rows, scaled to the largest; with fewer groups, "N of M
+  items started" under them;
+- her advice from the strip, and a tap anywhere goes back to the
+  dashboard.
+
+**The history** (`study.c`, host-tested in `make -C sim srs` and in
+`smoke32`):
+- `<course>/history.dat`: an 8-byte header, then one 12-byte `StDay` per
+  local day studied (reviews, right, lessons). About 4.4 KB for a year of
+  daily study.
+- `st_hist_add()` is called as each item finishes: a review (+1, and +1
+  right if it had no miss) or a lesson (+1). Undo takes its review back.
+  It rewrites one record in place or appends one, so a torn write costs
+  that day's counts at most: a partial record is ignored and written
+  over.
+- A day before the newest with no record of its own (the clock set back)
+  is counted on the newest: the file stays in day order and the totals
+  lose nothing. A file that isn't a history file is started again;
+  history is a nicety, not progress.
+- `st_hist_week()` reads it in one pass, 16 records at a time: the
+  fortnight's columns, the streak (the run reaching today or yesterday, so
+  it doesn't read 0 at breakfast), and the best run anywhere in the file.
+- `st_advise()` picks her line, most important first: a pile of 50+
+  reviews due; nothing this week or last; under 75 % right; a week's
+  streak; fewer days than last week; 90 %+ right (room for more lessons);
+  otherwise steady.
+- The test covers: no file, an undo with no file (writes nothing), a
+  missed day ending a streak, a streak ending yesterday, the columns,
+  undo down to zero (not a day studied), the clock set back (found in
+  the file, and before it all), a torn append ignored then written over,
+  the best run in a 39-day file past the first read, a foreign file
+  started again, an id with `..` refused, and each advice case.
+- Removing a course removes its `history.dat` too.
+
+**Cost:**
+- While the Week screen is up the heap in use is 13,328 B: the session
+  (8,856 B) plus the chart's canvas buffer (4.4 KB), freed with the
+  screen. Within §7's 24 KB; the smoke run's peak is still 13,896 B, and
+  `E leaving Study` still finds every byte given back.
+- LVGL pool: 31,704 B free on the Week screen (64-bit sim).
+- Firmware build (`espressif/idf:release-v5.5`, LVGL 9.5.0 as a local
+  component): app 1,716,208 B, **+2,880 B** of flash on the 2× answer
+  commit; static DRAM unchanged at 160,556 B (the screen's state is on the
+  stack and in the session block).
+
+### 2026-09-30 — Study's answers at twice the size
+
+From the bench: "the answer english text is a small font — can it be 2x?"
+It can, with no RAM cost.
+
+**The font.** `firmware/main/lv_font_palm_bold_2x.c` is the Palm bold font
+pixel-doubled: each pixel a 2×2 block, and every metric doubled (30 px
+line). It's generated by `tools/gen_font_2x.py` from `lv_font_palm_bold.c`,
+so it's the same face as the rest of the UI rather than a smoothed outline
+font, and it covers the same U+0020–U+00FF (Albanian's ë and ç double too).
+`make -C sim course` runs `gen_font_2x.py --check`.
+
+**Where it's used** (`st_big()` in `ui.c`):
+- **the answer** on a question: the primary meaning, or a reading that's
+  written in Latin letters (kana readings keep the 38 px kana font). The
+  answer area is 50 px, so it's one line at 2×, with one line of "also:"
+  under it (cut with "..." if longer; the Card has them all). An answer
+  too long for one line at 2× stays at 1× bold, wrapped, as before;
+- **a term that's words** rather than a picture (an Albanian word, a
+  Spanish root): up to two lines at 2×, on the question and on the lesson
+  card.
+
+Checked in the smoke shots (`study_quiz_answer`, `study_review_answer`:
+"mouth" at 2×), and in a scratch run of the `features` test deck, whose
+terms are Latin text ("comer", "-ida" at 2×; "to eat" with its "also:"
+line; "(noun from a verb)" still fits on one line).
+
+**Cost** (firmware build in `espressif/idf:release-v5.5`, LVGL 9.5.0 as a
+local component, as before):
+- app binary 1,713,328 B, **+12,592 B** of flash (10,427 B of glyph
+  bitmaps, the rest the glyph table);
+- static DRAM unchanged at 160,556 B: the font is `const`;
+- LVGL pool: the answer screens leave 37,536 B free in the 64-bit smoke
+  run, inside S3's 31–40 KB; the heap in use while a question is up is
+  9,264 B, as in S3.
+
+### 2026-09-30 — Study S3: the screens, and the demo on the card
+
+The owner approved the format and the demo ("format and demo look good,
+start S3"). Study is on the launcher now, and runs the demo end to end in
+the simulator: a lesson, its quiz, reviews two hours later, and the next
+lesson, whose kanji have unlocked. The smoke tour walks all of it (the
+`study_*` shots), and every screen was looked at.
+
+**The tile and the speaker.**
+- Position 7 on the launcher: a closed textbook knocked out of the black
+  disc, 24×22 A8 like the rest (`tools/gen_study_icon.py`, art kept as
+  text).
+- **The owner's portrait** went into `tools/gen_faces.py` as `STUDY`, read
+  pixel for pixel from `docs/img/study_face.png`. A `--preview` of it
+  round-trips to the identical PNG. The one blank row at its top is kept,
+  as it's the owner's framing.
+- She greets from the Graffiti strip once per unlock session, as Coach and
+  Guru do. The line depends on what's waiting: a first visit, reviews due,
+  lessons available, or nothing. She also speaks at the end of every round.
+
+**The screens** (`ui.c`, the "Study" section; `study.c` for the logic):
+- **The dashboard:** the course and its level; two big buttons with their
+  counts, Lessons and Reviews, greyed at 0; the count in each stage group
+  (the course's own names); when the next review comes due; and items
+  started. With the clock unset (a year before 2024), it says so and
+  offers nothing to schedule.
+- **A lesson:** the batch's cards (5 in the demo) with Back and Next.
+  - Each card shows the term, meaning, readings by type (in the kana
+    font), senses, what it's built from (the parts' own meanings, "Built
+    from: sun + moon"), mnemonics, examples with translations, forms,
+    etymology and notes.
+  - It scrolls, with a thin grey scrollbar.
+  - Then a quiz on the batch. Only when an item's questions are all right
+    does it start on the schedule.
+- **Reviews:** everything due, shuffled.
+  - Meaning and reading are separate questions on one item. Reading's
+    banner is inverted, so the two are told apart at a glance.
+  - Show answer, then Wrong / Right (or Again / Hard / Good / Easy for an
+    sm2 course).
+  - A miss comes back 2–5 questions later, and the item takes the worst
+    grade it got.
+  - **Undo** takes back the last answer, and the record if it had been
+    graded.
+  - **Card** opens the whole card over the question.
+- **Courses:** the demo is installed once (a `.demo` marker keeps a
+  removed demo removed). The last course is remembered, and a list shows
+  when there's more than one course. The menu has *Courses*, *About this
+  course*, *Check course* (`course_verify`), *Remove course* (with a
+  confirmation), and *Reinstall demo* when it's gone.
+- **Pictures** are the course's 1-bit bitmaps copied into I1 canvases, the
+  format every canvas here already uses. Term pictures sit centred in a
+  fixed box, since a picture is cropped to its ink and 一 alone would read
+  as a rule.
+
+**`study.c`** (host-tested in the `srs` gate):
+- The round's queue: a seeded shuffle, the requeue, the worst grade, one
+  level of undo; and 300 random rounds with random undos, where every item
+  finishes exactly once, after all its questions were right.
+- The card: installing the demo (byte for byte, once, reinstalled on
+  request), listing courses (sorted, only folders with a `course.srs`),
+  removing one (no `..` in an id), and the last course opened.
+
+**The demo in the firmware:** `tools/gen_study_demo.py` turns
+`courses/demo-kanji/course.srs` into `firmware/main/study_demo.c` (const,
+so flash). Its `--check` runs in `make -C sim course`.
+
+**Memory, measured:**
+- **Heap:** a Study session is one block of 8.9–9.4 KB in the simulator
+  (the course, its progress, the item on screen, and the pictures), inside
+  the 24 KB budget. The whole smoke tour peaked at 13.9 KB.
+  - **Leaving Study gives back every byte:** the smoke tour now marks the
+    heap on the launcher (`B`) and fails unless it's the same after Study
+    (`E`).
+  - Opened and not left, the `E` check fails with the 8,856 bytes, so it
+    has teeth.
+- **Static DRAM:** 160,556 B, +16 over S2. The budget was 256 B. A first
+  build was +1,032, from five `static char` message buffers. The label, the
+  balloon and the alert all copy their text, so those buffers went to the
+  stack, and the course info to the session's own text buffer.
+- **The LVGL pool:** Study's screens leave 31–40 KB free in the 64-bit
+  simulator; `smoke32` runs the same tour at the device's true pool size.
+- **Flash:** the image is 1,700,736 B (+114,624):
+  - the demo course, 81,760;
+  - the portrait and the icon, 4,308;
+  - code and strings, the rest.
+  That's 57 % of the 3 MB app partition.
+
+**1-bit pictures:** kept for now. At 64 px (kanji and radicals), 40 px
+(words) and 24 px (sentences), the simulator's shots read cleanly. 2 bpp
+stays reserved in the format. Whether they read as well on the real 2.8"
+panel is a `[d]` check.
+
+**Harness additions:** `A <seconds>` moves Study's clock on (UI_DEVTOOLS
+only), so the tour reaches reviews that come due 2 hours after a lesson.
+`B`/`E` are the heap check. Each shot line now also prints the heap in use.
+
+### 2026-09-30 — Study S2: the schedulers and progress on the card
+
+`firmware/main/srs.c` holds both schedulers and the progress files. It is
+pure C and stdio, beside `course.c`, and the time is passed in. Nothing is
+on screen yet (S3).
+
+**The schedulers.**
+- **`stages` (WaniKani-style).** Right moves an item up a stage; wrong moves
+  it down `drop` stages, or `drop_high` from `high_from` up, never below 1.
+  The last stage retires it. The gate walks the demo from lesson to
+  retirement: nine right answers, the last exactly 4,190 hours after the
+  lesson. It also checks every drop rule.
+- **`sm2` (Anki-style, as the Albanian web app does it)**, in integer
+  arithmetic, seconds and hundredths.
+  - **Checked against the web app's own `srs.js`** under node: five items
+    with fixed grade patterns, reviewed at 09:00 and 09:30 every day for a
+    year, in UTC and in UTC+2. That's 551 reviews each, and they are
+    **identical, review for review**, once the web app's ease is rounded
+    to hundredths after each review.
+  - That one difference is on purpose. The web app's ease is a float that
+    drifts (1.35 + 0.15 = 1.4999999999999998), so 13 days × 1.5 becomes 19
+    there and 20 here. Unaltered, the traces first part at one item's 22nd
+    review.
+  - The oracle and the Albanian code stayed outside the repo. The gate pins
+    the traces' CRC-32s.
+- **Ease now goes in steps of 0.05** (1.30–14.05 in one byte). The first
+  design stored hundredths above 1.30, capping ease at 3.85. The oracle
+  showed the web app passing that within months on a streak of Easy
+  answers. Courses must now give eases in steps of 0.05; Anki's and the web
+  app's all are. The builder and the reader both enforce it
+  (`COURSE_FORMAT.md` §2.2).
+
+**Progress on the card**, in the course's folder:
+- `progress.dat`: a 20-byte header (the records' CRC-32 and the course's
+  fingerprint), then 16-byte records sorted by id, replaced whole through
+  `safefile.h`.
+- `progress.log`: 20-byte entries (a record and its CRC-32), appended and
+  fsync'd on every grade.
+- **Opening folds the log in and empties it.** Log entries are merged 256 at
+  a time (5 KB), so a long log never needs more memory.
+- **If the course's fingerprint changed, progress is remapped:** a walk of
+  `progress.dat` beside IDX, both sorted by id. Removed items drop out, new
+  ones start unlearned, and the rest keep their records, clamped to the new
+  scheduler.
+- **The scan fills** a 2-bit state per item, the due list (up to 500), the
+  count per stage group, and the next due time.
+- **`srs_lessons`** returns what can be learned now:
+  - an item waits for its `built_from` parts (with `by_links`) and its
+    `unlock_after` items to be known;
+  - a level opens once the one before has its `level_percent` of level-up
+    items known, rounded up.
+
+**The gate, `make -C sim srs`** (ASan and UBSan, 0.3 s; `smoke32` runs it
+32-bit):
+- **The log cut at every byte** (0–240): the fold keeps every whole entry
+  before the cut and loses at most the one it cuts.
+  - **A bug it caught:** a log shorter than one entry was never emptied, so
+    every later entry would have been appended out of step. Now any bytes
+    at all mean a fold.
+- **Folding the same log twice** (a crash between the swap and the truncate)
+  gives the same bytes, and a lone `.tmp` from safefile's gap is promoted.
+- **A damaged `progress.dat`**, one flipped byte at a time, is refused and
+  left exactly as it was. The one field outside its CRC, the fingerprint,
+  only causes a harmless remap.
+- **Remapping from `remap-v1` to `remap-v2`** (new test decks: c removed, g
+  added, the order changed, a stage added), both after a fold and straight
+  from an unfolded log.
+- **The demo's unlocks:**
+  - first, only the 8 level-1 radicals;
+  - after one right answer each, all 12 kanji;
+  - words once their kanji are known (大人 yes, 日本 not while 本 isn't);
+  - level 2 shut at 10 of 12 kanji and open at 11;
+  - then 明, 林 and 森 at once (built from level-1 radicals), while 休 and
+    上 wait for 亻 and 卜.
+  - In the features deck, `unlock_after` holds comedor back.
+- **Counts across puts, rescans and an undo** (the old record put back),
+  which survives a fold.
+
+**Also fixed in the builder:** a course with fewer than 5 stages that left
+out `high_from` or `known` was refused, because their defaults of 5 weren't
+clamped. They now are, as in the reader.
+
+**Numbers:**
+- `Srs` is 436 B, `Course` 1,420 B and a record 16 B (a 32-bit build).
+- While a course is open: 2 bits per item and a 1 KB due list; plus 5 KB
+  while folding, and 4.6 KB while `srs_lessons` reads links.
+- The firmware image is unchanged, because nothing calls `srs.c` until S3.
+
+### 2026-09-30 — a faster demo, Albanian confirmed, and the builder's text rules
+
+**The demo is faster** (asked for by the owner). A 2-hour stage now comes
+before WaniKani's intervals, and `known` is 2, one right answer. So a
+kanji's lesson opens 2 hours after its radicals', and a word's 2 hours after
+its kanji's: the first level can be tried in an afternoon. The format's
+defaults stay at WaniKani's pace; the demo's README says which is which. The
+course is 81,760 B (+4).
+
+**Albanian's letters draw with the Palm font** (asked by the owner):
+- **ë, ç, Ë and Ç** are Latin-1. The glyphs were decoded from
+  `lv_font_palm.c` and `lv_font_palm_bold.c` and looked at: real diaeresis
+  and cedilla, different from e and c, in both weights.
+- **The Albanian course, scanned** (read only): no character in any word,
+  form, level title or root is outside U+0020–U+00FF.
+- **Then built whole** in a scratch folder (deleted; nothing entered the
+  repo), with a converter written to Appendix A's mapping: 4,087 items, 592
+  levels, 1,394,508 B, **no pictures at all**. `course_verify()` passed and
+  both readers agreed.
+
+**What that build found, and the builder now handles** (`COURSE_FORMAT.md`
+§4):
+- **370 line breaks in etymologies**, which the builder refused as control
+  characters. Line breaks and tabs now fold to a space.
+- **CO₂-style subscripts and a fraction slash** in two meanings. These now
+  fold to plain digits and `/`; arrows fold to `->`.
+- **č, ć and š in glosses.** Neither font has them. A **Latin fallback** now
+  turns a Latin letter outside Latin-1 into its base letter (č to c, ā to a,
+  ſ to s) in every field but TERM and READING, which must stay exact.
+- **Examples written wholly in the Greek alphabet** (historical texts). With
+  examples stripped, nothing readable is left, so the field is now
+  **dropped**, with its translation, and the build reports the count: 7 in
+  that course.
+- `--check` on a missing file printed a traceback; it now says so plainly.
+
+**Gates:**
+- `course_test` checks the folded meaning, the fallback, joined lines and
+  a dropped field, from two new items in the `features` deck.
+- `mkcourse_test.py` checks that a TERM with č is refused (18 refusals
+  now), and that a stripped example goes with its translation.
+
+### 2026-09-30 — Study S0 and S1: the course format, the demo, the builder and the reader
+
+The owner asked for S0 and S1 together, so S0's stop for review became a
+review of both. **Nothing is on screen yet** (that's S3). What exists is the
+file format, a course in it, a tool that builds it, and the reader the
+device will use, with gates on all four.
+
+**For the owner's review** (S0's exit; the format is hard to change once
+real courses exist): `docs/COURSE_FORMAT.md` and `courses/demo-kanji/`.
+The choices most worth a look:
+1. **65,535 items per course**, so the app can keep due lists as 2-byte item
+   numbers. The Albanian course has 4,087; WaniKani's full set is about
+   9,000.
+2. **Pictures are 1 bit per pixel**, 64 px for a lone kanji, 40 px for a
+   word, 24 px for sentences, wrapped at 232 px. They read well in a
+   rendered sheet; S3 judges them on the screen, and 2 bpp stays reserved in
+   the format in case small kanji need it.
+3. **The picture font (Noto Sans JP) has no Arabic, Hebrew or accented
+   Greek.** Measured, not assumed: the plan had said Arabic would become a
+   picture. Such text is stripped instead (`render.strip`), which suits
+   etymologies, the only place the Albanian course has it.
+4. **The demo's pace** (settled 2026-09-30: the owner asked for it
+   faster). A 2-hour stage now comes before WaniKani's intervals, and
+   `known` is 2, one right answer. So a kanji's lesson opens 2 hours after
+   its radicals', not three and a half days. The format's defaults stay at
+   WaniKani's pace.
+5. **The demo's stage names are its own** (Learning, Known, Strong, Deep,
+   Retired): WaniKani's are theirs, and "Guru" is already an app here.
+6. **8 radicals in level 1 and 6 in level 2** (the plan said about 10
+   each): exactly the ones its kanji are built from.
+7. **Readings inside mnemonics and notes are in romaji.** Mixed English
+   and kana must be a picture; written in kana, the demo was 142 KB instead
+   of 82 KB.
+
+**The format** (`COURSE_FORMAT.md` §3): a 32-byte header, a section table,
+and seven sections (META, LEVL, ITEM, TEXT, BMP, LINK, IDX), all
+little-endian and 4-aligned with zero padding. **Every byte is covered by a
+CRC or the zero rule**: the header's own CRC, the table's (which doubles as
+the course's fingerprint), each section's, and each item's, level's and
+picture's. So "Check course" catches any corruption, and the fuzz gate
+proves it for every single-bit flip.
+
+**Paper check against the Albanian course** (Appendix A, read at
+`82ac18d`, nothing copied): it fits. 4,087 words in 592 levels (up from
+3,731 in 543 on 2026-09-29). Its scheduler constants are the `sm2` example
+value for value. The largest word encodes to 3,439 B, inside the 4,096 B
+item limit, as long as a converter doesn't store the gloss list twice
+(4.8 KB if it did).
+
+**The demo** (`courses/demo-kanji/`, CC0): 78 items (14 radicals, 24 kanji,
+40 words) in two levels. **Every kanji reading was checked by script
+against KANJIDIC2, and every word's written form and reading against
+JMdict** (from the `jamdict-data` package, used locally, not committed): all
+match. Radical names, mnemonics and sentences are original.
+
+**`tools/mkcourse.py`** builds a source folder into `course.srs`, `--check`s
+a built file, and `--dump`s either one as canonical text.
+- It refuses anything the device would have to guess about, naming the file
+  and line.
+- It keeps `ids.tsv`: numbers are appended and never reused.
+- **Builds are byte-for-byte reproducible.** The font is pinned by SHA-256
+  (downloaded to `~/.cache/cyd-palm/`), Pillow by version
+  (`tools/requirements-course.txt`), and the layout engine is forced to
+  BASIC so libraqm can't change the shaping. The same bytes came out on
+  Python 3.11 and 3.12, and with the font from the cache or from `--font`.
+
+**`firmware/main/course.c`** is the reader: pure C and stdio, no statics.
+- A `Course` is about 1.3 KB.
+- `course_open` checks the header, the table, META, LEVL and IDX, and
+  briefly mallocs META (≤ 4 KB).
+- Each item is two reads, its CRC checked before use; text is checked as
+  strict UTF-8 in the range its drawing allows.
+- `course_verify` checks everything.
+- The CRC-32 is nibble-at-a-time (a 64-byte table). The first table had one
+  wrong entry, and the check-value test caught it.
+
+**Gates:**
+- **`make -C sim course`**: reader checks on the three committed files; then
+  the round trip, where the C reader's dump of each file must equal
+  `mkcourse.py --dump` of it byte for byte. (Also checked by hand: the dump
+  of the *source* equals both.)
+- **`make ftest` gains `course_fuzz`** (ASan and UBSan, 24 s):
+  - 8,762 truncations, all refused;
+  - 51,136 single-bit flips, **every one caught** by open or verify;
+  - 43,000 hostile files with every CRC fixed up after the damage, 22,480 of
+    which opened and were walked in full with no sanitizer report.
+  - Deleting one bounds check from the reader makes it fail at once with a
+    heap overflow, so the gate has teeth.
+- **`smoke32`** also runs the reader's checks built 32-bit.
+- **`tests/mkcourse_test.py`**, a new CI job "Course builder": every
+  committed course rebuilds to the same bytes, the `ids.tsv` rules hold,
+  and 17 kinds of bad source are refused with the right message.
+
+**Numbers:**
+- The demo course is 81,756 B: 66,784 B of pictures (91 of them, the radical
+  and kanji 一 sharing one), 10,360 B of text.
+- The firmware image is unchanged at 1,586,112 B, and static DRAM at
+  160,540 B. `course.c` compiles into it, but nothing calls it until S3, so
+  the linker drops it.
+
+### 2026-09-30 — the password editor lets you see what you typed
+
+**From the bench:** typing a password blind, one `*` per key, on this screen
+and keyboard was too error-prone. The editor now works like a phone's:
+- **the character just typed shows for a second** (`SECRET_PEEK_MS`), then
+  turns into a `*`; a backspace hides it at once;
+- **"Show"**, between Cancel and Save, shows the whole password, and turns
+  into "Hide". It is off every time the screen opens.
+- **The end stays in view.** A password wider than the box used to be clipped
+  at the right, where you are typing; now the front drops off behind a `<`.
+
+**The password still never enters LVGL.** The label draws from the second half
+of the editor's own heap block (`SECRET_DISP`; the block is now 2 × 64 B),
+handed over with `lv_label_set_text_static`, so LVGL holds only the pointer.
+A label draws from its text without copying it (a draw task copies text only
+when the caller sets `text_local`, which the label never does; checked in both
+9.2.2 and 9.5.0). The whole block is wiped on Save and when the screen goes.
+
+**The gate had to get sharper to prove it.** Swapping in `lv_label_set_text`
+(a copy into the pool on every key) passed the old `secretscan`: LVGL grows a
+label's text in place and the next screen reuses the block, so the stray copy
+was overwritten before the scan after Save looked. So the harness gained `Y`:
+the same scan, but skipping the malloc heap, run **while the editor is still
+open**, with Show on and the password typed. Then only the editor's own block
+(on the heap) may hold it. The LVGL pool is a static array, so a copy there is
+found. With `lv_label_set_text` swapped in, `Y` finds 3 copies and the gate
+fails; with the real code, 0.
+
+**Numbers:** image 1,586,112 B (+432); static DRAM 160,540 B (+8: the Show
+and peek flags and the peek timer). The heap block is 128 B instead of 64 while
+the editor is open. All gates pass.
+
+### 2026-09-29 — the Planner: To Do and Memo in one app
+
+**One launcher tile, both halves.** The grid is now Date Book, Address,
+**Planner** / News, HotSync, Games / *(open)*, Guru, Coach. Position 7 is held
+open by an empty cell (a `NULL` in `APPS[]`) for Study (`SRS_PLAN.md`), so Guru
+and Coach did not move. The tile's icon is a Palm page tilted 15 degrees on the
+black disc, two checkbox lines and two text lines (`tools/gen_planner_icon.py`;
+its art is kept as text, like `gen_faces.py`).
+
+**How the two halves are joined: a switch, not one mixed list.** The backlog
+said "lists memos and task lists together". It is built as one app whose list
+bar's first box says which half is open (**To Do** or **Memo**, bold, framed)
+and switches to the other, with the title bar reading "Planner" on both. A
+single mixed list was the first idea and was dropped for three reasons: To Do
+and Memo have separate category tables, so one category filter over both has no
+honest meaning; the quick-add field would need a way to say which kind of record
+to make; and on a 7-row screen, tasks sorted first push every memo below the
+fold. The switch keeps every To Do and Memo feature exactly as it was (quick
+add, categories, completed/sort options, the forms) and adds one control, where
+the eye already goes to see what the field will make. The tile reopens the half
+that was open last.
+
+**Storage and sync are unchanged.** Memos stay in `MemoDB.pdb`, on the device
+only; To Dos stay in `ToDoDB.pdb` and sync as CalDAV tasks by category.
+
+**Checklist memos.** A memo line starting `[ ] ` or `[x] ` is a checkbox line.
+It is plain text in the memo, so a memo stays a valid Palm memo and nothing
+about storage changed.
+- **Writing one:** the memo editor has an "[X]" button in its action row,
+  between Done and the category, that adds a box to the start of the cursor's
+  line or takes it off. On the memo form only, Done and Cancel narrow to 56 px
+  and the category button to 80, so the text keeps the whole form (it was first
+  a full-width button under the text, which cost the memo 32 px of height).
+  Typing the four characters works the same.
+- **Reading one:** a memo with any box line opens as a list: plain lines as rows,
+  box lines with the To Do list's own drawn boxes. It is one `lv_table`, so no
+  per-line object. Tapping an item, its box or its words, ticks or unticks it
+  (filled and struck through when ticked) and saves.
+- **"Make this line a To Do" was built and then taken out** the same day, at
+  the owner's request. To Do syncs to one server list and Unfiled is where the
+  item landed, so moving it out of its memo lost the project the memo was. A
+  better way between checklist memos and To Do is parked in `BACKLOG.md`.
+- Each change re-reads the memo into a 1,200-byte heap buffer, edits one line
+  and writes it back whole; the list keeps only row-to-line numbers, in
+  `g_rowuids`, freed on the way out like every list's.
+
+**Numbers:** image 1,586,416 B (+1,376 over the version commit); static DRAM
++8 B (the switch's state and the checklist's memo id and pending line). The smoke
+tour gained a checklist walk (`planner_*` shots): build a memo with the button
+and with typed boxes, open it, tick one by its box, one by its words, and
+untick it again.
+The News taps moved from row 3 to row 2; the Memo walk goes through the switch.
+
+### 2026-09-29 — the firmware version, shown in About
+
+**ESP-IDF already stamps a version into the image**: with no `PROJECT_VER` in
+the project and no `version.txt`, it runs `git describe --always --tags
+--dirty`. There are no tags yet, so a build says the commit (`334fcac`), with
+`-dirty` if it was built from uncommitted edits; after a `v*` tag, the tag's
+name. So nothing was added to the build. It is now **shown** and **reused**:
+- **Settings ▸ About** has a "Version ..." row (second; "All settings" moved to
+  the fifth row, and the smoke tap followed it to y=147). The two About boxes
+  (the launcher's and Guru's) say "Version ..." where they said a hard-coded
+  "v0.3".
+- **`tools/package_firmware.py`** reads the version from the build's
+  `project_description.json` instead of taking it on the command line, and CI
+  stopped computing its own. The installer's manifest, the release file's name
+  and About on the device can no longer disagree. Checked against a local
+  build: manifest and file name said `334fcac-dirty`, as About did.
+- **The simulator** gets the same `git describe` from `sim/Makefile`, passed
+  unquoted and stringified in `sim/include/esp_app_desc.h`, because a quoted
+  `-D` does not survive `smoke32` re-quoting `CFLAGS` for its sub-make.
+- `main` now lists `esp_app_format` in `REQUIRES` (for `esp_app_desc.h`).
+
+Image +112 B; static DRAM unchanged.
+
+### 2026-09-29 — passwords out of resident RAM
+
+**The running config no longer holds a password.** `Config` lost its five
+password buffers (four Wi-Fi, one account). It keeps a `has_pass` flag per
+network (inside `WifiNet`, so it moves when a join promotes a slot) and
+`dav_has_pass`. `config.ini` can still carry passwords, so `config_load` and
+`config_save` take a separate `ConfigSecrets`, which `appcfg_load` holds on the
+heap only while it moves them into the store, then wipes. Code that needs a
+password asks for it (`appcfg_wifi_pass`, `appcfg_dav_pass`), uses it, and
+wipes its copy (`config_wipe`, or `mbedtls_platform_zeroize` on the device):
+- **Wi-Fi join** (`wifi_try`): into `wifi_config_t`, handed to the driver,
+  wiped. The driver now keeps its copy in RAM only (`WIFI_STORAGE_RAM`); before,
+  it also wrote every network's password to NVS a second time, outside the store.
+- **Sync and discovery**: into the `DavCtx` for that run, wiped at the one exit
+  before `wifi_down()`. `basic_auth` wipes `user:pass` and its base64, and
+  `davreq` wipes the `Authorization` header it built.
+- **Passwords are stored by SSID**, so pointing a slot at another network
+  (`appcfg_set_wifi_ssid`) now also removes the old network's password once no
+  slot names it. Forgetting a network used to leave its password in flash.
+
+**The password screen is not a textarea any more.** An `lv_textarea` keeps its
+text in the LVGL pool and grows it by `realloc` per keystroke, so every key left
+a longer copy of the password in freed pool memory, and nothing wipes the pool.
+`show_secret_edit` takes the tap keyboard and Graffiti into a 64-byte heap
+buffer of its own, shows one `*` per character, and wipes and frees the buffer
+from the display label's `LV_EVENT_DELETE`, so Home, Cancel and Save all clear
+it. It starts empty ("(saved -- type to replace)"); Save with nothing typed
+keeps the stored password. The old editor filled the field with the stored
+password in plain text.
+
+**The gate: `make -C sim secretscan`** (in CI, and in `CLAUDE.md`'s list).
+`tests/secretscan.txt` types two test passwords through the real Settings
+screens, leaves one editor with Home, reopens one, runs the stub sync (which now
+reads and wipes the passwords the way `hotsync.c` does), and after each step:
+- `P` checks the store holds the password, so a clean scan means "wiped", not
+  "never typed";
+- `X` reads every writable mapping in `/proc/self/maps` (`.data`, `.bss`, heap,
+  anonymous maps, stacks), freed memory included, for **any 12 bytes** of it.
+The passwords are in the script as hex only (`K`, `X`, `P`). The simulator's
+store masks what it holds, since it stands in for flash, not RAM. The gate runs
+on an empty card and restores the previous one afterwards, because `smoke` in
+the same CI job expects a fresh card.
+
+**Checked that it fails:** with the editor's wipe removed, it reports the
+leftover pieces; with a static unwiped copy in the sync stub, it reports that.
+Its first run failed on the script itself, whose comment spelled the test
+passwords out; stdin's read buffer held them. **What it cannot see:** a stack
+buffer that isn't wiped (an unwiped one in the stub passed, because the UI
+reuses that stack before the scan runs), and the Wi-Fi driver's and HTTP
+client's own copies, which exist only on the device. `SECURITY.md` has a new
+"Passwords in RAM" section saying all of this.
+
+**Numbers** (IDF v5.5 container, LVGL 9.5.0 from a local clone; the baseline is
+a clean build of `904921a`):
+
+| | Before | After |
+|---|---|---|
+| App image | 1,582,816 B | 1,584,928 B (+2,112) |
+| Static DRAM used | 160,812 B | 160,524 B (−288) |
+| Static DRAM free | 19,924 B | 20,212 B |
+
+Bench check (Wi-Fi join and an iCloud HotSync still work) is in `BACKLOG.md`.
+
 ### 2026-09-23 — flash from the browser
 
 **The Pages site has an Install page** (`sim/web/flash.html`, linked from the

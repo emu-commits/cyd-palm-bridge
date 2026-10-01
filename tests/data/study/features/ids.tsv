@@ -1,0 +1,9 @@
+# source id	number -- kept by tools/mkcourse.py: numbers are never reused or changed, so commit this file with the course
+comer	1
+comida	2
+-ida	3
+comedor	4
+つき	5
+long	6
+fold	7
+drop	8

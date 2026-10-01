@@ -22,12 +22,13 @@ int main(void){
 
     /* fill + save + reload -> round-trip */
     snprintf(c.wifi[0].ssid,sizeof c.wifi[0].ssid,"HomeNet");
-    snprintf(c.wifi[0].pass,sizeof c.wifi[0].pass,"s3cr3t-pw");
+    ConfigSecrets cs; memset(&cs,0,sizeof cs);
+    snprintf(cs.wifi_pass[0],sizeof cs.wifi_pass[0],"s3cr3t-pw");
     snprintf(c.wifi[1].ssid,sizeof c.wifi[1].ssid,"Office 5G");
-    snprintf(c.wifi[1].pass,sizeof c.wifi[1].pass,"office-pw");
+    snprintf(cs.wifi_pass[1],sizeof cs.wifi_pass[1],"office-pw");
     snprintf(c.wifi[3].ssid,sizeof c.wifi[3].ssid,"Phone Hotspot");
     snprintf(c.dav_user,sizeof c.dav_user,"me@icloud.com");
-    snprintf(c.dav_pass,sizeof c.dav_pass,"abcd-efgh-ijkl-mnop");
+    snprintf(cs.dav_pass,sizeof cs.dav_pass,"abcd-efgh-ijkl-mnop");
     snprintf(c.cal_coll,sizeof c.cal_coll,"123/calendars/UUID-CAL");
     snprintf(c.todo_coll,sizeof c.todo_coll,"123/calendars/UUID-TODO");
     snprintf(c.card_coll,sizeof c.card_coll,"123/carddavhome/card");
@@ -35,19 +36,35 @@ int main(void){
     snprintf(c.world1,sizeof c.world1,"America/Los_Angeles");
     snprintf(c.world2,sizeof c.world2,"Australia/Sydney");
     c.brightness=55; c.backlight_sec=15; c.clock24=1; c.policy=CFG_POL_BOTH;
-    CK(config_save(PATH,&c)==0,"save ok");
+    CK(config_save(PATH,&c,&cs)==0,"save ok");
 
     Config d; config_defaults(&d);
-    CK(config_load(PATH,&d)==0,"load ok");
+    ConfigSecrets ds; memset(&ds,0,sizeof ds);
+    CK(config_load(PATH,&d,&ds)==0,"load ok");
     CK(!strcmp(d.wifi[0].ssid,"HomeNet"),"wifi slot 1 ssid round-trips");
-    CK(!strcmp(d.wifi[0].pass,"s3cr3t-pw"),"wifi slot 1 pass round-trips");
+    CK(!strcmp(ds.wifi_pass[0],"s3cr3t-pw"),"wifi slot 1 pass round-trips");
     CK(!strcmp(d.wifi[1].ssid,"Office 5G"),"wifi slot 2 ssid round-trips (spaces kept)");
-    CK(!strcmp(d.wifi[1].pass,"office-pw"),"wifi slot 2 pass round-trips");
+    CK(!strcmp(ds.wifi_pass[1],"office-pw"),"wifi slot 2 pass round-trips");
     CK(d.wifi[2].ssid[0]==0,"an empty slot stays empty");
     CK(!strcmp(d.wifi[3].ssid,"Phone Hotspot"),"wifi slot 4 ssid round-trips");
-    CK(d.wifi[3].pass[0]==0,"a network with no password round-trips as open");
+    CK(ds.wifi_pass[3][0]==0,"a network with no password round-trips as open");
     CK(!strcmp(d.dav_user,"me@icloud.com"),"dav_user round-trips");
-    CK(!strcmp(d.dav_pass,"abcd-efgh-ijkl-mnop"),"dav_pass round-trips");
+    CK(!strcmp(ds.dav_pass,"abcd-efgh-ijkl-mnop"),"dav_pass round-trips");
+
+    /* Without a ConfigSecrets, the passwords are neither read nor written: the
+     * file functions have nowhere else to put them. */
+    Config d2; config_defaults(&d2);
+    CK(config_load(PATH,&d2,NULL)==0,"load with no secrets ok");
+    CK(!strcmp(d2.wifi[0].ssid,"HomeNet"),"...and everything else still loads");
+    CK(config_save(PATH,&d2,NULL)==0,"save with no secrets ok");
+    ConfigSecrets es; memset(&es,0,sizeof es);
+    Config d3; config_defaults(&d3);
+    CK(config_load(PATH,&d3,&es)==0,"reload it");
+    CK(es.wifi_pass[0][0]==0 && es.wifi_pass[1][0]==0 && es.dav_pass[0]==0,
+       "a save with no secrets writes every password key empty");
+    CK(!strcmp(d3.wifi[1].ssid,"Office 5G"),"...and keeps the networks");
+    char wb[8]="abcdefg"; config_wipe(wb,sizeof wb);
+    CK(wb[0]==0 && wb[6]==0,"config_wipe zeroes the buffer");
     CK(!strcmp(d.cal_coll,"123/calendars/UUID-CAL"),"cal_coll round-trips");
     CK(!strcmp(d.todo_coll,"123/calendars/UUID-TODO"),"todo_coll round-trips");
     CK(!strcmp(d.card_coll,"123/carddavhome/card"),"card_coll round-trips");
@@ -72,9 +89,10 @@ int main(void){
         "timezone=Europe/London\n");
     fclose(f);
     Config e; config_defaults(&e);
-    CK(config_load(PATH,&e)==0,"robust load ok");
+    ConfigSecrets esec; memset(&esec,0,sizeof esec);
+    CK(config_load(PATH,&e,&esec)==0,"robust load ok");
     CK(!strcmp(e.wifi[0].ssid,"Spacey Net"),"trims outer space, keeps inner");
-    CK(!strcmp(e.wifi[0].pass,"CaseKey"),"key match is case-insensitive");
+    CK(!strcmp(esec.wifi_pass[0],"CaseKey"),"key match is case-insensitive");
     CK(e.brightness==100,"brightness clamped to 100");
     CK(e.backlight_sec==0,"backlight_sec clamped to 0");
     CK(e.policy==CFG_POL_LOCAL,"policy=local parsed");
@@ -94,18 +112,19 @@ int main(void){
         "cal_coll =                           # deliberately empty\n");
     fclose(f);
     Config h; config_defaults(&h);
-    CK(config_load(PATH,&h)==0,"inline-comment load ok");
+    ConfigSecrets hs; memset(&hs,0,sizeof hs);
+    CK(config_load(PATH,&h,&hs)==0,"inline-comment load ok");
     CK(!strcmp(h.timezone,"America/New_York"),"inline comment cut off timezone");
-    CK(!strcmp(h.dav_pass,"abcd-efgh-ijkl-mnop"),"inline comment cut off dav_pass");
+    CK(!strcmp(hs.dav_pass,"abcd-efgh-ijkl-mnop"),"inline comment cut off dav_pass");
     CK(h.brightness==80,"inline comment cut off brightness");
     CK(h.policy==CFG_POL_BOTH,"inline comment cut off policy");
-    CK(!strcmp(h.wifi[0].pass,"P#ssw0rd"),"'#' with no space before it is literal");
+    CK(!strcmp(hs.wifi_pass[0],"P#ssw0rd"),"'#' with no space before it is literal");
     CK(!strcmp(h.wifi[0].ssid,"Net#5"),"literal '#' kept while ' #' comment is cut");
     CK(h.cal_coll[0]==0,"comment-only value is empty, not the comment");
 
     /* missing file -> -1, defaults preserved */
     Config g; config_defaults(&g);
-    CK(config_load("state/does_not_exist.ini",&g)==-1,"missing file -> -1");
+    CK(config_load("state/does_not_exist.ini",&g,NULL)==-1,"missing file -> -1");
     CK(g.brightness==80,"defaults intact after failed load");
 
     /* The location's provenance flag, and the DIRECTION OF ITS DEFAULT, which is
@@ -119,7 +138,7 @@ int main(void){
     fprintf(f, "latitude = 51.5074\nlongitude = -0.1278\n");   /* a pre-flag card */
     fclose(f);
     Config lo; config_defaults(&lo);
-    CK(config_load(PATH,&lo)==0,"a pre-flag card loads");
+    CK(config_load(PATH,&lo,NULL)==0,"a pre-flag card loads");
     CK(!strcmp(lo.latitude,"51.5074"),"...with its coordinates");
     CK(lo.loc_auto == -1, "...and the question stays open for appcfg to settle");
 
@@ -128,9 +147,9 @@ int main(void){
     snprintf(la.loc_name,sizeof la.loc_name,"Washington, D.C.");
     snprintf(la.latitude,sizeof la.latitude,"38.9072");
     snprintf(la.longitude,sizeof la.longitude,"-77.0369");
-    CK(config_save(PATH,&la)==0,"save an automatic location");
+    CK(config_save(PATH,&la,NULL)==0,"save an automatic location");
     Config lb; config_defaults(&lb);
-    CK(config_load(PATH,&lb)==0,"reload it");
+    CK(config_load(PATH,&lb,NULL)==0,"reload it");
     CK(lb.loc_auto == 1, "loc_auto round-trips");
 
     /* -1 must never reach the file: writing it is what settles the question, and
@@ -138,9 +157,9 @@ int main(void){
     Config lu; config_defaults(&lu);
     snprintf(lu.latitude,sizeof lu.latitude,"1.0");
     CK(lu.loc_auto == -1, "unsettled before save");
-    CK(config_save(PATH,&lu)==0,"save an unsettled config");
+    CK(config_save(PATH,&lu,NULL)==0,"save an unsettled config");
     Config lv; config_defaults(&lv);
-    CK(config_load(PATH,&lv)==0,"reload it");
+    CK(config_load(PATH,&lv,NULL)==0,"reload it");
     CK(lv.loc_auto == 0, "an unsettled flag is written as pinned, never as -1");
     CK(!strcmp(lb.loc_name,"Washington, D.C."),"a place name with a comma round-trips");
 
@@ -155,9 +174,10 @@ int main(void){
     fprintf(f, "wifi_ssid = OldCard\nwifi_pass = oldpw\nbrightness = 42\n");
     fclose(f);
     Config o; config_defaults(&o);
-    CK(config_load(PATH,&o)==0,"pre-W5 config loads");
+    ConfigSecrets os; memset(&os,0,sizeof os);
+    CK(config_load(PATH,&o,&os)==0,"pre-W5 config loads");
     CK(!strcmp(o.wifi[0].ssid,"OldCard"),"a one-network card lands in slot 1");
-    CK(!strcmp(o.wifi[0].pass,"oldpw"),"...with its password");
+    CK(!strcmp(os.wifi_pass[0],"oldpw"),"...with its password");
     CK(o.wifi[1].ssid[0]==0 && o.wifi[3].ssid[0]==0,"...and the other slots stay empty");
 
     /* promote: the order is the try order, so a successful join moves its slot
@@ -166,11 +186,12 @@ int main(void){
     snprintf(p.wifi[0].ssid,sizeof p.wifi[0].ssid,"A");
     snprintf(p.wifi[1].ssid,sizeof p.wifi[1].ssid,"B");
     snprintf(p.wifi[2].ssid,sizeof p.wifi[2].ssid,"C");
-    snprintf(p.wifi[2].pass,sizeof p.wifi[2].pass,"cpw");
+    p.wifi[2].has_pass = 1;
     snprintf(p.wifi[3].ssid,sizeof p.wifi[3].ssid,"D");
     CK(config_wifi_promote(&p,2)==1,"promoting a later slot reports a change");
     CK(!strcmp(p.wifi[0].ssid,"C"),"the promoted network is now first");
-    CK(!strcmp(p.wifi[0].pass,"cpw"),"its password travels with it");
+    CK(p.wifi[0].has_pass == 1 && p.wifi[1].has_pass == 0,
+       "its has-password flag travels with it");
     CK(!strcmp(p.wifi[1].ssid,"A") && !strcmp(p.wifi[2].ssid,"B"),"the rest keep their order");
     CK(!strcmp(p.wifi[3].ssid,"D"),"slots below the promoted one do not move");
     CK(config_wifi_promote(&p,0)==0,"promoting the first slot is not a change");
@@ -179,9 +200,9 @@ int main(void){
 
     /* the promoted order is what gets written, so the device wakes up trying the
      * network that worked last */
-    CK(config_save(PATH,&p)==0,"save after promote");
+    CK(config_save(PATH,&p,NULL)==0,"save after promote");
     Config q; config_defaults(&q);
-    CK(config_load(PATH,&q)==0,"reload after promote");
+    CK(config_load(PATH,&q,NULL)==0,"reload after promote");
     CK(!strcmp(q.wifi[0].ssid,"C") && !strcmp(q.wifi[2].ssid,"B"),"promoted order round-trips");
 
     printf("\n%s (%d failures)\n", fails?"FAILURES":"ALL PASS", fails);

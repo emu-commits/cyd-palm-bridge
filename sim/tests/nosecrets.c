@@ -33,30 +33,34 @@ int main(void){
     appcfg_load();
     const Config *c = appcfg();
 
-    const struct { const char *name; const char *val; } f[] = {
-        { "dav_user",  c->dav_user  },
-        { "dav_pass",  c->dav_pass  },
-    };
-
+    /* Passwords are not in the Config any more (appcfg.h): ask the getters,
+     * which read the store, and wipe what they hand back. */
+    char pw[128];
     int bad = 0;
-    for(unsigned i = 0; i < sizeof f / sizeof f[0]; i++){
-        if(f[i].val[0]){
-            printf("nosecrets: FAIL -- %s is seeded into this build (%d chars)\n",
-                   f[i].name, (int)strlen(f[i].val));
-            bad = 1;
-        }
+    if(c->dav_user[0]){
+        printf("nosecrets: FAIL -- dav_user is seeded into this build (%d chars)\n",
+               (int)strlen(c->dav_user));
+        bad = 1;
     }
+    if(c->dav_has_pass || appcfg_dav_pass(pw, sizeof pw)){
+        printf("nosecrets: FAIL -- dav_pass is seeded into this build (%d chars)\n",
+               (int)strlen(pw));
+        bad = 1;
+    }
+    config_wipe(pw, sizeof pw);
     /* EVERY Wi-Fi slot, not just the first. The device remembers four networks
      * now, and a check that only looked at slot 1 would pass a build carrying
      * three real passwords -- which is precisely the shape of the leak this
      * gate was written for (the history is at the top of appcfg.c). */
     for(int i = 0; i < CFG_WIFI_N; i++){
-        if(c->wifi[i].ssid[0] || c->wifi[i].pass[0]){
+        int has = appcfg_wifi_pass(i, pw, sizeof pw);
+        if(c->wifi[i].ssid[0] || c->wifi[i].has_pass || has){
             printf("nosecrets: FAIL -- wifi slot %d is seeded into this build "
                    "(ssid %d chars, pass %d chars)\n", i + 1,
-                   (int)strlen(c->wifi[i].ssid), (int)strlen(c->wifi[i].pass));
+                   (int)strlen(c->wifi[i].ssid), (int)strlen(pw));
             bad = 1;
         }
+        config_wipe(pw, sizeof pw);
     }
     if(bad){
         printf("nosecrets: a simulator build must never carry credentials.\n"

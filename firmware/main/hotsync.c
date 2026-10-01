@@ -17,6 +17,7 @@
 #include "feeds.h"        /* RSS reader: the enabled feed sources */
 #include "dash.h"         /* lock-screen dashboard: the WxCache it renders from */
 #include "wxfetch.h"      /* Open-Meteo CSV -> WxCache */
+#include "mbedtls/platform_util.h"   /* mbedtls_platform_zeroize */
 #include "appcfg.h"
 #include "geoip.h"
 #include "clock.h"
@@ -246,14 +247,19 @@ static void wifi_ev(void *a, esp_event_base_t base, int32_t id, void *data){
 
 /* Try ONE remembered network. The radio is already initialised and started by
  * wifi_up(); this just points it at a different AP and waits. */
-static int wifi_try(const WifiNet *n, int timeout_ms){
+static int wifi_try(int slot, int timeout_ms){
+    const WifiNet *n = &appcfg()->wifi[slot];
     wifi_config_t wc = { 0 };
     strncpy((char*)wc.sta.ssid, n->ssid, sizeof wc.sta.ssid);
-    strncpy((char*)wc.sta.password, n->pass, sizeof wc.sta.password);
+    /* The password comes out of the store for exactly as long as it takes the
+     * driver to copy it (the driver keeps it in RAM only: WIFI_STORAGE_RAM). */
+    appcfg_wifi_pass(slot, (char*)wc.sta.password, sizeof wc.sta.password);
     s_retries = 0;
     xEventGroupClearBits(s_evt, WIFI_OK|WIFI_FAIL);
-    if(esp_wifi_set_config(WIFI_IF_STA, &wc)!=ESP_OK) return 0;
-    /* Never log n->pass, and never log the SSID's contents beyond this: the
+    esp_err_t e = esp_wifi_set_config(WIFI_IF_STA, &wc);
+    mbedtls_platform_zeroize(&wc, sizeof wc);
+    if(e!=ESP_OK) return 0;
+    /* Never log a password, and never log the SSID's contents beyond this: the
      * status line is shown on screen and the log goes to a shared console. */
     ESP_LOGI(TAG, "wifi: trying \"%s\"", n->ssid);
     esp_wifi_connect();
@@ -273,6 +279,10 @@ static int radio_up(void){
     if(!s_netif) s_netif = esp_netif_create_default_wifi_sta();
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     if(esp_wifi_init(&cfg)!=ESP_OK) return 0;
+    /* Keep the driver's copy of the network config (which holds the password)
+     * in RAM only. The default also writes it to NVS, which would be a second
+     * copy of every password the store already holds, outside the store. */
+    esp_wifi_set_storage(WIFI_STORAGE_RAM);
     esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_ev, NULL, &s_h_wifi);
     esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_ev, NULL, &s_h_ip);
     if(esp_wifi_set_mode(WIFI_MODE_STA)!=ESP_OK) return 0;
@@ -297,7 +307,7 @@ static int wifi_up(void){
     for(int i = 0; i < CFG_WIFI_N; i++){
         if(!pc->wifi[i].ssid[0]) continue;                  /* empty slot */
         if(s_cancel) break;
-        if(!wifi_try(&pc->wifi[i], i == 0 ? 25000 : 8000)) continue;
+        if(!wifi_try(i, i == 0 ? 25000 : 8000)) continue;
         if(config_wifi_promote(appcfg_mut(), i)){
             appcfg_save();                                  /* the order changed */
             ESP_LOGI(TAG, "wifi: promoted slot %d to first", i + 1);
@@ -740,10 +750,12 @@ static void hotsync_task(void *arg){
              cfg->latitude[0]  ? cfg->latitude  : "(unset)",
              cfg->longitude[0] ? cfg->longitude : "(unset)");
 
+    /* The account password, out of the store for the length of this sync. It
+     * and dcard's copy are wiped at the one exit below, before wifi_down(). */
     DavCtx d; memset(&d,0,sizeof d);
     snprintf(d.base,sizeof d.base,"%s",cfg->dav_base);
     snprintf(d.user,sizeof d.user,"%s",cfg->dav_user);
-    snprintf(d.pass,sizeof d.pass,"%s",cfg->dav_pass);
+    appcfg_dav_pass(d.pass,sizeof d.pass);
     (void)abspath;
     char msg[208];
 
@@ -763,7 +775,7 @@ static void hotsync_task(void *arg){
     int dav_ok = 0;
     char dav_why[48] = "";
 
-    if(!cfg->dav_base[0] || !cfg->dav_user[0] || !cfg->dav_pass[0]){
+    if(!cfg->dav_base[0] || !cfg->dav_user[0] || !d.pass[0]){
         snprintf(dav_why,sizeof dav_why,"no account set up");
         ESP_LOGW(TAG,"no iCloud credentials; internet-only sync");
     } else if(!ntgt){
@@ -808,6 +820,7 @@ static void hotsync_task(void *arg){
     /* Address book (CardDAV) lives on a separate iCloud host; resolve it lazily
      * the first time a card target is reached. Same credentials as caldav. */
     DavCtx dcard; int card_ready=0;
+    memset(&dcard,0,sizeof dcard);
 
     SyncStats tot={0};
     /* ---- declare the memory ceiling before anything allocates (sync.h) ------
@@ -868,7 +881,7 @@ static void hotsync_task(void *arg){
                 memset(&dcard,0,sizeof dcard);
                 snprintf(dcard.base,sizeof dcard.base,"%s",cfg->dav_card_base);
                 snprintf(dcard.user,sizeof dcard.user,"%s",cfg->dav_user);
-                snprintf(dcard.pass,sizeof dcard.pass,"%s",cfg->dav_pass);
+                snprintf(dcard.pass,sizeof dcard.pass,"%s",d.pass);
                 char chost[256]="";
                 if(dav_effective_host(&dcard,"/",chost,sizeof chost)==0 && chost[0]){
                     snprintf(dcard.base,sizeof dcard.base,"%s",chost);
@@ -1017,6 +1030,8 @@ static void hotsync_task(void *arg){
     ESP_LOGI(TAG,"%s",msg);
     setst(msg);
     hs_heap("sync-done");  /* after sync_free_scratch(), before Wi-Fi goes away */
+    mbedtls_platform_zeroize(d.pass, sizeof d.pass);
+    mbedtls_platform_zeroize(dcard.pass, sizeof dcard.pass);
     wifi_down();           /* also closes the last collection's keep-alive connection */
     /* Back in Mode A. If largestDMA here is much smaller than it was at "wifi-up",
      * a Wi-Fi cycle fragments the DMA region -- which is what would break a plan to
@@ -1094,7 +1109,7 @@ static void discover_task(void *arg){
     DavCtx d; memset(&d,0,sizeof d);
     snprintf(d.base,sizeof d.base,"%s",cfg->dav_base);
     snprintf(d.user,sizeof d.user,"%s",cfg->dav_user);
-    snprintf(d.pass,sizeof d.pass,"%s",cfg->dav_pass);
+    appcfg_dav_pass(d.pass,sizeof d.pass);      /* wiped below, before wifi_down() */
     char host[256]="";
     if(dav_effective_host(&d,"/",host,sizeof host)==0 && host[0]) snprintf(d.base,sizeof d.base,"%s",host);
     setst("Finding calendars...");
@@ -1114,7 +1129,7 @@ static void discover_task(void *arg){
     DavCtx dc; memset(&dc,0,sizeof dc);
     snprintf(dc.base,sizeof dc.base,"%s",cfg->dav_card_base);
     snprintf(dc.user,sizeof dc.user,"%s",cfg->dav_user);
-    snprintf(dc.pass,sizeof dc.pass,"%s",cfg->dav_pass);
+    snprintf(dc.pass,sizeof dc.pass,"%s",d.pass);
     char chost[256]="";
     if(dav_effective_host(&dc,"/",chost,sizeof chost)==0 && chost[0]) snprintf(dc.base,sizeof dc.base,"%s",chost);
     char cprin[512]="";
@@ -1131,6 +1146,8 @@ static void discover_task(void *arg){
     s_disc_done = 1;
     if(s_disc_n==0) setst("No collections found - check login");
     else { char m[80]; snprintf(m,sizeof m,"Found %d (%d cal, %d addr)",s_disc_n,ncal,s_disc_n-ncal); setst(m); }
+    mbedtls_platform_zeroize(d.pass, sizeof d.pass);
+    mbedtls_platform_zeroize(dc.pass, sizeof dc.pass);
     wifi_down();           /* also closes the discovery keep-alive connection */
     s_busy = 0;
     vTaskDelete(NULL);

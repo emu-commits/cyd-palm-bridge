@@ -74,6 +74,11 @@ static void wifi_keys(int i, char *ks, size_t nks, char *kp, size_t nkp){
     else      { snprintf(ks,nks,"wifi_ssid%d",i+1); snprintf(kp,nkp,"wifi_pass%d",i+1); }
 }
 
+void config_wipe(void *p, size_t n){
+    volatile unsigned char *v = (volatile unsigned char *)p;   /* not optimised away */
+    while(n--) *v++ = 0;
+}
+
 int config_wifi_promote(Config *c, int i){
     if(!c || i <= 0 || i >= CFG_WIFI_N) return 0;
     WifiNet t = c->wifi[i];
@@ -82,15 +87,20 @@ int config_wifi_promote(Config *c, int i){
     return 1;
 }
 
-static void apply(Config *c, const char *key, const char *val){
+/* A password key goes to `sec`, or nowhere when the caller passed none: the
+ * Config itself never holds one (config.h). */
+static void apply(Config *c, ConfigSecrets *sec, const char *key, const char *val){
     for(int i = 0; i < CFG_WIFI_N; i++){
         char ks[16], kp[16];
         wifi_keys(i, ks, sizeof ks, kp, sizeof kp);
         if(!strcasecmp(key,ks)){ setstr(c->wifi[i].ssid, sizeof c->wifi[i].ssid, val); return; }
-        if(!strcasecmp(key,kp)){ setstr(c->wifi[i].pass, sizeof c->wifi[i].pass, val); return; }
+        if(!strcasecmp(key,kp)){
+            if(sec) setstr(sec->wifi_pass[i], sizeof sec->wifi_pass[i], val);
+            return;
+        }
     }
     if(!strcasecmp(key,"dav_user"))       setstr(c->dav_user,      sizeof c->dav_user, val);
-    else if(!strcasecmp(key,"dav_pass"))  setstr(c->dav_pass,      sizeof c->dav_pass, val);
+    else if(!strcasecmp(key,"dav_pass")){ if(sec) setstr(sec->dav_pass, sizeof sec->dav_pass, val); }
     else if(!strcasecmp(key,"dav_base"))  setstr(c->dav_base,      sizeof c->dav_base, val);
     else if(!strcasecmp(key,"dav_card_base")) setstr(c->dav_card_base, sizeof c->dav_card_base, val);
     else if(!strcasecmp(key,"cal_coll"))  setstr(c->cal_coll,      sizeof c->cal_coll, val);
@@ -111,7 +121,7 @@ static void apply(Config *c, const char *key, const char *val){
     /* unknown key: ignored */
 }
 
-int config_load(const char *path, Config *c){
+int config_load(const char *path, Config *c, ConfigSecrets *sec){
     sf_recover(path);
     FILE *f=fopen(path,"r");
     if(!f) return -1;
@@ -126,13 +136,14 @@ int config_load(const char *path, Config *c){
         cut_comment(val);                       /* `value   # note` -> `value` */
         val=trim(val);
         if(*key==0) continue;                   /* empty key */
-        apply(c,key,val);
+        apply(c,sec,key,val);
     }
     fclose(f);
+    config_wipe(line, sizeof line);             /* a password line may be the last */
     return 0;
 }
 
-int config_save(const char *path, const Config *c){
+int config_save(const char *path, const Config *c, const ConfigSecrets *sec){
     SafeFile sf;
     FILE *f=sf_open(&sf,path,"w");
     if(!f) return -1;
@@ -146,10 +157,10 @@ int config_save(const char *path, const Config *c){
         char ks[16], kp[16];
         wifi_keys(i, ks, sizeof ks, kp, sizeof kp);
         fprintf(f,"%s = %s\n", ks, c->wifi[i].ssid);
-        fprintf(f,"%s = %s\n", kp, c->wifi[i].pass);
+        fprintf(f,"%s = %s\n", kp, sec ? sec->wifi_pass[i] : "");
     }
     fprintf(f,"dav_user = %s\n",      c->dav_user);
-    fprintf(f,"dav_pass = %s\n",      c->dav_pass);
+    fprintf(f,"dav_pass = %s\n",      sec ? sec->dav_pass : "");
     fprintf(f,"dav_base = %s\n",      c->dav_base);
     fprintf(f,"dav_card_base = %s\n", c->dav_card_base);
     fprintf(f,"cal_coll = %s\n",      c->cal_coll);

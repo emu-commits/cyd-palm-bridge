@@ -23,6 +23,39 @@ the device moves it into its flash and rewrites the file without it. If the
 device cannot write its flash, the password is left in the file rather than
 lost, and the boot log says so (`appcfg: ... could NOT move them off the card`).
 
+## Passwords in RAM
+
+**A password is in RAM only while it is being used.** The device's running
+configuration holds a "has a password" flag per network and for the account,
+never a password:
+
+- **A Wi-Fi join** reads the network's password from flash into the driver's
+  config, hands it to the driver, and wipes its own copy. The driver is told to
+  keep its copy in RAM only (`WIFI_STORAGE_RAM`), not to write a second one to
+  flash, and it is freed when the radio goes down after the sync.
+- **A sync or "Find my calendars"** reads the account password into the request
+  context for that run, and wipes it before the radio goes down. The
+  `Authorization` header built from it is wiped after each request.
+- **The password screens never show a stored password**, not even masked into a
+  field: they start empty and say "(saved -- type to replace)". What you type
+  goes into a buffer of the screen's own, never into the UI toolkit's memory,
+  and is wiped when the screen closes, however it closes. It shows as `*`,
+  except that the character just typed shows for a second, and **Show** shows
+  all of it (mind who can see the screen). What is drawn comes from that same
+  buffer, which the toolkit draws from without copying.
+- **`make -C sim secretscan`** checks this in CI. It types two test passwords
+  through the real Settings screens, runs the simulator's sync (which reads and
+  wipes them the way the device does), and after each step searches every
+  writable page of the process, freed memory included, for any 12-byte piece of
+  either one.
+
+What that cannot cover: the Wi-Fi driver and the HTTP client each hold a copy of
+what they were given for as long as the sync runs, and free it afterwards
+without wiping; a buffer on a task's stack can outlive its function until that
+stack is reused (the code wipes its own; the gate cannot see one that is
+missed); and none of this helps against someone who has the device and reads
+its flash, where the passwords are stored unencrypted (above).
+
 ## What is never done
 
 - **No credential is compiled into any build.** A developer's `secrets.h` used

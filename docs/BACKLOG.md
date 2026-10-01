@@ -22,6 +22,62 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 
 ---
 
+## RESUME HERE — the SRS app, the Planner, and two firmware items (approved 2026-09-29)
+
+**Done 2026-09-29:** the two firmware items and the Planner (`[s]` below;
+their `[d]` checks are open). **Done 2026-09-30:** SRS S0 to S5 in the sim
+(the owner approved the format and demo), then three rounds of bench
+feedback: the 2× answer, the 20 px readings and tidier cards, and full
+screen for lessons and reviews. S4 was replanned: no typed answers
+(`SRS_PLAN.md` §11 decision 9).
+
+**Now (2026-09-30, end of day): the owner is testing on the bench.** The
+next session starts from their report: work through what they found, and
+leave the `[d]` boxes for them to tick. The build under test is `7810d49`
+(CI green; the Pages deploy job fails on a repository setting, not the
+code).
+
+**The app platform is on hold.** The main goal is one first-class SRS app
+(WaniKani/Anki-style, with a large course on the SD card), and it's being
+built into the firmware: **`SRS_PLAN.md`**, with the reasons in its §1. The
+root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
+
+**Firmware groundwork** (from the old Phase 1; one commit each)
+- [x] Passwords out of resident RAM, with a sim `secretscan` gate `[s]` (2026-09-29; `BUILD_PROGRESS.md`)
+- [ ] Wi-Fi join and an iCloud HotSync still work after that change `[d]` (2026-09-30: the user reports "wifi password and sync works fine"; the box is theirs to tick)
+- [x] Password editor: the character just typed shows for a second, "Show"/"Hide" shows it all, and the end stays in view, still outside LVGL (`secretscan`'s new `Y`) `[s]` (2026-09-30, from the bench)
+- [ ] Password entry on glass: the peek is long enough to read, Show/Hide, a long password scrolls with `<` `[d]`
+- [x] Firmware version from `git describe`, shown in Settings ▸ About `[s]` (2026-09-29)
+
+**Planner — To Do and Memo as one app** (built 2026-09-29; `BUILD_PROGRESS.md`)
+- [x] Planner built: one launcher tile, the To Do / Memo switch, checkbox lines in memos, new icon, and the new grid `[s]`
+- [ ] Planner on glass: the To Do / Memo switch, a checklist memo (the [X] button, tick and untick by box and by words), and To Do still syncs `[d]` (2026-09-30: the user reports the Planner "looks great" on the device; the box is theirs to tick)
+
+**SRS app** (phases in `SRS_PLAN.md` §10)
+- [x] S0 — `docs/COURSE_FORMAT.md`, the two-level demo kanji course source (`courses/demo-kanji/`), the test decks (`tests/data/study/`), and the Albanian fit check (its Appendix A) (2026-09-30)
+- [x] **The owner's review of `COURSE_FORMAT.md` and the demo content** (S0's exit): approved 2026-09-30 ("format and demo look good, start S3").
+- [x] S1 — `course.c` reader and `tools/mkcourse.py`, with round-trip, fuzz and demo-rebuild gates in CI (2026-09-30)
+- [x] S2 — `srs.c` with both schedulers and crash-safe progress, with host tests in CI (2026-09-30; sm2 matches the Albanian web app review for review)
+- [x] S3 — launcher tile (position 7), the user's finished portrait (`docs/img/study_face.png`), course picker, dashboard, lessons and reviews, and the demo installed on first run, in the sim `[s]` (2026-09-30; the `study_*` smoke shots)
+- [ ] Study on glass: the tile and portrait, a lesson and its quiz, reviews two hours later (Undo, the Card view), the kana answers, and whether 1-bit kanji read well at 64 and 24 px `[d]`
+- [x] S4a — the answer at 2x: the Palm bold font pixel-doubled (`tools/gen_font_2x.py`), for the answer and a term that's words `[s]` (2026-09-30; `study_review_answer`)
+- [ ] S4a on glass: the 2x answer reads well, and a long one falls back to 1x `[d]`
+- [x] S4b — the Week screen, as Coach and Guru have it: `history.dat` per course, the chart, this week against last, streak, right %, stage groups, her advice `[s]` (2026-09-30; `study_week`, and the history's host tests)
+- [ ] The Week screen on glass: after a few days of use, the bars match what was done, the streak holds overnight, Undo takes a review back off the count `[d]`
+- [x] S5 — the reviews due on the lock screen (AHEAD's STUDY row) and the launcher (a badge), from `summary.bin`, totalled across courses; the Week screen's forecast `[s]` (2026-09-30; `study_lock_due`, `study_lock_caught_up`, `study_launcher_badge`, `study_week`)
+- [x] Lesson cards cleaned up (from the bench: the readings' kana were twice the size needed and ran off the screen): readings a line per type in a 20 px kana font, the meaning big, beside a single kanji `[s]` (2026-09-30; `study_kanji_card`)
+- [x] Lessons, questions and the Card full screen: the Graffiti strip hidden (296 px, not 184), Home and Menu in the title bar, 42 px buttons along the bottom `[s]` (2026-09-30, from the bench; the `study_*` shots)
+- [ ] Full screen on glass: Home and Menu in the title bar are easy to hit, the strip is back on the dashboard, a lesson card mostly without scrolling `[d]`
+- [x] Guru's list and a habit full screen too, her week as it was `[s]` (2026-10-01, from the owner; the `guru_*` shots)
+- [ ] Guru full screen on glass: the list scrolls and ticks better, the greeting still dismisses, Home and Menu work there `[d]`
+- [x] Full screen's Home as wide as fits (clock to Menu, 43 px, outlined) `[s]` (2026-10-01, from the owner)
+- [ ] The wide Home on glass: easy to hit, never touching the clock `[d]`
+- [ ] The cleaned-up cards on glass: the 20 px kana read well, a kanji's readings on the first screen `[d]`
+- [ ] S5 on glass: the lock's STUDY row and the weather box above it read well, the air quality beside the reading, the badge on the icon, the count going up on its own as reviews come due (the lock repaints each minute) `[d]`
+- [ ] S6 — a full course on the real card: open time, next-card time, heap, battery pull, kanji readability `[d]`
+
+---
+
 ## RESUME HERE — 2026-09-23
 
 **Flash from the browser is live** (PR #64; §Proposals ▸ User experience 1):
@@ -417,6 +473,20 @@ follow-ups*.
 
 ## Parked — offered, NOT approved (do not build without a yes)
 
+- **Planner: a workflow between checklist memos and To Do.** A "make this line
+  a To Do" was built and removed on 2026-09-29: To Do syncs to one server list
+  and the item landed in Unfiled, so it lost its project (the memo). Options
+  discussed: checklist memos as the project lists with an optional due date in
+  the item's text; To Do categories as the project lists ("Lists", named after
+  the memo, up to 15), with the category sent to the server (`CATEGORIES`) or
+  routed to its own collection (`sync_categorized` exists but the device does
+  not use it). The owner will decide later.
+
+- **The app platform** (`APP_PLATFORM_PLAN.md`): native C apps from the SD
+  card, with an SDK, versions and a local inspection. **On hold since
+  2026-09-29**, planned but not built. Bring it back if someone else wants to
+  write apps, if `ui.c` or flash becomes a bottleneck, or if apps need
+  sharing between devices.
 - **Opt-in CORS-proxy RSS fetch in the web emulator.** Feed servers send no
   `Access-Control-Allow-Origin`; the routes are a public proxy (fragile) or a
   self-hosted one (infra). Emulator parity only.
@@ -427,6 +497,12 @@ follow-ups*.
 - **BLE + a companion iOS app: dropped, not parked** — see `PRODUCT_PLAN.md` §2.
 
 ## Decided — kept so the reasoning is not relitigated
+
+- **The SRS app is built in, not an SD app** (2026-09-29). The app framework
+  would have cost several times the app, saved only the full-firmware flash,
+  and limited the app to a small memory block, 1-bit bitmaps and no kana
+  font. Courses are data on the card, which covers most of the benefit of
+  adding things without reflashing. `SRS_PLAN.md` §1.
 
 - **No RTC part for timekeeping.** Drift on battery is under a minute a day and
   idle clears 24 h (measured 2026-08-27). An RTC survives only as the enabler for

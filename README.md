@@ -304,8 +304,9 @@ moving the sync arenas to heap.
 **The UI (LVGL, monochrome Palm theme, authentic Palm fonts/icons from PumpkinOS):**
 - **Launcher** — an icon grid of the classic Palm apps (real tAIB icons).
 - **Silkscreen buttons** flanking the Graffiti area: **Home / Menu / Find / Calc**.
-- **Apps** — Date Book, Address, To Do, **Memo Pad** (all four functional): list →
-  detail → edit forms with an on-screen keyboard.
+- **Apps** — Date Book, Address, and the **Planner** (To Do and Memo in one
+  app, with checklist memos): list → detail → edit forms with an on-screen
+  keyboard.
 - **Menus** (F1) — the Menu button opens Palm's **Record** (New/Delete) and
   **Options** (Categories/About) pull-downs.
 - **Categories** (F2) — the top-right category pop-up filters lists, wired to the

@@ -173,11 +173,11 @@ c 32 40
 t 400
 c 18 225
 t 300
-# News (RSS reader, roadmap #4): launcher app (row 3 col 1) opens a one-item-per-view
+# News (RSS reader, roadmap #4): launcher app (row 2 col 1 since the Planner merge) opens a one-item-per-view
 # feed (seeded with samples in the sim).
 # Press-drag UP navigates to the next article. Pool-safe (labels + content swap on
 # a gesture surface; a regression here would HANG or fail to advance).
-c 46 160
+c 46 110
 t 400
 s news_reader
 d 120 185
@@ -433,7 +433,9 @@ t 300
 # and opened a record, and todo_list.ppm has been a picture of an Address detail
 # ever since -- green the whole time, because the gate reads the exit code.
 s launcher_after_about
-# To Do (launcher row 1 col 3)
+# The Planner (launcher row 1 col 3): To Do and Memo in one app. It opens on the
+# half that was open last, which on a fresh boot is To Do. The title bar says
+# "Planner"; the bar's first box says which half this is, and is the switch.
 c 195 56
 t 400
 s todo_list
@@ -487,8 +489,11 @@ t 1200
 s due_saved
 c 18 225
 t 300
-# Memo Pad (launcher row 2 col 1 after the Graffiti app was added)
-c 40 110
+# Memo: the same Planner tile (it reopens on To Do, the half left open above),
+# then the switch at the left of the bar.
+c 195 56
+t 400
+c 30 40
 t 400
 s memo_list
 # Q8 quick add: write into the bar, tap New, and the row must APPEAR. This is
@@ -501,6 +506,40 @@ s q8_memo_typed
 c 215 40
 t 500
 s q8_memo_added
+# The Planner's checklist memo. New on an empty bar opens the form; the "[X]"
+# button in the action row (between Done and the category) puts a box at the
+# start of the line the cursor is on. K types hex: 0a is a newline, and the second item is written
+# out as "[ ] eggs" by hand, which must work just the same.
+c 215 40
+t 400
+k Groceries
+K 0a
+c 81 188
+t 200
+k milk
+K 0a
+K 5b205d2065676773
+t 100
+s planner_memo_boxes
+c 36 188
+t 1200
+# "Groceries" sorts second. Its detail is a list: the title as a plain row, the
+# two items with drawn boxes (the To Do list's own boxes, no per-line object).
+c 120 86
+t 400
+s planner_checklist
+# Tap milk's BOX: ticked, struck through, saved into the memo text as "[x]".
+c 16 56
+t 400
+s planner_checklist_ticked
+# Tap eggs' WORDS: the same thing -- the whole row is the checkbox.
+c 120 78
+t 400
+s planner_checklist_both
+# ...and again: unticked.
+c 120 78
+t 400
+s planner_checklist_untick
 c 18 225
 t 300
 # HotSync -- launcher row 2 col 2, back in the middle where it is findable
@@ -850,9 +889,10 @@ t 400
 c 195 160
 t 400
 s settings_about
-# "All settings (one list)" is the About panel's FOURTH row (y=119). This tap
-# was y=37 -- the first row -- so prefs_list had been a second picture of About.
-c 120 119
+# "All settings (one list)" is the About panel's FIFTH row (y=147) since the
+# version row went in second. This tap was once y=37 -- the first row -- so
+# prefs_list had been a second picture of About; check the PNG, not the exit code.
+c 120 147
 t 400
 s prefs_list
 c 18 225
@@ -890,7 +930,7 @@ t 500
 s hotsync_news
 c 18 225
 t 300
-c 46 160
+c 46 110
 t 500
 s news_from_sync
 # Preferences > News feeds: the checkbox manager + the URL editor keyboard. Pin the
@@ -1310,10 +1350,10 @@ s guru_checked
 c 120 117
 t 400
 s guru_task
-c 79 190
+c 79 300
 t 300
 s guru_task_done
-c 200 190
+c 200 300
 t 400
 # back on the list, with BOTH habits now ticked and the header counting them
 s guru_back
@@ -1338,8 +1378,11 @@ s guru_six
 # was verified by temporarily moving the longest why onto a first-screen habit;
 # see the note in gu_show_task().
 # Options -> This week (R2: it said "Her week"). The menu item only exists
-# while a Guru screen is up.
-c 18 300
+# while a Guru screen is up. Her list and a habit are full screen, as Study's
+# lessons are: no Graffiti strip, Home (200,12) and Menu (226,12) in the title
+# bar, a habit's buttons along the bottom (y 300). Her week isn't: her
+# verdict stands in the strip.
+c 226 12
 t 400
 s guru_menu
 # "This week" is the third row (Settings / Power / This week). R4's layout: the
@@ -1362,8 +1405,200 @@ t 500
 s r1_guru_week_button
 c 120 100
 t 400
+c 200 12
+t 300
+# S3: Study, the spaced-repetition app. Launcher row 3 col 1 (the textbook).
+# The first open installs the demo course on the card and greets from the
+# strip (her portrait is the owner's own art). Then a whole day in the demo:
+# a lesson (five radical cards, then a quiz on them), two hours later (the
+# `A` command moves Study's clock, UI_DEVTOOLS only) the first reviews,
+# with a wrong answer taken back by Undo, and the next lesson, whose kanji
+# unlocked because their radicals are known now. Lessons, questions and the
+# Card are full screen: no Graffiti strip, Home (200,12) and Menu (226,12) in
+# the title bar, the buttons along the bottom (y 295). B/E: leaving Study gives
+# back every byte of heap it took (SRS_PLAN.md S3's exit condition).
+B
+c 46 160
+t 400
+s study_greet
+c 120 260
+t 300
+s study_dash
+c 61 92
+t 400
+s study_card
+# the card scrolls: meaning, then the mnemonic below the fold
+d 120 150
+t 30
+m 120 120
+t 30
+m 120 80
+t 30
+m 120 50
+t 30
+u
+t 400
+s study_card_scrolled
+c 176 295
+t 300
+c 176 295
+t 300
+c 176 295
+t 300
+c 176 295
+t 300
+s study_card_last
+c 176 295
+t 300
+s study_quiz
+c 120 295
+t 300
+s study_quiz_answer
+c 180 295
+t 300
+c 120 295
+t 300
+c 180 295
+t 300
+c 120 295
+t 300
+c 180 295
+t 300
+c 120 295
+t 300
+c 180 295
+t 300
+c 120 295
+t 300
+c 180 295
+t 300
+s study_lesson_done
+c 120 260
+t 200
+c 120 130
+t 400
+s study_dash_after_lesson
+A 7300
 c 18 225
 t 300
+c 46 160
+t 400
+c 120 260
+t 200
+s study_dash_reviews_due
+c 180 92
+t 400
+s study_review
+c 120 295
+t 300
+s study_review_answer
+c 60 295
+t 300
+s study_review_after_wrong
+c 24 34
+t 300
+s study_review_undone
+c 180 295
+t 300
+c 120 295
+t 300
+c 180 295
+t 300
+c 120 295
+t 300
+c 180 295
+t 300
+c 120 295
+t 300
+c 180 295
+t 300
+c 120 295
+t 300
+c 180 295
+t 300
+s study_reviews_done
+c 120 260
+t 200
+c 120 130
+t 400
+s study_dash_after_reviews
+# the Week screen, as Coach's and Guru's: today's lesson and reviews in the
+# chart (history.dat), the stage groups, and her advice; a tap goes back
+c 201 185
+t 400
+s study_week
+c 120 100
+t 400
+# the next lesson: the last three radicals, then kanji -- whose reading
+# questions come on a black banner and answer in the kana font
+c 61 92
+t 400
+c 176 295
+t 300
+c 176 295
+t 300
+c 176 295
+t 300
+s study_kanji_card
+c 176 295
+t 300
+c 176 295
+t 300
+s study_quiz2
+# the menu's Study items: This week, About this course, and Check course
+c 226 12
+t 400
+s study_menu
+c 60 184
+t 400
+s study_about_course
+c 120 160
+t 300
+c 226 12
+t 400
+c 60 210
+t 600
+s study_check_course
+c 120 160
+t 300
+c 200 12
+t 300
+E leaving Study
+# S5: Study at a glance, with no course open: the launcher's badge and the
+# lock's STUDY row come from each course's summary.bin (written as Study
+# closed). Just after the reviews nothing is due: no badge, "caught up".
+s study_launcher_none
+L
+t 300
+s study_lock_caught_up
+d 120 275
+t 30
+m 120 210
+t 30
+m 120 140
+t 30
+m 120 90
+t 30
+u
+t 400
+# a day and a half on (`A`): what was reviewed is due again
+A 129600
+c 18 225
+t 300
+s study_launcher_badge
+L
+t 300
+s study_lock_due
+d 120 275
+t 30
+m 120 210
+t 30
+m 120 140
+t 30
+m 120 90
+t 30
+u
+t 400
 # I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.
 # (CI starts on a fresh /sdcard, so the seed + manifest exist here.)
 c 18 225
