@@ -204,8 +204,11 @@ and S1**, which the owner asked for together:
   `content_clear()` turns it off for everyone else; the smoke tour taps
   Home at (200,12), Menu at (226,12) and Study's buttons at y 295 there.
 
-**Where things stand (end of 2026-09-30):** the owner is bench-testing build
-`7810d49` (CI green). Start the next session from their report; the open
+- **Then (2026-10-01): Guru full screen too.** Her list and a habit call
+  `ui_full_screen(1)`; her week keeps the strip for her verdict.
+
+**Where things stand (2026-10-01):** the owner is bench-testing build
+`7810d49` (CI green), plus Guru full screen since. Start the next session from their report; the open
 `[d]` items in `BACKLOG.md`'s first RESUME HERE are the checklist.
 
 1. **S6, the bench**, is the owner's (`[d]` items in `BACKLOG.md`). Any

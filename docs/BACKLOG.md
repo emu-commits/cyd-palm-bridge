@@ -68,6 +68,8 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 - [x] Lesson cards cleaned up (from the bench: the readings' kana were twice the size needed and ran off the screen): readings a line per type in a 20 px kana font, the meaning big, beside a single kanji `[s]` (2026-09-30; `study_kanji_card`)
 - [x] Lessons, questions and the Card full screen: the Graffiti strip hidden (296 px, not 184), Home and Menu in the title bar, 42 px buttons along the bottom `[s]` (2026-09-30, from the bench; the `study_*` shots)
 - [ ] Full screen on glass: Home and Menu in the title bar are easy to hit, the strip is back on the dashboard, a lesson card mostly without scrolling `[d]`
+- [x] Guru's list and a habit full screen too, her week as it was `[s]` (2026-10-01, from the owner; the `guru_*` shots)
+- [ ] Guru full screen on glass: the list scrolls and ticks better, the greeting still dismisses, Home and Menu work there `[d]`
 - [ ] The cleaned-up cards on glass: the 20 px kana read well, a kanji's readings on the first screen `[d]`
 - [ ] S5 on glass: the lock's STUDY row and the weather box above it read well, the air quality beside the reading, the badge on the icon, the count going up on its own as reviews come due (the lock repaints each minute) `[d]`
 - [ ] S6 — a full course on the real card: open time, next-card time, heap, battery pull, kanji readability `[d]`

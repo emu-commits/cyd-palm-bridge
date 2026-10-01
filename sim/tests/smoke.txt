@@ -1350,10 +1350,10 @@ s guru_checked
 c 120 117
 t 400
 s guru_task
-c 79 190
+c 79 300
 t 300
 s guru_task_done
-c 200 190
+c 200 300
 t 400
 # back on the list, with BOTH habits now ticked and the header counting them
 s guru_back
@@ -1378,8 +1378,11 @@ s guru_six
 # was verified by temporarily moving the longest why onto a first-screen habit;
 # see the note in gu_show_task().
 # Options -> This week (R2: it said "Her week"). The menu item only exists
-# while a Guru screen is up.
-c 18 300
+# while a Guru screen is up. Her list and a habit are full screen, as Study's
+# lessons are: no Graffiti strip, Home (200,12) and Menu (226,12) in the title
+# bar, a habit's buttons along the bottom (y 300). Her week isn't: her
+# verdict stands in the strip.
+c 226 12
 t 400
 s guru_menu
 # "This week" is the third row (Settings / Power / This week). R4's layout: the
@@ -1402,7 +1405,7 @@ t 500
 s r1_guru_week_button
 c 120 100
 t 400
-c 18 225
+c 200 12
 t 300
 # S3: Study, the spaced-repetition app. Launcher row 3 col 1 (the textbook).
 # The first open installs the demo course on the card and greets from the

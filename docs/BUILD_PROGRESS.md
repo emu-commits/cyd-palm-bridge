@@ -16,6 +16,25 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-01 — Guru full screen: her list and a habit without the Graffiti strip
+
+From the owner: "just like we did for the Study app, apply the full-screen
+mode to the Guru app, which will make scrolling the list and checking items
+easier". Nothing in Guru is written, so her habit list and a habit's page
+call `ui_full_screen(1)` (`show_guru()`, `gu_show_task()`) and size
+themselves from `GU_FULL_H` (296 px): the list shows about 14 rows where it
+showed 8, and a habit's why box grows by the same 112 px, with Did it and
+Back along the bottom. Home and Menu are in the title bar, as in Study.
+**Her week stays as it was**, because her verdict stands in the strip.
+Her greeting still stands in the strip's place, over the bottom of the list,
+until it's tapped.
+
+Smoke: the habit's buttons are tapped at y 300, Menu at (226,12) and Home
+at (200,12) on the list; the `guru_*` shots were looked at on a fresh card.
+
+Measured (IDF build in `espressif/idf:release-v5.5`, LVGL v9.5.0 vendored
+locally): app 1,728,160 B (+16 B); static DRAM 160,580 B (unchanged).
+
 ### 2026-09-30 — Study full screen: lessons and reviews without the Graffiti strip
 
 From the bench: "the scrolling is still a poor experience. What do you

@@ -6797,7 +6797,7 @@ static lv_obj_t *mk_tb_silk(const lv_image_dsc_t *ic, int x, lv_event_cb_t cb){
 }
 
 /* FULL SCREEN, for a view with nothing to write (Study's lessons and
- * reviews): the Graffiti strip is hidden and its 112 px go to the content
+ * reviews, Guru's list and habits): the Graffiti strip is hidden and its 112 px go to the content
  * area, and Home and Menu move up into the title bar's right end (a view that
  * asks for this has no category picker there). content_clear() turns it off,
  * so it lasts exactly as long as the screen that asked for it. */
@@ -10471,6 +10471,10 @@ static void gu_tbl_click_cb(lv_event_t *e);
  * is plain pixels computed from the same constant. */
 #define GU_HDR_H  38
 #define GU_WEEK_W 54
+/* The list and a habit are full screen (ui_full_screen), as Study's lessons
+ * are: nothing on them is written, so the Graffiti strip's 112 px go to the
+ * list. Her week stays as it was: her verdict stands in the strip. */
+#define GU_FULL_H (LCD_H - TITLE_H)
 static void gu_week_btn_cb(lv_event_t *e){ (void)e; show_guru_report(); }
 
 static void gu_build_header(void){
@@ -10539,7 +10543,7 @@ static void gu_build_list(void){
     list_table_style(t);
     lv_table_set_column_width(t, 0, 34);
     lv_table_set_column_width(t, 1, LCD_W - 46);
-    lv_obj_set_size(t, lv_pct(100), (PDA_H - TITLE_H) - GU_HDR_H);
+    lv_obj_set_size(t, lv_pct(100), GU_FULL_H - GU_HDR_H);
     lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_add_event_cb(t, gu_tbl_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
@@ -10609,7 +10613,7 @@ static int g_gu_detail_id;
  * TOP, so the two only meet correctly if they agree about the 34px button, its
  * 3px inset and a 4px gap. */
 #define GU_WHY_Y 46
-#define GU_WHY_H ((PDA_H - TITLE_H) - 3 - 34 - 4 - GU_WHY_Y)
+#define GU_WHY_H (GU_FULL_H - 3 - 34 - 4 - GU_WHY_Y)
 
 static void gu_detail_back_cb(lv_event_t *e){ (void)e; show_guru(); }
 
@@ -10630,6 +10634,7 @@ static void gu_show_task(int id){
     kill_kb();
     content_clear();
     g_gu_open = 1;
+    ui_full_screen(1);
     lv_label_set_text(title_lbl, "Guru");
     update_cat_trigger();
 
@@ -10826,6 +10831,7 @@ static void show_guru(void){
     content_clear();
     gu_load();
     g_gu_open = 1;
+    ui_full_screen(1);
     lv_label_set_text(title_lbl, "Guru");
     update_cat_trigger();
 
