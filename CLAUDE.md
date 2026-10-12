@@ -21,6 +21,8 @@ before touching anything.
 - `docs/BUILD_PROGRESS.md`: changelog, measured RAM/flash numbers, lessons.
 - `docs/SRS_PLAN.md`: the built-in spaced-repetition app. **This is the
   current project; see "Current work" below.**
+- `docs/GAME_PLAN.md`: a monster-catching game from Tuxemon's content.
+  **Paused for the owner's review since 2026-10-12**; nothing built.
 - `docs/APP_PLATFORM_PLAN.md`: native C apps loaded from the SD card.
   **On hold since 2026-09-29**; don't build any of it without the user's yes.
 

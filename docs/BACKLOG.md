@@ -22,6 +22,13 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 
 ---
 
+## Paused — a monster-catching game (planned 2026-10-12, awaiting the owner)
+
+`GAME_PLAN.md` is the plan: a C engine in the Games menu, with content from
+Tuxemon (GPLv3 data, mostly CC-BY-SA art) converted into one file on the card,
+on-screen controls and an Auto-play checkbox. **Nothing is built. Don't start
+G1 without the owner's yes;** its open questions are §13 Q1–Q5.
+
 ## RESUME HERE — the SRS app, the Planner, and two firmware items (approved 2026-09-29)
 
 **Done 2026-09-29:** the two firmware items and the Planner (`[s]` below;
