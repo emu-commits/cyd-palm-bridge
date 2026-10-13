@@ -930,13 +930,12 @@ static void hotsync_task(void *arg){
          * the partial merge was discarded. n >= 0: records kept. They are counted
          * apart because the status line names the cause, and naming the wrong one
          * sends the next hour of debugging the wrong way. */
-        /* bothDel is logged separately from pushDel and only when non-zero: it
-         * is a record that was already gone on both sides, so nothing was sent.
-         * Counting it in pushDel would report deletions this device never
-         * made. */
+        /* Nothing is ever deleted on the server (dav.h), so "up" has no minus:
+         * a record deleted here is logged as hidden, and bothDel (already gone
+         * on both sides) only when non-zero. Neither sent anything. */
         { int fb = 0, fs = 0; sync_fetch_counts(&fb, &fs);
-          ESP_LOGI(TAG,"%s: rc=%d up +%d~%d-%d down +%d~%d-%d%s pruned=%d fetched=%d batched+%d single heap=%lu",
-                   t->name,n, st.pushNew,st.pushMod,st.pushDel, st.pullNew,st.pullMod,st.pullDel,
+          ESP_LOGI(TAG,"%s: rc=%d up +%d~%d down +%d~%d-%d hidden=%d%s pruned=%d fetched=%d batched+%d single heap=%lu",
+                   t->name,n, st.pushNew,st.pushMod, st.pullNew,st.pullMod,st.pullDel, st.hidden,
                    st.bothDel ? " (+already gone)" : "", st.pruned, fb, fs,
                    (unsigned long)esp_get_free_heap_size()); }
         sync_set_window(0, 0);
@@ -953,7 +952,7 @@ static void hotsync_task(void *arg){
                          t->name, sync_too_big_bytes()); }
             else             oomed++; }
         else { did++;
-            tot.pushNew+=st.pushNew; tot.pushMod+=st.pushMod; tot.pushDel+=st.pushDel;
+            tot.pushNew+=st.pushNew; tot.pushMod+=st.pushMod; tot.hidden+=st.hidden;
             tot.pullNew+=st.pullNew; tot.pullMod+=st.pullMod; tot.pullDel+=st.pullDel;
             tot.bothDel+=st.bothDel; }
     }
@@ -1023,8 +1022,8 @@ static void hotsync_task(void *arg){
                      oomed, diskerr, netdown);
     }
     else
-        snprintf(msg,sizeof msg,"Done: +%d~%d-%d up +%d~%d-%d down%.16s%.20s%.10s%.47s",
-                 tot.pushNew,tot.pushMod,tot.pushDel, tot.pullNew,tot.pullMod,tot.pullDel,
+        snprintf(msg,sizeof msg,"Done: +%d~%d up +%d~%d-%d down%.16s%.20s%.10s%.47s",
+                 tot.pushNew,tot.pushMod, tot.pullNew,tot.pullMod,tot.pullDel,
                  (failed||protec)?" (some skipped)":"",
                  s_clock_synced ? "" : " - CLOCK NOT SYNCED",
                  s_news_added ? "" : " - no news",

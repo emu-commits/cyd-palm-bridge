@@ -20,6 +20,7 @@
 #include <time.h>
 #include "../bridge/palm.h"
 #include "../bridge/sync.h"
+#include "radicale_rm.h"
 
 static DavCtx D;
 static int fails = 0;
@@ -36,7 +37,7 @@ static void nlCb(const char *name, const char *etag, void *ctx){
 }
 static void clearColl(void){
     NL *l = calloc(1, sizeof *l); dav_list(&D, COLL, nlCb, l);
-    for(int i = 0; i < l->c; i++) dav_delete(&D, COLL, l->n[i], NULL);
+    for(int i = 0; i < l->c; i++) test_rm(&D, COLL, l->n[i], NULL);
     remove(MAP); free(l);
 }
 static int serverCount(void){ NL *l = calloc(1, sizeof *l); dav_list(&D, COLL, nlCb, l); int n = l->c; free(l); return n; }
@@ -122,17 +123,17 @@ int main(void){
 
     printf("== the same window again: nothing to do ==\n");
     rc = sync1(&s);
-    int ops = s.pushNew + s.pushMod + s.pushDel + s.pullNew + s.pullMod + s.pullDel + s.conflicts;
+    int ops = s.pushNew + s.pushMod + s.pullNew + s.pullMod + s.pullDel + s.conflicts;
     CK(rc == 3 && ops == 0 && s.unchanged == 3 && s.pruned == 0, "a no-op");
 
     printf("== time moves on: what left the window leaves the device, not the server ==\n");
     window(50, 70);
     rc = sync1(&s);
-    printf("  rc=%d pullNew=%d pruned=%d pushDel=%d\n", rc, s.pullNew, s.pruned, s.pushDel);
+    printf("  rc=%d pullNew=%d pruned=%d\n", rc, s.pullNew, s.pruned);
     CK(s.pruned == 2, "A and E pruned");
     CK(s.pullNew == 1 && findLocal("Later B") >= 0, "B pulled in");
     CK(findLocal("Weekly D") >= 0, "the weekly event stays: it recurs in this window too");
-    CK(s.pushDel == 0 && serverCount() == 5, "NOTHING deleted on the server");
+    CK(serverCount() == 5, "NOTHING deleted on the server");
 
     printf("== an edit to an event that then leaves the window still reaches the server ==\n");
     window(-1, 14); sync1(&s);                           /* A and E back, B pruned */
@@ -150,15 +151,18 @@ int main(void){
     CK(findLocal("Soon A, edited") < 0, "and at the next sync it leaves the device");
     CK(serverCount() == 5, "still five on the server");
 
-    printf("== a tombstone for an event outside the window still deletes it ==\n");
+    printf("== a tombstone for an event outside the window: off the device, never the server ==\n");
     window(-1, 14); sync1(&s);
     int ie = findLocal("Soon E");
     CK(ie >= 0, "E is back");
     if(ie >= 0){ recs[ie].attr |= REC_ATTR_DELETE; saveLocal(); }
     window(50, 70);
     rc = sync1(&s);
-    printf("  rc=%d pushDel=%d\n", rc, s.pushDel);
-    CK(s.pushDel == 1 && serverCount() == 4, "E deleted on the server, and only E");
+    printf("  rc=%d hidden=%d\n", rc, s.hidden);
+    CK(s.hidden == 1 && serverCount() == 5, "E hidden on the device; the server keeps all five");
+    window(-1, 14); rc = sync1(&s);
+    CK(findLocal("Soon E") < 0 && findLocal("Soon A, edited") >= 0,
+       "back in the window, E stays hidden and A comes back");
 
     printf("== a record made on the device outside the window goes up, then leaves ==\n");
     window(-1, 14); sync1(&s);
@@ -167,22 +171,23 @@ int main(void){
       dateOf(100, &a.year, &a.month, &a.day); snprintf(a.description, sizeof a.description, "Far F");
       Rec *x = &recs[nrecs++]; x->uid = 4242; x->attr = 0; x->len = ApptPack(x->data, PALM_REC_MAX, &a); saveLocal(); }
     rc = sync1(&s);
-    CK(s.pushNew == 1 && serverCount() == 5, "pushed: the server has it");
+    CK(s.pushNew == 1 && serverCount() == 6, "pushed: the server has it");
     rc = sync1(&s);
     CK(s.pruned == 1 && findLocal("Far F") < 0, "then pruned from the device");
-    CK(serverCount() == 5, "and kept on the server");
+    CK(serverCount() == 6, "and kept on the server");
 
     printf("== a window with nothing in it empties the device, and that's allowed ==\n");
     window(2000, 2001);
     rc = sync1(&s);
     printf("  rc=%d pruned=%d local=%d\n", rc, s.pruned, localCount());
     CK(rc == 0 && localCount() == 0, "the device is empty (not refused as a glitch)");
-    CK(serverCount() == 5, "and the server still holds everything");
+    CK(serverCount() == 6, "and the server still holds everything");
 
     printf("== no window: the whole collection, as before ==\n");
     sync_set_window(0, 0);
     rc = sync1(&s);
-    CK(rc == 5 && s.pullNew == 5, "every event comes down");
+    CK(rc == 5 && s.pullNew == 5, "every event comes down, bar the hidden E");
+    CK(findLocal("Soon E") < 0 && serverCount() == 6, "E still hidden, still on the server");
 
     printf("\n%s (%d failures)\n", fails ? "FAILURES" : "ALL PASS", fails);
     return fails ? 1 : 0;

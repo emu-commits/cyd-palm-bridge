@@ -605,9 +605,11 @@ static int app_syncs(int app){
     return 0;
 }
 
+int data_app_syncs(int app){ return app_syncs(app); }
+
 /* Delete a record. In an app that syncs it becomes a tombstone (see live_read)
- * and the next sync pushes the deletion and drops it; elsewhere it is removed
- * outright, as it always was. */
+ * and the next sync drops it from the device, leaving the server's copy alone
+ * (sync.c, HIDDEN_HASH); elsewhere it is removed outright, as it always was. */
 int data_delete(int app, uint32_t uid){
     int t = app_syncs(app);
     switch(app){

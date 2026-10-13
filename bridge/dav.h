@@ -16,8 +16,11 @@ int dav_put(const DavCtx*d,const char*coll,const char*name,const char*ctype,
             const char*bodyfile,const char*ifmatch,
             char*etag_out,int etagcap,int*status_out);
 
-/* DELETE <base>/<coll>/<name>; ifmatch optional. returns HTTP status or -1. */
-int dav_delete(const DavCtx*d,const char*coll,const char*name,const char*ifmatch);
+/* There is no DELETE, and there must never be one. Nothing on this device or
+ * in this bridge removes an object from the server: a record deleted on the
+ * device leaves the device only (sync.c, "hidden"), and a record leaving the
+ * calendar window is pruned locally. `make nodelete` fails the build if a
+ * DELETE (or MOVE, which removes the source) appears in shipped code. */
 
 /* PROPFIND Depth:0 for a single object's current ETag. returns 0 on success. */
 int dav_getetag(const DavCtx*d,const char*coll,const char*name,char*etag,int cap);

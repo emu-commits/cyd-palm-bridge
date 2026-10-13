@@ -15,6 +15,8 @@ int dav_last_status = 0;   /* HTTP status of the most recent discovery request *
 
 /* run a command, capture stdout into out (cap). returns bytes or -1. */
 static int run(const char*cmd,char*out,int cap){
+    /* Never a request that removes an object from the server (dav.h). */
+    if(strstr(cmd,"-X DELETE") || strstr(cmd,"-X MOVE")) return -1;   /* nodelete-ok */
     FILE*p=popen(cmd,"r"); if(!p) return -1;
     int n=0; if(out&&cap>0){ n=(int)fread(out,1,cap-1,p); out[n]=0; }
     else { char sink[4096]; while(fread(sink,1,sizeof sink,p)>0){} }
@@ -66,16 +68,6 @@ int dav_put(const DavCtx*d,const char*coll,const char*name,const char*ctype,
         grab_etag(h,etag_out,etagcap);
     }
     return 0;
-}
-
-int dav_delete(const DavCtx*d,const char*coll,const char*name,const char*ifmatch){
-    char ifhdr[256]="";
-    if(ifmatch&&ifmatch[0]) snprintf(ifhdr,sizeof ifhdr,"-H 'If-Match: \"%s\"' ",ifmatch);
-    char cmd[1024],code[16]={0};
-    snprintf(cmd,sizeof cmd,"curl -s -o /dev/null -w '%%{http_code}' -u %s:%s %s-X DELETE '%s/%s/%s'",
-        d->user,d->pass,ifhdr,d->base,coll,name);
-    if(run(cmd,code,sizeof code)<0) return -1;
-    return atoi(code);
 }
 
 int dav_getetag(const DavCtx*d,const char*coll,const char*name,char*etag,int cap){

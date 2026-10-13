@@ -110,7 +110,7 @@ int main(void){
 
     /* idempotent third sync */
     SyncStats s3={0}; sync_categorized(&D,PDB,PDB,KIND_CAL,&rt,"state",POL_SERVER,&s3);
-    int ops=s3.pushNew+s3.pushMod+s3.pushDel+s3.pullNew+s3.pullMod+s3.pullDel+s3.conflicts;
+    int ops=s3.pushNew+s3.pushMod+s3.pullNew+s3.pullMod+s3.pullDel+s3.conflicts;
     printf("  3rd sync ops=%d clean=%d\n",ops,s3.unchanged);
     CK(ops==0,"third sync is a no-op across all collections");
 

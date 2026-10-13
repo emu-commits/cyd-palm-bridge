@@ -49,6 +49,13 @@ the simulator too.
 
 ## The sync engine (`bridge/sync.c`)
 
+**Nothing is ever deleted on the server.** The transport has no `DELETE`
+(or `MOVE`): the device's `davreq()` allow-lists `GET`, `PUT`, `PROPFIND`
+and `REPORT`, the host's curl transport refuses the rest, and
+`tests/nodelete.sh` (run by `make test`) fails the build if shipped code
+names a delete. A record deleted on the device leaves the device only; one
+missing from the local database is restored from the server.
+
 **Change detection.** A record changed locally if its canonical body's FNV
 hash differs from the one stored at the last sync (or Palm's delete bit is
 set). It changed on the server if its ETag differs from the stored one (or
@@ -57,8 +64,11 @@ server moving an object doesn't duplicate it.
 
 **Reconciliation** runs the full (local × server) matrix of new, modified
 and deleted, does the DAV operations (conditional `PUT` with `If-Match`,
-`DELETE`, `GET`), writes the merged PDB, and rewrites the map
-(`state/<collection>.map`, rows `uid⇥href⇥etag⇥hash`). A **conflict** is a
+and `GET`), writes the merged PDB, and rewrites the map
+(`state/<collection>.map`, rows `uid⇥href⇥etag⇥hash`). A record deleted on
+the device is dropped from the PDB and its map row kept with hash 0
+(*hidden*), so the server's copy isn't pulled back; if that copy later
+changes on the server, it comes back. A **conflict** is a
 record changed on both sides, resolved by policy: `server` wins, `local`
 wins, or `both` (Palm's keep-both: the server copy stays and the local one is
 added as a new record). Modify beats delete under `both`.
@@ -75,15 +85,16 @@ by default yesterday to two weeks ahead), listed with a CalDAV time-range
 query that the server applies to recurrences. An object that leaves the
 window leaves the device and is never deleted on the server; one the device
 changed is checked with a one-object PROPFIND first, so an edit still goes
-up and a tombstone still deletes. Bodies are fetched in batches
+up and a tombstone still hides it. Bodies are fetched in batches
 (`calendar-multiget` / `addressbook-multiget`), streamed onto the card and
 looked up there, rather than one GET each. The index files are sorted in a
 4 KB buffer, or in runs on the card when they don't fit, so a collection's
 size costs card space rather than RAM.
 
-**Safety.** Every durable file is replaced whole (crash-safe writes). A sync
-that would delete most of a collection is held back (the mass-delete guard),
-deletions travel as tombstones, the demo records are never pushed, and a
+**Safety.** Every durable file is replaced whole (crash-safe writes). No
+deletion is ever sent; a record missing from the local database without a
+tombstone (a card that read short) is restored from the server, one record or
+all of them (`tests/massdel.c`). The demo records are never pushed, and a
 collection too large for the device's RAM is refused without changing
 anything (`tests/toobig.c`).
 

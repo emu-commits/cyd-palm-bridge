@@ -70,8 +70,11 @@ int data_save_todo(uint32_t uid, int cat, const Todo *in);
 int data_record_category(int app, uint32_t uid);
 /* toggle a to-do's completed flag (and save). 1 on success. */
 int data_toggle_todo(uint32_t uid);
-/* delete a record by uid (next sync propagates it). */
+/* delete a record by uid. In an app that syncs, the next sync takes it off the
+ * device only: nothing is ever deleted on the server (bridge/dav.h). */
 int data_delete(int app, uint32_t uid);
+/* 1 if this app's database syncs to an account (so a delete is device-only). */
+int data_app_syncs(int app);
 
 /* categories: read the app's category table; get/set the active list filter
  * (-1 = All). List iterators honor the filter. */

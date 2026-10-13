@@ -1,5 +1,9 @@
 /* sync.c -- push/pull primitives + incremental conflict-aware two-way sync.
  *
+ * NOTHING IS EVER DELETED FROM THE SERVER. The transport has no DELETE (dav.h);
+ * a record deleted on the device leaves the device only (HIDDEN_HASH), and a
+ * record missing from the local database is restored from the server.
+ *
  * The incremental engine (sync_collection) is the finished module. Change
  * detection:
  *   - LOCAL change  = record's canonical body hash differs from the hash
@@ -76,7 +80,6 @@ static int scratch_alloc(void);
 /* defined with the pull-only switch further down; used by pushRec above it. */
 static int put_guard(const DavCtx*d,const char*coll,const char*name,const char*ctype,
                      const char*bodyfile,const char*ifmatch,char*etag,int etagcap,int*status);
-static int del_guard(const DavCtx*d,const char*coll,const char*name,const char*ifmatch);
 
 /* ---- kind helpers ---- */
 static const char* kindExt(int k){ return k==KIND_CARD?"vcf":"ics"; }
@@ -343,10 +346,6 @@ static int put_guard(const DavCtx*d,const char*coll,const char*name,const char*c
     }
     return dav_put(d,coll,name,ctype,bodyfile,ifmatch,etag,etagcap,status);
 }
-static int del_guard(const DavCtx*d,const char*coll,const char*name,const char*ifmatch){
-    if(s_pull_only) return 0;              /* server keeps the record; next run re-pulls it */
-    return dav_delete(d,coll,name,ifmatch);
-}
 
 static int over_budget(void){
     if(!s_budget || SYNC_WORKING_SET <= s_budget) return 0;
@@ -455,9 +454,9 @@ static int cmpLine(const void*a,const void*b){
  *
  * Both failures must be loud, because silent they are WORSE THAN A CRASH. A
  * file left unsorted and walked by the merge-join as if sorted mis-pairs
- * records into spurious deletes and duplicates; a record dropped from the
- * merged PDB is read by the NEXT sync as locally deleted, and that deletion is
- * pushed to the server. */
+ * records into spurious deletes and duplicates on the device; a record dropped
+ * from the merged PDB is missing locally at the NEXT sync, and is restored from
+ * the server (it is never deleted there). */
 
 /* ---- the sort: in RAM when it fits, in runs on the card when it doesn't ----
  * Every index file is sorted by its first field. A file that fits the sort's
@@ -649,19 +648,6 @@ static void buildMapIdx(const char*mapfile,char*token,int tokcap,uint32_t*maxuid
     }
     if(a){fclose(a);} if(b){fclose(b);} if(c){fclose(c);}
     CHK("map-built"); sortFile(MP_IDX); sortFile(MP_HREF); sortFile(MP_PALM); CHK("map-sorted");
-}
-
-/* Trip the mass-delete guard only once a collection is big enough for "most of
- * it vanished" to mean anything. Below this, a small collection legitimately
- * emptying is ordinary. */
-#define MASSDEL_MIN 8
-static int countLines(const char*path){
-    FILE*f=fopen(path,"r"); if(!f) return 0;
-    int n=0, c, last='\n';
-    while((c=fgetc(f))!=EOF){ if(c=='\n') n++; last=c; }
-    if(last!='\n') n++;               /* a final line without a newline still counts */
-    fclose(f);
-    return n;
 }
 
 /* build LC_RAW (key=palmuid) from the source PDB, optionally filtered to records
@@ -992,6 +978,15 @@ static void svRead(FILE*f,SvRow*r){
     }
 }
 
+/* A map row whose hash is HIDDEN_HASH stands for a record deleted ON THE DEVICE
+ * ONLY. Nothing is ever deleted on the server (dav.h): a device-side delete
+ * takes the record off the device and leaves this row behind, so the next sync
+ * knows the server's copy is one the user doesn't want here and doesn't pull it
+ * back. A real row's hash is an FNV-1a of a body, and that is never 0 in
+ * practice. If the server's copy changes after this, it comes back (the merge,
+ * LABSENT+SMOD): somebody edited it in the cloud, so it is live again. */
+#define HIDDEN_HASH 0ULL
+
 /* per-collection sink: the shared streamed output writer + this collection's
  * open map file + the category to stamp on records pulled from the server.   */
 typedef struct { PdbW*w; FILE*mapf; int pullCat; } Sink;
@@ -999,8 +994,8 @@ typedef struct { PdbW*w; FILE*mapf; int pullCat; } Sink;
 static void keepBytes(Sink*k,uint32_t uid,uint8_t attr,const uint8_t*data,int len,
                       const char*href,const char*etag,uint64_t hash,const char*objuid){
     /* A dropped record here is not a lost row in a report -- it is a record
-     * missing from the merged PDB, which the next sync reads as a local
-     * deletion and pushes to the server. Never let that pass quietly. */
+     * missing from the merged PDB, which the next sync has to restore from the
+     * server. Never let that pass quietly. */
     if(pdbw_rec(k->w,uid,(uint8_t)(attr&~REC_ATTR_DIRTY&~REC_ATTR_DELETE),data,len)!=0){
         fprintf(stderr,"[sync] OUTPUT FULL at uid=%u -- the merged database cannot hold "
                        "this collection on this device\n",(unsigned)uid);
@@ -1009,6 +1004,16 @@ static void keepBytes(Sink*k,uint32_t uid,uint8_t attr,const uint8_t*data,int le
     }
     if(k->mapf) fprintf(k->mapf,"%u\t%s\t%s\t%llu\t%s\n",
                         (unsigned)uid,href,etag,(unsigned long long)hash,objuid?objuid:"");
+}
+
+/* A record deleted on the device: nothing goes to the output PDB, and only a
+ * HIDDEN_HASH map row is kept, so the server's copy isn't pulled back. Nothing
+ * is sent to the server. */
+static void hideOnDevice(Sink*k,uint32_t uid,const char*href,const char*etag,
+                         const char*objuid){
+    if(k->mapf && href && href[0])
+        fprintf(k->mapf,"%u\t%s\t%s\t%llu\t%s\n",(unsigned)uid,href,etag?etag:"",
+                HIDDEN_HASH,objuid?objuid:"");
 }
 
 /* GET a server object, parse+pack into a local record, keep it (stamped with
@@ -1172,50 +1177,16 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
     Sink*k=&K;
     const char*ext = kindExt(s->kind); int kind=s->kind;
 
-    /* ---- mass-delete guard --------------------------------------------------
-     * "Present in the map, absent locally" means the user deleted it, and the
-     * engine pushes that deletion to the server. That inference is only sound
-     * while the local database is intact. If it isn't -- a PDB truncated by a
-     * crash mid-write, then reseeded with demo rows as ABSENT on the next
-     * boot -- every real record looks locally deleted, and a two-way sync
-     * would erase the whole collection from the account. Writes are swapped
-     * in whole (safefile.h), and the device keeps tombstones, so the guard is the
-     * second line of defence rather than the only one; it stays, because a
-     * card can still read short for reasons no write discipline prevents.
-     *
-     * So when most of the mapped records have vanished at once, treat it as the
-     * local side being wrong rather than the user having deleted everything, and
-     * PULL THE SERVER'S COPIES BACK DOWN.
-     *
-     * That last part is new (2026-09-22) and it is the whole point. Until now
-     * the guard only DECLINED to delete: the mapped-but-locally-absent records
-     * were skipped and nothing was written for them, so the device stayed empty
-     * and the next sync reached exactly the same conclusion. The guard fired
-     * forever, the server kept its records, the device kept none, and NEITHER
-     * of this comment's two promises held -- nothing was restored, and a
-     * genuine bulk delete never took effect either. It was a permanent
-     * stalemate whose only symptom was a line on the UART. tests/massdel.c is
-     * the gate that found it; there was none before, which is how a guard that
-     * did half its job passed every suite for months.
-     *
-     * The trade this makes, stated plainly: on THIS device data_delete() drops
-     * a record outright rather than leaving a Palm tombstone, so a real user
-     * deletion and a bad card read are the same shape from in here. Restoring
-     * therefore undoes a genuine bulk delete and the user has to delete again.
-     * That is the right way round. Deleting half a collection through this UI
-     * means visiting half a collection one record at a time; a truncated PDB
-     * needs one bad write. And "my deleted events came back" is a bad hour,
-     * while "my device is empty and every sync agrees" is the data loss the
-     * guard exists to prevent. */
-    int nLoc = countLines(LC_IDX), nMap = countLines(MP_IDX);
-    int massGuard = (nMap >= MASSDEL_MIN) && (nLoc * 2 < nMap);
-    int guardedDel = 0;       /* deletions held back (local tombstones)      */
-    int guardedBack = 0;      /* records pulled back down from the server    */
-    if(massGuard)
-        fprintf(stderr,"[sync] MASS-DELETE GUARD for %s: %d local records against %d "
-                       "mapped. Not pushing deletions this run -- if the local database "
-                       "was lost, this sync restores it instead of erasing the server.\n",
-                coll, nLoc, nMap);
+    /* ---- a record absent from the local database ----------------------------
+     * "Present in the map, absent locally" is never a user's delete: the device
+     * keeps a deleted record as a tombstone (REC_ATTR_DELETE) until it has
+     * synced, and a synced device-side delete leaves a HIDDEN_HASH map row. A
+     * record that is simply missing is the card having lost it (a PDB truncated
+     * by a crash mid-write, a short read), so it is RESTORED from the server.
+     * This used to be the mass-delete guard, which held back pushing such
+     * deletions when most of a collection vanished at once; with no deletion
+     * ever pushed (dav.h), every absence is restored, a few or all of them. */
+    int restored = 0;
 
     FILE*flc=fopen(LC_IDX,"r"),*fmp=fopen(MP_IDX,"r"),*fsv=fopen(SV_IDX,"r");
     LcRow lc; MpRow mp; SvRow sv;
@@ -1258,6 +1229,7 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         const char*sEtag  = hasSrv?se.etag:"";
         char pEtag[160];                          /* a probed object's etag */
         int ldel = L && (L->attr & REC_ATTR_DELETE);
+        int hidden = hasMap && mHash==HIDDEN_HASH;   /* deleted on the device only */
 
         enum { LABSENT, LNEW, LMOD, LDEL, LCLEAN } lcs;
         if(!L)               lcs=LABSENT;
@@ -1275,13 +1247,13 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         else if(strcmp(sEtag,mEtag)) scs=SMOD;
         else                   scs=SCLEAN;
 
-        /* Not listed, and the device has something to say about it (an edit, a
-         * tombstone, or a record gone without one): which of the two it is now
-         * matters, so ask the server about this one object. Still there -> it's
-         * just outside the window, and the ordinary rules apply to it; gone ->
-         * a server delete. No answer -> keep everything for next time. An
-         * unchanged copy needs no question: either way it leaves the device. */
-        if(scs==SOUT && (lcs==LMOD || lcs==LDEL || (lcs==LABSENT && !massGuard))){
+        /* Not listed, and the device has something to say about it (an edit or
+         * a tombstone): which of the two it is now matters, so ask the server
+         * about this one object. Still there -> it's just outside the window,
+         * and the ordinary rules apply to it; gone -> a server delete. No
+         * answer -> keep everything for next time. An unchanged or absent copy
+         * needs no question: either way it isn't on the device. */
+        if(scs==SOUT && (lcs==LMOD || lcs==LDEL)){
             int ps=dav_probe(d,coll,mHref,pEtag,sizeof pEtag);
             if(ps==207 || ps==200){
                 hasSrv=1; sName=mHref; sEtag=pEtag;
@@ -1305,9 +1277,13 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
 
         if(scs==SOUT){
             /* Outside the window: off the device, and nothing is sent. (The only
-             * local states left here are an unchanged copy, and a record gone
-             * from the device while the mass-delete guard holds.) */
+             * local states left here are an unchanged copy and an absent one.)
+             * A hidden record keeps its row, so it stays hidden if it comes back
+             * into the window. */
             if(L) st->pruned++;
+            else if(hidden && k->mapf)
+                fprintf(k->mapf,"%u\t%s\t%s\t%llu\t%s\n",(unsigned)uid,mHref,mEtag,
+                        HIDDEN_HASH,mObjuid?mObjuid:"");
         }
         else if(scs==SKEEP){
             /* Couldn't tell: keep the record exactly as it is -- flags and all,
@@ -1338,7 +1314,7 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
             } else if(serverWins){
                 if(scs!=SDEL) keepFromServer(d,coll,kind,k,uid,srvName,sEtag);
             } else if(localWins){
-                if(lcs==LDEL){ del_guard(d,coll,srvName,NULL); }
+                if(lcs==LDEL){ hideOnDevice(k,uid,srvName,sEtag,mObjuid); st->hidden++; }
                 else pushLocal(d,coll,kind,k,s,L,uid,srvName,NULL, mHref,mEtag,mHash, mObjuid);
             }
         }
@@ -1381,35 +1357,31 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
         } else if(lcs==LCLEAN && scs==SDEL){
             st->pullDel++;
         } else if(lcs==LDEL && scs==SCLEAN){
-            /* A TOMBSTONE IS AN EXPLICIT DELETE, guard or no guard. The guard
-             * exists because a record that is merely ABSENT could be a user's
-             * delete or the card's loss; a record still in the database with
-             * the delete bit set can only be the user's. So this pushes even
-             * while the guard is holding back the absent ones below -- which
-             * is what the device keeping tombstones until they sync buys. */
-            if(!s_pull_only){ dav_delete(d,coll,srvName,mEtag); st->pushDel++; }
+            /* Deleted on the device. It leaves the device and NOTHING is sent:
+             * the server keeps its copy, and a hidden row keeps it from being
+             * pulled back (HIDDEN_HASH). */
+            hideOnDevice(k,uid,srvName,mEtag,mObjuid);
+            st->hidden++;
         } else if(lcs==LDEL && scs==SDEL){
-            /* Gone from both sides. There is nothing to delete anywhere, so no
-             * dav_delete is issued here -- and counting it as a pushDel (which
-             * this did) reported a deletion that never left the device. A
-             * tombstone is explicit, so the guard has nothing to say about it. */
+            /* Gone from both sides: nothing to do anywhere. */
             st->bothDel++;
         } else if(lcs==LABSENT && scs==SNEW){
             if(keepFromServer(d,coll,kind,k,uid,srvName,sEtag)==0) st->pullNew++;
-        } else if(lcs==LABSENT && scs==SCLEAN){
-            /* Mapped, still on the server, GONE from the local database with no
-             * tombstone -- which is both "the user deleted it" and "the card
-             * read short". Under the guard it is the second, so take the
-             * server's copy back: this is the restore the guard promises, and
-             * without it the record is simply dropped from the output PDB and
-             * the device never heals. */
-            if(massGuard){
-                guardedDel++;
-                if(keepFromServer(d,coll,kind,k,uid,srvName,sEtag)==0){
-                    st->pullNew++; guardedBack++;
-                }
+        } else if(lcs==LABSENT && hidden && scs==SCLEAN){
+            /* hidden on the device, unchanged on the server: stays hidden */
+            hideOnDevice(k,uid,srvName,mEtag,mObjuid);
+        } else if(lcs==LABSENT && hidden && scs==SDEL){
+            /* hidden here and now deleted on the server too: the row goes */
+            st->bothDel++;
+        } else if(lcs==LABSENT && (scs==SCLEAN || scs==SMOD)){
+            /* Mapped, on the server, and missing from the local database with
+             * no tombstone: the card lost it (see above). Take the server's copy
+             * back. Also a hidden record the server has since changed: edited
+             * in the cloud, so it's live again. */
+            if(keepFromServer(d,coll,kind,k,uid,srvName,sEtag)==0){
+                st->pullNew++;
+                if(!hidden) restored++;
             }
-            else if(!s_pull_only){ dav_delete(d,coll,srvName,mEtag); st->pushDel++; }
         }
 
         progTick();                             /* one reconciled record */
@@ -1420,10 +1392,9 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
     }
     CHK("merge-done");
     bcReset();
-    if(guardedDel)
-        fprintf(stderr,"[sync] MASS-DELETE GUARD held back %d deletion(s) for %s "
-                       "and RESTORED %d record(s) from the server\n",
-                guardedDel, coll, guardedBack);
+    if(restored)
+        fprintf(stderr,"[sync] %s: RESTORED %d record(s) missing from the local "
+                       "database from the server\n", coll, restored);
     if(flc){fclose(flc);} if(fmp){fclose(fmp);} if(fsv){fclose(fsv);}
 
     if(s_too_big){
@@ -1479,9 +1450,9 @@ int sync_collection(const DavCtx*d,const char*localpdb,const char*outpdb,
         pdbw_abort(w); return -4;
     }
     int nrec = pdbw_count(w);
-    SYNC_LOG("[sync] %s: out=%d push=%d/%d/%d pull=%d/%d/%d gone=%d\n",
-            coll,nrec,st->pushNew,st->pushMod,st->pushDel,
-            st->pullNew,st->pullMod,st->pullDel,st->bothDel);
+    SYNC_LOG("[sync] %s: out=%d push=%d/%d pull=%d/%d/%d hidden=%d gone=%d\n",
+            coll,nrec,st->pushNew,st->pushMod,
+            st->pullNew,st->pullMod,st->pullDel,st->hidden,st->bothDel);
     /* SAFETY: never overwrite a local PDB that HAD records with an empty result.
      * A read glitch, a parse failure, or an unexpectedly-empty server must not be
      * allowed to wipe the on-device data. Discard the streamed output, keep local. */

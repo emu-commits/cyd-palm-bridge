@@ -36,7 +36,7 @@ typedef struct {
 /* --- persistent keep-alive connection ------------------------------------
  * Init/perform/cleanup per request meant a full TLS handshake (~1-3 s against
  * iCloud's cert chain) for EVERY DAV call -- ~2N handshakes to pull N records
- * (one GET per object for its UID, one more for its body, plus each PUT/DELETE).
+ * (one GET per object for its UID, one more for its body, plus each PUT).
  * We now keep ONE client handle alive and reuse its TCP+TLS connection
  * (keep_alive_enable) across calls to the same origin, so the handshake happens
  * about once per network phase instead of once per request.
@@ -119,6 +119,16 @@ static int davreq(const DavCtx*d, esp_http_client_method_t method, const char*ur
                   const char*body, int bodylen,
                   char*resp, int respcap, int*respn,
                   char*etag, int etagcap, char*effurl, int effcap){
+    /* An allow-list, not a deny-list: reads, and PUT to create or edit. No
+     * request that can remove an object from the account leaves this device
+     * (dav.h), so a stray caller fails here rather than on someone's iCloud. */
+    if(method!=HTTP_METHOD_GET && method!=HTTP_METHOD_PUT &&
+       method!=HTTP_METHOD_PROPFIND && method!=HTTP_METHOD_REPORT){
+        if(resp && respcap) resp[0]=0;
+        if(respn) *respn = 0;
+        if(etag && etagcap) etag[0]=0;
+        return -1;
+    }
     /* Breaker first: once the transport is down, spending another 20-second
      * timeout tells us nothing we do not already know, and there is one request
      * per record behind this. */
@@ -239,11 +249,6 @@ int dav_put(const DavCtx*d,const char*coll,const char*name,const char*ctype,
     if(etag_out&&etagcap&&!etag_out[0]) dav_getetag(d,coll,name,etag_out,etagcap); /* fallback */
     else if(etag_out) dav_strip_quotes(etag_out);
     return 0;
-}
-
-int dav_delete(const DavCtx*d,const char*coll,const char*name,const char*ifmatch){
-    char url[512]; snprintf(url,sizeof url,"%s/%s/%s",d->base,coll,name);
-    return davreq(d,HTTP_METHOD_DELETE,url,-1,NULL,ifmatch,NULL,0, NULL,0,NULL, NULL,0, NULL,0);
 }
 
 int dav_getetag(const DavCtx*d,const char*coll,const char*name,char*etag,int cap){

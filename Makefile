@@ -136,7 +136,11 @@ $(B)/course_fuzz: tests/course_fuzz.c firmware/main/course.c firmware/main/cours
 $(B)/rss_asan: tests/rss_test.c bridge/rss.c | dirs
 	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -o $@ $^
 
-test: roundtrip find_test calc_test config_test streamparse rss_test news_test wx_test feeds_test break_test geoip_test safefile_test sort_test mget_test
+# nothing that ships can delete from the server (tests/nodelete.sh)
+nodelete:
+	./tests/nodelete.sh
+
+test: nodelete roundtrip find_test calc_test config_test streamparse rss_test news_test wx_test feeds_test break_test geoip_test safefile_test sort_test mget_test
 	./$(B)/roundtrip
 	./$(B)/find_test
 	./$(B)/calc_test
@@ -180,4 +184,4 @@ mtest: multiapp
 clean:
 	rm -rf $(B) pdb/_rt_*.pdb
 
-.PHONY: all dirs test ftest itest stest ctest btest mtest clean $(PROGS)
+.PHONY: all dirs nodelete test ftest itest stest ctest btest mtest clean $(PROGS)

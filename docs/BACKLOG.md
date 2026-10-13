@@ -44,9 +44,11 @@ bench besides them: a bigger iCloud sync, and loading a second course into
 Study. (The Pages deploy job fails on a repository setting, Pages source,
 not the code.)
 
-**Now (2026-10-01): the sync engine for a real account**, §Engine items 1
-(the external sort) and 5 (a tight time window with the pruning rule, and
-batched downloads).
+**Now (2026-10-13): finishing sync for a real account** (a 10-year iCloud
+account). **The hard rule, from the owner: nothing is ever deleted from the
+cloud** (done 2026-10-13, below; `CLAUDE.md`'s first rule). The steps left
+are §Engine items 6 to 10, in order; the owner's test with the real account
+comes after 6 and 7.
 
 **The app platform is on hold.** The main goal is one first-class SRS app
 (WaniKani/Anki-style, with a large course on the SD card), and it's being
@@ -92,6 +94,9 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 - [ ] Against the real iCloud account: Date Book comes down to the window only; the log line shows `pruned=` and `fetched=N batched+0 single`; nothing disappears from iCloud on the phone `[d]`
 - [ ] Settings ▸ Sync ▸ Calendar: widen to a month, sync, the extra events arrive; narrow again, they leave the device and stay on the phone `[d]`
 - [ ] An event edited on the device, then left behind by the window, shows the edit on the phone `[d]`
+- [x] **Never delete from the cloud** (2026-10-13): `dav_delete` removed from both transports, the device allow-lists GET/PUT/PROPFIND/REPORT, a delete on the device leaves the device only (a hidden map row; the server keeps its copy and it isn't pulled back), a record missing locally is always restored; `tests/nodelete.sh` in `make test`, `massdel` rewritten, `incremental` and `window` assert the server keeps everything; the delete dialog says "From this device only" in an app that syncs `[s]`
+- [ ] Delete an event and a contact on the device, sync: both gone from the device, both still on the phone and iCloud.com; sync again, they stay gone from the device `[d]`
+- [ ] Edit the hidden event on the phone, sync: it comes back to the device `[d]`
 
 ---
 
@@ -404,7 +409,9 @@ R and the robustness work).
    `post-tls`, on a freshly booted device). The next thread if feed fetches fail
    intermittently.
 4. **iCloud data hygiene** — one-time removal of the seed contacts and duplicate
-   events left in the real account from the broken-sync era.
+   events left in the real account from the broken-sync era. **By hand, on
+   the phone or iCloud.com**: the device never deletes anything on the server
+   (2026-10-13), so it can't do this and won't be made to.
 5. **Sync a window, not the whole account.** The window, the pruning rule
    and batched downloads were **built 2026-10-01** (the owner asked for them,
    with "a very tight time window"; `BUILD_PROGRESS.md`). Still open from
@@ -422,7 +429,7 @@ R and the robustness work).
    - **Leaving the window is not a deletion.** An object that drops out of the
      listing, or a local record that ages out, is pruned locally and marked in
      the map, never pushed as a delete. This is the one rule that makes a
-     window safe; the mass-delete guard stays as the backstop.
+     window safe. (Since 2026-10-13 nothing is pushed as a delete at all.)
    - **To Do: open tasks**, plus those completed in the last couple of weeks
      (a `prop-filter` on `COMPLETED`; iCloud's support needs checking). Note
      that reminders upgraded on iOS 13+ may not be reachable over CalDAV at
@@ -438,6 +445,46 @@ R and the robustness work).
      ceiling for every collection; then the window and pruning, tested against
      Radicale with a generated multi-year calendar; then multiget; then
      contacts.
+
+
+**Finishing sync for a real account** (outlined 2026-10-13, after the
+no-delete rule; in this order):
+
+6. **An edit on the device must not lose what Palm can't hold.** Today a
+   device edit PUTs a body rebuilt from the Palm record, which *replaces*
+   the whole iCloud object. The codec keeps SUMMARY, DESCRIPTION, DTSTART,
+   DTEND, RRULE, EXDATE and one alarm for an event; N, ORG, TITLE, ADR,
+   NOTE and Palm's five phone/email slots for a contact. So editing a
+   10-year-old event drops its location, attendees, URL, extra alarms and
+   the changed occurrences of a series (RECURRENCE-ID overrides), and
+   editing a contact drops its photo, birthday, URLs and every phone or
+   email past the fifth. That is data loss on the server by another route.
+   Fix: merge, don't replace. Fetch the server's current body, swap in only
+   the properties Palm owns, keep everything else byte for byte, PUT with
+   `If-Match` (412: take the server's copy, as now). The conflict policy
+   `local` PUTs without `If-Match` today; give it one too. Gate: an
+   iCloud-shaped event (overrides, attendees, two alarms, X- properties)
+   and vCard (PHOTO, BDAY, eight TELs) edited on the "device" keep every
+   non-Palm line.
+7. **Read-only until 6 is benched.** `sync_set_pull_only()` exists and
+   works (no PUT; local edits wait), but `hotsync.c` forces it off. Make it
+   a Settings ▸ Sync switch, on by default for a newly added account, so
+   the first syncs of a big account can't change it at all.
+8. **Contacts at real size.** No window applies. Ask for the Palm fields
+   only (CardDAV partial `address-data`, RFC 6352 §10.4.2) so photos never
+   arrive; check iCloud honours it. Today a vCard over the 8 KB fetch
+   buffer is skipped with a warning and fetched again every sync. Measure
+   how many contacts the device's AddressDB holds before "too large" (`-6`).
+9. **Recurring events from iCloud.** A series with changed occurrences is
+   one object with several VEVENTs (the master and its overrides). Check
+   what the parser keeps against the real account, and show the master
+   with its EXDATEs at least; never PUT such an object back (6).
+10. **To Do.** Open tasks only, plus recently completed. Check first that
+    the account's Reminders are reachable over CalDAV at all (lists
+    upgraded on iOS 13+ aren't).
+
+Then the owner's test: first sync read-only, compare counts on iCloud.com
+before and after (they must not move), then two-way with 6 in.
 
 ---
 

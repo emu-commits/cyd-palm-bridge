@@ -1050,8 +1050,9 @@ static void todo_toggle_detail_cb(lv_event_t *e){
 /* ---- delete a record (with confirmation, like PalmOS) ----
  * PalmOS never deletes without a "Delete <record>?" alert; we mirror that so a
  * mis-tap can't destroy data. On confirm the record is removed and the list
- * redraws. (data_delete rewrites the PDB without the record; its uid stays in
- * the sync map, so the next HotSync detects the deletion and pushes it up.) */
+ * redraws. (In an app that syncs, data_delete keeps a tombstone and the next
+ * HotSync takes the record off the device only: nothing is ever deleted on the
+ * server, so the dialog says so.) */
 static uint32_t del_uid;
 static lv_obj_t *g_confirm;
 static void confirm_close(void){ if(g_confirm){ lv_obj_del(g_confirm); g_confirm=NULL; } }
@@ -1079,7 +1080,8 @@ static void ask_delete(uint32_t uid){
 
     lv_obj_t *panel = lv_obj_create(g_confirm);
     lv_obj_set_width(panel, 200);
-    lv_obj_set_height(panel, 96);   /* fixed: LV_SIZE_CONTENT collapses under the bottom-aligned buttons */
+    int dev_only = data_app_syncs(cur_app->app);
+    lv_obj_set_height(panel, dev_only ? 112 : 96);   /* fixed: LV_SIZE_CONTENT collapses under the bottom-aligned buttons */
     lv_obj_center(panel);
     lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
     lv_obj_set_style_border_width(panel, 1, 0);
@@ -1095,6 +1097,14 @@ static void ask_delete(uint32_t uid){
     lv_label_set_text_fmt(q, "Delete this %s?", what);
     lv_obj_set_style_text_font(q, &lv_font_palm_bold, 0);
     lv_obj_align(q, LV_ALIGN_TOP_LEFT, 0, 0);
+    if(dev_only){
+        lv_obj_t *note = lv_label_create(panel);
+        lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(note, 180);
+        lv_label_set_text(note, "From this device only. The copy in your account is kept.");
+        lv_obj_set_style_text_font(note, &lv_font_palm, 0);
+        lv_obj_align(note, LV_ALIGN_TOP_LEFT, 0, 20);
+    }
 
     lv_obj_t *cancel = lv_button_create(panel);
     lv_obj_set_size(cancel, 82, 30);

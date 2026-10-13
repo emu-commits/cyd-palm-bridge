@@ -16,6 +16,56 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-13 — Nothing is ever deleted from the cloud
+
+From the owner, before syncing a 10-year-old iCloud account: "remove any sync
+code that deletes from iCloud. We must set a hard rule now to never delete
+anything from the cloud."
+
+**What could delete before:** one function, `dav_delete()` (host curl and
+device `esp_http_client`), called from three places in the merge: a
+tombstone against an unchanged server copy, the `local` conflict policy on a
+tombstone, and a record mapped but missing locally while the mass-delete
+guard was down. All three are gone, and so is the function.
+
+**What happens instead:**
+- *A delete on the device* (a tombstone) takes the record off the device and
+  keeps its map row with hash 0, `HIDDEN_HASH`, so the server's copy isn't
+  pulled back. If the server's copy changes later (edited on the phone), it
+  comes back. Counted as `hidden` in `SyncStats`; `pushDel` no longer exists,
+  so no code can count one.
+- *A record missing from the local database* without a tombstone is the card
+  having lost it, and is restored from the server, whatever the number. That
+  was the mass-delete guard's job above a threshold; with no deletion to
+  hold back, the guard and `MASSDEL_MIN` are gone.
+- *Outside the calendar window*: pruned on the device, as before; a hidden
+  record's row is carried while it's out, so it stays hidden when it's back.
+
+**Belt and braces:** the device's `davreq()` allow-lists GET, PUT, PROPFIND
+and REPORT; the host transport refuses a `-X DELETE` or `-X MOVE` command;
+`tests/nodelete.sh` (first in `make test`, so CI) fails on a DELETE/MOVE
+request or a `dav_delete` in `bridge/`, `firmware/` or `sim/`, checks its own
+pattern on four probes, and caught every line of the old code when run
+against it. The gates empty their Radicale with `tests/radicale_rm.h`, which
+exits on any server not on localhost.
+
+**The delete dialog** says "From this device only. The copy in your account
+is kept." in an app that syncs (`data_app_syncs()`); the panel grows from 96
+to 112 px for it. Looked at in a simulator spike with syncing forced on (the
+smoke has no account, so its walk never shows the note).
+
+**Gates:** `massdel` rewritten around the rule (whole database lost, one
+record lost, a device delete never reaching the server and staying hidden
+until a server edit, both-sides delete, tombstones and losses together);
+`incremental` and `window` now assert the server keeps the deleted record.
+All of `run_gates.sh` green.
+
+**Firmware** (`espressif/idf:release-v5.5`, LVGL v9.5.0 as a local component
+in a scratch copy, the HEAD before this change built the same way alongside):
+1,737,867 B against 1,738,191 B, 324 B smaller; static DRAM unchanged at
+160,612 B (88.87 %, 20,124 B free). `make -C sim wasm` not run (no emsdk
+here).
+
 ### 2026-10-01 — Sync for a real account: the sort on the card, a calendar window, batched downloads
 
 From the owner: "start with the external sort, the window and pruning rule,

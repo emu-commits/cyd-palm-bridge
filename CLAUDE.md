@@ -28,6 +28,14 @@ before touching anything.
 
 ## Rules that always apply
 
+- **Never delete anything on the server. No exceptions, ever** (the owner,
+  2026-10-13). There is no `dav_delete`, no `DELETE` or `MOVE` request, and
+  none may be added: a delete on the device leaves the device only (a
+  *hidden* map row, `sync.c`'s `HIDDEN_HASH`), a record missing locally is
+  restored, and a record leaving the calendar window is pruned on the
+  device. `make test` runs `tests/nodelete.sh`, which fails on any of it in
+  `bridge/`, `firmware/` or `sim/`. The gates clear their local Radicale
+  with `tests/radicale_rm.h`, which refuses any server not on localhost.
 - **Run every gate before a commit, not just the smoke:**
   - `make test` and `make ftest` (host; the programs build into `build/`);
   - `./tests/run_gates.sh` (the sync engine against a local Radicale; needs
@@ -234,6 +242,13 @@ Sync ▸ Calendar), and batched downloads (multiget into a body cache on the
 card); gates `sort_test`, `mget_test` (+`mget_asan`), `window`. Its bench
 checks are `[d]` items in `BACKLOG.md`'s first RESUME HERE. Still open:
 To Do (open tasks only) and Address (no photos, or one group).
+
+**2026-10-13: nothing is deleted from the cloud** (the first rule above).
+Next, in order, `BACKLOG.md` §Engine 6 to 10: an edit on the device must
+merge into the server's object rather than replace it (today it drops every
+property Palm can't hold), a read-only switch for a new account, contacts
+at real size, recurring series with overrides, To Do. Then the owner tests
+with a 10-year iCloud account.
 
 1. **S6, the bench**, is the owner's (`[d]` items in `BACKLOG.md`). Any
    further work follows `SRS_PLAN.md` §10, keeping to its §7 budgets:

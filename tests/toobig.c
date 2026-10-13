@@ -27,6 +27,7 @@
 #include <string.h>
 #include "../bridge/palm.h"
 #include "../bridge/sync.h"
+#include "radicale_rm.h"
 
 static DavCtx D;
 static int fails=0;
@@ -43,7 +44,7 @@ static void nlCb(const char*name,const char*etag,void*ctx){
 }
 static void clearColl(void){
     NL *l=calloc(1,sizeof*l); dav_list(&D,COLL,nlCb,l);
-    for(int i=0;i<l->c;i++) dav_delete(&D,COLL,l->n[i],NULL);
+    for(int i=0;i<l->c;i++) test_rm(&D,COLL,l->n[i],NULL);
     remove(MAP); free(l);
 }
 static int serverCount(void){ NL *l=calloc(1,sizeof*l); dav_list(&D,COLL,nlCb,l); int n=l->c; free(l); return n; }
@@ -93,7 +94,6 @@ int main(void){
     /* The whole point: nothing moved. */
     CK(localCount(PDB)==locBefore, "the local PDB is byte-for-byte untouched in record count");
     CK(serverCount()==srvBefore,   "NOTHING was deleted from the server");
-    CK(s1.pushDel==0,              "no deletions were even attempted");
     CK(s1.pushNew==0 && s1.pushMod==0, "no writes were attempted");
     CK(s1.pullNew==0 && s1.pullMod==0, "no pulls were applied");
     mf = fopen(MAP,"rb"); long mapAfter = 0;

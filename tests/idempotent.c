@@ -24,6 +24,7 @@
 #include <string.h>
 #include "../bridge/palm.h"
 #include "../bridge/sync.h"
+#include "radicale_rm.h"
 
 static DavCtx D;
 static const char* COLL="palm/cal";
@@ -40,7 +41,7 @@ static void firstName(char*out,int cap){
     NL l={0}; dav_list(&D,COLL,nameCb,&l); snprintf(out,cap,"%s", l.c? l.n[0] : ""); }
 static void clearColl(void){
     NL l={0}; dav_list(&D,COLL,nameCb,&l);
-    for(int i=0;i<l.c;i++) dav_delete(&D,COLL,l.n[i],NULL);
+    for(int i=0;i<l.c;i++) test_rm(&D,COLL,l.n[i],NULL);
     remove(MAP); remove(LPDB);
 }
 static int countCb(const PdbRec*r,int i,void*c){ (void)r;(void)i; (*(int*)c)++; return 0; }
@@ -70,7 +71,7 @@ static void relocate(const char*oldHref,const char*newHref,int padKB){
         }
     }
     FILE*f=fopen("state/.tb","wb"); fwrite(body,1,strlen(body),f); fclose(f);
-    dav_delete(&D,COLL,oldHref,NULL);
+    test_rm(&D,COLL,oldHref,NULL);
     char etag[160]; int st=0;
     dav_put(&D,COLL,newHref,"text/calendar; charset=utf-8","state/.tb",NULL,etag,sizeof etag,&st);
 }
@@ -105,7 +106,7 @@ static void testEtagChurn(void){
     CK(localCount()==1,"local still 1 after reformat");
 
     SyncStats s2={0}; sync_collection(&D,LPDB,LPDB,COLL,1,MAP,POL_SERVER,&s2);
-    int ops=s2.pushNew+s2.pushMod+s2.pushDel+s2.pullNew+s2.pullMod+s2.pullDel+s2.conflicts;
+    int ops=s2.pushNew+s2.pushMod+s2.pullNew+s2.pullMod+s2.pullDel+s2.conflicts;
     printf("   idempotent next sync ops=%d clean=%d\n",ops,s2.unchanged);
     CK(ops==0,"etag churn converges to a no-op");
     CK(serverCount()==1&&localCount()==1,"exactly one copy each side");
@@ -126,17 +127,16 @@ static void testUnresolvableReloc(void){
     CK(serverCount()==1,"still 1 object on server after relocation");
 
     SyncStats s1={0}; sync_collection(&D,LPDB,LPDB,COLL,1,MAP,POL_SERVER,&s1);
-    printf("   deferred sync: pull +%d -%d | push -%d | server=%d local=%d\n",
-        s1.pullNew,s1.pullDel,s1.pushDel,serverCount(),localCount());
+    printf("   deferred sync: pull +%d -%d | server=%d local=%d\n",
+        s1.pullNew,s1.pullDel,serverCount(),localCount());
     CK(s1.pullNew==0,"no phantom new record from the unreadable object");
-    CK(s1.pushDel==0,"no spurious server delete");
     CK(s1.pullDel==0,"local record NOT dropped");
     CK(localCount()==1,"local still holds exactly 1 (no loss)");
     CK(serverCount()==1,"server still holds exactly 1 (no duplicate)");
 
     /* object becomes resolvable again (UID readable) -> converges cleanly.
      * uid=2's synthesized server UID is palm-2@cyd (what the emitter minted). */
-    dav_delete(&D,COLL,"reloc-huge.ics",NULL);
+    test_rm(&D,COLL,"reloc-huge.ics",NULL);
     serverPutRaw("reloc-small.ics","palm-2@cyd","Beta",11);
     SyncStats s2={0}; sync_collection(&D,LPDB,LPDB,COLL,1,MAP,POL_SERVER,&s2);
     printf("   after object shrinks: server=%d local=%d\n",serverCount(),localCount());
@@ -144,7 +144,7 @@ static void testUnresolvableReloc(void){
     CK(serverCount()==1,"server still 1 after resolvable");
 
     SyncStats s3={0}; sync_collection(&D,LPDB,LPDB,COLL,1,MAP,POL_SERVER,&s3);
-    int ops=s3.pushNew+s3.pushMod+s3.pushDel+s3.pullNew+s3.pullMod+s3.pullDel+s3.conflicts;
+    int ops=s3.pushNew+s3.pushMod+s3.pullNew+s3.pullMod+s3.pullDel+s3.conflicts;
     printf("   idempotent final sync ops=%d clean=%d\n",ops,s3.unchanged);
     CK(ops==0,"converges to a no-op once resolvable");
 }

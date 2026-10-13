@@ -12,16 +12,18 @@ enum { KIND_CARD=0, KIND_CAL=1, KIND_TODO=2 };
 typedef enum { POL_SERVER, POL_LOCAL, POL_BOTH } ConflictPolicy;
 
 typedef struct {
-    int pushNew, pushMod, pushDel;
+    /* There is no pushDel: nothing is ever deleted on the server (dav.h). */
+    int pushNew, pushMod;
     int pullNew, pullMod, pullDel;
     int conflicts, unchanged;
-    /* Deleted on BOTH sides since the last sync: the map entry is simply
-     * dropped and NO NETWORK CALL IS MADE. Counted as a pushDel, the status
-     * line would report deletions that were never sent -- "-3 push" for three
-     * records the server had already lost. It is its own number
-     * because it is neither a push nor "unchanged": nothing was transmitted,
-     * and the record is gone. Deliberately outside the ops sums the gates use
-     * for idempotency, since no operation happened. */
+    /* Deleted on the device since the last sync: taken off the device, and its
+     * map row kept as hidden so the server's copy, which is NEVER deleted, isn't
+     * pulled back. Outside the ops sums -- nothing was transmitted. */
+    int hidden;
+    /* Deleted on BOTH sides since the last sync (or hidden here and then
+     * deleted on the server): the map entry is simply dropped and NO NETWORK
+     * CALL IS MADE. Deliberately outside the ops sums the gates use for
+     * idempotency, since no operation happened. */
     int bothDel;
     /* New local records the caller asked to HOLD (sync_set_hold): kept in the
      * local database as they are, never pushed and never mapped. Also outside
@@ -41,8 +43,8 @@ typedef struct {
  * THE RULE THAT MAKES THIS SAFE: an object that is not in the window's listing
  * is NOT a deletion. Its unchanged local copy is pruned from the device and
  * nothing is sent; a copy changed on the device is checked against the server
- * by itself first (dav_probe), so an edit is pushed and a delete is sent only
- * for an object that is really still there. A listing that fails prunes
+ * by itself first (dav_probe), so an edit is pushed only for an object that is
+ * really still there. (Nothing is ever deleted on the server.) A listing that fails prunes
  * nothing. Records created on the device are pushed wherever their date is,
  * and leave the device at the next sync if it's outside the window.
  *
@@ -136,7 +138,7 @@ void   sync_set_max_sort(long bytes);
 int    sync_sort_file(const char *path);
 
 /* ---- pull-only -------------------------------------------------------------
- * Refuse every write to the server: no PUT, no DELETE. The local PDB is still
+ * Refuse every write to the server: no PUT (there is never a DELETE). The local PDB is still
  * updated from the server, so a sync is still useful; local changes simply wait.
  * Set while the engine's memory handling is being reworked, because a bug on a
  * half-converted path would damage the real account, which no reflash can undo.
