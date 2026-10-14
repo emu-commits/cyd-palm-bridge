@@ -159,29 +159,69 @@ static int seed_memo(void){
     return nr;
 }
 
-/* Migrate PDBs seeded by an older build that had no AppInfo (so the category
- * table was empty and the picker only offered "All"). Reads the records back,
- * rewrites the PDB with the demo category table, and preserves the records. */
-#define RW_ARENA (12*1024)
-#define RW_MAX   64
-static uint8_t g_arena[RW_ARENA];
 static int g_testev_scanned;      /* records examined by the last test-event scan */
-static PdbRec  g_recs[RW_MAX];
-typedef struct { int used; int nr; } Collect;
-static int collectCb(const PdbRec *r, int i, void *ctx){ (void)i; Collect *c=ctx;
-    if(c->used + r->len > RW_ARENA || c->nr >= RW_MAX) return 1;
-    memcpy(g_arena+c->used, r->data, r->len);
-    g_recs[c->nr]=(PdbRec){.attr=r->attr,.uniqueID=r->uniqueID,.data=g_arena+c->used,.len=r->len};
-    c->used+=r->len; c->nr++; return 0;
+
+/* ---- rewriting a database, a record at a time ------------------------------
+ * EVERY REWRITE STREAMS THROUGH THE CARD. Until 2026-10-14 an edit, a delete
+ * or a category change read the whole database into a 12 KB, 64-record RAM
+ * arena and wrote back what fit: pdb_read stopped at the cap, so editing one
+ * contact in a book of two thousand wrote back sixty-four, and an edit to a
+ * record past the cap was appended as a new record -- a duplicate the next
+ * sync would push. Now each record goes through the streaming writer (PdbW:
+ * the bytes to a temp file, 16 bytes of index per record in RAM), and the
+ * live file is replaced only if every record the header declares was read and
+ * written. Otherwise the file is left exactly as it was and the call fails. */
+typedef int (*rw_fate)(const PdbRec *r, uint8_t *attr, const uint8_t **data, int *len, void *ctx);
+typedef struct { PdbW *w; rw_fate fate; void *ctx; int seen, err; uint32_t maxuid; } Stream;
+static int streamCb(const PdbRec *r, int i, void *c){ (void)i; Stream *s = c;
+    s->seen++;
+    if(r->uniqueID > s->maxuid) s->maxuid = r->uniqueID;
+    uint8_t attr = r->attr; const uint8_t *d = r->data; int len = r->len;
+    if(s->fate && s->fate(r, &attr, &d, &len, s->ctx)) return 0;        /* dropped */
+    if(pdbw_rec(s->w, r->uniqueID, attr, d, len) != 0){ s->err = 1; return 1; }
+    return 0;
 }
+static int hdr_count(const char *path){
+    FILE *f = fopen(path, "rb"); if(!f) return -1;
+    unsigned char h[0x4E]; int ok = fread(h, 1, sizeof h, f) == sizeof h; fclose(f);
+    return ok ? (int)((h[0x4C] << 8) | h[0x4D]) : -1;
+}
+/* Rewrite path: fate() decides each record (keep, change, or drop: nonzero);
+ * `add` (or NULL) is appended, its uid chosen by pick_uid(maxuid) when 0.
+ * ai: the AppInfo to write (NULL keeps the file's own). Returns the record
+ * count written, or -1 with the file untouched. */
+static int stream_rewrite(const char *path, const char *nm, uint32_t type, uint32_t creator,
+                          const uint8_t *ai, int al, rw_fate fate, void *ctx,
+                          const PdbRec *add, uint32_t (*pick_uid)(const char *, uint32_t)){
+    uint8_t own[512];
+    if(!ai){ al = pdb_read_appinfo(path, own, sizeof own); if(al < 0) al = 0; ai = al ? own : NULL; }
+    char tmp[64]; snprintf(tmp, sizeof tmp, "%s.rw", path);
+    PdbW *w = pdbw_begin(tmp); if(!w) return -1;
+    Stream st = { w, fate, ctx, 0, 0, 0 };
+    int got = pdb_read(path, streamCb, &st);
+    int want = hdr_count(path);
+    if(st.err || got < 0 || want < 0 || got != want || st.seen != want){
+        fprintf(stderr, "[data] %s: rewrite refused (read %d of %d records%s) -- left as it was\n",
+                path, st.seen, want, st.err ? ", the card would not take the copy" : "");
+        pdbw_abort(w); return -1;
+    }
+    if(add){
+        uint32_t u = add->uniqueID ? add->uniqueID : (pick_uid ? pick_uid(path, st.maxuid) : st.maxuid + 1);
+        if(pdbw_rec(w, u, add->attr, add->data, add->len) != 0){ pdbw_abort(w); return -1; }
+    }
+    return pdbw_commit(w, path, nm, type, creator, ai, al);
+}
+
+/* Migrate PDBs seeded by an older build that had no AppInfo (so the category
+ * table was empty and the picker only offered "All"): rewrite with the demo
+ * category table, every record kept. */
 static void ensure_appinfo(const char *path,const char *nm,uint32_t type,uint32_t creator){
     if(!file_exists(path)) return;
     uint8_t ai[512]; int al=pdb_read_appinfo(path,ai,sizeof ai);
     CatTable t;
     if(al>0 && appinfo_parse(ai,al,&t)==0 && t.name[0][0]) return;   /* already has categories */
-    Collect c={0,0}; pdb_read(path,collectCb,&c);
     uint8_t nai[APPINFO_SIZE]; int nal=build_appinfo(nai);
-    pdb_write_ai(path,nm,type,creator,nai,nal,g_recs,c.nr);
+    stream_rewrite(path,nm,type,creator,nai,nal,NULL,NULL,NULL,NULL);
 }
 
 /* app -> PDB header identity (name/type/creator), matching the seeders. */
@@ -203,9 +243,8 @@ int data_set_categories(int app, const CatTable *t){
     if(!file_exists(path)) return 0;
     uint8_t nai[APPINFO_SIZE]; int nal = appinfo_build(nai, sizeof nai, t);
     if(nal < 0) return 0;
-    Collect c={0,0}; pdb_read(path,collectCb,&c);
     const char *nm; uint32_t type, creator; db_ident(app,&nm,&type,&creator);
-    return pdb_write_ai(path,nm,type,creator,nai,nal,g_recs,c.nr) >= 0;
+    return stream_rewrite(path,nm,type,creator,nai,nal,NULL,NULL,NULL,NULL) >= 0;
 }
 
 void data_seed_if_empty(void){
@@ -244,31 +283,20 @@ void data_seed_if_empty(void){
  * menu item. The manifest is deleted once the demo rows are removed. */
 int data_demo_present(void){ return file_exists(DEMO_MANIFEST); }
 
-/* one-pass filter: keep every record whose uniqueID is outside 1..maxuid (i.e.
- * drop the demo rows), counting how many were dropped. */
-typedef struct { uint32_t maxuid; uint8_t *arena; int used; PdbRec *recs; int nr; int removed; } DemoRW;
-static int demoRwCb(const PdbRec *r, int i, void *ctx){ (void)i; DemoRW *w=ctx;
-    if(r->uniqueID >= 1 && r->uniqueID <= w->maxuid){ w->removed++; return 0; }  /* drop */
-    if(w->used + r->len > RW_ARENA || w->nr >= RW_MAX) return 1;
-    memcpy(w->arena + w->used, r->data, r->len);
-    w->recs[w->nr] = (PdbRec){.attr=r->attr,.uniqueID=r->uniqueID,.data=w->arena+w->used,.len=r->len};
-    w->used += r->len; w->nr++; return 0;
+/* drop the demo rows: every record whose uniqueID is in 1..maxuid */
+typedef struct { uint32_t maxuid; int removed; } DemoRW;
+static int demoFate(const PdbRec *r, uint8_t *attr, const uint8_t **d, int *len, void *ctx){
+    (void)attr; (void)d; (void)len; DemoRW *w = ctx;
+    if(r->uniqueID >= 1 && r->uniqueID <= w->maxuid){ w->removed++; return 1; }
+    return 0;
 }
 /* rewrite one app's PDB once, dropping demo rows (uid 1..nr); returns count removed. */
 static int remove_demo_from(int app, uint32_t nr){
     const char *path = db_path(app);
     if(!file_exists(path)) return 0;
-    uint8_t ai[512]; int al = pdb_read_appinfo(path, ai, sizeof ai); if(al<0) al=0;
-    DemoRW w = { nr, g_arena, 0, g_recs, 0, 0 };
-    pdb_read(path, demoRwCb, &w);
-    const char *nm; uint32_t type, creator;
-    switch(app){
-        case APP_CAL:  nm="DatebookDB"; type=0x44415441; creator=0x64617465; break;
-        case APP_ADDR: nm="AddressDB";  type=0x44415441; creator=0x61646472; break;
-        case APP_TODO: nm="ToDoDB";     type=0x44415441; creator=0x746F646F; break;
-        default:       nm="MemoDB";     type=0x44415441; creator=0x6D656D6F; break;
-    }
-    pdb_write_ai(path, nm, type, creator, al?ai:NULL, al, g_recs, w.nr);
+    DemoRW w = { nr, 0 };
+    const char *nm; uint32_t type, creator; db_ident(app,&nm,&type,&creator);
+    if(stream_rewrite(path, nm, type, creator, NULL, 0, demoFate, &w, NULL, NULL) < 0) return 0;
     return w.removed;
 }
 
@@ -279,10 +307,8 @@ static int remove_demo_from(int app, uint32_t nr){
  * next HotSync. Matching is the FULL marker string, so a genuine note is never
  * mistaken for one.
  *
- * The rewrite is refused unless every surviving record was captured. g_arena is
- * 12 KB and g_recs holds RW_MAX entries; if either filled we would be writing
- * back a PDB missing the records we never got to, which is exactly the kind of
- * silent data loss the sync's own empty-overwrite guard exists to prevent. */
+ * The rewrite streams through the card and is refused, leaving the file as it
+ * was, unless every record the header declares was read (stream_rewrite). */
 #define TESTEV_NOTE "generated for streaming-sync test"
 
 /* Pass 1: COUNT, and never stop early.
@@ -299,16 +325,12 @@ static int testScanCb(const PdbRec *r, int i, void *ctx){ (void)i; TestScan *t=c
     if(ApptUnpack(r->data, r->len, &a)==0 && !strcmp(a.note, TESTEV_NOTE)) t->matched++;
     return 0;
 }
-/* Pass 2: collect the survivors. Bails if they do not fit, and the caller then
- * refuses the rewrite rather than writing back a PDB missing real records. */
-typedef struct { uint8_t *arena; int used; PdbRec *recs; int nr, full; } TestRW;
-static int testRwCb(const PdbRec *r, int i, void *ctx){ (void)i; TestRW *w=ctx;
+/* Pass 2: the rewrite, dropping exactly the matches */
+static int testFate(const PdbRec *r, uint8_t *attr, const uint8_t **d, int *len, void *ctx){
+    (void)attr; (void)d; (void)len; int *dropped = ctx;
     Appt a;
-    if(ApptUnpack(r->data, r->len, &a)==0 && !strcmp(a.note, TESTEV_NOTE)) return 0;  /* drop */
-    if(w->used + r->len > RW_ARENA || w->nr >= RW_MAX){ w->full = 1; return 1; }
-    memcpy(w->arena + w->used, r->data, r->len);
-    w->recs[w->nr] = (PdbRec){.attr=r->attr,.uniqueID=r->uniqueID,.data=w->arena+w->used,.len=r->len};
-    w->used += r->len; w->nr++; return 0;
+    if(ApptUnpack(r->data, r->len, &a)==0 && !strcmp(a.note, TESTEV_NOTE)){ (*dropped)++; return 1; }
+    return 0;
 }
 int data_testev_scanned(void){ return g_testev_scanned; }
 
@@ -338,13 +360,10 @@ int data_remove_test_events(void){
     g_testev_scanned = t.scanned;            /* so the caller can report honestly */
     if(t.matched == 0) return 0;             /* genuinely none: do not touch the file */
 
-    uint8_t ai[512]; int al = pdb_read_appinfo(path, ai, sizeof ai); if(al<0) al=0;
-    TestRW w = { g_arena, 0, g_recs, 0, 0 };
-    pdb_read(path, testRwCb, &w);
-    if(w.full) return -1;                    /* would drop real records -- refuse, say so */
-    if(w.nr + t.matched != t.scanned) return -1;   /* the two passes disagree: refuse */
-    pdb_write_ai(path, "DatebookDB", 0x44415441, 0x64617465, al?ai:NULL, al, g_recs, w.nr);
-    return t.matched;
+    int dropped = 0;
+    if(stream_rewrite(path, "DatebookDB", 0x44415441, 0x64617465, NULL, 0, testFate, &dropped, NULL, NULL) < 0)
+        return -1;                           /* the file is untouched -- refuse, say so */
+    return dropped;
 }
 
 /* delete exactly the demo-seeded records (uniqueIDs 1..nr per app from the
@@ -529,49 +548,55 @@ int data_get_addr(uint32_t uid, Addr *out){ Get g={uid,out,0}; live_read(DB_ADDR
 int data_get_todo(uint32_t uid, Todo *out){ Get g={uid,out,0}; live_read(DB_TODO,getTodo,&g); return g.found; }
 
 /* ------------------------- rewrite (replace/append one record) ------------------------- */
-typedef struct { uint32_t uid; const uint8_t *nd; int nl; int cat; uint8_t *arena; int used; PdbRec *recs; int nr; int done; int tomb; } RW;
-static int rwCb(const PdbRec *r,int i,void *ctx){ (void)i; RW*w=ctx;
-    const uint8_t *src=r->data; int len=r->len; uint8_t attr=r->attr;
-    if(r->uniqueID==w->uid){
-        if(!w->nd && !w->tomb){ w->done=1; return 0; }  /* delete: drop this record */
-        if(!w->nd){                                     /* delete: keep a tombstone */
-            attr |= REC_ATTR_DELETE | REC_ATTR_DIRTY; w->done=1;
-        } else {
-        src=w->nd; len=w->nl;
-        if(w->cat>=0) attr=(attr & ~0x0F) | (uint8_t)(w->cat & 0x0F);   /* recategorize */
-        attr|=REC_ATTR_DIRTY; w->done=1;
+typedef struct { uint32_t uid; const uint8_t *nd; int nl; int cat; int done; int tomb; } RW;
+static int rwFate(const PdbRec *r, uint8_t *attr, const uint8_t **d, int *len, void *ctx){
+    RW *w = ctx;
+    if(r->uniqueID != w->uid) return 0;
+    w->done = 1;
+    if(!w->nd && !w->tomb) return 1;                    /* delete: drop this record */
+    if(!w->nd){ *attr |= REC_ATTR_DELETE | REC_ATTR_DIRTY; return 0; }   /* a tombstone */
+    *d = w->nd; *len = w->nl;
+    if(w->cat >= 0) *attr = (*attr & ~0x0F) | (uint8_t)(w->cat & 0x0F);  /* recategorize */
+    *attr |= REC_ATTR_DIRTY;
+    return 0;
+}
+/* a new record's uid: past every existing one, and never inside the demo
+ * seed's range (1..n): HotSync holds those back from the push, so a user's
+ * record that landed there -- after every sample was deleted, say -- would
+ * silently never sync. */
+static uint32_t new_uid(const char *path, uint32_t maxuid){
+    uint32_t nu = maxuid + 1;
+    for(int a = 0; a < 4; a++)
+        if(db_path(a) == path || !strcmp(db_path(a), path)){
+            uint32_t dn = (uint32_t)data_demo_count(a);
+            if(nu <= dn) nu = dn + 1;
         }
-    }
-    if(w->used+len>RW_ARENA || w->nr>=RW_MAX) return 1;
-    memcpy(w->arena+w->used, src, len);
-    w->recs[w->nr]=(PdbRec){.attr=attr,.uniqueID=r->uniqueID,.data=w->arena+w->used,.len=len};
-    w->used+=len; w->nr++; return 0;
+    return nu;
+}
+typedef struct { uint32_t uid; int found; } Look;
+static int lookCb(const PdbRec *r, int i, void *c){ (void)i; Look *l = c;
+    if(r->uniqueID == l->uid){ l->found = 1; return 1; }
+    return 0;
 }
 /* replace/append/delete one record, preserving the PDB's AppInfo (categories).
- * nd==NULL => delete; cat<0 => keep the record's current category. */
+ * nd==NULL => delete; cat<0 => keep the record's current category. The
+ * database streams through the card (stream_rewrite), whatever its size. */
 static int rewrite_ex(const char *path,const char *nm,uint32_t type,uint32_t creator,
                       uint32_t uid,const uint8_t *nd,int nl,int cat,int tomb){
-    uint8_t ai[512]; int al=pdb_read_appinfo(path,ai,sizeof ai); if(al<0)al=0;
-    RW w={uid,nd,nl,cat,g_arena,0,g_recs,0,0,tomb};
-    pdb_read(path,rwCb,&w);
-    if(!w.done && nd){                /* new record (uid==0 or not found): append */
-        uint32_t nu=1; for(int i=0;i<w.nr;i++) if(g_recs[i].uniqueID>=nu) nu=g_recs[i].uniqueID+1;
-        /* Never inside the demo seed's uid range (1..n): HotSync holds those
-         * back from the push, so a user's record that landed there -- after
-         * every sample was deleted, say -- would silently never sync. */
-        for(int a = 0; a < 4; a++)
-            if(db_path(a) == path || !strcmp(db_path(a), path)){
-                uint32_t dn = (uint32_t)data_demo_count(a);
-                if(nu <= dn) nu = dn + 1;
-            }
-        if(w.used+nl<=RW_ARENA && w.nr<RW_MAX){
-            memcpy(g_arena+w.used,nd,nl);
-            uint8_t na=REC_ATTR_DIRTY | (cat>=0 ? (uint8_t)(cat & 0x0F) : 0);
-            g_recs[w.nr]=(PdbRec){.attr=na,.uniqueID=nu,.data=g_arena+w.used,.len=nl};
-            w.used+=nl; w.nr++;
-        }
+    RW w = { uid, nd, nl, cat, 0, tomb };
+    /* the record to append is decided after the walk (was uid found?), so
+     * walk once to look, then rewrite: both are reads of the card, no RAM */
+    if(nd && uid){
+        Look lk = { uid, 0 };
+        pdb_read(path, lookCb, &lk);
+        if(lk.found) return stream_rewrite(path,nm,type,creator,NULL,0,rwFate,&w,NULL,NULL);
     }
-    return pdb_write_ai(path,nm,type,creator, al?ai:NULL, al, g_recs, w.nr);
+    if(nd){                                   /* new record (uid==0 or not found): append */
+        PdbRec add = { .attr = REC_ATTR_DIRTY | (cat>=0 ? (uint8_t)(cat & 0x0F) : 0), .uniqueID = 0,
+                       .data = nd, .len = nl };
+        return stream_rewrite(path,nm,type,creator,NULL,0,rwFate,&w,&add,new_uid);
+    }
+    return stream_rewrite(path,nm,type,creator,NULL,0,rwFate,&w,NULL,NULL);
 }
 static int rewrite(const char *path,const char *nm,uint32_t type,uint32_t creator,
                    uint32_t uid,const uint8_t *nd,int nl,int cat){

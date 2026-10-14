@@ -102,6 +102,9 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 - [ ] On glass: edit a phone number of a contact that has a photo and more than five numbers; on the phone, the photo and the other numbers are still there (the log shows `unsent=0`; a body over 16 KB is kept unsent on the device) `[d]`
 - [ ] A contact with a big photo now arrives on the device (it used to be skipped) `[d]`
 - [x] **Read-only switch** (2026-10-14): Settings ▸ Sync ▸ Changes (read-only / send my changes), config `read_only`, on by default and turned back on when the Apple ID changes; the log and the Done line say "(read-only)"; gated by `config_test` and `fidelity` (nothing sent, edits wait, the phone's edits still come down, and turned off they go up) `[s]` (`w9_changes_pick`, `w9_sync_changes`)
+- [x] **Big databases on the device** (2026-10-14): an edit, a delete, a category change, the boot-time category backfill and removing the demo rows all stream through the card (`stream_rewrite` in `data.c`) and refuse, leaving the file as it was, unless every record was read; the 12 KB static arena is gone; the streaming writer's index is 12 bytes a record; gated in `make -C sim data` (2,000 contacts: an edit and a delete past the old cap, a category change, a new contact) `[s]`
+- [ ] With the real address book on the device: edit and delete a contact far down the list; the count in Address doesn't change (bar the delete), the edit is on that contact, and the log shows no "rewrite refused" `[d]`
+- [ ] How many contacts a sync can write: watch the log's `OUTPUT FULL` / heap lines on the first full Address sync `[d]`
 - [ ] After flashing, Settings ▸ Sync shows "Changes: read-only"; a sync's Done line ends "(read-only)", an edit made on the device doesn't reach the phone, and does once "Send my changes" is picked `[d]`
 
 ---
@@ -480,7 +483,17 @@ no-delete rule; in this order):
    works (no PUT; local edits wait), but `hotsync.c` forces it off. Make it
    a Settings ▸ Sync switch, on by default for a newly added account, so
    the first syncs of a big account can't change it at all.
-8. **Contacts at real size.** No window applies. Ask for the Palm fields
+8. **Contacts at real size.** Done 2026-10-14, bar the bench: a photo
+   contact comes down through its Palm view (first entry above); every
+   database rewrite on the device streams through the card (an edit used to
+   write back only the first 64 records); the writer's RAM is 12 bytes a
+   record. **Partial `address-data` was not done, on purpose:** the
+   device's records would then be built from a different view than the
+   server's full copy, and whether iCloud's partial reply keeps Apple's
+   `item1.` grouped properties is unknown; it would save bandwidth and card
+   space, not RAM. Left to measure on the bench: the contact count at which
+   a sync's output index (12 bytes a record, one contiguous block) no longer
+   fits. The original note: No window applies. Ask for the Palm fields
    only (CardDAV partial `address-data`, RFC 6352 §10.4.2) so photos never
    arrive; check iCloud honours it. Today a vCard over the 8 KB fetch
    buffer is skipped with a warning and fetched again every sync. Measure

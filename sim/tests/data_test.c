@@ -90,6 +90,48 @@ int main(void){
     g_first = 0; data_todo(firstRow, NULL);
     CK(g_first > (uint32_t)dn, "gets a uid ABOVE the demo range, so HotSync will push it");
 
+    /* ---- a real account's size: every rewrite streams --------------------
+     * Edits, deletes and category changes used to go through a 12 KB,
+     * 64-record arena and write back what fit. Two thousand contacts: an edit
+     * and a delete past the old cap, and a category change, must keep every
+     * one, change the right one in place, and append nothing. */
+    printf("-- 2000 contacts --\n");
+    snprintf(c->card_coll, sizeof c->card_coll, "card");
+    {
+        static uint8_t arena[2000 * 64]; static PdbRec rr[2000]; int used = 0;
+        for(int i = 0; i < 2000; i++){
+            Addr a; memset(&a, 0, sizeof a);
+            char nm[32]; snprintf(nm, sizeof nm, "Person %04d", i);
+            a.fields[F_name] = AddrIntern(&a, nm);
+            a.fields[F_phone1] = AddrIntern(&a, "+1 555 0100");
+            int l = AddrPack(arena + used, 64, &a);
+            rr[i] = (PdbRec){ .attr = 0, .uniqueID = (uint32_t)(100 + i), .data = arena + used, .len = l };
+            used += l;
+        }
+        pdb_write(data_db_path(APP_ADDR), "AddressDB", 0x44415441, 0x61646472, rr, 2000);
+    }
+    Raw b0 = raw(APP_ADDR);
+    CK(b0.all == 2000, "2000 contacts on the card");
+    Addr ea; CK(data_get_addr(1600, &ea), "contact 1600 (past the old 64-record cap) reads");
+    ea.fields[F_phone1] = AddrIntern(&ea, "+1 555 0999");
+    CK(data_save_addr(1600, -1, &ea), "edit it");
+    Raw b1 = raw(APP_ADDR);
+    CK(b1.all == 2000, "still 2000: nothing truncated, nothing appended");
+    Addr a2; data_get_addr(1600, &a2);
+    CK(a2.fields[F_phone1] && !strcmp(a2.fields[F_phone1], "+1 555 0999"), "the edit landed on that contact");
+    Addr a3; data_get_addr(2099, &a3);
+    CK(a3.fields[F_name] && !strcmp(a3.fields[F_name], "Person 1999"), "and the last contact is untouched");
+    CK(data_delete(APP_ADDR, 1700), "delete contact 1700");
+    Raw b2 = raw(APP_ADDR);
+    CK(b2.all == 2000 && b2.tomb == 1, "a tombstone, and every other contact kept");
+    CatTable ct; data_get_categories(APP_ADDR, &ct);
+    snprintf(ct.name[5], sizeof ct.name[5], "Clients");
+    CK(data_set_categories(APP_ADDR, &ct), "rename a category");
+    CK(raw(APP_ADDR).all == 2000, "all 2000 kept through a category change");
+    Addr na; memset(&na, 0, sizeof na); na.fields[F_name] = AddrIntern(&na, "Brand New");
+    CK(data_save_addr(0, 0, &na), "a new contact");
+    CK(raw(APP_ADDR).all == 2001, "appended: 2001");
+
     printf(fails ? "== data: %d FAILURE(S) ==\n" : "== data: all passed ==\n", fails);
     return fails ? 1 : 0;
 }

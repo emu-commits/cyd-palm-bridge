@@ -215,10 +215,15 @@ int pdb_write(const char *path, const char *name,
 
 /* ===================== streaming PDB writer (PdbW) ====================== */
 /* record bytes go to a temp file as pdbw_rec() is called; only this tiny index
- * (24 bytes/record) stays in RAM. pdbw_commit() sorts by uniqueID and assembles
+ * (12 bytes/record) stays in RAM. pdbw_commit() sorts by uniqueID and assembles
  * the final PDB, copying record bytes back from the temp file. The index grows
  * on demand, so the output is bounded by disk, not by a fixed RAM arena.      */
-typedef struct { uint32_t uid; uint8_t attr; uint32_t len; long tmpoff; } PdbwEnt;
+/* 12 bytes a record, which is the whole RAM cost of a database being written:
+ * uid (24 bits) and attr share a word, a record is at most PALM_REC_MAX (4 KB)
+ * so its length is 16 bits, and the temp file's offset is 32. */
+typedef struct { uint32_t uidattr; uint32_t tmpoff; uint16_t len; } PdbwEnt;
+#define ENT_UID(e)  ((e).uidattr >> 8)
+#define ENT_ATTR(e) ((uint8_t)((e).uidattr & 0xFF))
 struct PdbW {
     char   tmppath[256];
     FILE  *tmp;
@@ -238,6 +243,7 @@ PdbW *pdbw_begin(const char *tmppath){
 int pdbw_rec(PdbW *w, uint32_t uid, uint8_t attr, const uint8_t *data, int len){
     if(!w) return -1;
     if(len<0) len=0;
+    if(len>0xFFFF || uid>0xFFFFFF) return -1;
     if(w->nent==w->cap){
         int nc = w->cap ? w->cap*2 : 32;
         PdbwEnt *e = realloc(w->ent, (size_t)nc*sizeof *e);
@@ -245,7 +251,7 @@ int pdbw_rec(PdbW *w, uint32_t uid, uint8_t attr, const uint8_t *data, int len){
         w->ent=e; w->cap=nc;
     }
     if(len && fwrite(data,1,(size_t)len,w->tmp)!=(size_t)len) return -1;
-    w->ent[w->nent] = (PdbwEnt){ uid, attr, (uint32_t)len, w->tmpused };
+    w->ent[w->nent] = (PdbwEnt){ (uid << 8) | attr, (uint32_t)w->tmpused, (uint16_t)len };
     w->tmpused += len;
     w->nent++;
     return 0;
@@ -262,7 +268,7 @@ void pdbw_abort(PdbW *w){
 }
 
 static int pdbwCmp(const void *a,const void *b){
-    uint32_t ua=((const PdbwEnt*)a)->uid, ub=((const PdbwEnt*)b)->uid;
+    uint32_t ua=ENT_UID(*(const PdbwEnt*)a), ub=ENT_UID(*(const PdbwEnt*)b);
     return ua<ub ? -1 : ua>ub ? 1 : 0;
 }
 
@@ -289,10 +295,11 @@ int pdbw_commit(PdbW *w, const char *path, const char *name,
     for(int i=0;i<nrecs;i++){
         uint8_t e[PDB_ENTRY];
         put32(e, off);
-        e[4]=w->ent[i].attr;
-        e[5]=(uint8_t)(w->ent[i].uid>>16);
-        e[6]=(uint8_t)(w->ent[i].uid>>8);
-        e[7]=(uint8_t)(w->ent[i].uid);
+        uint32_t u=ENT_UID(w->ent[i]);
+        e[4]=ENT_ATTR(w->ent[i]);
+        e[5]=(uint8_t)(u>>16);
+        e[6]=(uint8_t)(u>>8);
+        e[7]=(uint8_t)(u);
         fwrite(e,1,PDB_ENTRY,f);
         off += w->ent[i].len;
     }
@@ -307,7 +314,7 @@ int pdbw_commit(PdbW *w, const char *path, const char *name,
         long remaining = w->ent[i].len;
         /* the live file is never touched unless it all worked: a half-built PDB
          * must never become THE database */
-        if(fseek(w->tmp, w->ent[i].tmpoff, SEEK_SET)!=0){ sf_abort(&sf); pdbw_abort(w); return -1; }
+        if(fseek(w->tmp, (long)w->ent[i].tmpoff, SEEK_SET)!=0){ sf_abort(&sf); pdbw_abort(w); return -1; }
         while(remaining>0){
             size_t chunk = remaining < (long)sizeof cbuf ? (size_t)remaining : sizeof cbuf;
             if(fread(cbuf,1,chunk,w->tmp)!=chunk){ sf_abort(&sf); pdbw_abort(w); return -1; }

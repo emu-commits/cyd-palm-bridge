@@ -16,6 +16,38 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-14 — Every database rewrite streams; a real address book survives an edit
+
+`BACKLOG.md` §Engine 8, the device side, and a bug that predates this work:
+an edit, a delete or a category change on the device rewrote the database
+through a 12 KB, 64-record static arena, and `pdb_read` stopped when it
+filled, so **only the first 64 records (or 12 KB) were written back**.
+Editing one contact in a 2,000-contact book left 64 on the device; an edit
+to a record past the cap wasn't found and was appended as a new record,
+which the next sync would have pushed as a duplicate. (Under the engine
+before 2026-10-13 the missing records would have gone up as deletions.)
+It went unnoticed because every database on the bench was small.
+
+`stream_rewrite()` (`firmware/main/data.c`) walks the database and writes
+each record through the streaming writer (`PdbW`: bytes to a temp file on
+the card), with a per-record fate (keep, change, drop) and an optional
+append. The live file is replaced only if every record the header declares
+was read and written; otherwise it is left as it was. Record edit, delete
+and tombstone, the category editor, the boot-time category backfill,
+removing the demo rows, and the dev test-event cleanup all use it. The 12 KB
+arena and its 64-entry table are gone from static DRAM. An edit costs two
+reads of the database (find, then copy) and one write.
+
+`PdbW`'s per-record index is packed from 16 to 12 bytes (uid and attr in one
+word, a 16-bit length), so a sync's output index for 2,000 contacts is
+24 KB, not 32 KB, in its one contiguous block.
+
+Gate: `make -C sim data` writes 2,000 contacts and edits contact 1600 (past
+the old cap), deletes 1700, renames a category and adds one: 2,000 stay
+(2,001 after the add), the edit lands on 1600, the last contact is
+untouched. The old `data.c` crashes on these cases. All 17 sync gates green
+with the packed writer.
+
 ### 2026-10-14 — The merge is three-way, against each record's base
 
 Found while planning the contacts step: the merge decided what the device
