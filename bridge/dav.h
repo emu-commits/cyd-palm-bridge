@@ -27,6 +27,9 @@ int dav_getetag(const DavCtx*d,const char*coll,const char*name,char*etag,int cap
 
 /* GET <base>/<coll>/<name> into out buffer. returns bytes or -1. */
 int dav_get(const DavCtx*d,const char*coll,const char*name,char*out,int cap);
+/* GET <base>/<coll>/<name> streamed into the file `path`, whatever its size (a
+ * contact with a photo is tens of KB). Returns the HTTP status, or -1. */
+int dav_get_file(const DavCtx*d,const char*coll,const char*name,const char*path);
 
 /* Stream a public https URL's body to an SD file (the News reader's feed fetch).
  * Returns the HTTP status, or -1. Device-only: implemented in dav_esp.c; the host

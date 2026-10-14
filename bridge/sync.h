@@ -25,6 +25,10 @@ typedef struct {
      * CALL IS MADE. Deliberately outside the ops sums the gates use for
      * idempotency, since no operation happened. */
     int bothDel;
+    /* Edits kept on the device and not sent, because the server's copy couldn't
+     * be merged safely (sync.c, mergeEdit): an edit never replaces a server
+     * object, so it waits rather than going up lossy. Retried every sync. */
+    int unsent;
     /* New local records the caller asked to HOLD (sync_set_hold): kept in the
      * local database as they are, never pushed and never mapped. Also outside
      * the ops sums -- nothing was transmitted. */

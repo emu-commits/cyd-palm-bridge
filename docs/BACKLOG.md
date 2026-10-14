@@ -97,6 +97,10 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 - [x] **Never delete from the cloud** (2026-10-13): `dav_delete` removed from both transports, the device allow-lists GET/PUT/PROPFIND/REPORT, a delete on the device leaves the device only (a hidden map row; the server keeps its copy and it isn't pulled back), a record missing locally is always restored; `tests/nodelete.sh` in `make test`, `massdel` rewritten, `incremental` and `window` assert the server keeps everything; the delete dialog says "From this device only" in an app that syncs `[s]`
 - [ ] Delete an event and a contact on the device, sync: both gone from the device, both still on the phone and iCloud.com; sync again, they stay gone from the device `[d]`
 - [ ] Edit the hidden event on the phone, sync: it comes back to the device `[d]`
+- [x] **An edit merges into the server's copy, never replaces it** (2026-10-14): `bridge/objfile.c` streams the copy onto the card and swaps in only the Palm-owned fields that changed, PUT with If-Match (the `local` policy too); a big object is read through its Palm view, so photo contacts come down with the 8 KB buffer; Apple's `item1.` grouped properties and `DURATION` are read; a series with moved occurrences can't be moved from the device (counted *unsent*); gated by `objfile_test` and `fidelity` `[s]`
+- [ ] On glass: edit an iCloud event that has invitees, a location and two alerts; on the phone it shows the edit and still has all of them `[d]`
+- [ ] On glass: edit a phone number of a contact that has a photo and more than five numbers; on the phone, the photo and the other numbers are still there (the log shows `unsent=0`; a body over 16 KB is kept unsent on the device) `[d]`
+- [ ] A contact with a big photo now arrives on the device (it used to be skipped) `[d]`
 
 ---
 
@@ -450,8 +454,10 @@ R and the robustness work).
 **Finishing sync for a real account** (outlined 2026-10-13, after the
 no-delete rule; in this order):
 
-6. **An edit on the device must not lose what Palm can't hold.** Today a
-   device edit PUTs a body rebuilt from the Palm record, which *replaces*
+6. ~~**An edit on the device must not lose what Palm can't hold.**~~ Done
+   2026-10-14: `bridge/objfile.c` merges an edit into the server's copy
+   (`tests/objfile_test.c` offline, `tests/fidelity.c` against Radicale). The
+   original note: Today a device edit PUTs a body rebuilt from the Palm record, which *replaces*
    the whole iCloud object. The codec keeps SUMMARY, DESCRIPTION, DTSTART,
    DTEND, RRULE, EXDATE and one alarm for an event; N, ORG, TITLE, ADR,
    NOTE and Palm's five phone/email slots for a contact. So editing a
@@ -475,7 +481,12 @@ no-delete rule; in this order):
    arrive; check iCloud honours it. Today a vCard over the 8 KB fetch
    buffer is skipped with a warning and fetched again every sync. Measure
    how many contacts the device's AddressDB holds before "too large" (`-6`).
-9. **Recurring events from iCloud.** A series with changed occurrences is
+9. **Recurring events from iCloud.** The parse side is done 2026-10-14: the
+   Palm view reads the series' own VEVENT, not a moved occurrence's; an end
+   given as DURATION is read; moving or re-repeating a series that has moved
+   occurrences from the device is refused (unsent), since they're tied to its
+   old start. Still to check against the real account. The original note:
+   A series with changed occurrences is
    one object with several VEVENTs (the master and its overrides). Check
    what the parser keeps against the real account, and show the master
    with its EXDATEs at least; never PUT such an object back (6).

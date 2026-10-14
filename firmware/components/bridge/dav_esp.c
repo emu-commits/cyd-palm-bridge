@@ -271,6 +271,17 @@ int dav_get(const DavCtx*d,const char*coll,const char*name,char*out,int cap){
     return rn;
 }
 
+/* An object streamed to an SD file, as dav_fetch_url does a feed, with auth. */
+int dav_get_file(const DavCtx*d,const char*coll,const char*name,const char*path){
+    char url[512]; snprintf(url,sizeof url,"%s/%s/%s",d->base,coll,name);
+    FILE *sp = fopen(path,"w+b"); if(!sp) return -1;
+    s_spoolfile = sp;
+    int st = davreq(d,HTTP_METHOD_GET,url,-1,NULL,NULL,NULL,0, NULL,0,NULL, NULL,0, NULL,0);
+    s_spoolfile = NULL;
+    fclose(sp);
+    return st;
+}
+
 /* Stream an arbitrary (public) https URL's body straight to an SD file -- used by
  * the News reader's HotSync fetch to spool a feed for the sliding-window RSS
  * parser, exactly as dav_list spools a PROPFIND. No auth, no size cap in RAM.

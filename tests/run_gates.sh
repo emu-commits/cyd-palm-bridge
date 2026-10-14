@@ -95,6 +95,7 @@ run "bigsync (device-sized, 90 recs)"  clean ./build/bigsync
 run "multiapp (To Do + Address sync)"  clean ./build/multiapp
 run "toobig (refuses, changes nothing)" clean ./build/toobig
 run "window (a time window: prune, never delete)" clean ./build/window
+run "fidelity (an edit keeps what the Palm can't hold)" clean ./build/fidelity
 run "dav_roundtrip (PDB->server->PDB)" clean ./tests/dav_roundtrip.sh
 
 echo

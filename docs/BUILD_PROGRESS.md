@@ -16,6 +16,65 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-14 — An edit merges into the server's copy; big objects read through a Palm view
+
+The first of the steps to finish sync (`BACKLOG.md` §Engine 6, and the parse
+side of 9). Until now an edit made on the device was sent as a body rebuilt
+from the Palm record, which *replaced* the iCloud object: editing a 10-year-old
+event dropped its location, attendees, URL, extra alarms and moved
+occurrences; editing a contact dropped its photo, birthday, URLs and every
+number past the fifth.
+
+**`bridge/objfile.c`** reads a server object off the card a physical line at a
+time, never whole (a contact with a photo is tens of KB; the device's fetch
+buffer is 8 KB):
+- `obj_scan` finds the master component (the VEVENT without a RECURRENCE-ID)
+  and counts what the merge needs (ADR, TEL/EMAIL, VTIMEZONE ids).
+- `obj_filter` writes the **Palm view**: only the master's lines the codec
+  reads, unfolded. Every fetch in the engine now goes through it (the cache
+  is read in place, an uncached object is streamed to the card with the new
+  `dav_get_file`), so a 40 KB photo contact parses in a 594 B view, and a
+  moved occurrence can no longer overwrite its series' fields.
+- `obj_merge` writes the server's object back **byte for byte**, with only the
+  Palm-owned groups that the device changed swapped in. A group is replaced
+  only if the emitter's lines for it differ between the server's copy and the
+  device's record, so an untouched field is never rewritten. The phone slots
+  go one by one (an unedited slot keeps its TYPE, PREF and `item1.` label);
+  the Palm's address is the last ADR, so a home address before it is kept;
+  numbers past the fifth are never the Palm's. A changed time in a zone the
+  object has no VTIMEZONE for gets the device's.
+
+**The engine** (`pushLocal` → `mergeEdit`): an edit to an object the server
+has streams the current copy down, merges, and PUTs with If-Match; the
+`local` conflict policy now sends If-Match too (it was unconditional), and
+its 412 takes the server's copy. Refused, and kept on the device as
+**unsent** (a new `SyncStats` count, in the device log and its Done line):
+a copy with no master component, a Palm view too big, a merged body over
+16 KB on the device (`dav_put` holds a PUT body in RAM there), and moving or
+re-repeating a series that has moved occurrences (they're tied to its old
+start).
+
+**Read side fixes found on the way:** Apple's grouped vCard properties
+(`item1.EMAIL`, `item2.ADR`) were invisible to `vcard_parse`, so those emails
+and addresses never reached the device; an event whose end is a `DURATION`
+had no end time.
+
+**Gates:** `objfile_test` (offline, in `make test`): a series with a moved
+occurrence, attendees and two alarms; a 43 KB contact with eight numbers and
+two addresses; a reminder; nothing-changed returns the object identical;
+odd inputs. `fidelity` (in `run_gates.sh`, built with the device's 8 KB
+fetch buffer): the same shapes through Radicale, edited on the "device",
+compared before and after on the server; a both-sides edit under `local`
+keeps the guest the phone just added; the refused series move leaves the
+server's copy identical and the edit on the device. Radicale re-serializes
+vCards (emails first), which the gate allows for. All 17 gates green.
+
+**Firmware** (IDF v5.5 container, LVGL v9.5.0 local in a scratch copy):
+1,744,571 B, +6,704 B over the previous commit's 1,737,867 B; static DRAM
+unchanged at 160,612 B (88.87 %). The merge path's stack is about the pull
+path's (a 4 KB record and the emitter's buffers); the sync task's low-water
+log will show it on the bench.
+
 ### 2026-10-13 — Nothing is ever deleted from the cloud
 
 From the owner, before syncing a 10-year-old iCloud account: "remove any sync

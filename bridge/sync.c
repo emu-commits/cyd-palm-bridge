@@ -27,6 +27,7 @@
 #include "palm.h"
 #include "appinfo.h"
 #include "sync.h"
+#include "objfile.h"
 #include "dav_xml.h"   /* dav_parse_multiget_stream: the batched fetch */
 
 /* The `[sync]` lines that fire on every HEALTHY sync (per-collection read +
@@ -62,6 +63,8 @@
   #define STATE_DIR  "state"
 #endif
 #define BODY_TMP STATE_DIR "/.body"    /* PUT body staged here before upload */
+#define GET_TMP  STATE_DIR "/.get"     /* one object streamed down, not cached     */
+#define SRV_TMP  STATE_DIR "/.srv"     /* the server's copy of an object being edited */
 #define OUT_TMP  STATE_DIR "/.pdbout"  /* streamed output record bytes         */
 
 /* Sync scratch. Kept OFF the stack (the sync runs single-threaded and never
@@ -158,6 +161,14 @@ static int parse_object(int kind,const char*obj,uint8_t*out,int cap){
     if(kind==KIND_CAL){ Appt a; if(ical_parse(obj,&a)) return -1; return ApptPack(out,cap,&a); }
     if(kind==KIND_TODO){ Todo t; if(vtodo_parse(obj,&t)) return -1; return ToDoPack(out,cap,&t); }
     Addr a; if(vcard_parse(obj,&a)) return -1; return AddrPack(out,cap,&a);
+}
+
+/* the component alone (BEGIN:VEVENT..END:VEVENT, no VCALENDAR or VTIMEZONE),
+ * which is what obj_merge compares group by group. Length or -1. */
+static int emit_comp(int kind,const uint8_t*data,int len,char*out,int cap){
+    if(kind==KIND_CAL){ Appt a; if(ApptUnpack(data,len,&a)) return -1; return ical_emit(out,cap,&a,0); }
+    if(kind==KIND_TODO){ Todo t; if(ToDoUnpack(data,len,&t)) return -1; return vtodo_emit(out,cap,&t,0); }
+    Addr a; if(AddrUnpack(data,len,&a)) return -1; return vcard_emit(out,cap,&a,0);
 }
 
 static int pushRec(const PdbRec*r,int i,void*ctx){
@@ -774,38 +785,44 @@ static void bcCb(const char*name,const char*etag,long off,long len,void*ctx){
 }
 static void bcReset(void){ remove(BC_DAT); remove(BC_IDX); remove(NEED); remove(SV_PEND); remove(MG_SPOOL); }
 
-/* the cached body of `name` into out (NUL-terminated); its length (capped at
- * cap-1, which callers read as "too big"), or -1 if it isn't cached */
-static int cacheGet(const char*name,char*out,int cap){
+/* where `name`'s body sits in the cache: 0 and its offset and length, or -1 */
+static int cacheFind(const char*name,long*off,long*len){
     if(strlen(name)>BC_KEY) return -1;
     FILE*f=fopen(BC_IDX,"rb"); if(!f) return -1;
     fseek(f,0,SEEK_END); long n=ftell(f)/BC_W;
     char key[BC_KEY+1]; snprintf(key,sizeof key,"%-127s",name);
-    long lo=0, hi=n-1, off=-1, len=0;
+    long lo=0, hi=n-1; *off=-1; *len=0;
     char row[BC_W+1];
     while(lo<=hi){
         long mid=(lo+hi)/2;
         if(fseek(f,mid*BC_W,SEEK_SET) || fread(row,1,BC_W,f)!=BC_W) break;
         int c=memcmp(row,key,BC_KEY);
-        if(c==0){ row[BC_W]=0; off=strtol(row+BC_KEY+1,NULL,10); len=strtol(row+BC_KEY+12,NULL,10); break; }
+        if(c==0){ row[BC_W]=0; *off=strtol(row+BC_KEY+1,NULL,10); *len=strtol(row+BC_KEY+12,NULL,10); break; }
         if(c<0) lo=mid+1; else hi=mid-1;
     }
     fclose(f);
-    if(off<0) return -1;
-    FILE*d=fopen(BC_DAT,"rb"); if(!d) return -1;
-    long want = len < cap-1 ? len : cap-1;
-    int got = (fseek(d,off,SEEK_SET)==0) ? (int)fread(out,1,(size_t)want,d) : -1;
-    fclose(d);
-    if(got!=want) return -1;
-    out[got]=0;
-    return len >= cap-1 ? cap-1 : got;
+    return *off<0 ? -1 : 0;
 }
-/* a body: from the cache, else one GET */
-static int fetchBody(const DavCtx*d,const char*coll,const char*name,char*out,int cap){
-    int got=cacheGet(name,out,cap);
-    if(got>=0) return got;
+/* The Palm view of an object read off the card (objfile.h): only the lines the
+ * codec reads, so a contact with a 40 KB photo parses in a few hundred bytes.
+ * Its length; cap-1 if it didn't fit (read as "too big"); -1 if unreadable. */
+static int viewOf(int kind,const char*path,long off,long len,char*out,int cap){
+    FILE*f=fopen(path,"rb"); if(!f) return -1;
+    ObjScan sc; int n=-1;
+    if(obj_scan(kind,f,off,len,&sc)==0 && sc.ok) n=obj_filter(kind,f,off,len,&sc,out,cap);
+    fclose(f);
+    return n;
+}
+/* An object's Palm view: from the batched-download cache, else streamed down
+ * with one GET. Never the raw body: that can be any size. */
+static int fetchBody(const DavCtx*d,const char*coll,int kind,const char*name,char*out,int cap){
+    long off,len;
+    if(cacheFind(name,&off,&len)==0) return viewOf(kind,BC_DAT,off,len,out,cap);
     s_fetch_single++;
-    return dav_get(d,coll,name,out,cap);
+    int st=dav_get_file(d,coll,name,GET_TMP);
+    int n = (st>=200 && st<300) ? viewOf(kind,GET_TMP,0,-1,out,cap) : -1;
+    remove(GET_TMP);
+    return n;
 }
 
 static void prefetch(const DavCtx*d,const char*coll,int kind){
@@ -908,7 +925,7 @@ static int resolvePending(const DavCtx*d,const char*coll,int incremental,int win
         char sh[128]="",se[160]="";
         if(sscanf(pl,"%127[^\t]\t%159[^\t\r\n]",sh,se)<1) continue;
         char objuid[48]="";
-        int got=fetchBody(d,coll,sh,g_objbuf,OBJ_FETCH_CAP);
+        int got=fetchBody(d,coll,g_state->kind,sh,g_objbuf,OBJ_FETCH_CAP);
         if(got>0 && got<OBJ_FETCH_CAP-1 && objuid_of(g_objbuf,objuid,sizeof objuid)==0){
             if(o) fprintf(o,"%016llx\t%s\t%s\t%d\n",(unsigned long long)uidHash(objuid),sh,se,1);
         } else {                          /* UID unreadable -> DEFER (never mint an href identity) */
@@ -1022,10 +1039,10 @@ static void hideOnDevice(Sink*k,uint32_t uid,const char*href,const char*etag,
  * it is skipped with a warning rather than silently truncated. */
 static int keepFromServer(const DavCtx*d,const char*coll,int kind,Sink*k,
                           uint32_t uid,const char*name,const char*etag){
-    int got=fetchBody(d,coll,name,g_objbuf,OBJ_FETCH_CAP);
+    int got=fetchBody(d,coll,kind,name,g_objbuf,OBJ_FETCH_CAP);
     if(got<=0){ fprintf(stderr,"warning: could not fetch %s -- dropped\n",name); return -1; }
     if(got>=OBJ_FETCH_CAP-1){             /* hit the buffer limit => truncated */
-        fprintf(stderr,"warning: %s exceeds %d bytes (large PHOTO?) -- dropped\n",name,OBJ_FETCH_CAP);
+        fprintf(stderr,"warning: %s: what the Palm reads of it exceeds %d bytes -- dropped\n",name,OBJ_FETCH_CAP);
         return -1; }
     uint8_t tmp[PALM_REC_MAX];
     int l=parse_object(kind,g_objbuf,tmp,sizeof tmp);
@@ -1035,6 +1052,51 @@ static int keepFromServer(const DavCtx*d,const char*coll,int kind,Sink*k,
     emit_object(kind,tmp,l,uid,g_body,BODY_CAP,NULL);
     keepBytes(k,uid,(uint8_t)k->pullCat,tmp,l,name,etag,fnv1a(g_body),ouid);
     return 0;
+}
+
+/* ---- an edit goes into the server's copy, never over it ---------------------
+ * The Palm holds a fraction of what an iCloud object carries (objfile.h). So an
+ * edit made on the device is never sent as a body rebuilt from the Palm
+ * record: the server's current copy is streamed down, and obj_merge writes it
+ * back with only the Palm-owned fields the device changed swapped in. The PUT
+ * carries If-Match, so a copy that changed since is never overwritten.
+ *
+ * MERGE_REFUSED: the copy came down but can't be merged safely (no master
+ * component, a Palm view too big, a merged body too big for this device to
+ * send). The edit is kept on the device and retried; nothing is sent. */
+#define MERGE_REFUSED (-7)
+#ifdef ESP_PLATFORM
+#define PUT_MAX (16*1024)   /* dav_put holds the body in RAM on the device */
+#else
+#define PUT_MAX (4L*1024*1024)
+#endif
+static int mergeEdit(const DavCtx*d,const char*coll,int kind,const char*name,
+                     const uint8_t*rec,int len,int*nchg){
+    int st=dav_get_file(d,coll,name,SRV_TMP);
+    if(st<200 || st>=300){ remove(SRV_TMP); return -1; }        /* try again next time */
+    int rc=MERGE_REFUSED;
+    FILE*f=fopen(SRV_TMP,"rb"), *o=NULL;
+    ObjScan sc;
+    uint8_t tmp[PALM_REC_MAX];
+    if(!f || obj_scan(kind,f,0,-1,&sc) || !sc.ok) goto out;
+    int vn=obj_filter(kind,f,0,-1,&sc,g_objbuf,OBJ_FETCH_CAP);
+    if(vn<=0 || vn>=OBJ_FETCH_CAP-1) goto out;
+    int tl=parse_object(kind,g_objbuf,tmp,sizeof tmp);
+    if(tl<=0) goto out;
+    /* the view is done with: g_objbuf takes the server's emitted component,
+     * g_body the device's */
+    if(emit_comp(kind,tmp,tl,g_objbuf,OBJ_FETCH_CAP)<0 || emit_comp(kind,rec,len,g_body,BODY_CAP)<0) goto out;
+    char vt[1200]=""; if(kind==KIND_CAL && ical_vtimezone(vt,sizeof vt)<=0) vt[0]=0;
+    o=fopen(BODY_TMP,"wb"); if(!o) goto out;
+    int n=obj_merge(kind,f,0,-1,&sc,g_objbuf,g_body,vt,ical_tzid(),o);
+    long sz=ftell(o);
+    if(n<0 || sz<=0 || sz>PUT_MAX) goto out;
+    *nchg=n; rc=0;
+out:
+    if(o) fclose(o);
+    if(f) fclose(f);
+    remove(SRV_TMP);
+    return rc;
 }
 
 /* PUT a local record (bytes read lazily); ifmatch NULL = unconditional.
@@ -1058,13 +1120,27 @@ static int pushLocal(const DavCtx*d,const char*coll,int kind,Sink*k,
                      const char*objuid){
     if(locBytes(s,L,g_lrec,PALM_REC_MAX)!=L->len){
         fprintf(stderr,"[sync] lazy read failed for local uid=%u -- skipped\n",(unsigned)uid); return -1; }
-    int bl=emit_object(kind,g_lrec,L->len,uid,g_body,BODY_CAP,objuid);
-    if(bl<0) return -1;
     /* the UID actually stored in the object (override, else the synth default). */
     char synth[32]; snprintf(synth,sizeof synth,"palm-%u@cyd",(unsigned)uid);
     const char*storedUid = (objuid&&objuid[0]) ? objuid : synth;
-    FILE*f=fopen(BODY_TMP,"wb"); if(!f) return -1; fwrite(g_body,1,strlen(g_body),f); fclose(f);
     char etag[160]=""; int st=0;
+    if(ifmatch && ifmatch[0] && !s_pull_only){
+        /* AN EDIT TO AN OBJECT THE SERVER HAS: merged into the server's copy,
+         * never a replacement of it (mergeEdit). */
+        int nchg=0, mr=mergeEdit(d,coll,kind,name,g_lrec,L->len,&nchg);
+        if(mr==MERGE_REFUSED){ st=MERGE_REFUSED; goto failed; }
+        if(mr<0){ st=-1; goto failed; }
+        if(nchg==0){
+            /* nothing the server would see: keep it, mapped as it is */
+            emit_object(kind,g_lrec,L->len,uid,g_body,BODY_CAP,NULL);
+            keepBytes(k,uid,L->attr,g_lrec,L->len,name,ifmatch,fnv1a(g_body),storedUid);
+            return 0;
+        }
+    } else {
+        int bl=emit_object(kind,g_lrec,L->len,uid,g_body,BODY_CAP,objuid);
+        if(bl<0) return -1;
+        FILE*f=fopen(BODY_TMP,"wb"); if(!f) return -1; fwrite(g_body,1,strlen(g_body),f); fclose(f);
+    }
     put_guard(d,coll,name,kindCType(kind),BODY_TMP,ifmatch,etag,sizeof etag,&st);
     if(st>=200 && st<300){
         if(!etag[0]) dav_getetag(d,coll,name,etag,sizeof etag);   /* fallback */
@@ -1078,6 +1154,11 @@ static int pushLocal(const DavCtx*d,const char*coll,int kind,Sink*k,
      * failure -- the caller resolves it per case (drop an orphan / pull the
      * server copy). Do NOT keep or re-map here, so the caller has a clean slate. */
     if(st==412) return st;
+failed:
+    if(st==MERGE_REFUSED)
+        fprintf(stderr,"[sync] uid=%u: the server's copy of %s couldn't be merged safely "
+                       "-- the edit stays on this device, unsent\n",(unsigned)uid,name);
+    else
     /* transient failure (network / 5xx): keep the record locally + preserve the
      * OLD map row so it stays dirty and is retried next sync (never poison the
      * map with a bad etag). */
@@ -1090,7 +1171,7 @@ static int pushLocal(const DavCtx*d,const char*coll,int kind,Sink*k,
     if(k->mapf && oldHref && oldHref[0])                                  /* preserve old mapping */
         fprintf(k->mapf,"%u\t%s\t%s\t%llu\t%s\n",(unsigned)uid,oldHref,oldEtag?oldEtag:"",
                 (unsigned long long)oldHash,objuid?objuid:"");
-    return st<=0 ? -1 : st;
+    return st==MERGE_REFUSED ? MERGE_REFUSED : st<=0 ? -1 : st;
 }
 
 /* Reconcile one collection by streaming merge-join. Builds the three UID-hash
@@ -1315,7 +1396,13 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
                 if(scs!=SDEL) keepFromServer(d,coll,kind,k,uid,srvName,sEtag);
             } else if(localWins){
                 if(lcs==LDEL){ hideOnDevice(k,uid,srvName,sEtag,mObjuid); st->hidden++; }
-                else pushLocal(d,coll,kind,k,s,L,uid,srvName,NULL, mHref,mEtag,mHash, mObjuid);
+                else {
+                    /* the server's copy is merged into, with If-Match on the
+                     * etag just seen; only a copy deleted there is recreated */
+                    int rc=pushLocal(d,coll,kind,k,s,L,uid,srvName,scs==SDEL?NULL:sEtag, mHref,mEtag,mHash, mObjuid);
+                    if(rc==412){ if(keepFromServer(d,coll,kind,k,uid,srvName,sEtag)==0) st->pullMod++; }
+                    else if(rc==MERGE_REFUSED) st->unsent++;
+                }
             }
         }
         else if(lcs==LNEW && scs==SABSENT && s_hold && s_hold(uid, s_hold_ctx)){
@@ -1347,6 +1434,7 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
                 st->conflicts++;
                 if(keepFromServer(d,coll,kind,k,uid,srvName,sEtag)==0) st->pullMod++;
             }
+            else if(rc==MERGE_REFUSED) st->unsent++;
         } else if(lcs==LCLEAN && scs==SCLEAN){
             if(locBytes(s,L,g_lrec,PALM_REC_MAX)==L->len)
                 keepBytes(k,uid,L->attr,g_lrec,L->len,srvName,mEtag,L->hash,mObjuid);

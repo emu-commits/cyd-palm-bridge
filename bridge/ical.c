@@ -18,6 +18,7 @@ static const Tz *g_tz = NULL;
 
 void ical_set_tz(const char *tzid){ g_tz = tz_find(tzid); }
 int  ical_vtimezone(char *out,int cap){ return tz_vtimezone(g_tz,out,cap); }
+const char *ical_tzid(void){ return g_tz ? g_tz->id : ""; }
 
 /* ---- RFC5545 text escaping (operates on ASCII control chars only) ---- */
 static void esc(char *o,int cap,const char *s){
@@ -156,7 +157,7 @@ int ical_parse(const char *ics, Appt *a){
     }
     buf[w]=0;
 
-    int haveStart=0, inEvent=0, inAlarm=0, inTz=0;
+    int haveStart=0, haveEnd=0, durMin=-1, inEvent=0, inAlarm=0, inTz=0;
     char *save=NULL;
     for(char *line=strtok_r(buf,"\n",&save); line; line=strtok_r(NULL,"\n",&save)){
         /* component tracking first (BEGIN/END never carry data we want) */
@@ -197,7 +198,18 @@ int ical_parse(const char *ics, Appt *a){
             a->year=y; a->month=mo; a->day=d; haveStart=1;
         } else if(!strcmp(name,"DTEND")){
             int y,mo,d,h,mi,hasT,utc; parseDT(val,&y,&mo,&d,&h,&mi,&hasT,&utc);
-            if(hasT){ if(utc && g_tz) tz_utc_to_local(g_tz,y,mo,d,h,mi,&y,&mo,&d,&h,&mi); a->eH=h; a->eM=mi; }
+            if(hasT){ if(utc && g_tz) tz_utc_to_local(g_tz,y,mo,d,h,mi,&y,&mo,&d,&h,&mi); a->eH=h; a->eM=mi; haveEnd=1; }
+        } else if(!strcmp(name,"DURATION")){
+            /* PT1H30M, P1D, PT45M: an end the Palm can show (same day) */
+            int days=0,hrs=0,mins=0,num=0,inT=0;
+            for(const char*p=val;*p;p++){
+                if(*p>='0'&&*p<='9'){ num=num*10+(*p-'0'); continue; }
+                if(*p=='T') inT=1;
+                else if(*p=='D'){ days=num; } else if(*p=='W'){ days=7*num; }
+                else if(*p=='H'&&inT){ hrs=num; } else if(*p=='M'&&inT){ mins=num; }
+                num=0;
+            }
+            durMin = days*1440 + hrs*60 + mins;
         } else if(!strcmp(name,"SUMMARY")){
             textIn(a->description,sizeof a->description,val,(int)strlen(val));
         } else if(!strcmp(name,"DESCRIPTION")){
@@ -230,6 +242,10 @@ int ical_parse(const char *ics, Appt *a){
                 }
             }
         }
+    }
+    if(a->hasTime && !haveEnd && durMin>=0){
+        int e = a->sH*60 + a->sM + durMin; if(e > 23*60+59) e = 23*60+59;
+        a->eH = e/60; a->eM = e%60;
     }
     if(!a->hasTime){ a->eH=a->sH; a->eM=a->sM; }
     free(buf);

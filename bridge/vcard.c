@@ -90,6 +90,7 @@ int vcard_parse(const char *vcf, Addr *a){
         char *semi=strchr(line,';'); char params[128]="";
         if(semi){ *semi=0; strncpy(params,semi+1,sizeof params-1); }
         char *name=line;
+        char *dot=strrchr(name,'.'); if(dot) name=dot+1;   /* Apple's "item1.EMAIL": the group goes */
 
         if(!strcmp(name,"N")){
             a->fields[F_name]      = comp(a,val,0);   /* family */

@@ -88,6 +88,7 @@ const char *AddrIntern(Addr *a, const char *s);
 /* ============================ iCalendar ================================= */
 void ical_set_tz(const char *tzid);      /* configure device zone; NULL/UTC = floating */
 int  ical_vtimezone(char *out, int cap); /* VTIMEZONE block for current zone, or 0 */
+const char *ical_tzid(void);             /* the device zone's TZID, or "" */
 int  ical_emit(char *out, int cap, const Appt *a, uint32_t uid);  /* Appt->VEVENT */
 int  ical_parse(const char *ics, Appt *a);                        /* VEVENT->Appt, 0 ok */
 

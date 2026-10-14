@@ -90,6 +90,15 @@ int dav_get(const DavCtx*d,const char*coll,const char*name,char*out,int cap){
     return run(cmd,out,cap);
 }
 
+int dav_get_file(const DavCtx*d,const char*coll,const char*name,const char*path){
+    char cmd[1200],code[16]={0};
+    snprintf(cmd,sizeof cmd,"curl -s -o '%s' -w '%%{http_code}' -u %s:%s '%s/%s/%s'",
+             path,d->user,d->pass,d->base,coll,name);
+    if(run(cmd,code,sizeof code)<0) return -1;
+    int st=atoi(code);
+    return st>0 ? st : -1;
+}
+
 int dav_list(const DavCtx*d,const char*coll,dav_list_cb cb,void*ctx){
     char cmd[1024];
     snprintf(cmd,sizeof cmd,

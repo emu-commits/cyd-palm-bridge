@@ -98,12 +98,30 @@ all of them (`tests/massdel.c`). The demo records are never pushed, and a
 collection too large for the device's RAM is refused without changing
 anything (`tests/toobig.c`).
 
+**An edit never replaces a server object.** The Palm holds a fraction of
+what an iCloud object carries, so an edit made on the device is merged into
+the server's current copy (`bridge/objfile.c`): the copy is streamed onto the
+card, and written back with only the Palm-owned fields the device changed
+swapped in, then `PUT` with `If-Match`. Location, attendees, URLs, extra
+alarms, moved occurrences, photos, birthdays and every phone number past the
+Palm's five stay byte for byte. An edit that can't be merged safely (the start
+of a series with moved occurrences, a body too big for the device to send)
+stays on the device and is counted as *unsent*; nothing is sent.
+
+**Reading big objects.** The same module gives the codec a *Palm view* of an
+object: only the lines it reads, unfolded, from the series' own VEVENT (not
+a moved occurrence's), so a 40 KB photo contact parses in a few hundred
+bytes of the device's 8 KB fetch buffer (`tests/fidelity.c` runs with that
+buffer).
+
 **Fidelity.**
 - Timezones: timed events carry `TZID` and a matching `VTIMEZONE`; UTC
   inputs are converted to local time with the right DST offset.
 - Alarms (`VALARM`), exceptions (`EXDATE`), and text in CP1252/Latin-1 ↔
   UTF-8.
 - To Do ↔ `VTODO` (due date, priority, completion).
+- An end given as `DURATION` instead of `DTEND`; Apple's grouped vCard
+  properties (`item1.EMAIL`, `item2.ADR`).
 - vCard is a set of typed values, not Palm's five ordered phone slots, so the
   slot order isn't kept across a round trip (the data is).
 

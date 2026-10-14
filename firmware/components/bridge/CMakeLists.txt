@@ -18,6 +18,7 @@ idf_component_register(
         "${BRIDGE_DIR}/dav_xml.c"
         "${BRIDGE_DIR}/dav_break.c"
         "${BRIDGE_DIR}/sync.c"
+        "${BRIDGE_DIR}/objfile.c"
         "${BRIDGE_DIR}/find.c"
         "${BRIDGE_DIR}/calc.c"
         "${BRIDGE_DIR}/config.c"

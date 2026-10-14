@@ -5,11 +5,11 @@ CFLAGS  = -std=gnu99 -Wall -O2 -g
 B       = build
 CORE    = bridge/pdb.c bridge/datebook.c bridge/address.c bridge/ical.c bridge/vcard.c \
           bridge/tz.c bridge/charset.c bridge/appinfo.c bridge/todo.c bridge/dav_xml.c \
-          bridge/find.c bridge/dav_break.c
+          bridge/find.c bridge/dav_break.c bridge/objfile.c
 
 PROGS   = roundtrip bridge_cli incremental synctoken category bigsync multiapp \
           uidmatch idempotent massdel streamparse find_test calc_test config_test rss_test news_test wx_test \
-          feeds_test break_test geoip_test toobig safefile_test sort_test window mget_test fuzz_test course_fuzz rss_asan mget_asan
+          feeds_test break_test geoip_test objfile_test toobig safefile_test sort_test window fidelity mget_test fuzz_test course_fuzz rss_asan mget_asan
 
 all: $(addprefix $(B)/,$(filter-out fuzz_test course_fuzz rss_asan mget_asan,$(PROGS)))
 
@@ -20,6 +20,10 @@ dirs:
 	@mkdir -p pdb state $(B)
 
 $(B)/roundtrip: tests/roundtrip.c $(CORE) | dirs
+	$(CC) $(CFLAGS) -o $@ $^
+
+# an edit on the device keeps everything the Palm can't hold (offline)
+$(B)/objfile_test: tests/objfile_test.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
 $(B)/bridge_cli: bridge/main.c bridge/dav.c bridge/sync.c $(CORE) | dirs
@@ -34,6 +38,11 @@ $(B)/incremental: tests/incremental.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 # other gates covered this only by staying silent, which is not coverage.
 $(B)/massdel: tests/massdel.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
+
+# an edit on the device keeps what the Palm can't hold, end to end; with the
+# device's 8 KB fetch buffer, so a photo contact proves it comes down at all
+$(B)/fidelity: tests/fidelity.c bridge/dav.c bridge/sync.c $(CORE) | dirs
+	$(CC) $(CFLAGS) -DOBJ_FETCH_CAP=8192 -o $@ $^
 
 $(B)/synctoken: tests/synctoken.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
@@ -140,8 +149,9 @@ $(B)/rss_asan: tests/rss_test.c bridge/rss.c | dirs
 nodelete:
 	./tests/nodelete.sh
 
-test: nodelete roundtrip find_test calc_test config_test streamparse rss_test news_test wx_test feeds_test break_test geoip_test safefile_test sort_test mget_test
+test: nodelete roundtrip objfile_test find_test calc_test config_test streamparse rss_test news_test wx_test feeds_test break_test geoip_test safefile_test sort_test mget_test
 	./$(B)/roundtrip
+	./$(B)/objfile_test
 	./$(B)/find_test
 	./$(B)/calc_test
 	./$(B)/config_test
