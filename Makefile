@@ -9,7 +9,7 @@ CORE    = bridge/pdb.c bridge/datebook.c bridge/address.c bridge/ical.c bridge/v
 
 PROGS   = roundtrip bridge_cli incremental synctoken category bigsync multiapp \
           uidmatch idempotent massdel streamparse find_test calc_test config_test rss_test news_test wx_test \
-          feeds_test break_test geoip_test objfile_test recur_test toobig safefile_test sort_test window fidelity mget_test fuzz_test course_fuzz rss_asan mget_asan
+          feeds_test break_test geoip_test objfile_test recur_test toobig safefile_test sort_test window fidelity todos mget_test fuzz_test course_fuzz rss_asan mget_asan
 
 all: $(addprefix $(B)/,$(filter-out fuzz_test course_fuzz rss_asan mget_asan,$(PROGS)))
 
@@ -47,6 +47,10 @@ $(B)/massdel: tests/massdel.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 # device's 8 KB fetch buffer, so a photo contact proves it comes down at all
 $(B)/fidelity: tests/fidelity.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -DOBJ_FETCH_CAP=8192 -o $@ $^
+
+# To Do: the open tasks and those done lately; the rest stays on the server
+$(B)/todos: tests/todos.c bridge/dav.c bridge/sync.c $(CORE) | dirs
+	$(CC) $(CFLAGS) -o $@ $^
 
 $(B)/synctoken: tests/synctoken.c bridge/dav.c bridge/sync.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^

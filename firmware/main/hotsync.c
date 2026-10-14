@@ -915,6 +915,17 @@ static void hotsync_task(void *arg){
                             mid + (long long)(cfg->cal_ahead + 1) * 86400LL);
             ESP_LOGI(TAG,"%s: window %d day(s) back, %d ahead",t->name,cfg->cal_back,cfg->cal_ahead);
         }
+        /* To Do keeps the open tasks and those done in the last todo_done_days
+         * (sync.h, sync_set_todo_window). Without a set clock it syncs whole:
+         * a 1970 "lately" would only keep more, never prune what it shouldn't. */
+        sync_set_todo_window(0);
+        if(t->kind == KIND_TODO && cfg->todo_done_days > 0){
+            time_t now = time(NULL);
+            if(now > 1700000000){
+                sync_set_todo_window((long long)now - (long long)cfg->todo_done_days * 86400LL);
+                ESP_LOGI(TAG,"%s: open tasks, and those done in the last %d day(s)",t->name,cfg->todo_done_days);
+            }
+        }
         SyncStats st={0};
         s_demo_n = data_demo_count(app_of(i));
         sync_set_hold(s_demo_n ? hold_demo : NULL, NULL);
@@ -938,6 +949,7 @@ static void hotsync_task(void *arg){
                    st.bothDel ? " (+already gone)" : "", st.pruned, fb, fs,
                    (unsigned long)esp_get_free_heap_size()); }
         sync_set_window(0, 0);
+        sync_set_todo_window(0);
         if(n == -2) protec++;
         else if(n < 0){ failed++;
             if(n == -3)      diskerr++;

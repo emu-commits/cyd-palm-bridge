@@ -274,6 +274,20 @@ int dav_body_window(char*out,int cap,long long start,long long end){
     return (n<0||n>=cap) ? -1 : n;
 }
 
+int dav_body_todos(char*out,int cap,int done,long long since){
+    char a[32]; utc_stamp(since,a,sizeof a);
+    char pf[128];
+    if(done) snprintf(pf,sizeof pf,"<C:prop-filter name=\"COMPLETED\"><C:time-range start=\"%s\"/></C:prop-filter>",a);
+    else     snprintf(pf,sizeof pf,"<C:prop-filter name=\"COMPLETED\"><C:is-not-defined/></C:prop-filter>");
+    int n=snprintf(out,cap,
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+        "<C:calendar-query xmlns:D=\"DAV:\" xmlns:C=\"urn:ietf:params:xml:ns:caldav\">"
+        "<D:prop><D:getetag/></D:prop>"
+        "<C:filter><C:comp-filter name=\"VCALENDAR\"><C:comp-filter name=\"VTODO\">%s"
+        "</C:comp-filter></C:comp-filter></C:filter></C:calendar-query>",pf);
+    return (n<0||n>=cap) ? -1 : n;
+}
+
 /* append s to out[*n], XML-escaping &, < and >; 0 ok, -1 if it doesn't fit */
 static int put_esc(char*out,int cap,int*n,const char*s){
     for(;*s;s++){

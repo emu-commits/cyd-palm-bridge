@@ -16,6 +16,35 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-14 — To Do keeps the open tasks and those done lately
+
+`BACKLOG.md` §Engine 10. A Reminders list ten years old is thousands of
+finished tasks, and To Do synced the whole list. Now, as Date Book's window
+does, the server lists what the device keeps and anything else leaves the
+device without being touched on the server:
+- `dav_query_todos()` sends two `calendar-query` REPORTs: VTODOs with no
+  `COMPLETED` (open), and those with `COMPLETED` since a date (RFC 4791
+  `prop-filter` with `is-not-defined` / `time-range`; Radicale answers both,
+  probed by hand first). The host and device transports share one
+  members-listing helper with the window query.
+- `sync_set_todo_window()` makes it the listing for `KIND_TODO`, with the
+  window's semantics (`windowed`: not listed is not deleted). A server that
+  doesn't answer is synced whole.
+- A task ticked on the device must stop being listed as open, so the merge
+  adds `COMPLETED:<now, UTC>` when the device's status group says completed
+  (`obj_merge`'s new `stamp`; none if the clock isn't set).
+- Config `todo_done_days` (default 14; 0 = the whole list), Settings ▸ Sync
+  ▸ To Do ("Open, and done in 2 weeks" / "Everything (slow)"), and HotSync
+  sets it per run.
+
+Gates: `todos` (Radicale, in `run_gates.sh`): an open task, one done three
+days ago and one done in 2019; a fresh device takes the first two; ticked on
+the device it goes up done with a COMPLETED time and Apple's properties
+kept; done long ago on the phone it leaves the device; without the window
+everything comes down; the server keeps all three throughout.
+`objfile_test` checks the stamp; `config_test` the key. Smoke shots
+`w9_todo_pick`, `w9_sync_todo`. All 18 sync gates green.
+
 ### 2026-10-14 — Repeating events show on the days they occur
 
 `BACKLOG.md` §Engine 9. The device drew every event on its start date only:

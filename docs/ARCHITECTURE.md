@@ -85,7 +85,10 @@ by default yesterday to two weeks ahead), listed with a CalDAV time-range
 query that the server applies to recurrences. An object that leaves the
 window leaves the device and is never deleted on the server; one the device
 changed is checked with a one-object PROPFIND first, so an edit still goes
-up and a tombstone still hides it. Bodies are fetched in batches
+up and a tombstone still hides it. To Do is listed the same way
+(`sync_set_todo_window`): the open VTODOs and those `COMPLETED` in the last
+two weeks, two `calendar-query` REPORTs; a task ticked on the device goes up
+with a `COMPLETED` time so it stops being listed as open. Bodies are fetched in batches
 (`calendar-multiget` / `addressbook-multiget`), streamed onto the card and
 looked up there, rather than one GET each. The index files are sorted in a
 4 KB buffer, or in runs on the card when they don't fit, so a collection's

@@ -18,6 +18,7 @@ int main(void){
     CK(!strcmp(c.world2,"Asia/Tokyo"),"default world clock 2");
     CK(c.policy==CFG_POL_SERVER,"default policy server");
     CK(c.read_only==1,"an account starts read-only");
+    CK(c.todo_done_days==14,"To Do keeps two weeks of done tasks");
     CK(c.cal_back==1 && c.cal_ahead==14,"default calendar window: yesterday to two weeks ahead");
     CK(strstr(c.dav_base,"caldav.icloud.com")!=NULL,"default caldav host");
     CK(strstr(c.dav_card_base,"contacts.icloud.com")!=NULL,"default contacts host");
@@ -37,7 +38,7 @@ int main(void){
     snprintf(c.timezone,sizeof c.timezone,"America/New_York");
     snprintf(c.world1,sizeof c.world1,"America/Los_Angeles");
     snprintf(c.world2,sizeof c.world2,"Australia/Sydney");
-    c.brightness=55; c.backlight_sec=15; c.clock24=1; c.policy=CFG_POL_BOTH; c.read_only=0;
+    c.brightness=55; c.backlight_sec=15; c.clock24=1; c.policy=CFG_POL_BOTH; c.read_only=0; c.todo_done_days=0;
     CK(config_save(PATH,&c,&cs)==0,"save ok");
 
     Config d; config_defaults(&d);
@@ -75,6 +76,7 @@ int main(void){
     CK(d.backlight_sec==15,"backlight_sec round-trips");
     CK(d.policy==CFG_POL_BOTH,"policy round-trips");
     CK(d.read_only==0,"read_only = 0 round-trips");
+    CK(d.todo_done_days==0,"todo_done_days = 0 (the whole list) round-trips");
 
     /* robust parse: comments, whitespace, unknown keys, malformed lines, clamps */
     FILE *f=fopen(PATH,"w");

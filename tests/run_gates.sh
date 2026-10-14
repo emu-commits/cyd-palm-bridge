@@ -96,6 +96,7 @@ run "multiapp (To Do + Address sync)"  clean ./build/multiapp
 run "toobig (refuses, changes nothing)" clean ./build/toobig
 run "window (a time window: prune, never delete)" clean ./build/window
 run "fidelity (an edit keeps what the Palm can't hold)" clean ./build/fidelity
+run "todos (open tasks and those done lately)" clean ./build/todos
 run "dav_roundtrip (PDB->server->PDB)" clean ./tests/dav_roundtrip.sh
 
 echo

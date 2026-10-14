@@ -106,7 +106,7 @@ static char *calMerge(FILE *f, const ObjScan *sc, const Appt *s, const Appt *l, 
     ical_emit(es, sizeof es, s, 1); ical_emit(el, sizeof el, l, 1);
     int vl = ical_vtimezone(vt, sizeof vt); if(vl < 0) vt[0] = 0;
     FILE *o = tmpfile();
-    *rc = obj_merge(KIND_CAL, f, 0, -1, sc, es, es, el, vt, "America/New_York", o);
+    *rc = obj_merge(KIND_CAL, f, 0, -1, sc, es, es, el, vt, "America/New_York", "", o);
     char *r = slurpF(o); fclose(o); return r;
 }
 
@@ -218,7 +218,7 @@ static void contacts(void){
     static char es[8192], el[8192];
     vcard_emit(es, sizeof es, &s, 1); vcard_emit(el, sizeof el, &l, 1);
     FILE *o = tmpfile();
-    int rc = obj_merge(KIND_CARD, f, 0, -1, &sc, es, es, el, "", "", o);
+    int rc = obj_merge(KIND_CARD, f, 0, -1, &sc, es, es, el, "", "", "", o);
     char *m = slurpF(o); fclose(o);
     const char *ex[] = {"TEL;type=CELL", NULL};
     CK(rc == 1, "one group replaced (the five phone slots)");
@@ -233,7 +233,7 @@ static void contacts(void){
     printf("== the work address edited ==\n");
     l = s; l.fields[F_city] = AddrIntern(&l, "Evanston");
     vcard_emit(el, sizeof el, &l, 1);
-    o = tmpfile(); rc = obj_merge(KIND_CARD, f, 0, -1, &sc, es, es, el, "", "", o);
+    o = tmpfile(); rc = obj_merge(KIND_CARD, f, 0, -1, &sc, es, es, el, "", "", "", o);
     m = slurpF(o); fclose(o);
     CK(rc == 1 && strstr(m, "Evanston") && !strstr(m, "9 Work Ave;Chicago"), "the last ADR replaced");
     CK(strstr(m, "item2.ADR;type=HOME:;;1 Home St;Springfield") != NULL, "the home address kept");
@@ -247,7 +247,7 @@ static char *cardMerge(const char *card, const char *addPhone, Addr *sOut){
     Addr l = s; int i = 0; while(i < 5 && l.fields[F_phone1+i]) i++;
     l.fields[F_phone1+i] = AddrIntern(&l, addPhone); l.phoneLabel[i] = 7;   /* mobile */
     static char es[4096], el[4096]; vcard_emit(es, sizeof es, &s, 1); vcard_emit(el, sizeof el, &l, 1);
-    FILE *o = tmpfile(); obj_merge(KIND_CARD, f, 0, -1, &sc, es, es, el, "", "", o);
+    FILE *o = tmpfile(); obj_merge(KIND_CARD, f, 0, -1, &sc, es, es, el, "", "", "", o);
     char *m = slurpF(o); fclose(o); fclose(f); return m;
 }
 /* A record pulled by an older parser that couldn't see "item1.EMAIL": its base
@@ -268,7 +268,7 @@ static void staleBase(void){
     Addr now = base; now.fields[F_note] = AddrIntern(&now, "Met at the 2016 offsite; owes me lunch");
     static char eb[8192], es[8192], el[8192];
     vcard_emit(eb, sizeof eb, &base, 1); vcard_emit(es, sizeof es, &srv, 1); vcard_emit(el, sizeof el, &now, 1);
-    FILE *o = tmpfile(); int rc = obj_merge(KIND_CARD, f, 0, -1, &sc, eb, es, el, "", "", o);
+    FILE *o = tmpfile(); int rc = obj_merge(KIND_CARD, f, 0, -1, &sc, eb, es, el, "", "", "", o);
     char *m = slurpF(o); fclose(o);
     const char *ex[] = {"NOTE:", NULL};
     CK(rc == 1, "one group: the note");
@@ -282,7 +282,7 @@ static void staleBase(void){
     vcard_parse(view, &srv); base = srv; now = srv;
     now.fields[F_phone3] = NULL;                       /* the work number, slot 3 */
     vcard_emit(eb, sizeof eb, &base, 1); vcard_emit(es, sizeof es, &srv, 1); vcard_emit(el, sizeof el, &now, 1);
-    o = tmpfile(); rc = obj_merge(KIND_CARD, f, 0, -1, &sc, eb, es, el, "", "", o);
+    o = tmpfile(); rc = obj_merge(KIND_CARD, f, 0, -1, &sc, eb, es, el, "", "", "", o);
     m = slurpF(o); fclose(o);
     const char *ex2[] = {"TEL;type=WORK", NULL};
     CK(rc == 1 && !strstr(m, "+1 555 0102"), "that number is gone from the contact");
@@ -319,10 +319,11 @@ static void todos(void){
     Todo s; CK(vtodo_parse(view, &s) == 0 && !s.completed, "it parses, open");
     Todo l = s; l.completed = 1;
     char es[2048], el[2048]; vtodo_emit(es, sizeof es, &s, 1); vtodo_emit(el, sizeof el, &l, 1);
-    FILE *o = tmpfile(); int rc = obj_merge(KIND_TODO, f, 0, -1, &sc, es, es, el, "", "", o);
+    FILE *o = tmpfile(); int rc = obj_merge(KIND_TODO, f, 0, -1, &sc, es, es, el, "", "", "20261014T120000Z", o);
     char *m = slurpF(o); fclose(o);
     const char *ex[] = {"STATUS:", NULL};
     CK(rc == 1 && hasLine(m, "STATUS:COMPLETED"), "completed");
+    CK(hasLine(m, "COMPLETED:20261014T120000Z"), "with when (COMPLETED), so it stops being listed as open");
     CK(keptInOrder(T, m, ex), "Apple's sort order and the reminder's alarm kept");
     free(m); fclose(f);
 }

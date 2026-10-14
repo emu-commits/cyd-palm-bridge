@@ -104,6 +104,8 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 - [x] **Read-only switch** (2026-10-14): Settings ▸ Sync ▸ Changes (read-only / send my changes), config `read_only`, on by default and turned back on when the Apple ID changes; the log and the Done line say "(read-only)"; gated by `config_test` and `fidelity` (nothing sent, edits wait, the phone's edits still come down, and turned off they go up) `[s]` (`w9_changes_pick`, `w9_sync_changes`)
 - [x] **Big databases on the device** (2026-10-14): an edit, a delete, a category change, the boot-time category backfill and removing the demo rows all stream through the card (`stream_rewrite` in `data.c`) and refuse, leaving the file as it was, unless every record was read; the 12 KB static arena is gone; the streaming writer's index is 12 bytes a record; gated in `make -C sim data` (2,000 contacts: an edit and a delete past the old cap, a category change, a new contact) `[s]`
 - [x] **Repeating events show on every day they occur** (2026-10-14): Day view, week counts, month dots and the lock screen's next event use `appt_occurs_on`/`appt_next_on`; the parser reads `BYDAY=2TU`/`-1FR` (Palm's monthly by day, written back the same), `COUNT` (an end date) and a weekly without `BYDAY`, and keeps the latest 16 exceptions; gated by `recur_test` (in `make test`) and `make -C sim data` (a weekly meeting from 2019 on a Monday in 2026, and the month's dots) `[s]`
+- [x] **To Do keeps the open tasks and those done lately** (2026-10-14): `sync_set_todo_window` lists the open VTODOs and those COMPLETED in the last `todo_done_days` (default 14) with two calendar-query REPORTs; not listed leaves the device, never the server; a task ticked on the device gets a COMPLETED time; Settings ▸ Sync ▸ To Do; gated by `todos` (Radicale) and `objfile_test` `[s]` (`w9_todo_pick`, `w9_sync_todo`)
+- [ ] With the real account: the To Do list shows only open tasks and those finished in the last two weeks; the log says "open tasks, and those done in the last 14 day(s)", not "wasn't answered"; a task ticked on the device shows done on the phone, and leaves the device two weeks later `[d]`
 - [ ] On glass: a weekly meeting that began years ago shows on this week's day, the month view dots every week, the lock screen names its next one; a "second Tuesday" meeting lands on the right Tuesday `[d]`
 - [ ] With the real address book on the device: edit and delete a contact far down the list; the count in Address doesn't change (bar the delete), the edit is on that contact, and the log shows no "rewrite refused" `[d]`
 - [ ] How many contacts a sync can write: watch the log's `OUTPUT FULL` / heap lines on the first full Address sync `[d]`
@@ -514,7 +516,11 @@ no-delete rule; in this order):
    one object with several VEVENTs (the master and its overrides). Check
    what the parser keeps against the real account, and show the master
    with its EXDATEs at least; never PUT such an object back (6).
-10. **To Do.** Open tasks only, plus recently completed. Check first that
+10. ~~**To Do.**~~ Done 2026-10-14, bar the bench: the open tasks and
+    those done in the last two weeks (`todo_done_days`, Settings ▸ Sync ▸
+    To Do), the window's rule. Still to check on the real account: whether
+    its Reminders are reachable over CalDAV at all. The original note:
+    Open tasks only, plus recently completed. Check first that
     the account's Reminders are reachable over CalDAV at all (lists
     upgraded on iOS 13+ aren't).
 

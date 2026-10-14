@@ -86,8 +86,9 @@ into its own flash and blanks them on the card ([`SECURITY.md`](SECURITY.md)).
 - **Date Book keeps a window of your calendar**, by default from yesterday
   to two weeks ahead (Settings ▸ Sync ▸ Calendar). Everything outside it
   stays in iCloud, untouched; an event you add on the device further out
-  goes up to iCloud and then leaves the device. To Do and Address sync
-  whole.
+  goes up to iCloud and then leaves the device. **To Do keeps the open
+  tasks** and those done in the last two weeks (Settings ▸ Sync ▸ To Do);
+  older finished ones stay in iCloud, untouched. Address syncs whole.
 - **A single moved occurrence of a repeating event** (one week's meeting
   moved to Tuesday) shows on the device at the series' usual time.
 

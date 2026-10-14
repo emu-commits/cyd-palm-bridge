@@ -26,6 +26,7 @@
 #include <errno.h>
 #include "palm.h"
 #include "appinfo.h"
+#include <time.h>
 #include "sync.h"
 #include "objfile.h"
 #include "dav_xml.h"   /* dav_parse_multiget_stream: the batched fetch */
@@ -442,6 +443,8 @@ void sync_free_scratch(void){
 /* ---- the time window (contract in sync.h) ---- */
 static long long s_win_start, s_win_end;
 void sync_set_window(long long start, long long end){ s_win_start = start; s_win_end = end; }
+static long long s_todo_since;
+void sync_set_todo_window(long long doneSince){ s_todo_since = doneSince; }
 
 /* compare two lines by their first field (up to the first TAB). Every index
  * file leads with its sort key zero-padded (objhash %016llx / palmuid %010u) or
@@ -743,6 +746,16 @@ static int enumServer(const DavCtx*d,const char*coll,int kind,const char*token,
             return 0;
         }
         fprintf(stderr,"[sync] %s: the window query wasn't answered -- syncing the whole collection\n",coll);
+        re.f=reopenTrunc(re.f,SV_RAW);
+    }
+    /* To Do: the open tasks and those done lately, listed the same way */
+    if(kind==KIND_TODO && s_todo_since > 0){
+        if(dav_query_todos(d,coll,s_todo_since,rawListCb,&re)>=0){
+            if(re.f) fclose(re.f);
+            *windowed=1;
+            return 0;
+        }
+        fprintf(stderr,"[sync] %s: the open-tasks query wasn't answered -- syncing the whole list\n",coll);
         re.f=reopenTrunc(re.f,SV_RAW);
     }
     if(token[0]){
@@ -1160,7 +1173,11 @@ static int mergeEdit(const DavCtx*d,const char*coll,int kind,Sink*k,uint32_t uid
     if(e1<0 || e2<0 || e3<0 || e1>=half-1 || e2>=half-1 || e3>=BODY_CAP-1) goto out;
     char vt[1200]=""; if(kind==KIND_CAL && ical_vtimezone(vt,sizeof vt)<=0) vt[0]=0;
     o=fopen(BODY_TMP,"wb"); if(!o) goto out;
-    int n=obj_merge(kind,f,0,-1,&sc,eBase,eSrv,g_body,vt,ical_tzid(),o);
+    /* a to-do ticked here carries when (COMPLETED, UTC): a clock that isn't
+     * set yet gives none rather than a 1970 date */
+    char stamp[20]=""; time_t now=time(NULL); struct tm u;
+    if(now > 1700000000 && gmtime_r(&now,&u)) strftime(stamp,sizeof stamp,"%Y%m%dT%H%M%SZ",&u);
+    int n=obj_merge(kind,f,0,-1,&sc,eBase,eSrv,g_body,vt,ical_tzid(),stamp,o);
     long sz=ftell(o);
     if(n<0 || sz<=0 || sz>PUT_MAX) goto out;
     *nchg=n; rc=0;

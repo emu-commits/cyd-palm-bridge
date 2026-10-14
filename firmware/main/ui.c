@@ -4577,6 +4577,18 @@ static void pol_done(int i){
     if(i >= 0 && i < 3){ appcfg_mut()->policy = i; appcfg_save(); }
     show_set_panel(SET_SYNC);
 }
+/* To Do: the open tasks and those done lately, or the whole list (sync.h,
+ * sync_set_todo_window). A list years old is thousands of finished tasks. */
+static const char *const TD_NAMES[] = { "Open, and done in 2 weeks", "Everything (slow)" };
+static void td_done(int i){
+    if(i == 0 || i == 1){ appcfg_mut()->todo_done_days = i == 0 ? 14 : 0; appcfg_save(); }
+    show_set_panel(SET_SYNC);
+}
+static void sp_td_pick_cb(lv_event_t *e){ (void)e;
+    pick_open("To Do", "Which tasks the device keeps. Finished ones older than "
+                       "that stay in iCloud, untouched.",
+              TD_NAMES, 2, appcfg()->todo_done_days > 0 ? 0 : 1, td_done);
+}
 /* Read-only: whether a sync may change the account at all. On for a new
  * account (config.h, read_only), so its first syncs only ever read. */
 static const char *const RO_NAMES[] = { "Read-only", "Send my changes" };
@@ -5013,6 +5025,9 @@ static void show_set_panel(int tile){
         pf_add(list, row, sp_pol_pick_cb, 0);
         snprintf(row, sizeof row, "Changes: %s", c->read_only ? "read-only" : "sent to iCloud");
         pf_add(list, row, sp_ro_pick_cb, 0);
+        if(c->todo_done_days > 0) snprintf(row, sizeof row, "To Do: open + done %d days", c->todo_done_days);
+        else                      snprintf(row, sizeof row, "To Do: everything");
+        pf_add(list, row, sp_td_pick_cb, 0);
         sp_field_row(list, tile, PF_CAL);
         sp_field_row(list, tile, PF_TODO);
         sp_field_row(list, tile, PF_CARD);

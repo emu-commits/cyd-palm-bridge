@@ -57,6 +57,11 @@ int dav_sync_report(const DavCtx*d,const char*coll,const char*token,
  * count, or -1 if the reply wasn't a multistatus (no answer, or no support). */
 int dav_query_window(const DavCtx*d,const char*coll,long long start,long long end,
                      dav_list_cb cb,void*ctx);
+/* The To Do list's listing: the open VTODOs, then those completed since
+ * `doneSince` (two calendar-query REPORTs). cb(name, etag) per member. The
+ * member count, or -1 if either wasn't a multistatus. */
+int dav_query_todos(const DavCtx*d,const char*coll,long long doneSince,
+                    dav_list_cb cb,void*ctx);
 /* calendar-multiget (card=0) or addressbook-multiget (card=1) for `n` member
  * names of coll: many objects in one request instead of a GET each. The raw
  * multistatus reply is written to the file `spool`, to be read by

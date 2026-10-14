@@ -29,6 +29,7 @@ void config_defaults(Config *c){
     c->cal_back      = 1;      /* yesterday ...                          */
     c->cal_ahead     = 14;     /* ... to two weeks ahead (a tight window) */
     c->read_only     = 1;      /* an account starts read-only (config.h)  */
+    c->todo_done_days= 14;     /* open tasks + those done in two weeks    */
     c->loc_auto      = -1;     /* "the file has not said"; see config.h */
 }
 
@@ -124,6 +125,7 @@ static void apply(Config *c, ConfigSecrets *sec, const char *key, const char *va
     else if(!strcasecmp(key,"cal_days_back"))  c->cal_back      = clampi(atoi(val),0,366);
     else if(!strcasecmp(key,"cal_days_ahead")) c->cal_ahead     = clampi(atoi(val),0,730);
     else if(!strcasecmp(key,"read_only"))      c->read_only     = clampi(atoi(val),0,1);
+    else if(!strcasecmp(key,"todo_done_days")) c->todo_done_days= clampi(atoi(val),0,3650);
     /* unknown key: ignored */
 }
 
@@ -188,5 +190,6 @@ int config_save(const char *path, const Config *c, const ConfigSecrets *sec){
     fprintf(f,"cal_days_back = %d\n",  c->cal_back);
     fprintf(f,"cal_days_ahead = %d\n", c->cal_ahead);
     fprintf(f,"read_only = %d\n",      c->read_only ? 1 : 0);
+    fprintf(f,"todo_done_days = %d\n", c->todo_done_days);
     return sf_commit(&sf, !ferror(f));
 }

@@ -109,6 +109,9 @@ typedef struct {
      * so the first syncs of an account can't touch it; Settings > Sync turns
      * it off. A config.ini without the key reads as on. */
     int  read_only;
+    /* To Do keeps the open tasks and those completed in the last this-many
+     * days (default 14); the rest stay in iCloud, untouched. 0: the whole list. */
+    int  todo_done_days;
 } Config;
 
 /* populate with safe defaults (empty creds, sensible timers). */

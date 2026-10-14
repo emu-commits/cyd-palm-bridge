@@ -403,13 +403,11 @@ int dav_list_collections(const DavCtx*d,const char*path,dav_coll_cb cb,void*ctx)
 }
 
 /* ---------------- a time window, multiget, a probe ---------------- */
-int dav_query_window(const DavCtx*d,const char*coll,long long start,long long end,
-                     dav_list_cb cb,void*ctx){
-    char body[640]; int bl=dav_body_window(body,sizeof body,start,end);
-    if(bl<0) return -1;
+static int query_members(const DavCtx*d,const char*coll,const char*body,int bl,
+                         dav_list_cb cb,void*ctx,const char*what){
     char url[512]; snprintf(url,sizeof url,"%s/%s/",d->base,coll);
     /* spooled and stream-parsed, as the other listings are */
-    FILE*sp=fopen(ENUM_SPOOL,"w+b"); if(!sp){ ESP_LOGW(TAG,"window %s: spool open failed",coll); return -1; }
+    FILE*sp=fopen(ENUM_SPOOL,"w+b"); if(!sp){ ESP_LOGW(TAG,"%s %s: spool open failed",what,coll); return -1; }
     s_spoolfile=sp;
     int st=davreq(d,HTTP_METHOD_REPORT,url,1,"application/xml; charset=utf-8",NULL,body,bl,
                   NULL,0,NULL, NULL,0, NULL,0);
@@ -417,8 +415,22 @@ int dav_query_window(const DavCtx*d,const char*coll,long long start,long long en
     long rn = ftell(sp); rewind(sp);
     int count = st==207 ? dav_parse_members_stream(sp,cb,ctx) : -1;
     fclose(sp); remove(ENUM_SPOOL);
-    fprintf(stderr,"[dav] window %s -> st=%d rn=%ld members=%d\n",coll,st,rn,count);
+    fprintf(stderr,"[dav] %s %s -> st=%d rn=%ld members=%d\n",what,coll,st,rn,count);
     return count;
+}
+int dav_query_window(const DavCtx*d,const char*coll,long long start,long long end,
+                     dav_list_cb cb,void*ctx){
+    char body[640]; int bl=dav_body_window(body,sizeof body,start,end);
+    if(bl<0) return -1;
+    return query_members(d,coll,body,bl,cb,ctx,"window");
+}
+int dav_query_todos(const DavCtx*d,const char*coll,long long doneSince,dav_list_cb cb,void*ctx){
+    char body[640];
+    int bl=dav_body_todos(body,sizeof body,0,0); if(bl<0) return -1;
+    int a=query_members(d,coll,body,bl,cb,ctx,"open to-dos"); if(a<0) return -1;
+    bl=dav_body_todos(body,sizeof body,1,doneSince); if(bl<0) return -1;
+    int b=query_members(d,coll,body,bl,cb,ctx,"recently done"); if(b<0) return -1;
+    return a+b;
 }
 
 int dav_multiget(const DavCtx*d,const char*coll,int card,const char*const*names,int n,

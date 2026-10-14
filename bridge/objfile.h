@@ -60,9 +60,10 @@ int obj_filter(int kind, FILE *f, long off, long len, const ObjScan *sc,
  * edit refused because it would do harm or can't be placed (the start or
  * repeat of a series with moved occurrences, which are tied to its original
  * times; an address edit when the Palm's address is no longer the one the
- * device was given). */
+ * device was given). stamp: now, UTC ("20261014T120000Z", or ""): a to-do
+ * marked done on the device gets it as its COMPLETED. */
 int obj_merge(int kind, FILE *f, long off, long len, const ObjScan *sc,
               const char *eBase, const char *eSrv, const char *eLoc,
-              const char *vtz, const char *tzid, FILE *out);
+              const char *vtz, const char *tzid, const char *stamp, FILE *out);
 
 #endif

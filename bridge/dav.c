@@ -193,10 +193,8 @@ int dav_list_collections(const DavCtx*d,const char*path,dav_coll_cb cb,void*ctx)
 }
 
 /* ---------------- a time window, multiget, a probe ---------------- */
-int dav_query_window(const DavCtx*d,const char*coll,long long start,long long end,
-                     dav_list_cb cb,void*ctx){
-    { char body[1024]; if(dav_body_window(body,sizeof body,start,end)<0) return -1;
-      FILE*f=fopen("state/.wreq","wb"); if(!f) return -1; fputs(body,f); fclose(f); }
+static int query_members(const DavCtx*d,const char*coll,const char*body,dav_list_cb cb,void*ctx){
+    { FILE*f=fopen("state/.wreq","wb"); if(!f) return -1; fputs(body,f); fclose(f); }
     char cmd[1024];
     snprintf(cmd,sizeof cmd,
         "curl -s -L -o state/.wrep -w '%%{http_code}' -u %s:%s -X REPORT "
@@ -208,6 +206,19 @@ int dav_query_window(const DavCtx*d,const char*coll,long long start,long long en
     int n=dav_parse_members_stream(f,cb,ctx);
     fclose(f);
     return n;
+}
+int dav_query_window(const DavCtx*d,const char*coll,long long start,long long end,
+                     dav_list_cb cb,void*ctx){
+    char body[1024]; if(dav_body_window(body,sizeof body,start,end)<0) return -1;
+    return query_members(d,coll,body,cb,ctx);
+}
+int dav_query_todos(const DavCtx*d,const char*coll,long long doneSince,dav_list_cb cb,void*ctx){
+    char body[1024];
+    if(dav_body_todos(body,sizeof body,0,0)<0) return -1;
+    int a=query_members(d,coll,body,cb,ctx); if(a<0) return -1;
+    if(dav_body_todos(body,sizeof body,1,doneSince)<0) return -1;
+    int b=query_members(d,coll,body,cb,ctx); if(b<0) return -1;
+    return a+b;
 }
 
 int dav_multiget(const DavCtx*d,const char*coll,int card,const char*const*names,int n,

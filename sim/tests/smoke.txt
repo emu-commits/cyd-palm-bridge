@@ -816,6 +816,14 @@ s w9_changes_pick
 c 120 59
 t 400
 s w9_sync_changes
+# The fourth row is which tasks To Do keeps: the open ones and those done in
+# the last two weeks (the default), or the whole list.
+c 120 115
+t 400
+s w9_todo_pick
+c 120 37
+t 400
+s w9_sync_todo
 c 18 225
 t 300
 # Settings > Date & Time (row 2, col 1): the tile that absorbed the old "Lock

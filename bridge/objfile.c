@@ -257,9 +257,17 @@ static void putln(const char *l, FILE *out){
     fwrite(l, 1, n, out); fputs("\r\n", out);
 }
 
+/* a group's lines from the device; a to-do marked done also gets when */
+static void putgrp(const Grp *g, const char *text, int kind, const char *stamp, FILE *out){
+    fputs(text, out);
+    if(kind == KIND_TODO && !strcmp(g->names[0], "STATUS") && stamp && stamp[0] &&
+       strstr(text, "STATUS:COMPLETED"))
+        fprintf(out, "COMPLETED:%s\r\n", stamp);
+}
+
 int obj_merge(int kind, FILE *f, long off, long len, const ObjScan *sc,
               const char *eBase, const char *eSrv, const char *eLoc,
-              const char *vtz, const char *tzid, FILE *out){
+              const char *vtz, const char *tzid, const char *stamp, FILE *out){
     if(!sc->ok) return -1;
     const Grp *G = groups(kind); int ng = ngroups(G);
     char *loc[8] = {0}, *bas[8] = {0}, *srv[8] = {0};
@@ -347,7 +355,7 @@ int obj_merge(int kind, FILE *f, long off, long len, const ObjScan *sc,
             if(mdepth && depth == mdepth && !strcmp(v, ct)){
                 for(int i = 0; i < ng; i++) if(chg[i] && !ins[i]){
                     if(i == gs) while(nextA < na) putln(A[nextA++], out);
-                    else fputs(loc[i], out);
+                    else putgrp(&G[i], loc[i], kind, stamp, out);
                     ins[i] = 1;
                 }
                 mdepth = 0; ord = 1 << 20;                  /* no second master */
@@ -379,7 +387,7 @@ int obj_merge(int kind, FILE *f, long off, long len, const ObjScan *sc,
                 else owned = 1;
             }
             if(g >= 0 && owned && chg[g]){
-                if(!ins[g]){ fputs(loc[g], out); ins[g] = 1; }
+                if(!ins[g]){ putgrp(&G[g], loc[g], kind, stamp, out); ins[g] = 1; }
                 pass_line(&r, ln, more, NULL);
                 continue;
             }

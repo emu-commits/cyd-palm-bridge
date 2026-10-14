@@ -45,6 +45,9 @@ int dav_parse_collections_stream(FILE*f,dav_coll_cb cb,void*ctx);
 /* ---- request bodies shared by both transports ---- */
 /* the calendar-query for a time window (UTC epoch seconds). Length, or -1. */
 int dav_body_window(char*out,int cap,long long start,long long end);
+/* calendar-query for VTODOs: done==0, the open ones (no COMPLETED); done==1,
+ * the ones COMPLETED since `since` (UTC epoch seconds). */
+int dav_body_todos(char*out,int cap,int done,long long since);
 /* a calendar-multiget (card=0) / addressbook-multiget (card=1) naming each
  * member by its path: the path part of `base`, then coll, then the name.
  * Length, or -1 if it doesn't fit `cap`. */

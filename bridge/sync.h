@@ -56,6 +56,15 @@ typedef struct {
  * the query is synced whole, as before. */
 void sync_set_window(long long start, long long end);
 
+/* ---- To Do: open tasks, and those done lately --------------------------------
+ * When set (doneSince > 0, UTC epoch seconds), a KIND_TODO collection syncs
+ * only its open VTODOs and those COMPLETED since doneSince, listed by the
+ * server (dav_query_todos). The same rule as the calendar window: a task not
+ * listed leaves the device and is never touched on the server. 0 (the
+ * default) syncs the whole list; a server that doesn't answer the queries is
+ * synced whole too. */
+void sync_set_todo_window(long long doneSince);
+
 /* How the last sync_collection/sync_categorized call got object bodies: in
  * batches (multiget) and one GET at a time. For the gates and the log. */
 void sync_fetch_counts(int *batched, int *single);
