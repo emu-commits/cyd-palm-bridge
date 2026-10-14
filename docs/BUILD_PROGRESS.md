@@ -16,6 +16,33 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-14 — A read-only probe: does iCloud honour partial address-data?
+
+Whether the device can stop downloading contact photos depends on iCloud
+honouring a partial `addressbook-multiget` (RFC 6352 §10.4.2), which nobody
+had checked. `tools/probe_partial_card.py` (standard library only) finds
+the account's address books, lists the contacts with their sizes, and
+fetches a sample (the 20 biggest, or `--all`) twice: whole, and asking only
+for `objfile.c`'s `RD_CARD` properties. Per contact it compares the two by
+property name: PHOTO in each, the `item1.` groups, the Palm's lines exact
+or only ungrouped, anything extra or missing. The verdict is HONOURED,
+HONOURED (groups changed), IGNORED, REFUSED or DIFFERENT. It also says how
+many contacts are over 8 KB and over 16 KB, and how long each reply took
+from the computer, which is the size of a full resync.
+
+It sends PROPFIND and REPORT only (`Probe.request` refuses anything else
+before sending), the credentials go only to the host they were given for
+(or another `*.icloud.com`, where iCloud moves an account), and the report
+holds counts, sizes and property names, never values.
+
+Gate: `tests/probe_partial_test.py` in `run_gates.sh`. Offline, every other
+method refused, unfolding, and each verdict from made-up replies; it also
+checks the property list against `objfile.c`. Live against Radicale: a
+contact with a 30 KB photo and one without, discovered from the root,
+measured (one over 8 and 16 KB), and IGNORED, which is what Radicale does;
+no name or number in the report; a wrong password is a clear rc 2. All
+`run_gates.sh` gates green.
+
 ### 2026-10-14 — Contacts are read-only on the device while Address syncs
 
 The owner's rule, after reading how photo contacts are sent: "if we can't

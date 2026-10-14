@@ -98,6 +98,8 @@ run "window (a time window: prune, never delete)" clean ./build/window
 run "fidelity (an edit keeps what the Palm can't hold)" clean ./build/fidelity
 run "todos (open tasks and those done lately)" clean ./build/todos
 run "dav_roundtrip (PDB->server->PDB)" clean ./tests/dav_roundtrip.sh
+run "probe_partial (the read-only iCloud probe)" clean \
+    env PROBE_BASE="$BASE/" PROBE_USER="$U" PROBE_PW="$P" python3 tests/probe_partial_test.py
 
 echo
 if [ "$rc" = 0 ]; then echo "ALL GATES GREEN"; else echo "SOME GATES FAILED"; fi

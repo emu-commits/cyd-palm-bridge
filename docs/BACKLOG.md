@@ -103,6 +103,8 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 - [ ] On glass: edit an iCloud event that has invitees, a location and two alerts; on the phone it shows the edit and still has all of them `[d]`
 - [x] **Contacts are read-only on the device while Address syncs** (2026-10-14, the owner: "if we can't say all contact edits will sync, stop syncing any"): a merged contact over 16 KB (a real photo) was kept unsent, silently. Now Address has no New, Edit or Delete when it syncs (`data_app_readonly`), the detail says "Read-only: edit contacts on your phone", and `hotsync.c` runs the Address collection pull-only whatever Settings ▸ Sync ▸ Changes says; gated in `make -C sim data` `[s]` (scratch shots of the list, detail and menu)
 - [ ] With Address syncing: the list has no New, a contact's detail has Done and the read-only line, the menu has no Record section; the log's budget line says "contacts: never" when Changes is "Send my changes" `[d]`
+- [x] **A read-only probe for partial address-data** (2026-10-14): `tools/probe_partial_card.py`, run on a computer, asks the account's address book for the Palm's properties only and compares that with the whole contacts (PHOTO left out? `item1.` groups kept?), and sizes the book (total, over 8 KB, over 16 KB); PROPFIND and REPORT only, and the report holds no names or numbers; gated by `tests/probe_partial_test.py` (offline verdicts, and live against Radicale in `run_gates.sh`)
+- [ ] Run it against the real iCloud account: `python3 tools/probe_partial_card.py --user <Apple ID>` (an app-specific password), then again with `--all` for the whole book's size and download time; paste the report. HONOURED means building partial downloads is worth it; IGNORED means photos always come down `[d]`
 - [ ] Contact edits come back only when every one can reach iCloud: the PUT streamed from the card (no 16 KB cap), and the other refusals (no master component, a Palm view over 8 KB) settled; see §Engine 8
 - [ ] A contact with a big photo now arrives on the device (it used to be skipped) `[d]`
 - [x] **Read-only switch** (2026-10-14): Settings ▸ Sync ▸ Changes (read-only / send my changes), config `read_only`, on by default and turned back on when the Apple ID changes; the log and the Done line say "(read-only)"; gated by `config_test` and `fidelity` (nothing sent, edits wait, the phone's edits still come down, and turned off they go up) `[s]` (`w9_changes_pick`, `w9_sync_changes`)
@@ -499,7 +501,9 @@ no-delete rule; in this order):
    while Address syncs** (first RESUME HERE): a merged contact over 16 KB
    couldn't be sent and was kept unsent, and the owner's rule is all contact
    edits reach iCloud or none are made. To lift it: a PUT streamed from the
-   card, and no other refusal left. **Partial `address-data` was not done, on purpose:** the
+   card, and no other refusal left. `tools/probe_partial_card.py` checks
+   whether iCloud honours partial `address-data` (a read-only probe the
+   owner runs; below). **Partial `address-data` was not done, on purpose:** the
    device's records would then be built from a different view than the
    server's full copy, and whether iCloud's partial reply keeps Apple's
    `item1.` grouped properties is unknown; it would save bandwidth and card
