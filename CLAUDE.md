@@ -36,6 +36,11 @@ before touching anything.
   device. `make test` runs `tests/nodelete.sh`, which fails on any of it in
   `bridge/`, `firmware/` or `sim/`. The gates clear their local Radicale
   with `tests/radicale_rm.h`, which refuses any server not on localhost.
+- **Contacts are read-only on the device while Address syncs** (the owner,
+  2026-10-14: all contact edits reach iCloud, or none are made). Address
+  has no New, Edit or Delete then (`data_app_readonly()`), and `hotsync.c`
+  syncs it pull-only whatever Settings says. Don't lift it until every
+  contact edit can be sent (`BACKLOG.md`, first RESUME HERE).
 - **Run every gate before a commit, not just the smoke:**
   - `make test` and `make ftest` (host; the programs build into `build/`);
   - `./tests/run_gates.sh` (the sync engine against a local Radicale; needs

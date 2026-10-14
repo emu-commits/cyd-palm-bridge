@@ -101,7 +101,9 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 - [ ] Edit the hidden event on the phone, sync: it comes back to the device `[d]`
 - [x] **An edit merges into the server's copy, never replaces it** (2026-10-14): `bridge/objfile.c` streams the copy onto the card and swaps in only the Palm-owned fields that changed, PUT with If-Match (the `local` policy too); a big object is read through its Palm view, so photo contacts come down with the 8 KB buffer; Apple's `item1.` grouped properties and `DURATION` are read; a series with moved occurrences can't be moved from the device (counted *unsent*); gated by `objfile_test` and `fidelity` `[s]`
 - [ ] On glass: edit an iCloud event that has invitees, a location and two alerts; on the phone it shows the edit and still has all of them `[d]`
-- [ ] On glass: edit a phone number of a contact that has a photo and more than five numbers; on the phone, the photo and the other numbers are still there (the log shows `unsent=0`; a body over 16 KB is kept unsent on the device) `[d]`
+- [x] **Contacts are read-only on the device while Address syncs** (2026-10-14, the owner: "if we can't say all contact edits will sync, stop syncing any"): a merged contact over 16 KB (a real photo) was kept unsent, silently. Now Address has no New, Edit or Delete when it syncs (`data_app_readonly`), the detail says "Read-only: edit contacts on your phone", and `hotsync.c` runs the Address collection pull-only whatever Settings ▸ Sync ▸ Changes says; gated in `make -C sim data` `[s]` (scratch shots of the list, detail and menu)
+- [ ] With Address syncing: the list has no New, a contact's detail has Done and the read-only line, the menu has no Record section; the log's budget line says "contacts: never" when Changes is "Send my changes" `[d]`
+- [ ] Contact edits come back only when every one can reach iCloud: the PUT streamed from the card (no 16 KB cap), and the other refusals (no master component, a Palm view over 8 KB) settled; see §Engine 8
 - [ ] A contact with a big photo now arrives on the device (it used to be skipped) `[d]`
 - [x] **Read-only switch** (2026-10-14): Settings ▸ Sync ▸ Changes (read-only / send my changes), config `read_only`, on by default and turned back on when the Apple ID changes; the log and the Done line say "(read-only)"; gated by `config_test` and `fidelity` (nothing sent, edits wait, the phone's edits still come down, and turned off they go up) `[s]` (`w9_changes_pick`, `w9_sync_changes`)
 - [x] **Big databases on the device** (2026-10-14): an edit, a delete, a category change, the boot-time category backfill and removing the demo rows all stream through the card (`stream_rewrite` in `data.c`) and refuse, leaving the file as it was, unless every record was read; the 12 KB static arena is gone; the streaming writer's index is 12 bytes a record; gated in `make -C sim data` (2,000 contacts: an edit and a delete past the old cap, a category change, a new contact) `[s]`
@@ -493,7 +495,11 @@ no-delete rule; in this order):
    contact comes down through its Palm view (first entry above); every
    database rewrite on the device streams through the card (an edit used to
    write back only the first 64 records); the writer's RAM is 12 bytes a
-   record. **Partial `address-data` was not done, on purpose:** the
+   record. **Since then (2026-10-14) contacts are read-only on the device
+   while Address syncs** (first RESUME HERE): a merged contact over 16 KB
+   couldn't be sent and was kept unsent, and the owner's rule is all contact
+   edits reach iCloud or none are made. To lift it: a PUT streamed from the
+   card, and no other refusal left. **Partial `address-data` was not done, on purpose:** the
    device's records would then be built from a different view than the
    server's full copy, and whether iCloud's partial reply keeps Apple's
    `item1.` grouped properties is unknown; it would save bandwidth and card

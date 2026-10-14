@@ -912,7 +912,8 @@ static void lookup_ta_cb(lv_event_t *e){
 #define LIST_BAR_ADD_MAX  (QUICK_ADD_MAX - 1)
 
 /* `on_word` makes the word a button (the Planner's To Do / Memo switch); NULL
- * leaves it a label. */
+ * leaves it a label. `on_new` NULL: no New button (a read-only Address), and
+ * the field takes its room. */
 static lv_obj_t *list_top_bar(const char *word, const char *seed, int maxlen,
                               lv_event_cb_t on_type, lv_event_cb_t on_new,
                               lv_event_cb_t on_word){
@@ -933,11 +934,13 @@ static lv_obj_t *list_top_bar(const char *word, const char *seed, int maxlen,
         lv_obj_set_pos(l, 4, 8);
     }
 
-    lv_obj_t *nb = lv_button_create(content);
-    lv_obj_set_size(nb, LIST_BAR_NEWW, 28);
-    lv_obj_align(nb, LV_ALIGN_TOP_RIGHT, -2, 1);
-    lv_obj_t *nl = lv_label_create(nb); lv_label_set_text(nl, "New"); lv_obj_center(nl);
-    lv_obj_add_event_cb(nb, on_new, LV_EVENT_CLICKED, NULL);
+    if(on_new){
+        lv_obj_t *nb = lv_button_create(content);
+        lv_obj_set_size(nb, LIST_BAR_NEWW, 28);
+        lv_obj_align(nb, LV_ALIGN_TOP_RIGHT, -2, 1);
+        lv_obj_t *nl = lv_label_create(nb); lv_label_set_text(nl, "New"); lv_obj_center(nl);
+        lv_obj_add_event_cb(nb, on_new, LV_EVENT_CLICKED, NULL);
+    }
 
     lv_obj_t *ta = lv_textarea_create(content);
     lv_textarea_set_one_line(ta, true);
@@ -945,7 +948,7 @@ static lv_obj_t *list_top_bar(const char *word, const char *seed, int maxlen,
     lv_textarea_set_text(ta, seed);       /* set BEFORE the cb so it doesn't fire */
     /* From the word's slot to the button, so the field shrinks by exactly what
      * the button takes. */
-    lv_obj_set_width(ta, LCD_W - LIST_BAR_LBLW - LIST_BAR_NEWW - 10);
+    lv_obj_set_width(ta, LCD_W - LIST_BAR_LBLW - (on_new ? LIST_BAR_NEWW : 0) - 10);
     lv_obj_set_pos(ta, LIST_BAR_LBLW, 2);
     if(on_type) lv_obj_add_event_cb(ta, on_type, LV_EVENT_VALUE_CHANGED, NULL);
     g_barta = ta;
@@ -1013,8 +1016,8 @@ static void list_view(const AppDef *ad){
     /* The top bar. Graffiti writes into whichever field the bar put there --
      * the Look Up filter on Address, the new record on To Do and Memo. */
     if(ad->app == APP_ADDR){
-        active_ta = list_top_bar("Look Up:", g_lookup, LIST_BAR_FIND_MAX,
-                                 lookup_ta_cb, list_new_cb, NULL);
+        active_ta = list_top_bar("Look Up:", g_lookup, LIST_BAR_FIND_MAX, lookup_ta_cb,
+                                 data_app_readonly(APP_ADDR) ? NULL : list_new_cb, NULL);
     } else {
         g_lookup[0] = 0;                               /* filter only applies to Address */
         /* The Planner: the word at the left of the bar says which half this
@@ -1063,7 +1066,7 @@ static void confirm_delete_cb(lv_event_t *e){ (void)e;
     if(a && u){ data_delete(a->app, u); cur_uid = 0; app_reopen(a); toast_show("Deleted"); }
 }
 static void ask_delete(uint32_t uid){
-    if(g_confirm || !cur_app) return;
+    if(g_confirm || !cur_app || data_app_readonly(cur_app->app)) return;
     del_uid = uid;
     const char *what = cur_app->app==APP_CAL ? "event"
                      : cur_app->app==APP_ADDR ? "address"
@@ -1257,6 +1260,17 @@ static void show_detail(uint32_t uid){
     lv_obj_t *dl = lv_label_create(done);
     lv_label_set_text(dl, "Done"); lv_obj_center(dl);
     lv_obj_add_event_cb(done, done_cb, LV_EVENT_CLICKED, NULL);
+
+    /* A read-only Address (data_app_readonly) says so where Delete and Edit
+     * would be, so their absence reads as a decision and not a fault. */
+    if(data_app_readonly(cur_app->app)){
+        lv_obj_t *ro = lv_label_create(content);
+        lv_label_set_long_mode(ro, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(ro, LCD_W - 92);
+        lv_label_set_text(ro, "Read-only: edit contacts on your phone");
+        lv_obj_align(ro, LV_ALIGN_BOTTOM_RIGHT, -4, -3);
+        return;
+    }
 
     lv_obj_t *del = lv_button_create(content);
     lv_obj_set_size(del, 72, 34);
@@ -1586,6 +1600,7 @@ static void memo_box_btn_cb(lv_event_t *e){
 }
 
 static void show_edit(uint32_t uid){
+    if(cur_app && data_app_readonly(cur_app->app)){ toast_show("Contacts are read-only"); return; }
     if(!cur_app) return;
     edit_uid = uid; cur_uid = uid; g_nfields = 0;
     int rc = uid ? data_record_category(cur_app->app, uid) : data_get_category();
@@ -4598,7 +4613,8 @@ static void ro_done(int i){
 }
 static void sp_ro_pick_cb(lv_event_t *e){ (void)e;
     pick_open("Changes", "Read-only: a sync copies from iCloud and never changes "
-                         "it; your edits wait here. Nothing is ever deleted in iCloud.",
+                         "it; your edits wait here. Contacts are never sent: edit "
+                         "them on your phone. Nothing is ever deleted in iCloud.",
               RO_NAMES, 2, appcfg()->read_only ? 0 : 1, ro_done);
 }
 static void sp_pol_pick_cb(lv_event_t *e){ (void)e;
@@ -5679,7 +5695,7 @@ static void menu_open(void){
     lv_obj_set_style_pad_row(panel, 2, 0);
     lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);   /* absorb clicks (don't close) */
 
-    if(cur_app){
+    if(cur_app && !data_app_readonly(cur_app->app)){
         menu_header(panel, "Record");
         menu_item(panel, "New", act_new);
         if(cur_uid) menu_item(panel, "Delete", act_delete);

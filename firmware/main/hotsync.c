@@ -846,7 +846,8 @@ static void hotsync_task(void *arg){
                  (unsigned)freeh, (unsigned)HS_SORT_RESERVE, (unsigned)HS_FILE_CACHE,
                  (unsigned)budget, (unsigned)sync_working_set(),
                  sync_working_set() <= budget ? "fits" : "REFUSED",
-                 cfg->read_only ? "READ-ONLY: nothing is sent" : "two-way: edits are sent, merged");
+                 cfg->read_only ? "READ-ONLY: nothing is sent"
+                                : "two-way: edits are sent, merged (contacts: never)");
     }
 
     int did=0, failed=0, protec=0, oomed=0, diskerr=0, netdown=0, overbudget=0, toobig=0;
@@ -926,6 +927,11 @@ static void hotsync_task(void *arg){
                 ESP_LOGI(TAG,"%s: open tasks, and those done in the last %d day(s)",t->name,cfg->todo_done_days);
             }
         }
+        /* Contacts are never sent, whatever the switch says: an edit is merged
+         * into iCloud's copy, photo and all, and a copy too big for this device
+         * to send would stay here unsent, so the device makes none (data.h,
+         * data_app_readonly). Anything changed before that rule waits here. */
+        sync_set_pull_only(cfg->read_only || t->kind == KIND_CARD);
         SyncStats st={0};
         s_demo_n = data_demo_count(app_of(i));
         sync_set_hold(s_demo_n ? hold_demo : NULL, NULL);

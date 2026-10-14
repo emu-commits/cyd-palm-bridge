@@ -75,6 +75,11 @@ int data_toggle_todo(uint32_t uid);
 int data_delete(int app, uint32_t uid);
 /* 1 if this app's database syncs to an account (so a delete is device-only). */
 int data_app_syncs(int app);
+/* 1 if this app's records can't be changed on the device: Address while it
+ * syncs. A contact edit is merged into iCloud's copy, photo and all, and a
+ * copy bigger than the device can send would stay here unsent; until every
+ * edit can reach the server, none is made (README, "Contacts are read-only"). */
+int data_app_readonly(int app);
 
 /* categories: read the app's category table; get/set the active list filter
  * (-1 = All). List iterators honor the filter. */

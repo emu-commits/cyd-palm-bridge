@@ -96,7 +96,13 @@ int main(void){
      * and a delete past the old cap, and a category change, must keep every
      * one, change the right one in place, and append nothing. */
     printf("-- 2000 contacts --\n");
+    /* Address is read-only on the device while it syncs, and only then; a
+     * Date Book that syncs stays editable. The data layer itself still
+     * writes contacts: the rewrites below are what a sync's output uses. */
+    CK(!data_app_readonly(APP_ADDR), "Address with no account collection: editable");
     snprintf(c->card_coll, sizeof c->card_coll, "card");
+    CK(data_app_readonly(APP_ADDR), "Address that syncs: read-only");
+    CK(!data_app_readonly(APP_CAL) && data_app_syncs(APP_CAL), "a Date Book that syncs: editable");
     {
         static uint8_t arena[2000 * 64]; static PdbRec rr[2000]; int used = 0;
         for(int i = 0; i < 2000; i++){

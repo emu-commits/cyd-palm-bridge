@@ -58,7 +58,8 @@ data** clears them.
    reminders lists and address book. Assign one to each of Date Book, To Do
    and Address.
 3. **Sync:** tap **HotSync**. Records you add on the device go up to iCloud,
-   and changes made on iCloud come down on the next sync.
+   and changes made on iCloud come down on the next sync (contacts only
+   come down; see below).
 
 Without an account, a HotSync still sets the clock and fetches news and
 weather.
@@ -75,8 +76,14 @@ into its own flash and blanks them on the card ([`SECURITY.md`](SECURITY.md)).
   copy from iCloud and never change it, and your edits wait on the device
   until you choose "Send my changes".
 - **An edit is merged into the iCloud copy**, so what the Palm can't show
-  (invitees, locations, extra alerts, photos, the sixth phone number) is
-  kept.
+  (invitees, locations, extra alerts, the sixth phone number) is kept.
+- **Contacts are read-only on the device while Address syncs.** Edit them on
+  your phone; they come down on the next sync. An edited contact goes back
+  to iCloud whole, photo included, and one with a large photo is more than
+  the device can send today. So that no edit is ever left behind on the
+  device, none is made: Address has no New, Edit or Delete while it syncs,
+  and a sync never sends a contact. Without an account, Address is editable
+  as before.
 
 **Limits worth knowing:**
 - **Memos stay on the device.** iCloud Notes has no sync interface.

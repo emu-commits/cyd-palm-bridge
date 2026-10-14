@@ -636,6 +636,7 @@ static int app_syncs(int app){
 }
 
 int data_app_syncs(int app){ return app_syncs(app); }
+int data_app_readonly(int app){ return app == APP_ADDR && app_syncs(APP_ADDR); }
 
 /* Delete a record. In an app that syncs it becomes a tombstone (see live_read)
  * and the next sync drops it from the device, leaving the server's copy alone

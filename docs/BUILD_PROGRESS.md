@@ -16,6 +16,39 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-14 — Contacts are read-only on the device while Address syncs
+
+The owner's rule, after reading how photo contacts are sent: "if we can't
+say all contact edits will sync, then we should stop syncing any and all
+contact edits and be clear about the decision." An edit to a contact goes
+back to iCloud whole (CardDAV has no partial update), photo included, and
+the device's PUT holds its body in RAM: a merged contact over 16 KB was kept
+on the device as *unsent*, with a log line and a word on the Done line as
+the only sign. So:
+- **`data_app_readonly()`** (`data.c`): Address, while it syncs (an account
+  and an Address collection). Without an account, Address edits as before.
+- **The screens:** no New on the Address bar (Look Up takes its room), a
+  contact's detail has Done and "Read-only: edit contacts on your phone"
+  where Delete and Edit were, the menu has no Record section; `show_edit()`
+  and `ask_delete()` refuse it too. A device-only delete is refused as
+  well: hiding a contact is also a change that never reaches iCloud.
+- **The engine:** `hotsync.c` runs the Address collection pull-only whatever
+  Settings ▸ Sync ▸ Changes says; a contact changed before this firmware
+  waits on the device. The Changes picker and the README say so.
+- Contact edits come back only when every one can reach iCloud: a PUT
+  streamed from the card, and the other refusals (no master component, a
+  Palm view over 8 KB) settled (`BACKLOG.md`, first RESUME HERE).
+
+Gates: `make -C sim data` checks `data_app_readonly` (editable with no
+collection, read-only with one, a syncing Date Book still editable); every
+gate in `CLAUDE.md`'s list green but wasm (no emsdk here). Scratch smoke
+shots (a `config.ini` with an Address collection) of the list, detail and
+menu were looked at.
+
+**Firmware** (built as below, `git archive` of `03ea728` and this tree): image
+1,752,267 → 1,752,575 B (+308 B); static DRAM unchanged, 147,316 B
+(81.51 %), 33,420 B free.
+
 ### 2026-10-14 — To Do keeps the open tasks and those done lately
 
 `BACKLOG.md` §Engine 10. A Reminders list ten years old is thousands of
