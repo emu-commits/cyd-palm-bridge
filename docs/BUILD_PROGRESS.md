@@ -45,6 +45,22 @@ everything comes down; the server keeps all three throughout.
 `objfile_test` checks the stamp; `config_test` the key. Smoke shots
 `w9_todo_pick`, `w9_sync_todo`. All 18 sync gates green.
 
+**Firmware, this day's commits** (each built from `git archive` of the commit
+in the IDF v5.5 container, LVGL v9.5.0 local in a scratch copy; static DRAM
+from `idf.py size`):
+
+| commit | image | static DRAM used | free |
+|---|---|---|---|
+| before (`cf7b6e2`) | 1,737,867 B | 160,612 B (88.87 %) | 20,124 B |
+| merge into the server's copy (`81ea2cd`) | 1,744,571 B | 160,612 B | 20,124 B |
+| read-only switch (`97624ef`) | 1,745,295 B | 160,612 B | 20,124 B |
+| three-way merge (`fa09618`) | 1,747,915 B | 160,612 B | 20,124 B |
+| streaming rewrites (`666e71b`) | 1,747,931 B | **147,300 B (81.5 %)** | **33,436 B** |
+| repeating events (`3839f19`) | 1,750,591 B | 147,300 B | 33,436 B |
+| To Do (`48dac7f`) | 1,752,267 B | 147,316 B (81.51 %) | 33,420 B |
+
+The 13,312 B of static DRAM back is the rewrite arena (12 KB) and its table.
+
 ### 2026-10-14 — Repeating events show on the days they occur
 
 `BACKLOG.md` §Engine 9. The device drew every event on its start date only:

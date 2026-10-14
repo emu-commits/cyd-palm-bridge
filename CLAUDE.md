@@ -58,8 +58,9 @@ before touching anything.
 - **Don't let versions float.** LVGL is pinned at 9.5.0 in
   `firmware/main/idf_component.yml`, and the sim pins v9.2.2 separately.
   The LVGL pool is 32 KB; `make -C sim poolparity` enforces it.
-- **Watch static DRAM.** It is about 89 % used, with about 19.9 KB free. No
-  new large static buffers; allocate when a screen opens and free when it
+- **Watch static DRAM.** It is about 81.5 % used, with about 33.4 KB free
+  (2026-10-14: the 12 KB rewrite arena went; it was 89 % before). No new
+  large static buffers; allocate when a screen opens and free when it
   closes.
 
 ## Cloud-session environment (learned 2026-09)
@@ -244,11 +245,17 @@ checks are `[d]` items in `BACKLOG.md`'s first RESUME HERE. Still open:
 To Do (open tasks only) and Address (no photos, or one group).
 
 **2026-10-13: nothing is deleted from the cloud** (the first rule above).
-Next, in order, `BACKLOG.md` §Engine 6 to 10: an edit on the device must
-merge into the server's object rather than replace it (today it drops every
-property Palm can't hold), a read-only switch for a new account, contacts
-at real size, recurring series with overrides, To Do. Then the owner tests
-with a 10-year iCloud account.
+**2026-10-14: §Engine 6 to 10 are built** (`BUILD_PROGRESS.md`, newest
+entries): an edit is merged three ways into the server's copy
+(`bridge/objfile.c`, against each record's *base* beside the map, never a
+replacement); big objects are read through a Palm view; a read-only switch,
+on for a new account (Settings ▸ Sync ▸ Changes); every database rewrite on
+the device streams (an edit used to truncate a big database to 64
+records); repeating events show on every day they occur; To Do keeps the
+open tasks and those done in two weeks. Gates: `objfile_test`,
+`recur_test` (make test), `fidelity`, `todos` (run_gates.sh), the sim
+`data` gate. **Next is the owner's test with the 10-year account**: the
+`[d]` items in `BACKLOG.md`'s first RESUME HERE, read-only first.
 
 1. **S6, the bench**, is the owner's (`[d]` items in `BACKLOG.md`). Any
    further work follows `SRS_PLAN.md` §10, keeping to its §7 budgets:

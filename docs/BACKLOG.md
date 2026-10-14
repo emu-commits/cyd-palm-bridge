@@ -44,11 +44,13 @@ bench besides them: a bigger iCloud sync, and loading a second course into
 Study. (The Pages deploy job fails on a repository setting, Pages source,
 not the code.)
 
-**Now (2026-10-13): finishing sync for a real account** (a 10-year iCloud
-account). **The hard rule, from the owner: nothing is ever deleted from the
-cloud** (done 2026-10-13, below; `CLAUDE.md`'s first rule). The steps left
-are §Engine items 6 to 10, in order; the owner's test with the real account
-comes after 6 and 7.
+**Now: the owner's test with a 10-year iCloud account.** The hard rule,
+from the owner: **nothing is ever deleted from the cloud** (2026-10-13;
+`CLAUDE.md`'s first rule). §Engine 6 to 10 were built 2026-10-14 (below and
+`BUILD_PROGRESS.md`). The test, in order: flash; check Settings ▸ Sync says
+read-only; sync; compare counts on iCloud.com before and after (they must
+not move); then the `[d]` items below; then "Send my changes" and the edit
+checks.
 
 **The app platform is on hold.** The main goal is one first-class SRS app
 (WaniKani/Anki-style, with a large course on the SD card), and it's being
