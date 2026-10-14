@@ -16,6 +16,41 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-14 — Repeating events show on the days they occur
+
+`BACKLOG.md` §Engine 9. The device drew every event on its start date only:
+the Day view, the week's counts, the month's dots and the lock screen's next
+event all compared the record's date. So the calendar window, which fetches a
+weekly meeting that began in 2019 because it recurs this week, kept it on the
+device and showed it nowhere a window covers. On a ten-year calendar that is
+most recurring meetings.
+
+`appt_occurs_on()` and `appt_next_on()` (`bridge/datebook.c`, so the host
+gates run them) follow Palm's repeat rules: daily; weekly on its days, every
+N weeks counted in weeks that begin on the record's start of week; monthly
+by date (a 31st skips the short months) or by "nth weekday" (Palm's
+`dom1stSun`..`domLastSat`); yearly (a leap day in leap years); the end date;
+the exceptions. Dates are integers (days from 1970) both ways. The four
+callers use them; the lock screen asks for the next occurrence in the year
+ahead, from tomorrow if today's has begun.
+
+The parser now reads `BYDAY=2TU` / `-1FR` as Palm's monthly by day (and the
+emitter writes it back the same way, so a merge sees no change), turns
+`COUNT=n` into the nth occurrence's date (counted before exceptions, as RFC
+5545 does), and gives a weekly without `BYDAY` its start's weekday. A series
+with more than 16 `EXDATE`s keeps the latest 16: the ones a window can show.
+
+A moved occurrence (`RECURRENCE-ID`) still shows at the series' time: a
+Palm record can't hold it, and a second record for it would be pushed as a
+new event.
+
+Gates: `recur_test` (offline, in `make test`): a weekly from 2019, every
+other week on two days, no `BYDAY`, the second Tuesday and the last Friday
+both ways, `COUNT`, forty exceptions, the 31st, a leap day. `make -C sim
+data`: a weekly meeting from 2019 is listed on Monday 12 Oct 2026 and not
+the Tuesday, and every Monday of the month is dotted. All 17 sync gates
+green.
+
 ### 2026-10-14 — Every database rewrite streams; a real address book survives an edit
 
 `BACKLOG.md` §Engine 8, the device side, and a bug that predates this work:

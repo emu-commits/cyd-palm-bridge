@@ -103,6 +103,8 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 - [ ] A contact with a big photo now arrives on the device (it used to be skipped) `[d]`
 - [x] **Read-only switch** (2026-10-14): Settings ▸ Sync ▸ Changes (read-only / send my changes), config `read_only`, on by default and turned back on when the Apple ID changes; the log and the Done line say "(read-only)"; gated by `config_test` and `fidelity` (nothing sent, edits wait, the phone's edits still come down, and turned off they go up) `[s]` (`w9_changes_pick`, `w9_sync_changes`)
 - [x] **Big databases on the device** (2026-10-14): an edit, a delete, a category change, the boot-time category backfill and removing the demo rows all stream through the card (`stream_rewrite` in `data.c`) and refuse, leaving the file as it was, unless every record was read; the 12 KB static arena is gone; the streaming writer's index is 12 bytes a record; gated in `make -C sim data` (2,000 contacts: an edit and a delete past the old cap, a category change, a new contact) `[s]`
+- [x] **Repeating events show on every day they occur** (2026-10-14): Day view, week counts, month dots and the lock screen's next event use `appt_occurs_on`/`appt_next_on`; the parser reads `BYDAY=2TU`/`-1FR` (Palm's monthly by day, written back the same), `COUNT` (an end date) and a weekly without `BYDAY`, and keeps the latest 16 exceptions; gated by `recur_test` (in `make test`) and `make -C sim data` (a weekly meeting from 2019 on a Monday in 2026, and the month's dots) `[s]`
+- [ ] On glass: a weekly meeting that began years ago shows on this week's day, the month view dots every week, the lock screen names its next one; a "second Tuesday" meeting lands on the right Tuesday `[d]`
 - [ ] With the real address book on the device: edit and delete a contact far down the list; the count in Address doesn't change (bar the delete), the edit is on that contact, and the log shows no "rewrite refused" `[d]`
 - [ ] How many contacts a sync can write: watch the log's `OUTPUT FULL` / heap lines on the first full Address sync `[d]`
 - [ ] After flashing, Settings ▸ Sync shows "Changes: read-only"; a sync's Done line ends "(read-only)", an edit made on the device doesn't reach the phone, and does once "Send my changes" is picked `[d]`
@@ -498,7 +500,12 @@ no-delete rule; in this order):
    arrive; check iCloud honours it. Today a vCard over the 8 KB fetch
    buffer is skipped with a warning and fetched again every sync. Measure
    how many contacts the device's AddressDB holds before "too large" (`-6`).
-9. **Recurring events from iCloud.** The parse side is done 2026-10-14: the
+9. **Recurring events from iCloud.** Done 2026-10-14, bar the bench: the
+   device draws a repeating event on every day it occurs (it used to draw
+   it on its start date only, so the window's recurring meetings were
+   invisible); `BYDAY=2TU`, `COUNT` and a weekly without days are read; the
+   latest 16 exceptions are kept. Moved occurrences show at the series'
+   time. Earlier the same day, the parse side: the
    Palm view reads the series' own VEVENT, not a moved occurrence's; an end
    given as DURATION is read; moving or re-repeating a series that has moved
    occurrences from the device is refused (unsent), since they're tied to its

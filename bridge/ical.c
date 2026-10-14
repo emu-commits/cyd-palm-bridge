@@ -76,7 +76,10 @@ int ical_emit(char *out,int cap,const Appt *a,uint32_t uid){
                 for(int d=0;d<7;d++) if(a->repeatOn&(1<<d)){ if(!first)strcat(b,","); strcat(b,BYDAY[d]); first=0; }
                 if(b[0]) snprintf(extra,sizeof extra,";BYDAY=%s",b);
             } break;
-            case repeatMonthlyByDate: case repeatMonthlyByDay: freq="MONTHLY"; break;
+            case repeatMonthlyByDate: freq="MONTHLY"; break;
+            case repeatMonthlyByDay: freq="MONTHLY";      /* "the second Tuesday", "the last Friday" */
+                snprintf(extra,sizeof extra,";BYDAY=%d%s", a->repeatOn/7 >= 4 ? -1 : a->repeatOn/7 + 1, BYDAY[a->repeatOn%7]);
+                break;
             case repeatYearly: freq="YEARLY"; break;
         }
         if(freq){
@@ -158,6 +161,7 @@ int ical_parse(const char *ics, Appt *a){
     buf[w]=0;
 
     int haveStart=0, haveEnd=0, durMin=-1, inEvent=0, inAlarm=0, inTz=0;
+    int rrCount=0, rrOrd=0, rrOrdDow=-1;      /* RRULE COUNT=, and BYDAY=2TU's 2 and TU */
     char *save=NULL;
     for(char *line=strtok_r(buf,"\n",&save); line; line=strtok_r(NULL,"\n",&save)){
         /* component tracking first (BEGIN/END never carry data we want) */
@@ -216,10 +220,20 @@ int ical_parse(const char *ics, Appt *a){
             textIn(a->note,sizeof a->note,val,(int)strlen(val));
         } else if(!strcmp(name,"EXDATE")){
             char *ds=NULL;
-            for(char *tok=strtok_r(val,",",&ds); tok && a->nExcept<16; tok=strtok_r(NULL,",",&ds)){
+            for(char *tok=strtok_r(val,",",&ds); tok; tok=strtok_r(NULL,",",&ds)){
                 int y,mo,d,h,mi,hasT,utc; parseDT(tok,&y,&mo,&d,&h,&mi,&hasT,&utc);
                 if(hasT && utc && g_tz) tz_utc_to_local(g_tz,y,mo,d,h,mi,&y,&mo,&d,&h,&mi);
-                a->excpt[a->nExcept].y=y; a->excpt[a->nExcept].m=mo; a->excpt[a->nExcept].d=d; a->nExcept++;
+                /* The Palm holds 16; a weekly series years old has more. Keep
+                 * the latest: those are the ones a window of days can show. */
+                int slot=a->nExcept;
+                if(slot>=16){
+                    slot=0;
+                    for(int k=1;k<16;k++){ long ek=a->excpt[k].y*10000L+a->excpt[k].m*100+a->excpt[k].d,
+                                                e0=a->excpt[slot].y*10000L+a->excpt[slot].m*100+a->excpt[slot].d;
+                                           if(ek<e0) slot=k; }
+                    if(y*10000L+mo*100+d <= a->excpt[slot].y*10000L+a->excpt[slot].m*100+a->excpt[slot].d) continue;
+                } else a->nExcept++;
+                a->excpt[slot].y=y; a->excpt[slot].m=mo; a->excpt[slot].d=d;
             }
         } else if(!strcmp(name,"RRULE")){
             a->hasRepeat=1; a->repeatForever=1; a->repeatFreq=1;
@@ -232,16 +246,39 @@ int ical_parse(const char *ics, Appt *a){
                     else if(!strcmp(rv,"MONTHLY")) a->repeatType=repeatMonthlyByDate;
                     else if(!strcmp(rv,"YEARLY")) a->repeatType=repeatYearly;
                 } else if(!strcmp(tok,"INTERVAL")){ a->repeatFreq=atoi(rv);
+                } else if(!strcmp(tok,"COUNT")){ rrCount=atoi(rv);
                 } else if(!strcmp(tok,"UNTIL")){
                     int y,mo,d,h,mi,hasT,utc; parseDT(rv,&y,&mo,&d,&h,&mi,&hasT,&utc);
                     a->repeatForever=0; a->endYear=y; a->endMonth=mo; a->endDay=d;
                 } else if(!strcmp(tok,"BYDAY")){
                     a->repeatOn=0; char *xs=NULL;
-                    for(char *day=strtok_r(rv,",",&xs); day; day=strtok_r(NULL,",",&xs))
-                        for(int k=0;k<7;k++) if(!strncmp(day,BYDAY[k],2)) a->repeatOn|=(1<<k);
+                    for(char *day=strtok_r(rv,",",&xs); day; day=strtok_r(NULL,",",&xs)){
+                        /* "2TU" or "-1FR": an ordinal, for a monthly by weekday */
+                        int ord=0; const char*dp=day; int neg=0;
+                        if(*dp=='+'||*dp=='-'){ neg=*dp=='-'; dp++; }
+                        while(*dp>='0'&&*dp<='9') ord=ord*10+(*dp++-'0');
+                        if(neg) ord=-ord;
+                        for(int k=0;k<7;k++) if(!strncmp(dp,BYDAY[k],2)){ a->repeatOn|=(1<<k); if(ord){ rrOrd=ord; rrOrdDow=k; } }
+                    }
                 }
             }
         }
+    }
+    if(a->hasRepeat && a->repeatType==repeatMonthlyByDate && rrOrd && rrOrdDow>=0){
+        /* "the second Tuesday": Palm's monthly by day, dom1stSun=0 .. domLastSat=34 */
+        a->repeatType = repeatMonthlyByDay;
+        a->repeatOn = (rrOrd<0 || rrOrd>4 ? 4 : rrOrd-1)*7 + rrOrdDow;
+    }
+    if(a->hasRepeat && rrCount>0 && haveStart){
+        /* COUNT=n: the Palm keeps an end date, so it is the nth occurrence's
+         * (RFC 5545 counts before EXDATE takes any away) */
+        Appt c=*a; c.repeatForever=1; c.nExcept=0;
+        int y=a->year,mo=a->month,d=a->day,n=0,oy,om,od,ly=0,lm=0,ld=0;
+        while(n<rrCount && appt_next_on(&c,y,mo,d,366*5,&oy,&om,&od)){
+            n++; ly=oy; lm=om; ld=od;
+            y=oy; mo=om; d=od; appt_add_days(&y,&mo,&d,1);
+        }
+        if(n==rrCount){ a->repeatForever=0; a->endYear=ly; a->endMonth=lm; a->endDay=ld; }
     }
     if(a->hasTime && !haveEnd && durMin>=0){
         int e = a->sH*60 + a->sM + durMin; if(e > 23*60+59) e = 23*60+59;

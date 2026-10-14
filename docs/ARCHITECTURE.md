@@ -126,6 +126,12 @@ buffer).
 - To Do ↔ `VTODO` (due date, priority, completion).
 - An end given as `DURATION` instead of `DTEND`; Apple's grouped vCard
   properties (`item1.EMAIL`, `item2.ADR`).
+- Repeats: daily, weekly days, monthly by date or by "nth weekday"
+  (`BYDAY=2TU`, `-1FR`), yearly, every N; `COUNT` becomes an end date; the
+  latest 16 exceptions are kept. The device draws a repeating event on every
+  day it occurs (`appt_occurs_on`, `bridge/datebook.c`). A moved occurrence
+  (`RECURRENCE-ID`) shows at the series' time; the Palm record has no way to
+  hold it.
 - vCard is a set of typed values, not Palm's five ordered phone slots, so the
   slot order isn't kept across a round trip (the data is).
 

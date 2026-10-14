@@ -116,3 +116,81 @@ int ApptPack(uint8_t *buf, int cap, const Appt *a){
     put16(buf+6, flags);
     return n;
 }
+
+/* ---- occurrences ------------------------------------------------------------
+ * Days from 1970-01-01 (H. Hinnant's days_from_civil), so dates compare and
+ * subtract as integers, any year. */
+static long dfc(int y, int m, int d){
+    y -= m <= 2;
+    long era = (y >= 0 ? y : y - 399) / 400;
+    unsigned yoe = (unsigned)(y - era * 400);
+    unsigned doy = (unsigned)((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1);
+    unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + (long)doe - 719468;
+}
+static void civil(long z, int *y, int *m, int *d){
+    z += 719468;
+    long era = (z >= 0 ? z : z - 146096) / 146097;
+    unsigned doe = (unsigned)(z - era * 146097);
+    unsigned yoe = (doe - doe/1460 + doe/36524 - doe/146096) / 365;
+    unsigned doy = doe - (365*yoe + yoe/4 - yoe/100);
+    unsigned mp = (5*doy + 2) / 153;
+    *d = (int)(doy - (153*mp + 2)/5 + 1);
+    *m = (int)(mp < 10 ? mp + 3 : mp - 9);
+    *y = (int)((long)yoe + era * 400 + (*m <= 2));
+}
+void appt_add_days(int *y, int *m, int *d, int n){ civil(dfc(*y, *m, *d) + n, y, m, d); }
+int appt_weekday(int y, int m, int d){ long z = dfc(y, m, d); return (int)(((z % 7) + 7 + 4) % 7); }
+static int dim(int y, int m){
+    static const int n[12] = {31,28,31,30,31,30,31,31,30,31,30,31};
+    if(m < 1 || m > 12) return 31;
+    return n[m-1] + (m == 2 && ((y % 4 == 0 && y % 100) || y % 400 == 0));
+}
+int appt_occurs_on(const Appt *a, int y, int m, int d){
+    if(a->year < 1904 || a->month < 1 || a->day < 1) return 0;
+    long t = dfc(y, m, d), s = dfc(a->year, a->month, a->day);
+    if(t < s) return 0;
+    if(!a->hasRepeat || a->repeatType == repeatNone) return t == s;
+    if(!a->repeatForever && a->endYear >= 1904 && t > dfc(a->endYear, a->endMonth, a->endDay)) return 0;
+    for(int i = 0; i < a->nExcept && i < 16; i++)
+        if(a->excpt[i].y == y && a->excpt[i].m == m && a->excpt[i].d == d) return 0;
+    int f = a->repeatFreq > 0 ? a->repeatFreq : 1;
+    int months = (y - a->year) * 12 + (m - a->month);
+    switch(a->repeatType){
+    case repeatDaily:
+        return (t - s) % f == 0;
+    case repeatWeekly: {
+        int wd = appt_weekday(y, m, d);
+        int on = a->repeatOn & 0x7F;
+        if(!on) on = 1 << appt_weekday(a->year, a->month, a->day);   /* no days given: the start's */
+        if(!(on & (1 << wd))) return 0;
+        /* every f weeks, counted in weeks that begin on startOfWeek */
+        int sow = a->startOfWeek % 7;
+        long ws = s - ((appt_weekday(a->year, a->month, a->day) - sow + 7) % 7);
+        long wt = t - ((wd - sow + 7) % 7);
+        return ((wt - ws) / 7) % f == 0;
+    }
+    case repeatMonthlyByDate:
+        return months % f == 0 && d == a->day;          /* a 31st skips the short months */
+    case repeatMonthlyByDay: {
+        if(months % f) return 0;
+        int week = a->repeatOn / 7, dow = a->repeatOn % 7;   /* Palm: dom1stSun=0 .. domLastSat=34 */
+        if(appt_weekday(y, m, d) != dow) return 0;
+        return week < 4 ? (d - 1) / 7 == week : d + 7 > dim(y, m);
+    }
+    case repeatYearly:
+        return (y - a->year) % f == 0 && m == a->month && d == a->day;
+    }
+    return t == s;
+}
+int appt_next_on(const Appt *a, int y, int m, int d, int horizon, int *oy, int *om, int *od){
+    long t = dfc(y, m, d);
+    long s = a->year >= 1904 ? dfc(a->year, a->month, a->day) : t;
+    if(t < s) t = s;                                    /* nothing before the start */
+    for(int i = 0; i <= horizon; i++, t++){
+        int yy, mm, dd; civil(t, &yy, &mm, &dd);
+        if(appt_occurs_on(a, yy, mm, dd)){ *oy = yy; *om = mm; *od = dd; return 1; }
+        if(!a->hasRepeat && t > s) return 0;
+    }
+    return 0;
+}

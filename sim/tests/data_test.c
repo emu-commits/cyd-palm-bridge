@@ -132,6 +132,26 @@ int main(void){
     CK(data_save_addr(0, 0, &na), "a new contact");
     CK(raw(APP_ADDR).all == 2001, "appended: 2001");
 
+    /* ---- a repeating event shows on the days it occurs ------------------
+     * It used to show on its start date only: a weekly meeting that began in
+     * 2019 never appeared in the days a sync window keeps. */
+    printf("-- a weekly meeting from 2019 --\n");
+    {
+        Appt w; memset(&w, 0, sizeof w);
+        w.hasTime = 1; w.sH = 9; w.eH = 10; w.year = 2019; w.month = 1; w.day = 7;   /* a Monday */
+        w.hasRepeat = 1; w.repeatType = repeatWeekly; w.repeatFreq = 1; w.repeatForever = 1; w.repeatOn = 1 << 1;
+        snprintf(w.description, sizeof w.description, "Standup");
+        uint8_t pk[512]; int l = ApptPack(pk, sizeof pk, &w);
+        PdbRec one = { .attr = 0, .uniqueID = 500, .data = pk, .len = l };
+        pdb_write(data_db_path(APP_CAL), "DatebookDB", 0x44415441, 0x64617465, &one, 1);
+        int mon = 0, tue = 0;
+        data_cal_day(2026, 10, 12, countRow, &mon);
+        data_cal_day(2026, 10, 13, countRow, &tue);
+        CK(mon == 1 && tue == 0, "on Monday 12 Oct 2026, not Tuesday");
+        uint8_t marks[32]; data_cal_month_marks(2026, 10, marks);
+        CK(marks[5] && marks[12] && marks[19] && marks[26] && !marks[13], "every Monday of the month dotted");
+    }
+
     printf(fails ? "== data: %d FAILURE(S) ==\n" : "== data: all passed ==\n", fails);
     return fails ? 1 : 0;
 }

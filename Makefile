@@ -9,7 +9,7 @@ CORE    = bridge/pdb.c bridge/datebook.c bridge/address.c bridge/ical.c bridge/v
 
 PROGS   = roundtrip bridge_cli incremental synctoken category bigsync multiapp \
           uidmatch idempotent massdel streamparse find_test calc_test config_test rss_test news_test wx_test \
-          feeds_test break_test geoip_test objfile_test toobig safefile_test sort_test window fidelity mget_test fuzz_test course_fuzz rss_asan mget_asan
+          feeds_test break_test geoip_test objfile_test recur_test toobig safefile_test sort_test window fidelity mget_test fuzz_test course_fuzz rss_asan mget_asan
 
 all: $(addprefix $(B)/,$(filter-out fuzz_test course_fuzz rss_asan mget_asan,$(PROGS)))
 
@@ -24,6 +24,10 @@ $(B)/roundtrip: tests/roundtrip.c $(CORE) | dirs
 
 # an edit on the device keeps everything the Palm can't hold (offline)
 $(B)/objfile_test: tests/objfile_test.c $(CORE) | dirs
+	$(CC) $(CFLAGS) -o $@ $^
+
+# repeating events: the days they fall on, and iCloud's RRULE shapes (offline)
+$(B)/recur_test: tests/recur_test.c $(CORE) | dirs
 	$(CC) $(CFLAGS) -o $@ $^
 
 $(B)/bridge_cli: bridge/main.c bridge/dav.c bridge/sync.c $(CORE) | dirs
@@ -149,9 +153,10 @@ $(B)/rss_asan: tests/rss_test.c bridge/rss.c | dirs
 nodelete:
 	./tests/nodelete.sh
 
-test: nodelete roundtrip objfile_test find_test calc_test config_test streamparse rss_test news_test wx_test feeds_test break_test geoip_test safefile_test sort_test mget_test
+test: nodelete roundtrip objfile_test recur_test find_test calc_test config_test streamparse rss_test news_test wx_test feeds_test break_test geoip_test safefile_test sort_test mget_test
 	./$(B)/roundtrip
 	./$(B)/objfile_test
+	./$(B)/recur_test
 	./$(B)/find_test
 	./$(B)/calc_test
 	./$(B)/config_test

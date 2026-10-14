@@ -7216,8 +7216,8 @@ static void dash_moon_draw(int cx,int cy,int r,int illum,int waxing){
     }
 }
 
-/* soonest upcoming appointment -> "2:30p  Dentist" (1 if found). Recurrence is not
- * expanded (the base date is used); good enough for a glance. */
+/* soonest upcoming appointment -> "2:30p  Dentist" (1 if found), a repeating
+ * one at its next occurrence (appt_next_on), within the year ahead. */
 typedef struct { long best; char line[64]; int found; } NextEv;
 static void next_ev_cb(uint32_t uid,const char *pri,const char *sec,void *ctx){
     (void)pri; (void)sec;
@@ -7225,6 +7225,16 @@ static void next_ev_cb(uint32_t uid,const char *pri,const char *sec,void *ctx){
     Appt a;
     if(!data_get_cal(uid,&a)) return;
     if(a.year < 2000) return;
+    {   /* the next occurrence from today (a timed one already begun today: from tomorrow) */
+        time_t now0=0; time(&now0); struct tm nt; localtime_r(&now0,&nt);
+        int y=nt.tm_year+1900, m=nt.tm_mon+1, d=nt.tm_mday, oy,om,od;
+        if(!appt_next_on(&a,y,m,d,366,&oy,&om,&od)) return;
+        if(a.hasTime && oy==y && om==m && od==d && (a.sH*60+a.sM) < nt.tm_hour*60+nt.tm_min){
+            appt_add_days(&y,&m,&d,1);
+            if(!appt_next_on(&a,y,m,d,366,&oy,&om,&od)) return;
+        }
+        a.year=oy; a.month=om; a.day=od;
+    }
     struct tm ti; memset(&ti,0,sizeof ti);
     ti.tm_year=a.year-1900; ti.tm_mon=a.month-1; ti.tm_mday=a.day;
     ti.tm_hour=a.hasTime?a.sH:0; ti.tm_min=a.hasTime?a.sM:0; ti.tm_isdst=-1;

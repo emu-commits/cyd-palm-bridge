@@ -415,7 +415,7 @@ static int cbCalDay(const PdbRec *r, int i, void *ctx){
     (void)i; DayIt *it=ctx; Appt a;
     if(g_catfilter>=0 && (r->attr & 0x0F)!=g_catfilter) return 0;
     if(ApptUnpack(r->data,r->len,&a)) return 0;
-    if(a.year!=it->y || a.month!=it->m || a.day!=it->d) return 0;
+    if(!appt_occurs_on(&a, it->y, it->m, it->d)) return 0;   /* repeats expanded */
     char pri[96];
     if(a.hasTime) snprintf(pri,sizeof pri,"%02d:%02d  %.80s",a.sH,a.sM,a.description);
     else          snprintf(pri,sizeof pri,"--:--  %.80s",a.description);
@@ -427,12 +427,17 @@ void data_cal_day(int y,int m,int d, data_row_cb cb, void *ctx){
 }
 
 /* mark which day-of-month (1..31) has >=1 appointment in month y/m (Month view
- * dots). marks[0] unused; ignores the category filter (whole-month overview). */
+ * dots), repeats expanded. marks[0] unused; ignores the category filter
+ * (whole-month overview). */
 typedef struct { int y,m; uint8_t *marks; } MarkIt;
 static int cbCalMark(const PdbRec *r, int i, void *ctx){
     (void)i; MarkIt *mk=ctx; Appt a;
     if(ApptUnpack(r->data,r->len,&a)) return 0;
-    if(a.year==mk->y && a.month==mk->m && a.day>=1 && a.day<=31) mk->marks[a.day]=1;
+    if(!a.hasRepeat){
+        if(a.year==mk->y && a.month==mk->m && a.day>=1 && a.day<=31) mk->marks[a.day]=1;
+        return 0;
+    }
+    for(int d=1; d<=31; d++) if(!mk->marks[d] && appt_occurs_on(&a, mk->y, mk->m, d)) mk->marks[d]=1;
     return 0;
 }
 void data_cal_month_marks(int y,int m, uint8_t marks[32]){
