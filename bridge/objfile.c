@@ -238,22 +238,50 @@ static void pass_line(Rd *r, const char *ln, int more, FILE *out){
     }
 }
 
+/* split "A\r\nB\r\n" in place into lines (each kept with its "\r\n") */
+static int split5(char *t, char **ln){
+    int n = 0;
+    for(char *p = t; *p && n < 5; ){
+        char *e = strstr(p, "\r\n"); if(!e) break;
+        ln[n++] = p; p = e + 2;
+    }
+    return n;
+}
+static int lneq(const char *a, const char *b){
+    const char *ea = strstr(a, "\r\n"), *eb = strstr(b, "\r\n");
+    size_t la = ea ? (size_t)(ea - a) : strlen(a), lb = eb ? (size_t)(eb - b) : strlen(b);
+    return la == lb && !memcmp(a, b, la);
+}
+static void putln(const char *l, FILE *out){
+    const char *e = strstr(l, "\r\n"); size_t n = e ? (size_t)(e - l) : strlen(l);
+    fwrite(l, 1, n, out); fputs("\r\n", out);
+}
+
 int obj_merge(int kind, FILE *f, long off, long len, const ObjScan *sc,
-              const char *eSrv, const char *eLoc, const char *vtz, const char *tzid,
-              FILE *out){
+              const char *eBase, const char *eSrv, const char *eLoc,
+              const char *vtz, const char *tzid, FILE *out){
     if(!sc->ok) return -1;
     const Grp *G = groups(kind); int ng = ngroups(G);
-    char *loc[8] = {0}; int chg[8] = {0}, ins[8] = {0}, nchg = 0, rc = -1;
+    char *loc[8] = {0}, *bas[8] = {0}, *srv[8] = {0};
+    int chg[8] = {0}, ins[8] = {0}, nchg = 0, rc = -1;
+    /* WHAT THE DEVICE CHANGED is its record against the base -- the record as
+     * it was at its last sync -- never against the server's copy: a field the
+     * device never touched can differ from the server's parse for reasons that
+     * aren't edits (an older parser pulled it), and must not be written. */
     for(int i = 0; i < ng; i++){
-        char *a = grp_text(eSrv, &G[i]); loc[i] = grp_text(eLoc, &G[i]);
-        if(!a || !loc[i]){ free(a); goto done; }
-        chg[i] = strcmp(a, loc[i]) != 0; nchg += chg[i];
-        free(a);
+        bas[i] = grp_text(eBase, &G[i]); loc[i] = grp_text(eLoc, &G[i]); srv[i] = grp_text(eSrv, &G[i]);
+        if(!bas[i] || !loc[i] || !srv[i]) goto done;
+        chg[i] = strcmp(bas[i], loc[i]) != 0; nchg += chg[i];
     }
     /* A series with moved occurrences: each is tied to the series by its
      * original start (RECURRENCE-ID). Moving or re-repeating the series from
      * the device would cut them loose, so that edit is refused, not sent. */
     if(kind == KIND_CAL && sc->ncomp > 1 && (chg[0] || chg[3])) goto done;
+    /* The Palm's address is the object's last ADR. If the base's address isn't
+     * that one any more, which line the device edited is unknown: refused. */
+    int ga = -1;
+    for(int i = 0; i < ng; i++) if(G[i].rule == R_LAST) ga = i;
+    if(ga >= 0 && chg[ga] && strcmp(bas[ga], srv[ga])) goto done;
     /* a changed time in a zone the object has no VTIMEZONE for gets ours */
     int needTz = 0;
     if(kind == KIND_CAL && chg[0] && tzid && tzid[0] && vtz && vtz[0]){
@@ -263,21 +291,30 @@ int obj_merge(int kind, FILE *f, long off, long len, const ObjScan *sc,
             for(int i = 0; i < sc->ntz; i++) if(!strcmp(sc->tz[i], tzid)) needTz = 0;
         }
     }
-    /* The phone slots go one by one: a slot the device didn't change keeps its
-     * server line as it was (its TYPE, PREF and item label), so editing one
-     * number rewrites that number only. */
-    char *sl[5] = {0}, *ll[5] = {0}; int ns = 0, nl = 0, gs = -1;
+    /* THE PHONE SLOTS, as a set: a number the device removed or changed is
+     * found among the server's lines by its value and only that line goes (or
+     * takes the new value, keeping its place); a new number is added after the
+     * last one. Untouched numbers keep their lines exactly (TYPE, PREF, the
+     * item label), and a shift of the Palm's slots rewrites nothing. */
+    int gs = -1;
     for(int i = 0; i < ng; i++) if(G[i].rule == R_FIRST5) gs = i;
-    char *srvSlots = NULL;
-    if(gs >= 0){
-        srvSlots = grp_text(eSrv, &G[gs]);
-        if(!srvSlots) goto done;
-        for(char *p = srvSlots; *p && ns < 5; ){ char *e = strstr(p, "\r\n"); if(!e) break; sl[ns++] = p; e[1] = 0; p = e + 2; }
-        for(char *p = loc[gs]; *p && nl < 5; ){ char *e = strstr(p, "\r\n"); if(!e) break; ll[nl++] = p; e[1] = 0; p = e + 2; }
-        /* each slot is now "TEL...\r" (the \n cut); written back with "\n" */
+    char *B[5], *L[5], *S[5], *A[5]; int nb = 0, nl = 0, nsv = 0, na = 0, nextA = 0;
+    int act[5]; for(int j = 0; j < 5; j++) act[j] = -1;      /* -1 keep, -2 drop, >=0 replace by A[act] */
+    if(gs >= 0 && chg[gs]){
+        nb = split5(bas[gs], B); nl = split5(loc[gs], L); nsv = split5(srv[gs], S);
+        int mb[5] = {0}, ml[5] = {0};
+        for(int i = 0; i < nb; i++) for(int k = 0; k < nl; k++)
+            if(!ml[k] && lneq(B[i], L[k])){ mb[i] = ml[k] = 1; break; }
+        char *R[5]; int nr = 0, usedR[5] = {0};
+        for(int i = 0; i < nb; i++) if(!mb[i]) R[nr++] = B[i];
+        for(int k = 0; k < nl; k++) if(!ml[k]) A[na++] = L[k];
+        for(int j = 0; j < nsv; j++)
+            for(int r = 0; r < nr; r++) if(!usedR[r] && lneq(S[j], R[r])){
+                usedR[r] = 1; act[j] = nextA < na ? nextA++ : -2; break;
+            }
     }
     int nOwned = sc->nMasterTel < 5 ? sc->nMasterTel : 5;
-    Rd r; if(rd_open(&r, f, off, len)){ free(srvSlots); goto done; }
+    Rd r; if(rd_open(&r, f, off, len)) goto done;
     const char *ct = kcomp(kind);
     char ln[LB], nm[32], v[32]; int more;
     int depth = 0, ord = -1, mdepth = 0, skip = 0, tel = 0, adr = 0;
@@ -309,7 +346,7 @@ int obj_merge(int kind, FILE *f, long off, long len, const ObjScan *sc,
         if(isEnd){
             if(mdepth && depth == mdepth && !strcmp(v, ct)){
                 for(int i = 0; i < ng; i++) if(chg[i] && !ins[i]){
-                    if(i == gs) for(int j = 0; j < nl; j++){ fputs(ll[j], out); fputc('\n', out); }
+                    if(i == gs) while(nextA < na) putln(A[nextA++], out);
                     else fputs(loc[i], out);
                     ins[i] = 1;
                 }
@@ -324,10 +361,13 @@ int obj_merge(int kind, FILE *f, long off, long len, const ObjScan *sc,
             if(g >= 0 && g == gs && chg[g]){
                 int k = tel++;
                 if(k < 5){
-                    if(k < nl && k < ns && !strcmp(sl[k], ll[k])) pass_line(&r, ln, more, out);
-                    else { if(k < nl){ fputs(ll[k], out); fputc('\n', out); } pass_line(&r, ln, more, NULL); }
-                    if(k == nOwned - 1){
-                        for(int j = nOwned; j < nl; j++){ fputs(ll[j], out); fputc('\n', out); }
+                    if(act[k] == -1) pass_line(&r, ln, more, out);           /* untouched */
+                    else {
+                        if(act[k] >= 0) putln(A[act[k]], out);                 /* changed, in place */
+                        pass_line(&r, ln, more, NULL);
+                    }
+                    if(k == nOwned - 1){                                      /* new ones after the last */
+                        while(nextA < na) putln(A[nextA++], out);
                         ins[g] = 1;
                     }
                     continue;
@@ -347,8 +387,7 @@ int obj_merge(int kind, FILE *f, long off, long len, const ObjScan *sc,
         pass_line(&r, ln, more, out);
     }
     rc = nchg;
-    free(srvSlots);
 done:
-    for(int i = 0; i < ng; i++) free(loc[i]);
+    for(int i = 0; i < ng; i++){ free(loc[i]); free(bas[i]); free(srv[i]); }
     return ferror(out) ? -1 : rc;
 }

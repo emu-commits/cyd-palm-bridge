@@ -16,6 +16,37 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-14 — The merge is three-way, against each record's base
+
+Found while planning the contacts step: the merge decided what the device
+changed by comparing its record with the server's *current* copy as parsed
+today. A record pulled by an older parser differs from today's parse where
+nobody changed anything (before the previous entry `item1.EMAIL` was
+invisible), so editing just the note of such a contact would have rewritten
+its phone slots and dropped that email.
+
+Now every record the merge keeps is also written to a **base** beside the
+map (`<map>.bdat`: the records back to back; `<map>.bidx`: one 28-byte row
+per uid, sorted, binary-searched), published with the map, carried forward
+for a record kept unsent, and removed rather than left stale if it can't be
+written whole. `obj_merge` takes three emitted components: a group is the
+device's edit only where the record now differs from its base; the server's
+copy says which lines are the Palm's. The phone slots are a set: a number
+removed or changed is found among the server's lines by value and only that
+line goes (or takes the new value in place); new numbers go after the last;
+a shift of the Palm's slots rewrites nothing. An address edit when the
+Palm's address is no longer the base's is refused (unsent). An edit with
+**no base** (made before this firmware's first sync) goes the conflict route,
+as a 412 does: never a guessed merge.
+
+Gates: `objfile_test` adds the old-parser contact (its note edited: every
+phone and email line exactly as it was, `item1.EMAIL` included) and a
+cleared number (only that line goes); `fidelity` adds an edit with no base
+(a conflict, the server's copy identical, the base written again). All 17
+gates green. The base costs a second copy of each collection's records on
+the card (Address: about 400 KB for 2,000 contacts) and no RAM beyond a
+transient 4 KB during an edit's merge.
+
 ### 2026-10-14 — Read-only: a switch, on for a new account
 
 `BACKLOG.md` §Engine 7. The engine has had a pull-only mode since the memory

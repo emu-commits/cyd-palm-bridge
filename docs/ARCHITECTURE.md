@@ -102,7 +102,11 @@ anything (`tests/toobig.c`).
 what an iCloud object carries, so an edit made on the device is merged into
 the server's current copy (`bridge/objfile.c`): the copy is streamed onto the
 card, and written back with only the Palm-owned fields the device changed
-swapped in, then `PUT` with `If-Match`. Location, attendees, URLs, extra
+swapped in, then `PUT` with `If-Match`. "Changed" is the record now against
+the *base*, a copy of each record as it was at its last sync kept beside the
+map (`<map>.bdat`, `<map>.bidx`), never against the server's copy, so a field
+an older parser read differently is never mistaken for an edit. An edit with
+no base goes the conflict route. Location, attendees, URLs, extra
 alarms, moved occurrences, photos, birthdays and every phone number past the
 Palm's five stay byte for byte. An edit that can't be merged safely (the start
 of a series with moved occurrences, a body too big for the device to send)

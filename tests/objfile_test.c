@@ -106,7 +106,7 @@ static char *calMerge(FILE *f, const ObjScan *sc, const Appt *s, const Appt *l, 
     ical_emit(es, sizeof es, s, 1); ical_emit(el, sizeof el, l, 1);
     int vl = ical_vtimezone(vt, sizeof vt); if(vl < 0) vt[0] = 0;
     FILE *o = tmpfile();
-    *rc = obj_merge(KIND_CAL, f, 0, -1, sc, es, el, vt, "America/New_York", o);
+    *rc = obj_merge(KIND_CAL, f, 0, -1, sc, es, es, el, vt, "America/New_York", o);
     char *r = slurpF(o); fclose(o); return r;
 }
 
@@ -218,7 +218,7 @@ static void contacts(void){
     static char es[8192], el[8192];
     vcard_emit(es, sizeof es, &s, 1); vcard_emit(el, sizeof el, &l, 1);
     FILE *o = tmpfile();
-    int rc = obj_merge(KIND_CARD, f, 0, -1, &sc, es, el, "", "", o);
+    int rc = obj_merge(KIND_CARD, f, 0, -1, &sc, es, es, el, "", "", o);
     char *m = slurpF(o); fclose(o);
     const char *ex[] = {"TEL;type=CELL", NULL};
     CK(rc == 1, "one group replaced (the five phone slots)");
@@ -233,7 +233,7 @@ static void contacts(void){
     printf("== the work address edited ==\n");
     l = s; l.fields[F_city] = AddrIntern(&l, "Evanston");
     vcard_emit(el, sizeof el, &l, 1);
-    o = tmpfile(); rc = obj_merge(KIND_CARD, f, 0, -1, &sc, es, el, "", "", o);
+    o = tmpfile(); rc = obj_merge(KIND_CARD, f, 0, -1, &sc, es, es, el, "", "", o);
     m = slurpF(o); fclose(o);
     CK(rc == 1 && strstr(m, "Evanston") && !strstr(m, "9 Work Ave;Chicago"), "the last ADR replaced");
     CK(strstr(m, "item2.ADR;type=HOME:;;1 Home St;Springfield") != NULL, "the home address kept");
@@ -247,9 +247,49 @@ static char *cardMerge(const char *card, const char *addPhone, Addr *sOut){
     Addr l = s; int i = 0; while(i < 5 && l.fields[F_phone1+i]) i++;
     l.fields[F_phone1+i] = AddrIntern(&l, addPhone); l.phoneLabel[i] = 7;   /* mobile */
     static char es[4096], el[4096]; vcard_emit(es, sizeof es, &s, 1); vcard_emit(el, sizeof el, &l, 1);
-    FILE *o = tmpfile(); obj_merge(KIND_CARD, f, 0, -1, &sc, es, el, "", "", o);
+    FILE *o = tmpfile(); obj_merge(KIND_CARD, f, 0, -1, &sc, es, es, el, "", "", o);
     char *m = slurpF(o); fclose(o); fclose(f); return m;
 }
+/* A record pulled by an older parser that couldn't see "item1.EMAIL": its base
+ * and its present both lack that email. Editing the note must change the note
+ * and nothing else -- the 2-way diff against the server's copy would have
+ * rewritten the phone slots and dropped the email. */
+static void staleBase(void){
+    printf("== a record pulled by an older parser, its note edited ==\n");
+    char *card = bigCard();
+    FILE *f = tmpWith(card); ObjScan sc; char view[8192];
+    obj_scan(KIND_CARD, f, 0, -1, &sc); obj_filter(KIND_CARD, f, 0, -1, &sc, view, sizeof view);
+    Addr srv; vcard_parse(view, &srv);
+    /* the old parser's record: the same, without the grouped email (slot 1) */
+    char *old = strdup(view); char *g = strstr(old, "item1.EMAIL"); char *e = strstr(g, "\r\n") + 2;
+    memmove(g, e, strlen(e) + 1);
+    Addr base; vcard_parse(old, &base);
+    CK(base.fields[F_phone1] && !strcmp(base.fields[F_phone1], "+1 555 0101"), "the old record's slot 1 is the mobile");
+    Addr now = base; now.fields[F_note] = AddrIntern(&now, "Met at the 2016 offsite; owes me lunch");
+    static char eb[8192], es[8192], el[8192];
+    vcard_emit(eb, sizeof eb, &base, 1); vcard_emit(es, sizeof es, &srv, 1); vcard_emit(el, sizeof el, &now, 1);
+    FILE *o = tmpfile(); int rc = obj_merge(KIND_CARD, f, 0, -1, &sc, eb, es, el, "", "", o);
+    char *m = slurpF(o); fclose(o);
+    const char *ex[] = {"NOTE:", NULL};
+    CK(rc == 1, "one group: the note");
+    CK(strstr(m, "owes me lunch") != NULL, "the note went in");
+    CK(keptInOrder(card, m, ex), "every phone and email line exactly as it was, item1.EMAIL included");
+    free(m); free(old); free(card); fclose(f);
+
+    printf("== the same record, one number cleared on the device ==\n");
+    card = bigCard(); f = tmpWith(card);
+    obj_scan(KIND_CARD, f, 0, -1, &sc); obj_filter(KIND_CARD, f, 0, -1, &sc, view, sizeof view);
+    vcard_parse(view, &srv); base = srv; now = srv;
+    now.fields[F_phone3] = NULL;                       /* the work number, slot 3 */
+    vcard_emit(eb, sizeof eb, &base, 1); vcard_emit(es, sizeof es, &srv, 1); vcard_emit(el, sizeof el, &now, 1);
+    o = tmpfile(); rc = obj_merge(KIND_CARD, f, 0, -1, &sc, eb, es, el, "", "", o);
+    m = slurpF(o); fclose(o);
+    const char *ex2[] = {"TEL;type=WORK", NULL};
+    CK(rc == 1 && !strstr(m, "+1 555 0102"), "that number is gone from the contact");
+    CK(keptInOrder(card, m, ex2), "and only that line: the shift of the Palm's slots rewrote nothing");
+    free(m); free(card); fclose(f);
+}
+
 static void phonesAdded(void){
     printf("== a number added on the device ==\n");
     const char *C2 = "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Lee;Kim;;;\r\nTEL;type=HOME:111\r\nTEL;type=WORK:222\r\n"
@@ -279,7 +319,7 @@ static void todos(void){
     Todo s; CK(vtodo_parse(view, &s) == 0 && !s.completed, "it parses, open");
     Todo l = s; l.completed = 1;
     char es[2048], el[2048]; vtodo_emit(es, sizeof es, &s, 1); vtodo_emit(el, sizeof el, &l, 1);
-    FILE *o = tmpfile(); int rc = obj_merge(KIND_TODO, f, 0, -1, &sc, es, el, "", "", o);
+    FILE *o = tmpfile(); int rc = obj_merge(KIND_TODO, f, 0, -1, &sc, es, es, el, "", "", o);
     char *m = slurpF(o); fclose(o);
     const char *ex[] = {"STATUS:", NULL};
     CK(rc == 1 && hasLine(m, "STATUS:COMPLETED"), "completed");
@@ -328,6 +368,7 @@ int main(void){
     events();
     contacts();
     phonesAdded();
+    staleBase();
     todos();
     odd();
     printf("\n%s (%d failures)\n", fails ? "FAILURES" : "ALL PASS", fails);

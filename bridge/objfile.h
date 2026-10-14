@@ -22,10 +22,11 @@
  *               the sixth phone number -- is kept exactly as it was.
  *
  * Which properties the Palm owns, and how they group (DTSTART, DTEND and
- * DURATION change together), is the table in objfile.c. A group is replaced
- * only if the device's emitted lines for it differ from the server's emitted
- * lines for it, both made by the same emitter, so an untouched field is never
- * rewritten. */
+ * DURATION change together), is the table in objfile.c. A group is the
+ * device's edit only if the emitter's lines for it differ between the record
+ * as it was at its last sync (the base, sync.c) and the record now; anything
+ * else is the server's as it stands, so an untouched field is never
+ * rewritten, whatever an older parser made of it. */
 #ifndef OBJFILE_H
 #define OBJFILE_H
 #include <stdio.h>
@@ -48,16 +49,20 @@ int obj_scan(int kind, FILE *f, long off, long len, ObjScan *sc);
 int obj_filter(int kind, FILE *f, long off, long len, const ObjScan *sc,
                char *out, int cap);
 
-/* The merged object to `out`. eSrv / eLoc: the component the Palm emitter makes
- * from the server's object and from the device's record (BEGIN:VEVENT..END:VEVENT
- * and so on, no VCALENDAR or VTIMEZONE around it). vtz: the device zone's
- * VTIMEZONE block (or "") and tzid its id (or ""), added if a changed time needs
- * a zone the object lacks. Returns the number of groups replaced (0: nothing to
- * send), or -1: unreadable, or an edit refused because it would do harm (the
- * start or repeat of a series that has moved occurrences, which are tied to
- * the series' original times). */
+/* The merged object to `out`. eBase, eSrv, eLoc: the component the Palm
+ * emitter makes (BEGIN:VEVENT..END:VEVENT and so on, no VCALENDAR or VTIMEZONE)
+ * from the device's record as it was at its last sync, from the server's
+ * current copy, and from the device's record now. A group is the device's
+ * edit only where eLoc differs from eBase; eSrv says which server lines are the
+ * Palm's. vtz: the device zone's VTIMEZONE block (or "") and tzid its id (or
+ * ""), added if a changed time needs a zone the object lacks. Returns the
+ * number of groups replaced (0: nothing to send), or -1: unreadable, or an
+ * edit refused because it would do harm or can't be placed (the start or
+ * repeat of a series with moved occurrences, which are tied to its original
+ * times; an address edit when the Palm's address is no longer the one the
+ * device was given). */
 int obj_merge(int kind, FILE *f, long off, long len, const ObjScan *sc,
-              const char *eSrv, const char *eLoc, const char *vtz, const char *tzid,
-              FILE *out);
+              const char *eBase, const char *eSrv, const char *eLoc,
+              const char *vtz, const char *tzid, FILE *out);
 
 #endif

@@ -165,6 +165,22 @@ static void events(void){
        "and the guest the phone just added is still there (merged, not replaced)");
     free(after);
 
+    printf("== an edit with no base (made before this firmware's first sync) ==\n");
+    before = getUnfolded(CAL, "fid-ev.ics");
+    remove(CMAP ".bdat"); remove(CMAP ".bidx");
+    loadLocal(CPDB); ApptUnpack(recs[0].data, recs[0].len, &a);
+    char was[256]; snprintf(was, sizeof was, "%s", a.description);
+    snprintf(a.description, sizeof a.description, "Edited before the update");
+    recs[0].len = ApptPack(recs[0].data, PALM_REC_MAX, &a); saveLocal(CPDB, "DatebookDB", 0x64617465);
+    SyncStats s5 = {0}; sync_collection(&D, CPDB, CPDB, CAL, KIND_CAL, CMAP, POL_SERVER, &s5);
+    after = getUnfolded(CAL, "fid-ev.ics");
+    CK(s5.conflicts == 1 && s5.pushMod == 0, "handled as a conflict, nothing pushed");
+    CK(!strcmp(before, after), "the server's copy is exactly as it was");
+    loadLocal(CPDB); ApptUnpack(recs[0].data, recs[0].len, &a);
+    CK(!strcmp(a.description, was), "the device took the server's copy (the default policy)");
+    free(before); free(after);
+    FILE *bf = fopen(CMAP ".bidx", "rb"); CK(bf != NULL, "and the base is written again"); if(bf) fclose(bf);
+
     printf("== the series moved on the device: it has a moved occurrence, so refused ==\n");
     before = getUnfolded(CAL, "fid-ev.ics");
     loadLocal(CPDB); ApptUnpack(recs[0].data, recs[0].len, &a);

@@ -1006,7 +1006,71 @@ static void svRead(FILE*f,SvRow*r){
 
 /* per-collection sink: the shared streamed output writer + this collection's
  * open map file + the category to stamp on records pulled from the server.   */
-typedef struct { PdbW*w; FILE*mapf; int pullCat; } Sink;
+typedef struct {
+    PdbW*w; FILE*mapf; int pullCat;
+    const char*mapfile;        /* this collection's map: the old base sits beside it */
+    FILE*bdat,*bidx; int bfail; /* the new base, written as records are kept          */
+} Sink;
+
+/* ---- the base: each record as it was at its last sync ----------------------
+ * What the device changed is its record now against its record at the last
+ * sync, never against the server's copy (obj_merge). So every record the merge
+ * keeps is also written here, beside the map: <map>.bdat holds the records
+ * back to back, <map>.bidx one fixed-width row per uid, sorted, for a binary
+ * search. A record kept unsent carries its old base forward. The base is
+ * published with the map; if it can't be written whole, the old one is removed
+ * rather than left stale, and an edit without a base goes the conflict route. */
+#define BI_W 28                               /* "%010u\t%010ld\t%05d\n" */
+static void baseKeep(Sink*k,uint32_t uid,const uint8_t*data,int len){
+    if(!k->bdat || !k->bidx || k->bfail) return;
+    long off=ftell(k->bdat);
+    if(off<0 || fwrite(data,1,(size_t)len,k->bdat)!=(size_t)len){ k->bfail=1; return; }
+    if(fprintf(k->bidx,"%010u\t%010ld\t%05d\n",(unsigned)uid,off,len)!=BI_W) k->bfail=1;
+}
+/* the base of `uid` from the published files: its length, or -1 */
+static int baseGet(const char*mapfile,uint32_t uid,uint8_t*out,int cap){
+    char p[320]; snprintf(p,sizeof p,"%s.bidx",mapfile);
+    FILE*f=fopen(p,"rb"); if(!f) return -1;
+    fseek(f,0,SEEK_END); long n=ftell(f)/BI_W, lo=0, hi=n-1, off=-1; int len=0;
+    char key[12]; snprintf(key,sizeof key,"%010u",(unsigned)uid);
+    char row[BI_W+1];
+    while(lo<=hi){
+        long mid=(lo+hi)/2;
+        if(fseek(f,mid*BI_W,SEEK_SET) || fread(row,1,BI_W,f)!=BI_W) break;
+        int c=memcmp(row,key,10);
+        if(c==0){ row[BI_W]=0; off=strtol(row+11,NULL,10); len=atoi(row+22); break; }
+        if(c<0) lo=mid+1; else hi=mid-1;
+    }
+    fclose(f);
+    if(off<0 || len<=0 || len>cap) return -1;
+    snprintf(p,sizeof p,"%s.bdat",mapfile);
+    FILE*d=fopen(p,"rb"); if(!d) return -1;
+    int got = fseek(d,off,SEEK_SET)==0 ? (int)fread(out,1,(size_t)len,d) : -1;
+    fclose(d);
+    return got==len ? len : -1;
+}
+static void baseCarry(Sink*k,uint32_t uid){
+    uint8_t*b=malloc(PALM_REC_MAX); if(!b){ k->bfail=1; return; }
+    int n=baseGet(k->mapfile,uid,b,PALM_REC_MAX);
+    if(n>0) baseKeep(k,uid,b,n);
+    free(b);
+}
+/* publish (ok) or drop the new base; on a failed write the old one goes too */
+static void basePublish(Sink*k,int ok){
+    char bd[320],bi[320],td[330],ti[330];
+    snprintf(bd,sizeof bd,"%s.bdat",k->mapfile); snprintf(bi,sizeof bi,"%s.bidx",k->mapfile);
+    snprintf(td,sizeof td,"%s.tmp",bd); snprintf(ti,sizeof ti,"%s.tmp",bi);
+    int good = ok && k->bdat && k->bidx && !k->bfail;
+    if(k->bdat){ if(fclose(k->bdat)) good=0; k->bdat=NULL; }
+    if(k->bidx){ if(fclose(k->bidx)) good=0; k->bidx=NULL; }
+    if(good && !sortFile(ti)) good=0;
+    if(!ok){ remove(td); remove(ti); return; }        /* nothing published: keep the old */
+    remove(bd); remove(bi);                            /* FATFS rename won't overwrite */
+    if(!good || rename(td,bd)!=0 || rename(ti,bi)!=0){
+        remove(td); remove(ti); remove(bd); remove(bi);
+        fprintf(stderr,"[sync] base for %s not written -- edits go the conflict route until it is\n",k->mapfile);
+    }
+}
 
 static void keepBytes(Sink*k,uint32_t uid,uint8_t attr,const uint8_t*data,int len,
                       const char*href,const char*etag,uint64_t hash,const char*objuid){
@@ -1019,6 +1083,7 @@ static void keepBytes(Sink*k,uint32_t uid,uint8_t attr,const uint8_t*data,int le
         s_too_big = 1;
         return;                       /* do not write a map row for a record we dropped */
     }
+    baseKeep(k,uid,data,len);
     if(k->mapf) fprintf(k->mapf,"%u\t%s\t%s\t%llu\t%s\n",
                         (unsigned)uid,href,etag,(unsigned long long)hash,objuid?objuid:"");
 }
@@ -1070,10 +1135,14 @@ static int keepFromServer(const DavCtx*d,const char*coll,int kind,Sink*k,
 #else
 #define PUT_MAX (4L*1024*1024)
 #endif
-static int mergeEdit(const DavCtx*d,const char*coll,int kind,const char*name,
-                     const uint8_t*rec,int len,int*nchg){
+#define MERGE_NOBASE (-8)
+static int mergeEdit(const DavCtx*d,const char*coll,int kind,Sink*k,uint32_t uid,
+                     const char*name,const uint8_t*rec,int len,int*nchg){
+    uint8_t*base=malloc(PALM_REC_MAX); if(!base) return -1;
+    int bl=baseGet(k->mapfile,uid,base,PALM_REC_MAX);
+    if(bl<=0){ free(base); return MERGE_NOBASE; }
     int st=dav_get_file(d,coll,name,SRV_TMP);
-    if(st<200 || st>=300){ remove(SRV_TMP); return -1; }        /* try again next time */
+    if(st<200 || st>=300){ free(base); remove(SRV_TMP); return -1; }   /* try again next time */
     int rc=MERGE_REFUSED;
     FILE*f=fopen(SRV_TMP,"rb"), *o=NULL;
     ObjScan sc;
@@ -1083,18 +1152,22 @@ static int mergeEdit(const DavCtx*d,const char*coll,int kind,const char*name,
     if(vn<=0 || vn>=OBJ_FETCH_CAP-1) goto out;
     int tl=parse_object(kind,g_objbuf,tmp,sizeof tmp);
     if(tl<=0) goto out;
-    /* the view is done with: g_objbuf takes the server's emitted component,
-     * g_body the device's */
-    if(emit_comp(kind,tmp,tl,g_objbuf,OBJ_FETCH_CAP)<0 || emit_comp(kind,rec,len,g_body,BODY_CAP)<0) goto out;
+    /* the view is done with: g_objbuf's halves take the base's and the
+     * server's emitted components, g_body the device's */
+    int half=OBJ_FETCH_CAP/2;
+    char*eBase=g_objbuf, *eSrv=g_objbuf+half;
+    int e1=emit_comp(kind,base,bl,eBase,half), e2=emit_comp(kind,tmp,tl,eSrv,half), e3=emit_comp(kind,rec,len,g_body,BODY_CAP);
+    if(e1<0 || e2<0 || e3<0 || e1>=half-1 || e2>=half-1 || e3>=BODY_CAP-1) goto out;
     char vt[1200]=""; if(kind==KIND_CAL && ical_vtimezone(vt,sizeof vt)<=0) vt[0]=0;
     o=fopen(BODY_TMP,"wb"); if(!o) goto out;
-    int n=obj_merge(kind,f,0,-1,&sc,g_objbuf,g_body,vt,ical_tzid(),o);
+    int n=obj_merge(kind,f,0,-1,&sc,eBase,eSrv,g_body,vt,ical_tzid(),o);
     long sz=ftell(o);
     if(n<0 || sz<=0 || sz>PUT_MAX) goto out;
     *nchg=n; rc=0;
 out:
     if(o) fclose(o);
     if(f) fclose(f);
+    free(base);
     remove(SRV_TMP);
     return rc;
 }
@@ -1127,7 +1200,14 @@ static int pushLocal(const DavCtx*d,const char*coll,int kind,Sink*k,
     if(ifmatch && ifmatch[0] && !s_pull_only){
         /* AN EDIT TO AN OBJECT THE SERVER HAS: merged into the server's copy,
          * never a replacement of it (mergeEdit). */
-        int nchg=0, mr=mergeEdit(d,coll,kind,name,g_lrec,L->len,&nchg);
+        int nchg=0, mr=mergeEdit(d,coll,kind,k,uid,name,g_lrec,L->len,&nchg);
+        if(mr==MERGE_NOBASE){
+            /* No record of what it was at the last sync, so which fields are
+             * the edit is unknown: never guessed. It goes the conflict route
+             * (the caller takes the server's copy), as a 412 does. */
+            fprintf(stderr,"[sync] uid=%u: no base for %s -- handled as a conflict\n",(unsigned)uid,name);
+            return 412;
+        }
         if(mr==MERGE_REFUSED){ st=MERGE_REFUSED; goto failed; }
         if(mr<0){ st=-1; goto failed; }
         if(nchg==0){
@@ -1169,9 +1249,11 @@ failed:
         s_too_big = 1;
         return -1;
     }
-    if(k->mapf && oldHref && oldHref[0])                                  /* preserve old mapping */
+    if(k->mapf && oldHref && oldHref[0]){                                 /* preserve old mapping */
         fprintf(k->mapf,"%u\t%s\t%s\t%llu\t%s\n",(unsigned)uid,oldHref,oldEtag?oldEtag:"",
                 (unsigned long long)oldHash,objuid?objuid:"");
+        baseCarry(k,uid);                                                 /* and its base */
+    }
     return st==MERGE_REFUSED ? MERGE_REFUSED : st<=0 ? -1 : st;
 }
 
@@ -1255,7 +1337,10 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
      * top); the host keeps incremental, so it records the token for the next run. */
     if(mapf && s->newToken[0]) fprintf(mapf,"#synctoken\t%s\n",s->newToken);
 #endif
-    Sink K={ .w=w, .mapf=mapf, .pullCat=pullCat };
+    char btd[330],bti[330];
+    snprintf(btd,sizeof btd,"%s.bdat.tmp",mapfile); snprintf(bti,sizeof bti,"%s.bidx.tmp",mapfile);
+    Sink K={ .w=w, .mapf=mapf, .pullCat=pullCat, .mapfile=mapfile,
+             .bdat=fopen(btd,"wb"), .bidx=fopen(bti,"wb") };
     Sink*k=&K;
     const char*ext = kindExt(s->kind); int kind=s->kind;
 
@@ -1375,6 +1460,7 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
                 if(locBytes(s,L,g_lrec,PALM_REC_MAX)==L->len){
                     if(pdbw_rec(k->w,uid,L->attr,g_lrec,L->len)!=0){
                         fprintf(stderr,"[sync] OUTPUT FULL at uid=%u\n",(unsigned)uid); s_too_big=1; }
+                    else baseCarry(k,uid);
                 } else fprintf(stderr,"[sync] lazy read failed for uid=%u\n",(unsigned)uid);
             }
             if(k->mapf && mHref[0])
@@ -1491,8 +1577,10 @@ static int sync_one(const DavCtx*d,S*s,const char*coll,const char*mapfile,
          * would leave the next run reconciling against a state that never existed. */
         if(mapf) fclose(mapf);
         remove(mtmp);
+        basePublish(k,0);
         return -1;
     }
+    basePublish(k,mapf!=NULL);
     if(mapf){
         fclose(mapf);
         /* Publish the new map. FATFS rename() FAILS if the target exists (FR_EXIST),
