@@ -3564,6 +3564,10 @@ static void pf_edit_save_cb(lv_event_t *e){ (void)e;
     int wslot = -1;
     for(int s = 0; s < CFG_WIFI_N; s++) if(pf_edit_idx == pf_wifi_ssid(s)) wslot = s;
     int cap=0; char *dst = pf_buf(cfg, pf_edit_idx, &cap);
+    /* A DIFFERENT ACCOUNT STARTS READ-ONLY: its first syncs only read from it,
+     * whatever the last account was set to (config.h, read_only). */
+    int newAcct = pf_edit_idx == PF_USER && dst && strcmp(dst, lv_textarea_get_text(g_fields[0])) && !cfg->read_only;
+    if(newAcct) cfg->read_only = 1;
     if(wslot >= 0) appcfg_set_wifi_ssid(wslot, lv_textarea_get_text(g_fields[0]));
     else if(dst && cap) snprintf(dst, cap, "%s", lv_textarea_get_text(g_fields[0]));
     /* TYPING A COORDINATE PINS IT. Everything else that fills the location is a
@@ -3577,7 +3581,7 @@ static void pf_edit_save_cb(lv_event_t *e){ (void)e;
     }
     appcfg_save();            /* persist to SD now -> survives reboot */
     pf_edit_back();
-    toast_show("Saved");      /* same transient feedback as record save/delete */
+    toast_show(newAcct ? "New account: read-only for now" : "Saved");   /* same transient feedback as record save/delete */
 }
 
 /* on-screen keyboard for the Preferences fields. Entering a 19-character
@@ -4573,6 +4577,18 @@ static void pol_done(int i){
     if(i >= 0 && i < 3){ appcfg_mut()->policy = i; appcfg_save(); }
     show_set_panel(SET_SYNC);
 }
+/* Read-only: whether a sync may change the account at all. On for a new
+ * account (config.h, read_only), so its first syncs only ever read. */
+static const char *const RO_NAMES[] = { "Read-only", "Send my changes" };
+static void ro_done(int i){
+    if(i == 0 || i == 1){ appcfg_mut()->read_only = (i == 0); appcfg_save(); }
+    show_set_panel(SET_SYNC);
+}
+static void sp_ro_pick_cb(lv_event_t *e){ (void)e;
+    pick_open("Changes", "Read-only: a sync copies from iCloud and never changes "
+                         "it; your edits wait here. Nothing is ever deleted in iCloud.",
+              RO_NAMES, 2, appcfg()->read_only ? 0 : 1, ro_done);
+}
 static void sp_pol_pick_cb(lv_event_t *e){ (void)e;
     pick_open("Conflicts", "When the same thing changed on both sides since the "
                            "last sync, this decides which copy survives.",
@@ -4995,6 +5011,8 @@ static void show_set_panel(int tile){
         pf_add(list, row, sp_win_pick_cb, 0);
         snprintf(row, sizeof row, "Conflicts: %s", pol_name(c->policy));
         pf_add(list, row, sp_pol_pick_cb, 0);
+        snprintf(row, sizeof row, "Changes: %s", c->read_only ? "read-only" : "sent to iCloud");
+        pf_add(list, row, sp_ro_pick_cb, 0);
         sp_field_row(list, tile, PF_CAL);
         sp_field_row(list, tile, PF_TODO);
         sp_field_row(list, tile, PF_CARD);

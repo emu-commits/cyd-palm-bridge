@@ -101,6 +101,8 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 - [ ] On glass: edit an iCloud event that has invitees, a location and two alerts; on the phone it shows the edit and still has all of them `[d]`
 - [ ] On glass: edit a phone number of a contact that has a photo and more than five numbers; on the phone, the photo and the other numbers are still there (the log shows `unsent=0`; a body over 16 KB is kept unsent on the device) `[d]`
 - [ ] A contact with a big photo now arrives on the device (it used to be skipped) `[d]`
+- [x] **Read-only switch** (2026-10-14): Settings ▸ Sync ▸ Changes (read-only / send my changes), config `read_only`, on by default and turned back on when the Apple ID changes; the log and the Done line say "(read-only)"; gated by `config_test` and `fidelity` (nothing sent, edits wait, the phone's edits still come down, and turned off they go up) `[s]` (`w9_changes_pick`, `w9_sync_changes`)
+- [ ] After flashing, Settings ▸ Sync shows "Changes: read-only"; a sync's Done line ends "(read-only)", an edit made on the device doesn't reach the phone, and does once "Send my changes" is picked `[d]`
 
 ---
 
@@ -472,7 +474,9 @@ no-delete rule; in this order):
    iCloud-shaped event (overrides, attendees, two alarms, X- properties)
    and vCard (PHOTO, BDAY, eight TELs) edited on the "device" keep every
    non-Palm line.
-7. **Read-only until 6 is benched.** `sync_set_pull_only()` exists and
+7. ~~**Read-only until 6 is benched.**~~ Done 2026-10-14: config
+   `read_only`, Settings ▸ Sync ▸ Changes. The original note:
+   `sync_set_pull_only()` exists and
    works (no PUT; local edits wait), but `hotsync.c` forces it off. Make it
    a Settings ▸ Sync switch, on by default for a newly added account, so
    the first syncs of a big account can't change it at all.

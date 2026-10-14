@@ -16,6 +16,25 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-14 — Read-only: a switch, on for a new account
+
+`BACKLOG.md` §Engine 7. The engine has had a pull-only mode since the memory
+rework (no PUT; local edits wait), but `hotsync.c` forced it off. Now it is
+the owner's: **Settings ▸ Sync ▸ Changes**, "Read-only" or "Send my
+changes", config key `read_only`. It is **on by default**: a `config.ini`
+without the key reads as read-only, so a device updated to this build starts
+read-only, and editing the Apple ID turns it back on ("New account:
+read-only for now"). The log's budget line and the Done line say so.
+
+The engine's pull-only path had no gate. `fidelity` now runs it: two events
+come down read-only; the device edits one and makes a new one while the
+phone edits the other; the sync sends nothing (the server's copy is
+identical, no new object), both changes wait on the device, and the phone's
+edit still comes down; turned off, the edit and the new event go up. Its log
+line says "read-only -- the change waits on the device" instead of "push
+FAILED (HTTP 0)". `config_test` checks the default, the round trip, and a
+file without the key. Smoke shots `w9_changes_pick`, `w9_sync_changes`.
+
 ### 2026-10-14 — An edit merges into the server's copy; big objects read through a Palm view
 
 The first of the steps to finish sync (`BACKLOG.md` §Engine 6, and the parse

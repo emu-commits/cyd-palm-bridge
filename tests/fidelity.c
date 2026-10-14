@@ -243,11 +243,63 @@ static void contacts(void){
     CK(ops(&s2) == 0, "the next sync is a no-op");
 }
 
+/* ---------------------------------------------------------------- read-only */
+static int countColl(const char *coll){ NL *l = calloc(1, sizeof *l); dav_list(&D, coll, nlCb, l);
+    int n = 0; for(int i = 0; i < l->c; i++) if(strstr(l->n[i], ".ics")) n++; free(l); return n; }
+static int findDesc(const char *d){
+    loadLocal(CPDB);
+    for(int i = 0; i < nrecs; i++){ Appt a; if(!ApptUnpack(recs[i].data, recs[i].len, &a) && !strcmp(a.description, d)) return i; }
+    return -1;
+}
+static void readOnly(void){
+    printf("== read-only: the account is never changed ==\n");
+    clearColl(CAL); remove(CMAP);
+    pdb_write(CPDB, "DatebookDB", 0x44415441, 0x64617465, NULL, 0);
+    const char *A = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:RO-A\r\nDTSTART:20261102T090000\r\n"
+                    "DTEND:20261102T100000\r\nSUMMARY:Alpha\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+    const char *B = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:RO-B\r\nDTSTART:20261103T090000\r\n"
+                    "DTEND:20261103T100000\r\nSUMMARY:Bravo\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+    putRaw(CAL, "ro-a.ics", "text/calendar; charset=utf-8", A);
+    putRaw(CAL, "ro-b.ics", "text/calendar; charset=utf-8", B);
+    sync_set_pull_only(1);
+    SyncStats s0 = {0}; sync_collection(&D, CPDB, CPDB, CAL, KIND_CAL, CMAP, POL_SERVER, &s0);
+    CK(s0.pullNew == 2, "read-only still brings the account down");
+
+    /* the device edits Alpha and makes a new event; the phone edits Bravo */
+    int ia = findDesc("Alpha"); Appt a;
+    if(ia >= 0){ ApptUnpack(recs[ia].data, recs[ia].len, &a); snprintf(a.description, sizeof a.description, "Alpha, edited here");
+                 recs[ia].len = ApptPack(recs[ia].data, PALM_REC_MAX, &a); }
+    memset(&a, 0, sizeof a); a.hasTime = 1; a.sH = 8; a.eH = 9; a.year = 2026; a.month = 11; a.day = 4;
+    snprintf(a.description, sizeof a.description, "Charlie, new here");
+    Rec *x = &recs[nrecs++]; x->uid = 777; x->attr = 0; x->len = ApptPack(x->data, PALM_REC_MAX, &a);
+    saveLocal(CPDB, "DatebookDB", 0x64617465);
+    char *beforeA = getUnfolded(CAL, "ro-a.ics");
+    char *B2 = strdup(B); memcpy(strstr(B2, "Bravo"), "BRAVO", 5);
+    putRaw(CAL, "ro-b.ics", "text/calendar; charset=utf-8", B2); free(B2);
+
+    SyncStats s1 = {0}; sync_collection(&D, CPDB, CPDB, CAL, KIND_CAL, CMAP, POL_SERVER, &s1);
+    char *afterA = getUnfolded(CAL, "ro-a.ics");
+    CK(s1.pushNew == 0 && s1.pushMod == 0, "nothing pushed");
+    CK(!strcmp(beforeA, afterA) && countColl(CAL) == 2, "the server is exactly as it was: Alpha unedited, no Charlie");
+    CK(findDesc("Alpha, edited here") >= 0 && findDesc("Charlie, new here") >= 0, "both changes wait on the device");
+    CK(s1.pullMod == 1 && findDesc("BRAVO") >= 0, "and the phone's edit still comes down");
+    free(beforeA); free(afterA);
+
+    printf("== read-only turned off: what waited goes up ==\n");
+    sync_set_pull_only(0);
+    SyncStats s2 = {0}; sync_collection(&D, CPDB, CPDB, CAL, KIND_CAL, CMAP, POL_SERVER, &s2);
+    afterA = getUnfolded(CAL, "ro-a.ics");
+    CK(s2.pushMod == 1 && s2.pushNew == 1, "the edit and the new event are sent");
+    CK(strstr(afterA, "SUMMARY:Alpha\\, edited here") != NULL && countColl(CAL) == 3, "and the server has both");
+    free(afterA);
+}
+
 int main(void){
     snprintf(D.base, sizeof D.base, "%s", getenv("DAV_BASE") ? getenv("DAV_BASE") : "http://localhost:5232");
     snprintf(D.user, sizeof D.user, "palm"); snprintf(D.pass, sizeof D.pass, "palm");
     events();
     contacts();
+    readOnly();
     printf("\n%s (%d failures)\n", fails ? "FAILURES" : "ALL PASS", fails);
     return fails ? 1 : 0;
 }

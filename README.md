@@ -68,6 +68,16 @@ You can also prepare the card on a computer: copy
 `config.ini` and fill it in. On the next boot the device moves any passwords
 into its own flash and blanks them on the card ([`SECURITY.md`](SECURITY.md)).
 
+**Your iCloud account is safe to try this with:**
+- **Nothing is ever deleted in iCloud.** Deleting on the device removes the
+  record from the device only.
+- **A new account starts read-only** (Settings ▸ Sync ▸ Changes): syncs
+  copy from iCloud and never change it, and your edits wait on the device
+  until you choose "Send my changes".
+- **An edit is merged into the iCloud copy**, so what the Palm can't show
+  (invitees, locations, extra alerts, photos, the sixth phone number) is
+  kept.
+
 **Limits worth knowing:**
 - **Memos stay on the device.** iCloud Notes has no sync interface.
 - **To Do syncs to iCloud's CalDAV task lists.** The iPhone's Reminders app

@@ -1162,7 +1162,8 @@ failed:
     /* transient failure (network / 5xx): keep the record locally + preserve the
      * OLD map row so it stays dirty and is retried next sync (never poison the
      * map with a bad etag). */
-    fprintf(stderr,"[sync] push FAILED uid=%u (HTTP %d) -- kept local, will retry\n",(unsigned)uid,st);
+    if(s_pull_only) SYNC_LOG("[sync] uid=%u: read-only -- the change waits on the device\n",(unsigned)uid);
+    else fprintf(stderr,"[sync] push FAILED uid=%u (HTTP %d) -- kept local, will retry\n",(unsigned)uid,st);
     if(pdbw_rec(k->w,uid,(uint8_t)(L->attr&~REC_ATTR_DIRTY&~REC_ATTR_DELETE),g_lrec,L->len)!=0){
         fprintf(stderr,"[sync] OUTPUT FULL at uid=%u -- cannot keep the local record\n",(unsigned)uid);
         s_too_big = 1;

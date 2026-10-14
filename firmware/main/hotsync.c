@@ -838,16 +838,15 @@ static void hotsync_task(void *arg){
         size_t need   = HS_SORT_RESERVE + HS_FILE_CACHE;
         size_t budget = freeh > need ? freeh - need : 0;
         sync_set_budget(budget);
-        /* Two-way. Pull-only carried the engine through the memory rework; the
-         * stack overflow that was corrupting the heap is fixed and measured, the
-         * full sync-gate suite passes against Radicale, and a device run
-         * reconciled all three collections cleanly. Writes are back on. */
-        sync_set_pull_only(0);
+        /* Read-only is the owner's switch (Settings > Sync, config read_only),
+         * on for a new account: nothing is sent, edits wait on the device. */
+        sync_set_pull_only(cfg->read_only ? 1 : 0);
         ESP_LOGI(TAG,"budget: free %u - sort %u - files %u = %u; sync needs %u -> %s"
-                     "  (two-way: writes ENABLED)",
+                     "  (%s)",
                  (unsigned)freeh, (unsigned)HS_SORT_RESERVE, (unsigned)HS_FILE_CACHE,
                  (unsigned)budget, (unsigned)sync_working_set(),
-                 sync_working_set() <= budget ? "fits" : "REFUSED");
+                 sync_working_set() <= budget ? "fits" : "REFUSED",
+                 cfg->read_only ? "READ-ONLY: nothing is sent" : "two-way: edits are sent, merged");
     }
 
     int did=0, failed=0, protec=0, oomed=0, diskerr=0, netdown=0, overbudget=0, toobig=0;
@@ -1022,8 +1021,9 @@ static void hotsync_task(void *arg){
                      oomed, diskerr, netdown);
     }
     else
-        snprintf(msg,sizeof msg,"Done: +%d~%d up +%d~%d-%d down%.16s%.22s%.20s%.10s%.47s",
+        snprintf(msg,sizeof msg,"Done: +%d~%d up +%d~%d-%d down%.12s%.16s%.22s%.20s%.10s%.47s",
                  tot.pushNew,tot.pushMod, tot.pullNew,tot.pullMod,tot.pullDel,
+                 cfg->read_only ? " (read-only)" : "",
                  (failed||protec)?" (some skipped)":"",
                  tot.unsent ? " - edits kept unsent" : "",
                  s_clock_synced ? "" : " - CLOCK NOT SYNCED",

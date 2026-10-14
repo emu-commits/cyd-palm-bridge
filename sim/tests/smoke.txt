@@ -808,6 +808,14 @@ s w9_policy_pick
 c 120 81
 t 400
 s w9_sync_set
+# The third row is whether a sync may change the account at all. A new account
+# starts read-only; pick "Send my changes", and the row says so.
+c 120 89
+t 400
+s w9_changes_pick
+c 120 59
+t 400
+s w9_sync_changes
 c 18 225
 t 300
 # Settings > Date & Time (row 2, col 1): the tile that absorbed the old "Lock

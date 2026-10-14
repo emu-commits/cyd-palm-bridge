@@ -103,6 +103,12 @@ typedef struct {
      * syncs the whole calendar. */
     int  cal_back;             /* days before today, 0..366 (default 1)  */
     int  cal_ahead;            /* days after today, 0..730 (default 14)  */
+    /* READ-ONLY: the sync takes from the account and never changes it (no PUT;
+     * nothing is ever deleted either way). Edits and new records wait on the
+     * device. ON by default, and turned back on whenever the Apple ID changes,
+     * so the first syncs of an account can't touch it; Settings > Sync turns
+     * it off. A config.ini without the key reads as on. */
+    int  read_only;
 } Config;
 
 /* populate with safe defaults (empty creds, sensible timers). */
