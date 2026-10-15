@@ -182,6 +182,45 @@ static int run_punct_exit(void){
     return ok;
 }
 
+/* ---- the command stroke ------------------------------------------------
+ * A straight flick up and to the right, 40-90 px at 35-55 degrees, jittered:
+ * the same geometry Enter (its mirror) has always asked for, 18 px each way.
+ * Palm's menu shortcut. It must land nearly every time, Enter (its mirror)
+ * must still be Enter, and the letter and digit sets above must not lose a
+ * glyph to it -- they run through the same recogniser in this binary. */
+static int run_command(float pass){
+    int ok_n = 0, ret_ok = 0, total = 200;
+    for(int t = 0; t < total; t++){
+        double L   = 40.0 + 50.0 * urand();
+        double ang = (35.0 + 20.0 * urand()) * 3.14159265 / 180.0;
+        int npt = 8 + (int)(L / 6.0);
+        graffiti_clear();
+        for(int k = 0; k <= npt; k++){
+            double u = (double)k / npt;
+            graffiti_add_point((int)lround(20 + L*u*cos(ang) + 1.5*nrand()),
+                               (int)lround(100 - L*u*sin(ang) + 1.5*nrand()));
+        }
+        char c = graffiti_recognize(0);
+        if(c == GRAF_PUNCT) graffiti_recognize(0);
+        if(c == GRAF_COMMAND) ok_n++;
+        graffiti_clear();                               /* the same line, drawn back down */
+        for(int k = npt; k >= 0; k--){
+            double u = (double)k / npt;
+            graffiti_add_point((int)lround(20 + L*u*cos(ang) + 1.5*nrand()),
+                               (int)lround(100 - L*u*sin(ang) + 1.5*nrand()));
+        }
+        c = graffiti_recognize(0);
+        if(c == GRAF_PUNCT) graffiti_recognize(0);
+        if(c == '\n') ret_ok++;
+    }
+    double r = (double)ok_n / total, rr = (double)ret_ok / total;
+    printf("\n== the command stroke (40-90 px, 35-55 deg up and right) ==\n");
+    printf("  command: %.1f%%   its mirror read as Enter: %.1f%%\n", 100.0*r, 100.0*rr);
+    int ok = r >= pass && rr >= pass;
+    printf("  -> %s (need >=%.0f%% each)\n", ok ? "PASS" : "FAIL", 100.0*pass);
+    return ok;
+}
+
 int main(void){
     /* the recognizer logs one ESP_LOGI line per stroke to stderr; silence the
      * ~1500 lines so CI output is just the accuracy summary on stdout. */
@@ -199,6 +238,7 @@ int main(void){
     ok &= run_set(2, 0, 1, "punct",   3.0f, 0.70f, 0.85f);
     ok &= run_swipes(0.97f);
     ok &= run_punct_exit();
+    ok &= run_command(0.95f);   /* Enter, its mirror, measures 97% on the same flicks */
     printf("\n%s\n", ok ? "graf accuracy: OK" : "graf accuracy: FAIL");
     return ok ? 0 : 1;
 }

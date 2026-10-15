@@ -662,6 +662,55 @@ s p4_delete_confirm
 c 70 196
 t 1200
 s p4_deleted
+# P7: Palm's command stroke -- a straight flick up and to the right on the
+# letter pad -- arms a command (the chip reads CMD), and the next letter runs
+# it: N is New. Then the Edit menu on the form: Undo, and Graffiti Help.
+d 50 300
+t 20
+m 60 288
+t 20
+m 70 276
+t 20
+m 80 264
+t 20
+m 90 252
+t 20
+m 100 240
+t 20
+u
+t 200
+s p7_cmd_armed
+k n
+t 400
+s p7_cmd_new
+k ab
+t 200
+c 24 12
+t 300
+s p7_edit_menu
+# Undo (y 106) takes back the last stroke: "Ab" reads "A"
+c 60 106
+t 300
+s p7_undone
+# Graffiti Help (y 132): the stroke sheet, whose button reads Done when it was
+# opened from somewhere, and goes back there -- to this memo, saved on the way
+c 24 12
+t 300
+c 60 132
+t 600
+s p7_graffiti_help
+c 32 39
+t 600
+s p7_help_done
+# tidy up: the memo is saved now, so Delete it from its own menu (y 86), and
+# confirm with Delete (on the left)
+c 24 12
+t 300
+c 60 86
+t 400
+c 70 196
+t 1200
+s p7_tidied
 c 18 225
 t 300
 # HotSync -- launcher row 2 col 2, back in the middle where it is findable

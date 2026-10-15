@@ -16,6 +16,38 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-15 — The command stroke, and an Edit menu
+
+`PALM_ARCHIVE_REVIEW.md` §3.7, from the UI Guidelines' chapter on commands.
+
+- **The command stroke.** Palm's menu shortcut is a straight flick up and to
+  the right, then a letter. `graffiti.c` returns `GRAF_COMMAND` for it, the
+  mirror of Enter's flick with the same geometry (18 px each way, nearly
+  straight). The punctuation chip reads "CMD  x" while it waits and leaves
+  the same three ways (run, tapped, lapsed). The letters are Palm's own
+  (Table 4.5): N new record, D delete it (its confirmation still asks), U
+  undo, G Graffiti Help, R preferences. Each one toasts its name, as Palm's
+  command toolbar did; any other letter says there's no such command. The
+  password editor ignores the stroke.
+- **Edit menu**, on a form being written: Undo and Graffiti Help. Undo takes
+  back the last stroke (a character or a backspace). The field's text before
+  each stroke is kept in a buffer taken on the first stroke and freed with
+  the screen, so nothing stays resident. There's no Cut, Copy or Paste,
+  because nothing on the device would paste. The section appears only on
+  edit forms, so the lists' menus, whose rows the smoke taps by position,
+  don't move.
+- **Graffiti Help** is the stroke sheet the trainer already had, so it costs
+  nothing new in the pool. Opened from somewhere, its button reads Done and
+  goes back there through the resume record (P1). A form being written is
+  saved on the way, so Done reopens it on its record, a new one included.
+
+Gates: `make -C sim graf` gains the command stroke (200 flicks, 40-90 px at
+35-55°: 96.5%, and its mirror still Enter at 97.0%; the bar is 95%, which
+Enter has always shipped at). Letters, digits and punctuation are unchanged
+to the decimal, so no glyph was lost to it. Smoke: `p7_cmd_armed`,
+`p7_cmd_new` (N on the memo list), `p7_edit_menu`, `p7_undone` ("Ab" back to
+"A"), `p7_graffiti_help`, `p7_help_done` (the memo, saved), `p7_tidied`.
+
 ### 2026-10-15 — Reminders that wait for you
 
 `PALM_ARCHIVE_REVIEW.md` §3.6, Palm OS 4's Attention Manager. Event alarms

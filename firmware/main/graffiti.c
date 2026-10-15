@@ -263,6 +263,11 @@ static char gesture(void){
         float dist = sqrtf(dx*dx + dy*dy);
         if(dist > 28.0f && dx < -18.0f && dy > 18.0f && path_len(s_buf,s_n) < 1.4f*dist)
             return '\n';
+        /* ...and its mirror, bottom-left -> top-right, is Palm's command
+         * stroke. No letter or digit is a straight line upward and to the
+         * right (graf_test runs every template through this to keep it so). */
+        if(dist > 28.0f && dx > 18.0f && dy < -18.0f && path_len(s_buf,s_n) < 1.4f*dist)
+            return GRAF_COMMAND;
     }
     return 0;
 }

@@ -274,15 +274,17 @@ static void      secret_key(char c);   /* ...and how a key reaches it */
  * cleared the content set it again; a sub-screen nobody can rebuild falls
  * back to its app's own entry. */
 enum { RV_NONE, RV_LIST, RV_DETAIL, RV_EDIT, RV_DAY, RV_WEEK, RV_MONTH };
-static struct {
+typedef struct {
     char     app[16];           /* show_app() name, "Find", "Settings", or "" */
     uint8_t  view;              /* RV_*, valid while !stale */
     uint8_t  stale;
     int8_t   appdef;            /* APPDEFS index for the data views */
     uint32_t uid;
     int16_t  y; int8_t m, d;    /* Date Book's day, week or month */
-} g_resume;
+} Resume;
+static Resume g_resume;
 static int g_edit_live;
+static uint32_t g_autosaved_uid;  /* the record the last content_clear() saved, or 0 */
 static int g_day_open;          /* Date Book's Day view is the screen (write to New) */
 static int g_new_hour = -1;     /* a New event's start hour, written on the Day view */
 static const AppDef *g_edit_app;  /* the form's app and field count, kept apart: */
@@ -2766,7 +2768,17 @@ static void gref_cell(int ci, char c, int y0){
     #undef GY
 }
 
-static void gref_back_cb(lv_event_t *e){ (void)e; show_trainer(); }
+/* Graffiti Help's way back: where it was opened from (graf_help_open), else
+ * the trainer's drill, which is where the sheet lives */
+static struct { int on; Resume r; } g_gref_ret;
+static void resume_show(void);
+static void menu_close(void);
+static void gref_back_cb(lv_event_t *e){ (void)e;
+    if(!g_gref_ret.on){ show_trainer(); return; }
+    g_gref_ret.on = 0;
+    g_resume = g_gref_ret.r;
+    resume_show();
+}
 
 static void show_graf_ref(void){
     kill_kb();
@@ -2777,7 +2789,9 @@ static void show_graf_ref(void){
 
     lv_obj_t *back = lv_button_create(content);
     lv_obj_set_size(back, 60, 26); lv_obj_align(back, LV_ALIGN_TOP_LEFT, 2, 2);
-    lv_obj_t *bl=lv_label_create(back); lv_label_set_text(bl,"Drill"); lv_obj_center(bl);
+    lv_obj_t *bl=lv_label_create(back);
+    lv_label_set_text(bl, g_gref_ret.on ? "Done" : "Drill");   /* Graffiti Help goes back */
+    lv_obj_center(bl);
     lv_obj_add_event_cb(back, gref_back_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *hint = lv_label_create(content);
     lv_label_set_text(hint, "dot = start here");
@@ -2847,7 +2861,20 @@ static void show_graf_ref(void){
                           GREF_PY + (i / GREF_COLS) * GREF_CELL + 1);
     }
 }
-static void graf_ref_cb(lv_event_t *e){ (void)e; show_graf_ref(); }
+static void graf_ref_cb(lv_event_t *e){ (void)e; g_gref_ret.on = 0; show_graf_ref(); }
+
+/* Palm's Graffiti Help (Edit menu, or the command stroke then G): the stroke
+ * sheet, and Done comes back to where it was opened. A form being written is
+ * saved on the way (content_clear), so Done reopens it on its record, a new
+ * one included. */
+static void graf_help_open(void){
+    menu_close();
+    g_gref_ret.on = 1;
+    g_gref_ret.r = g_resume;
+    show_graf_ref();
+    if(g_gref_ret.r.view == RV_EDIT && !g_gref_ret.r.stale && !g_gref_ret.r.uid && g_autosaved_uid)
+        g_gref_ret.r.uid = g_autosaved_uid;
+}
 
 static void show_trainer(void){
     kill_kb();
@@ -5438,6 +5465,10 @@ static void menu_close(void){
 }
 static void menu_backdrop_cb(lv_event_t *e){ (void)e; menu_close(); }
 
+static int  edit_undo(void);
+static void graf_help_open(void);
+static void act_undo(lv_event_t *e){ (void)e; menu_close(); if(!edit_undo()) toast_show("Nothing to undo"); }
+static void act_graf_help(lv_event_t *e){ (void)e; graf_help_open(); }
 static void act_new(lv_event_t *e){ (void)e; const AppDef *a=cur_app; menu_close(); if(a){ cur_app=a; show_edit(0); } }
 static void act_delete(lv_event_t *e){ (void)e;
     uint32_t u=cur_uid; menu_close();
@@ -5886,6 +5917,13 @@ static void menu_open(void){
         menu_header(panel, "Record");
         menu_item(panel, "New", act_new);
         if(cur_uid) menu_item(panel, "Delete", act_delete);
+    }
+    /* Palm's Edit menu, on a form being written: Undo the last stroke, and
+     * the stroke sheet. (No clipboard: nothing on the device would paste.) */
+    if(g_edit_live){
+        menu_header(panel, "Edit");
+        menu_item(panel, "Undo", act_undo);
+        menu_item(panel, "Graffiti Help", act_graf_help);
     }
     menu_header(panel, "Options");
     if(cur_app) menu_item(panel, "Categories", act_categories);
@@ -6942,14 +6980,74 @@ static void show_case(void){
 static lv_obj_t   *graf_punct_lbl;
 static lv_timer_t *graf_punct_tmr;
 static void show_punct(int on);
+/* the command stroke (graffiti.h's GRAF_COMMAND) is armed: the next letter
+ * runs a command. It wears the punctuation chip ("CMD  x") and leaves the same
+ * three ways: run, tapped away, or lapsed. */
+static int g_cmd;
 static void graf_punct_lapse_cb(lv_timer_t *t){ (void)t;
     graf_punct_tmr = NULL;                       /* one-shot: LVGL deletes it */
     graffiti_punct_cancel();
+    g_cmd = 0;
     show_punct(0);
 }
 static void graf_punct_tap_cb(lv_event_t *e){ (void)e;
     graffiti_punct_cancel();
+    g_cmd = 0;
     show_punct(0);
+}
+static void show_cmd(void){
+    show_punct(1);                               /* the chip and its lapse timer */
+    if(graf_punct_lbl) lv_label_set_text(graf_punct_lbl, "CMD  x");
+}
+
+/* ---- Undo: Palm's Edit > Undo, one step back in the field being written ----
+ * The field's text as it was before the last character or backspace, kept
+ * in a buffer taken on the first stroke and given back when the screen goes
+ * (content_clear): nothing resident while no field is being written. */
+static char     *g_undo_txt;
+static lv_obj_t *g_undo_ta;
+static uint32_t  g_undo_cur;
+static void undo_snap(lv_obj_t *ta){
+    g_undo_ta = NULL;
+    if(!ta) return;
+    const char *t = lv_textarea_get_text(ta);
+    size_t n = strlen(t);
+    if(n >= MEMO_CAP) return;                    /* longer than any field allows */
+    if(!g_undo_txt && !(g_undo_txt = malloc(MEMO_CAP))) return;
+    memcpy(g_undo_txt, t, n + 1);
+    g_undo_ta = ta;
+    g_undo_cur = lv_textarea_get_cursor_pos(ta);
+}
+static int edit_undo(void){
+    if(!g_undo_ta || g_undo_ta != active_ta || !g_undo_txt) return 0;
+    lv_obj_t *ta = g_undo_ta;
+    g_undo_ta = NULL;
+    lv_textarea_set_text(ta, g_undo_txt);
+    lv_textarea_set_cursor_pos(ta, (int32_t)g_undo_cur);
+    return 1;
+}
+
+static void graf_help_open(void);
+/* Palm's menu shortcuts, the standard letters (UI Guidelines, Table 4.5):
+ * N new record, D delete it (its confirmation still asks), U undo, G
+ * Graffiti help, R preferences. Each says what it did, as Palm's command
+ * toolbar did. */
+static void cmd_run(char c){
+    if(c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+    switch(c){
+    case 'n':
+        if(cur_app && !data_app_readonly(cur_app->app)){ toast_show("New"); show_edit(0); return; }
+        break;
+    case 'd':
+        if(cur_app && cur_uid && !data_app_readonly(cur_app->app)){ ask_delete(cur_uid); return; }
+        break;
+    case 'u':
+        if(edit_undo()){ toast_show("Undo"); return; }
+        break;
+    case 'g': graf_help_open(); return;
+    case 'r': show_settings(); return;
+    }
+    toast_show("No command for that here");
 }
 static void show_punct(int on){
     if(graf_punct_tmr){ lv_timer_delete(graf_punct_tmr); graf_punct_tmr = NULL; }
@@ -6994,8 +7092,14 @@ static void graf_up_cb(lv_event_t *e){
     if(c) graf_echo(c);                                /* flash what was recognized */
     if(!c){ show_punct(0); return; }                   /* nothing / punct rejected */
     if(c == GRAF_SHIFT){ graf_case = (graf_case + 1) % 3; show_case(); return; }
-    if(c == GRAF_PUNCT){ show_punct(1); return; }       /* tap: arm punctuation */
+    if(c == GRAF_PUNCT){ g_cmd = 0; show_punct(1); return; }   /* tap: arm punctuation */
+    if(c == GRAF_COMMAND){ if(!g_secret){ g_cmd = 1; show_cmd(); } return; }
     show_punct(0);                                      /* any real char clears it */
+    if(g_cmd){                                          /* the letter after the command stroke */
+        g_cmd = 0;
+        if(c != '\b' && c != ' ' && c != '\n') cmd_run(c);   /* a swipe just cancels */
+        return;
+    }
     if(g_secret && c != '\b' && graf_case != CASE_NONE && c >= 'a' && c <= 'z')
         c = c - 'a' + 'A';                              /* the password editor has no autocap */
     if(graf_char_hook){                                 /* trainer intercepts input */
@@ -7005,6 +7109,7 @@ static void graf_up_cb(lv_event_t *e){
     }
     if(!active_ta && day_write_to_new(c) != 2){ graf_case = CASE_NONE; show_case(); return; }
     if(!active_ta) return;
+    undo_snap(active_ta);                              /* Edit > Undo takes this back */
     if(c == '\b'){                                     /* backspace: keep caps lock */
         lv_textarea_delete_char(active_ta);
         if(graf_case == CASE_SHIFT){ graf_case = CASE_NONE; show_case(); }
@@ -8906,12 +9011,14 @@ static void content_clear(void){
     if(!content) return;
     /* an edit form being left any way but Done or Cancel is saved (see
      * g_edit_live). Before the clean: the fields are still alive. */
+    g_autosaved_uid = 0;
     if(g_edit_live){
         g_edit_live = 0;
         const AppDef *was = cur_app; int was_nf = g_nfields;
         cur_app = g_edit_app; g_nfields = g_edit_nf;
         if(edit_has_text() && edit_commit()){
             uint32_t u = edit_uid ? edit_uid : data_last_new_uid();
+            g_autosaved_uid = u;
             if(g_locking) resume_view(RV_EDIT, u, 0, 0, 0);   /* reopen it on unlock */
             else          toast_show("Saved");
         }
@@ -8919,6 +9026,7 @@ static void content_clear(void){
     }
     if(!g_locking) g_resume.stale = 1;   /* the next screen says what it is */
     g_day_open = 0;
+    free(g_undo_txt); g_undo_txt = NULL; g_undo_ta = NULL;   /* its field is going */
     lv_obj_clean(content);
     /* only the screen that asks for it keeps it; Study, swapping one of its
      * own screens for another, says for itself (st_screen) */
@@ -9697,12 +9805,16 @@ void ui_test_type(const char *text){
         for(const char *p = text; *p; p++) secret_key(*p);
         return;
     }
+    /* the letter after a command stroke runs the command, as graf_up_cb does */
+    if(g_cmd && text && *text){ g_cmd = 0; show_punct(0); cmd_run(*text++); }
     /* the Day view takes its first character as the recogniser hands it over */
     if(!active_ta && text && *text && day_write_to_new(*text) == 1) text++;
     if(!active_ta) return;
     if(!text){ lv_textarea_set_text(active_ta, ""); return; }   /* clear */
-    for(const unsigned char *p = (const unsigned char *)text; *p; p++)
+    for(const unsigned char *p = (const unsigned char *)text; *p; p++){
+        undo_snap(active_ta);
         lv_textarea_add_char(active_ta, (uint32_t)(unsigned char)ta_autocap(active_ta, (char)*p));
+    }
 }
 #endif
 

@@ -13,6 +13,10 @@
  * resolves (to a punctuation char, or nothing if rejected). Period is the tap that
  * follows the shift -- i.e. two taps, exactly as on PalmOS. */
 #define GRAF_PUNCT '\x02'
+/* the command stroke: a straight diagonal from lower left to upper right (the
+ * mirror of Enter). Palm's menu shortcut -- the NEXT letter runs a command
+ * (N New, D Delete...). The caller holds that state, as it does the shift. */
+#define GRAF_COMMAND '\x03'
 
 /* disarm a punctuation shift without reading a stroke (tap-to-cancel and the
  * timeout in the UI; a right-to-left swipe while armed also cancels, inside
@@ -25,7 +29,8 @@ void graffiti_add_point(int x, int y);  /* add a sampled point during the stroke
 /* recognize the buffered stroke against the letter set (digits==0, lowercase a-z)
  * or the digit set (digits!=0). Gestures: horizontal L->R swipe = ' ' (space),
  * R->L = '\b' (backspace), vertical bottom->top = GRAF_SHIFT, single tap =
- * GRAF_PUNCT (arms punctuation for the next stroke). Returns the character/gesture
+ * GRAF_PUNCT (arms punctuation for the next stroke), straight diagonal
+ * top-right->bottom-left = '\n', bottom-left->top-right = GRAF_COMMAND. Returns the character/gesture
  * code, or 0 if none/too short. */
 char graffiti_recognize(int digits);
 

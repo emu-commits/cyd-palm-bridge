@@ -75,10 +75,12 @@ tests the sync separately. One commit each.
 - [ ] Is the speaker connector populated (2-pin, beside the SD slot on most
   ESP32-2432S028R revisions, GPIO26 through an amplifier)? If so, alarm sound
   is unblocked `[d]`
-- [ ] **P7 — an Edit menu and the command stroke** (§3.7): with a field open
-  the menu has Edit (Undo, Select All, Graffiti Help, which opens the stroke
-  reference); the Graffiti command stroke (lower left to upper right) then a
-  letter runs a command: N New, D Delete (with its confirmation), F Find… `[s]`
+- [x] **P7 — an Edit menu and the command stroke** (§3.7): on an edit form the
+  menu has Edit (Undo, Graffiti Help, which opens the stroke reference; no
+  clipboard, as nothing would paste); the Graffiti command stroke (lower left
+  to upper right) then a letter runs a command: N New, D Delete (with its
+  confirmation), U Undo, G Graffiti Help, R Settings `[s]` (2026-10-15;
+  `p7_*`, and the command stroke in `make -C sim graf`)
 - [ ] P7 on glass: the command stroke recognises reliably and never fires by
   accident while writing `[d]`
 - [ ] **P8 — tips** (§3.8): an "i" on the dialogs that hide a gesture (Date
