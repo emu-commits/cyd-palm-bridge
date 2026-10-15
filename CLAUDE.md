@@ -262,6 +262,29 @@ open tasks and those done in two weeks. Gates: `objfile_test`,
 `data` gate. **Next is the owner's test with the 10-year account**: the
 `[d]` items in `BACKLOG.md`'s first RESUME HERE, read-only first.
 
+**2026-10-15: Palm behaviours, on branch `claude/palm-behaviours`** (on top
+of the sync branch, which is still to be tested on the device).
+`docs/PALM_ARCHIVE_REVIEW.md` measured the firmware against Palm's UI
+Guidelines and Zen of Palm (github.com/ardiri/dev-palmos; ideas only, its
+Palm OS source is all rights reserved). The owner had the bug and the seven
+items built, one commit each (`BACKLOG.md`'s "Palm behaviours" RESUME HERE,
+`BUILD_PROGRESS.md`):
+- P1 waking resumes the screen the lock went over (`resume_show()`, the
+  `g_resume` record), and leaving an edit form saves it (`g_edit_live` in
+  `content_clear()`);
+- P2 writing on the Day view makes an event; P3 the title opens the menu,
+  which remembers its last item; P4 Palm's alert order, titles, nothing
+  dimmed; P5 Find matches word starts; P6 reminders (`data_cal_alarms()`,
+  one list on wake, OK only); P7 the command stroke (`GRAF_COMMAND`) and an
+  Edit menu; P8 Tips.
+- Found on the way and fixed: a repeat set on the device packed a 1920 end
+  and showed on no day (`ApptUnpack()` now reads an end with no month or day
+  as none).
+- Smoke commands added: `R <back> <ahead>` (reminders over a span). The
+  `p1_*`..`p8_*` shots are the screens to look at.
+- `run_gates.sh`'s `probe_partial` fails ("discovery from the server's
+  root") on `5150be6` too, with Radicale 3.8.3; it's the sync branch's.
+
 1. **S6, the bench**, is the owner's (`[d]` items in `BACKLOG.md`). Any
    further work follows `SRS_PLAN.md` §10, keeping to its §7 budgets:
    - the screens use `course.c`, `srs.c` and `study.c` as they are; logic

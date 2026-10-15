@@ -3,6 +3,11 @@
 _Written 2026-10-15. Source: [github.com/ardiri/dev-palmos](https://github.com/ardiri/dev-palmos)
 (commit `a4fb37d`, cloned into a scratch directory, nothing copied into this repo). Line numbers are as of `5150be6`._
 
+> **Status (2026-10-15):** everything in §3 is built, on branch
+> `claude/palm-behaviours` (one commit each, P1 to P8 in `BACKLOG.md`). The
+> bench checks are that list's `[d]` items. The speaker connector (§3.6) is
+> one of them.
+
 **In short.** The archive is a 1.7 GB historical collection: Palm OS SDKs (3.0
 to 5 R3), the 3.5/4.0/5.0 reference PDFs, conference slides from 1999 to 2004,
 "limited release" OS source for 3.0, 3.5 and 4.0, a few desktop utilities and
