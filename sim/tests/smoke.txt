@@ -317,6 +317,14 @@ t 200
 c 150 140
 t 200
 s cal_details
+# P8: the Details sheet's "i" (top right): what Alarm and Repeat do, and that
+# writing on the Day view makes an event
+c 180 88
+t 300
+s p8_details_tips
+c 60 233
+t 300
+s p8_details_back
 c 210 260
 t 200
 c 40 188
@@ -711,6 +719,20 @@ t 400
 c 70 196
 t 1200
 s p7_tidied
+# P8: Find (the silkscreen's magnifier), which no walk opened before: words
+# that START with the query, and the "i" (Tips) that says so.
+c 222 226
+t 400
+k mee
+t 300
+s p8_find
+c 226 44
+t 300
+s p8_find_tips
+c 60 212
+t 300
+c 18 225
+t 300
 c 18 225
 t 300
 # HotSync -- launcher row 2 col 2, back in the middle where it is findable

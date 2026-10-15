@@ -3642,6 +3642,43 @@ static void alert_titled(const char *title, const char *msg){
 }
 static void alert_show(const char *msg){ alert_titled(NULL, msg); }
 
+/* Palm's Tips: the "i" in a dialog's corner, and behind it a few lines on
+ * what the dialog's parts are for, and the shortcuts nothing on the screen
+ * shows (Address Book's tips were where people learned to tap beside a name
+ * for its note). The text is a static string; the "i" is a 20 px circle. */
+static void tips_cb(lv_event_t *e){ alert_titled("Tips", (const char *)lv_event_get_user_data(e)); }
+static lv_obj_t *tips_btn(lv_obj_t *par, const char *text){
+    lv_obj_t *b = lv_button_create(par);
+    lv_obj_set_size(b, 20, 20);
+    lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_pad_all(b, 0, 0);
+    lv_obj_set_style_bg_color(b, COL_BODY, 0);
+    lv_obj_set_style_border_width(b, 1, 0);
+    lv_obj_set_style_border_color(b, COL_LINE, 0);
+    lv_obj_set_style_shadow_width(b, 0, 0);
+    lv_obj_set_ext_click_area(b, 6);                     /* a small mark, a finger-sized target */
+    lv_obj_add_flag(b, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_t *l = lv_label_create(b);
+    lv_label_set_text(l, "i");
+    lv_obj_set_style_text_font(l, &lv_font_palm_bold, 0);
+    lv_obj_set_style_text_color(l, COL_LINE, 0);
+    lv_obj_center(l);
+    lv_obj_add_event_cb(b, tips_cb, LV_EVENT_CLICKED, (void *)text);
+    return b;
+}
+static const char TIPS_DETAILS_CAL[] =
+    "\xC2\xB7 Alarm: when it's due, Reminders lists it, even if the screen was off.\n"
+    "\xC2\xB7 Repeat: each tap steps None, Daily, Weekly, Monthly, Yearly.\n"
+    "\xC2\xB7 On the Day view, write a number to start an event at that hour, "
+    "or a letter to start its description.";
+static const char TIPS_DETAILS[] =
+    "\xC2\xB7 Category files this record; the list's category (top right) shows one at a time.\n"
+    "\xC2\xB7 Tap a screen's title for its menu.";
+static const char TIPS_FIND[] =
+    "\xC2\xB7 Find looks in Date Book, Address, To Do and Memo for words that start "
+    "with what you write: \"the\" finds \"Then\", not \"Lathe\".\n"
+    "\xC2\xB7 Tap a result to open it.";
+
 /* a transient, auto-dismissing confirmation (Palm-style). Unlike alert_show
  * (a modal you tap to close), this is a non-clickable pill just above the Graffiti
  * strip that clears itself after ~900 ms -- for closing the loop on save/delete
@@ -6044,9 +6081,11 @@ static void show_find(void){
     lv_textarea_set_one_line(ta, true);
     lv_textarea_set_max_length(ta, sizeof g_findq - 1);
     lv_textarea_set_text(ta, "");                  /* set before cb so it doesn't fire */
-    lv_obj_set_width(ta, LCD_W - 52);
+    lv_obj_set_width(ta, LCD_W - 76);
     lv_obj_set_pos(ta, 46, 2);
     lv_obj_add_event_cb(ta, findq_ta_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_t *ti = tips_btn(content, TIPS_FIND);
+    lv_obj_align(ti, LV_ALIGN_TOP_RIGHT, -4, 8);
     active_ta = ta;                                /* Graffiti types the query */
 
     build_find_results();
@@ -6469,6 +6508,8 @@ static void details_open(void){
     lv_obj_set_style_pad_all(panel, 4, 0);
     lv_obj_set_style_pad_row(panel, 2, 0);
     lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t *ti = tips_btn(panel, cur_app->app == APP_CAL ? TIPS_DETAILS_CAL : TIPS_DETAILS);
+    lv_obj_align(ti, LV_ALIGN_TOP_RIGHT, 0, 0);
 
     if(cur_app->app == APP_CAL){    /* Date Book: alarm + repeat above the category */
         lv_obj_t *eh = lv_label_create(panel);

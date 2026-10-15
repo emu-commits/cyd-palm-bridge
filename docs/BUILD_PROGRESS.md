@@ -16,6 +16,32 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-15 — Tips: the "i" that teaches what the screen can't show
+
+`PALM_ARCHIVE_REVIEW.md` §3.8. Palm's dialogs carried an "i" in the corner
+with a few lines on what each part is for and the shortcuts nothing on the
+screen shows. Address Book's tips were where people learned to tap beside a
+name for its note. The last three items added exactly that kind of shortcut.
+
+`tips_btn()` is a 20 px circled "i" (a 6 px larger click area) that opens
+`alert_titled("Tips", …)`. It sits on:
+
+- **the Details sheet**: for Date Book, what Alarm does (Reminders lists it,
+  even after a dark screen), what Repeat steps through, and that writing on
+  the Day view makes an event. For the other apps, what a category does and
+  that a title opens its menu.
+- **Find**: words that start with the query ("the" finds "Then", not
+  "Lathe"), and a tap on a result opens it. The query field gave up 24 px
+  for it.
+
+The text is three static strings in flash.
+
+Gates: the smoke opens Find for the first time (`p8_find`: "mee" finds
+"Board meeting" and "Meeting notes"), then `p8_find_tips`,
+`p8_details_tips` and `p8_details_back` (OK returns to the sheet). Against
+the baseline, the only other changed shots are `cal_details` (the "i") and
+`cal_event_in_week` (the repeat fix).
+
 ### 2026-10-15 — The command stroke, and an Edit menu
 
 `PALM_ARCHIVE_REVIEW.md` §3.7, from the UI Guidelines' chapter on commands.

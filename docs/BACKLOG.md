@@ -83,8 +83,11 @@ tests the sync separately. One commit each.
   `p7_*`, and the command stroke in `make -C sim graf`)
 - [ ] P7 on glass: the command stroke recognises reliably and never fires by
   accident while writing `[d]`
-- [ ] **P8 — tips** (§3.8): an "i" on the dialogs that hide a gesture (Date
-  Book's Details, Find), with a short text that teaches it `[s]`
+- [x] **P8 — tips** (§3.8): an "i" on the dialogs that hide a gesture (Date
+  Book's Details, Find), with a short text that teaches it `[s]` (2026-10-15;
+  `p8_find_tips`, `p8_details_tips`)
+- [ ] P7/P8 on glass: the "i" is easy to hit and the tips read well; the
+  command stroke on the letter pad, then N, opens New `[d]`
 
 ## RESUME HERE — the SRS app, the Planner, and two firmware items (approved 2026-09-29)
 
