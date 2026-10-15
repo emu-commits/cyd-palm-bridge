@@ -5918,7 +5918,7 @@ static void menu_open(void){
 }
 
 /* ------------------------- Find (global search, silkscreen) -------------
- * Palm's Find scans every app for a substring. A Graffiti query field drives
+ * Palm's Find scans every app for words that start with the query. A Graffiti query field drives
  * bridge/find.c's streaming search over all four PDBs; results list as
  * "<app>: <snippet>", and tapping one opens that record in its app. Re-runs
  * live per keystroke (small PDBs, interactive mode -> no TLS competing). */

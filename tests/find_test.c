@@ -53,10 +53,11 @@ static void buildMemo(const char*p){
     static const char*txt[]={
         "Shopping list\nmilk, eggs, bread",
         "Ideas for the garden project",
-        "WiFi password is on the fridge" };
-    for(int i=0;i<3;i++){ r[n]=(PdbRec){ .attr=0,.uniqueID=(uint32_t)(i+1),
+        "WiFi password is on the fridge",
+        "How to use a lathe" };
+    for(int i=0;i<4;i++){ r[n]=(PdbRec){ .attr=0,.uniqueID=(uint32_t)(i+1),
         .data=(const uint8_t*)txt[i],.len=(int)strlen(txt[i]) }; n++; }
-    pdb_write(p,"MemoDB",0x44415441,0x6D656D6F,r,3);
+    pdb_write(p,"MemoDB",0x44415441,0x6D656D6F,r,4);
 }
 
 static int run(const char*path,int app,const char*q){
@@ -71,16 +72,25 @@ int main(void){
     buildCal(CAL); buildTodo(TD); buildAddr(AD); buildMemo(MM);
 
     printf("== Find across apps ==\n");
-    /* case-insensitive substring, spanning description + note + all addr fields */
+    /* case-insensitive, at the start of a word, spanning description + note +
+     * all addr fields */
     CK(run(CAL,FIND_CAL,"dentist")==1,"cal: 'dentist' matches description");
     CK(run(CAL,FIND_CAL,"BUDGET")==1,"cal: case-insensitive note match");
-    CK(run(CAL,FIND_CAL,"a")>=2,"cal: common letter matches several");
+    CK(run(CAL,FIND_CAL,"a")==1,"cal: one letter finds only words that START with it (appointment)");
     CK(run(TD,FIND_TODO,"dentist")==1,"todo: matches 'Call dentist'");
     CK(run(AD,FIND_ADDR,"acme")==1,"addr: matches company field");
-    CK(run(AD,FIND_ADDR,"555")==2,"addr: phone substring matches both");
+    CK(run(AD,FIND_ADDR,"555")==2,"addr: phone prefix matches both");
+    CK(run(AD,FIND_ADDR,"1212")==1,"addr: a number after '-' starts a word");
     CK(run(AD,FIND_ADDR,"robinson")==1,"addr: last-name match, case-insensitive");
     CK(run(MM,FIND_MEMO,"wifi")==1,"memo: plain-text body match");
     CK(run(MM,FIND_MEMO,"eggs")==1,"memo: match past a newline");
+
+    /* Palm's own example: "the" finds "Then", not "Lathe" */
+    CK(run(MM,FIND_MEMO,"the")==2,"memo: 'the' finds 'the garden' and 'the fridge', not 'lathe'");
+    CK(run(MM,FIND_MEMO,"lathe")==1,"memo: ...though 'lathe' itself is found");
+    CK(run(MM,FIND_MEMO,"arden")==0,"memo: the middle of a word is not a match");
+    CK(run(TD,FIND_TODO,"ilk")==0,"todo: 'ilk' is inside 'milk', so no match");
+    CK(run(AD,FIND_ADDR,"inson")==0,"addr: 'inson' is inside 'Robinson', so no match");
 
     /* negative + edge cases */
     CK(run(CAL,FIND_CAL,"zzz")==0,"no match returns 0");

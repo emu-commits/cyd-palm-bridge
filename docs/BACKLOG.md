@@ -61,8 +61,9 @@ tests the sync separately. One commit each.
   `p4_remove_course`)
 - [ ] P4 on glass: the delete dialog of a synced event (title, question, the
   "From this device only" note and the buttons don't touch) `[d]`
-- [ ] **P5 — Find matches the start of words** (§3.5): "the" finds "Then",
-  not "Lathe"; `find_test` covers it `[s]`
+- [x] **P5 — Find matches the start of words** (§3.5): "the" finds "Then",
+  not "Lathe"; `find_test` covers it `[s]` (2026-10-15; host-tested, no screen
+  changed)
 - [ ] **P6 — reminders that wait** (§3.6): event alarms that came due while the
   screen was dark are listed once on wake, dismissed together with OK `[s]`
 - [ ] P6 on glass: an event with an alarm five minutes out; leave the device

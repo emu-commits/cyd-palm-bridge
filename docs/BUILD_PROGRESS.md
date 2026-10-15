@@ -16,6 +16,26 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-15 — Find matches the start of words
+
+`PALM_ARCHIVE_REVIEW.md` §3.5. The UI Guidelines define Find as "a
+prefix-only case-insensitive search on each word": "the" finds "Then" and
+"There", not "Lathe". They also warn against "improving" on it, because
+people know the built-in behaviour. Ours matched anywhere, so a short query
+in a big account filled the 60-row result cap with words that only contained
+it.
+
+`ci_find_n()` (`bridge/find.c`) now accepts a match only at the start of the
+text or after a byte that isn't a letter or digit. Bytes past ASCII count as
+letters (CP1252's é, ü), so "ller" doesn't start a word inside "Müller". A
+digit after "-" does start one, so "1212" still finds "555-1212".
+
+Gate: `find_test` (in `make test`) gains the guide's own example as a memo
+("How to use a lathe": "the" finds two memos, not it), middles of words in
+each app that must not match, and the phone number after a dash. Its old
+"a common letter matches several" check now expects the one word that starts
+with "a". Run against the old matcher, five of the checks fail.
+
 ### 2026-10-15 — Palm's alert conventions
 
 `PALM_ARCHIVE_REVIEW.md` §3.4, from the UI Guidelines' chapter on forms:
