@@ -29,6 +29,51 @@ Tuxemon (GPLv3 data, mostly CC-BY-SA art) converted into one file on the card,
 on-screen controls and an Auto-play checkbox. **Nothing is built. Don't start
 G1 without the owner's yes;** its open questions are §13 Q1–Q5.
 
+## RESUME HERE — Palm behaviours from the archive review (approved 2026-10-15)
+
+`PALM_ARCHIVE_REVIEW.md` measured the firmware against Palm's UI Guidelines
+and Zen of Palm (from github.com/ardiri/dev-palmos). The owner: "treat the
+bug and 7 items as backlog work … work through them". Its §3 has the rule,
+the current behaviour and the change for each. On branch
+`claude/palm-behaviours`, which sits on the untested sync work: the owner
+tests the sync separately. One commit each.
+
+- [ ] **P1 — come back to where you were, and never lose an edit** (the bug,
+  §3.1). The lock's `content_clear()` threw the open app away, unlock always
+  built the launcher, and an edit form open when the screen slept (or on
+  Home) was discarded. Save an edit with at least one character on the way
+  out (lock and Home; the form's Cancel still discards), remember the screen,
+  and rebuild it on unlock `[s]`
+- [ ] P1 on glass: write half a memo, let the screen sleep, wake and swipe up:
+  the memo is there, saved; the same for an event; Home from an edit saves it `[d]`
+- [ ] **P2 — write in the Day view to make an event** (§3.2): a digit sets the
+  hour, a letter starts the description; New stays `[s]`
+- [ ] P2 on glass: writing "3" on the day view opens a 3 pm event on that day `[d]`
+- [ ] **P3 — tap the title to open the menu; it reopens on the last item**
+  (§3.3) `[s]`
+- [ ] P3 on glass: the title is an easy target and doesn't fight the category
+  pop-up `[d]`
+- [ ] **P4 — alert conventions** (§3.4): the verb on the left and Cancel on
+  the right, alert titles that name the operation, no dimmed buttons (a tap
+  says why instead) `[s]`
+- [ ] **P5 — Find matches the start of words** (§3.5): "the" finds "Then",
+  not "Lathe"; `find_test` covers it `[s]`
+- [ ] **P6 — reminders that wait** (§3.6): event alarms that came due while the
+  screen was dark are listed once on wake, dismissed together with OK `[s]`
+- [ ] P6 on glass: an event with an alarm five minutes out; leave the device
+  asleep past it; wake: the list names it `[d]`
+- [ ] Is the speaker connector populated (2-pin, beside the SD slot on most
+  ESP32-2432S028R revisions, GPIO26 through an amplifier)? If so, alarm sound
+  is unblocked `[d]`
+- [ ] **P7 — an Edit menu and the command stroke** (§3.7): with a field open
+  the menu has Edit (Undo, Select All, Graffiti Help, which opens the stroke
+  reference); the Graffiti command stroke (lower left to upper right) then a
+  letter runs a command: N New, D Delete (with its confirmation), F Find… `[s]`
+- [ ] P7 on glass: the command stroke recognises reliably and never fires by
+  accident while writing `[d]`
+- [ ] **P8 — tips** (§3.8): an "i" on the dialogs that hide a gesture (Date
+  Book's Details, Find), with a short text that teaches it `[s]`
+
 ## RESUME HERE — the SRS app, the Planner, and two firmware items (approved 2026-09-29)
 
 **Done 2026-09-29:** the two firmware items and the Planner (`[s]` below;
