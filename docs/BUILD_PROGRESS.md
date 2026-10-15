@@ -16,6 +16,26 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-15 — A repeat set on the device repeats
+
+Found while building reminders (P6): the smoke's `cal_event_in_week`, the
+shot meant to prove an event made on the device was written, has shown an
+empty week since the repeat work (`3839f19`). Its exit code stayed green. The event
+was written. But the Details sheet sets a repeat and no end, so the end
+date packed as zeros, which reads back as 1920-00-00. Once
+`appt_occurs_on()` honoured end dates, as it must for iCloud's `UNTIL`, the
+event occurred on no day: not in the Day view, the week, the month dots or
+the lock's NEXT.
+
+- `edit_commit()` saves a repeat with no end as `repeatForever`.
+- `ApptUnpack()` reads an end with no month or day as no end, so events
+  already saved this way on a device show again, and a sync doesn't send
+  their 1920 end to the account.
+
+Gates: `recur_test` (a device-made repeat packs, reads back with no end,
+and is on its day and each after; both checks fail on the old decoder).
+`cal_event_in_week` now reads "Thu 10/15  1 event".
+
 ### 2026-10-15 — Find matches the start of words
 
 `PALM_ARCHIVE_REVIEW.md` §3.5. The UI Guidelines define Find as "a

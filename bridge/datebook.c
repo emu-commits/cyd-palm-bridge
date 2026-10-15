@@ -48,6 +48,12 @@ int ApptUnpack(const uint8_t *r, int len, Appt *a){
         uint16_t end = WORD(idx++);
         a->repeatForever = (end == 0xFFFF);
         if(!a->repeatForever) unpackDate(end,&a->endYear,&a->endMonth,&a->endDay);
+        /* an end with no month or day is no date at all: the device's own
+         * Details sheet once wrote one (a repeat with its end left as zeros,
+         * packed as 1920), and it means "no end", not "ended long ago" */
+        if(!a->repeatForever && (a->endMonth < 1 || a->endDay < 1)){
+            a->repeatForever = 1; a->endYear = a->endMonth = a->endDay = 0;
+        }
         uint16_t fo = WORD(idx++);
         a->repeatFreq = fo & 0xFF; a->repeatOn = fo >> 8;
         a->startOfWeek = WORD(idx++) & 0xFF;

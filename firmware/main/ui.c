@@ -1596,7 +1596,14 @@ static int edit_commit(void){
         a.hasAlarm = g_ev_alarm;                          /* Details sheet: alarm + repeat */
         if(g_ev_alarm && a.alarmAdv <= 0){ a.alarmAdv = 5; a.alarmUnit = 0; }  /* default 5 min */
         if(g_ev_repeat == repeatNone){ a.hasRepeat = 0; a.repeatType = repeatNone; }
-        else { a.hasRepeat = 1; a.repeatType = g_ev_repeat; if(a.repeatFreq <= 0) a.repeatFreq = 1; }
+        else {
+            a.hasRepeat = 1; a.repeatType = g_ev_repeat; if(a.repeatFreq <= 0) a.repeatFreq = 1;
+            /* The Details sheet picks a repeat but no end, so it repeats for
+             * ever unless the record already ends. Without this the end
+             * date packed as zeros, which reads back as 1920, and the event
+             * occurred on no day at all. */
+            if(!a.repeatForever && a.endYear < 1904) a.repeatForever = 1;
+        }
         ok = data_save_cal(edit_uid,edit_cat,&a);
     } else if(cur_app->app == APP_TODO){
         Todo t; if(!data_get_todo(edit_uid,&t)) memset(&t,0,sizeof t);

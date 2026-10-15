@@ -78,6 +78,20 @@ int main(void){
     Appt leap = ev("DTSTART;VALUE=DATE:20240229\r\nRRULE:FREQ=YEARLY\r\n");
     CK(appt_occurs_on(&leap, 2028, 2, 29) && !appt_occurs_on(&leap, 2027, 2, 28), "a leap day, in leap years");
 
+    printf("== a repeat made on the device with no end ==\n");
+    {
+        /* what the Details sheet used to save: Repeat Daily, the end left as
+         * zeros, which packed as 1920-00-00 and so occurred on no day */
+        Appt z; memset(&z, 0, sizeof z);
+        z.hasTime = 1; z.sH = 9; z.eH = 10; z.year = 2026; z.month = 10; z.day = 15;
+        z.hasRepeat = 1; z.repeatType = repeatDaily; z.repeatFreq = 1;
+        snprintf(z.description, sizeof z.description, "Daily");
+        uint8_t pk[256]; int l = ApptPack(pk, sizeof pk, &z);
+        Appt r; CK(l > 0 && ApptUnpack(pk, l, &r) == 0, "it packs and reads back");
+        CK(r.repeatForever, "an end with no month or day reads as no end");
+        CK(appt_occurs_on(&r, 2026, 10, 15) && appt_occurs_on(&r, 2026, 10, 20), "so it's on its day and every day after");
+    }
+
     printf("\n%s (%d failures)\n", fails ? "FAILURES" : "ALL PASS", fails);
     return fails ? 1 : 0;
 }

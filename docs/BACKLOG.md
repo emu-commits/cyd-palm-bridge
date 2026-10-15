@@ -64,6 +64,9 @@ tests the sync separately. One commit each.
 - [x] **P5 — Find matches the start of words** (§3.5): "the" finds "Then",
   not "Lathe"; `find_test` covers it `[s]` (2026-10-15; host-tested, no screen
   changed)
+- [ ] An event made on the device with Repeat Daily (Details) shows on its day
+  and the days after, and on the phone after a sync with "Send my changes";
+  one made that way before this fix shows again too `[d]`
 - [ ] **P6 — reminders that wait** (§3.6): event alarms that came due while the
   screen was dark are listed once on wake, dismissed together with OK `[s]`
 - [ ] P6 on glass: an event with an alarm five minutes out; leave the device
