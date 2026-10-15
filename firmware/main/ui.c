@@ -1108,12 +1108,33 @@ static void confirm_delete_cb(lv_event_t *e){ (void)e;
      * saved on the way out, or the record comes straight back */
     if(a && u){ g_edit_live = 0; data_delete(a->app, u); cur_uid = 0; app_reopen(a); toast_show("Deleted"); }
 }
+/* A Palm dialog's title: a black strip across the top of the panel naming the
+ * operation ("Delete Memo"), so the question under it can be read in that
+ * light. Drawn over the panel's padding, edge to edge. */
+static void dlg_title(lv_obj_t *panel, int panel_w, int pad_x, int pad_y, const char *text){
+    lv_obj_t *t = lv_label_create(panel);
+    lv_obj_set_width(t, panel_w - 2);                    /* inside the 1 px border */
+    lv_obj_set_style_bg_color(t, COL_LINE, 0);
+    lv_obj_set_style_bg_opa(t, LV_OPA_COVER, 0);
+    lv_obj_set_style_text_color(t, COL_BODY, 0);
+    lv_obj_set_style_text_font(t, &lv_font_palm_bold, 0);
+    lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_pad_ver(t, 2, 0);
+    lv_label_set_text(t, text);
+    lv_obj_add_flag(t, LV_OBJ_FLAG_IGNORE_LAYOUT);       /* a flex panel leaves it be */
+    lv_obj_align(t, LV_ALIGN_TOP_LEFT, -pad_x, -pad_y);
+}
+#define DLG_TITLE_H 18                                   /* what the strip takes */
+
 static void ask_delete(uint32_t uid){
     if(g_confirm || !cur_app || data_app_readonly(cur_app->app)) return;
     del_uid = uid;
     const char *what = cur_app->app==APP_CAL ? "event"
                      : cur_app->app==APP_ADDR ? "address"
                      : cur_app->app==APP_TODO ? "item" : "memo";
+    const char *title = cur_app->app==APP_CAL ? "Delete Event"
+                      : cur_app->app==APP_ADDR ? "Delete Address"
+                      : cur_app->app==APP_TODO ? "Delete To Do" : "Delete Memo";
 
     g_confirm = lv_obj_create(lv_layer_top());
     lv_obj_set_size(g_confirm, LCD_W, LCD_H);
@@ -1127,7 +1148,7 @@ static void ask_delete(uint32_t uid){
     lv_obj_t *panel = lv_obj_create(g_confirm);
     lv_obj_set_width(panel, 200);
     int dev_only = data_app_syncs(cur_app->app);
-    lv_obj_set_height(panel, dev_only ? 112 : 96);   /* fixed: LV_SIZE_CONTENT collapses under the bottom-aligned buttons */
+    lv_obj_set_height(panel, (dev_only ? 112 : 96) + DLG_TITLE_H);   /* fixed: LV_SIZE_CONTENT collapses under the bottom-aligned buttons */
     lv_obj_center(panel);
     lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
     lv_obj_set_style_border_width(panel, 1, 0);
@@ -1136,31 +1157,35 @@ static void ask_delete(uint32_t uid){
     lv_obj_set_style_pad_all(panel, 10, 0);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);   /* absorb clicks */
+    dlg_title(panel, 200, 10, 10, title);
 
     lv_obj_t *q = lv_label_create(panel);
     lv_label_set_long_mode(q, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(q, 180);
     lv_label_set_text_fmt(q, "Delete this %s?", what);
     lv_obj_set_style_text_font(q, &lv_font_palm_bold, 0);
-    lv_obj_align(q, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_align(q, LV_ALIGN_TOP_LEFT, 0, DLG_TITLE_H - 2);
     if(dev_only){
         lv_obj_t *note = lv_label_create(panel);
         lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
         lv_obj_set_width(note, 180);
         lv_label_set_text(note, "From this device only. The copy in your account is kept.");
         lv_obj_set_style_text_font(note, &lv_font_palm, 0);
-        lv_obj_align(note, LV_ALIGN_TOP_LEFT, 0, 20);
+        lv_obj_align(note, LV_ALIGN_TOP_LEFT, 0, DLG_TITLE_H + 18);
     }
 
+    /* Palm's order: the button that answers the question with its own verb on
+     * the left, Cancel beside it. A tap outside stays Cancel, the least
+     * destructive answer, as Palm's default button is. */
     lv_obj_t *cancel = lv_button_create(panel);
     lv_obj_set_size(cancel, 82, 30);
-    lv_obj_align(cancel, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_align(cancel, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
     lv_obj_t *cl = lv_label_create(cancel); lv_label_set_text(cl, "Cancel"); lv_obj_center(cl);
     lv_obj_add_event_cb(cancel, confirm_cancel_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *del = lv_button_create(panel);
     lv_obj_set_size(del, 82, 30);
-    lv_obj_align(del, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_align(del, LV_ALIGN_BOTTOM_LEFT, 0, 0);
     lv_obj_t *dll = lv_label_create(del); lv_label_set_text(dll, "Delete"); lv_obj_center(dll);
     lv_obj_add_event_cb(del, confirm_delete_cb, LV_EVENT_CLICKED, NULL);
 }
@@ -1939,7 +1964,7 @@ static void hs_confirm_open(void){
     lv_obj_add_flag(g_hs_confirm, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *panel = lv_obj_create(g_hs_confirm);
-    lv_obj_set_size(panel, 196, 124);
+    lv_obj_set_size(panel, 196, 124 + DLG_TITLE_H);
     lv_obj_center(panel);
     lv_obj_set_style_bg_color(panel, COL_BODY, 0);
     lv_obj_set_style_border_width(panel, 1, 0);
@@ -1948,10 +1973,11 @@ static void hs_confirm_open(void){
     lv_obj_set_style_pad_all(panel, 8, 0);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
 
+    dlg_title(panel, 196, 8, 8, "HotSync");
     lv_obj_t *ttl = lv_label_create(panel);
     lv_obj_set_style_text_font(ttl, &lv_font_palm_bold, 0);
     lv_label_set_text(ttl, "Stop syncing?");
-    lv_obj_align(ttl, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_align(ttl, LV_ALIGN_TOP_LEFT, 0, DLG_TITLE_H - 2);
 
     /* Say what survives. The fear a confirmation has to answer is "will this
      * corrupt what it already did", and the honest answer is no -- it stops
@@ -1962,18 +1988,18 @@ static void hs_confirm_open(void){
     lv_label_set_text(body, "Anything already synced stays synced. "
                             "It stops after the current item, so this "
                             "can take a moment.");
-    lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 18);
+    lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, DLG_TITLE_H + 16);
 
     lv_obj_t *no = lv_button_create(panel);
     lv_obj_set_size(no, 84, 30);
-    lv_obj_align(no, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_align(no, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
     lv_obj_t *nl = lv_label_create(no);
     lv_label_set_text(nl, "Keep going"); lv_obj_center(nl);
     lv_obj_add_event_cb(no, hs_confirm_no_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *yes = lv_button_create(panel);
     lv_obj_set_size(yes, 76, 30);
-    lv_obj_align(yes, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_align(yes, LV_ALIGN_BOTTOM_LEFT, 0, 0);       /* the verb on the left */
     lv_obj_t *yl = lv_label_create(yes);
     lv_obj_set_style_text_font(yl, &lv_font_palm_bold, 0);
     lv_label_set_text(yl, "Stop"); lv_obj_center(yl);
@@ -3540,7 +3566,9 @@ static void show_launcher(void){
 static lv_obj_t *g_alert;
 static void alert_close(void){ if(g_alert){ lv_obj_del(g_alert); g_alert=NULL; } }
 static void alert_ok_cb(lv_event_t *e){ (void)e; alert_close(); }
-static void alert_show(const char *msg){
+/* With a title, it's a Palm alert: the operation named in the strip, the
+ * message, and OK at the bottom left. Without one, the plain box it was. */
+static void alert_titled(const char *title, const char *msg){
     if(g_alert) return;
     g_alert = lv_obj_create(lv_layer_top());
     lv_obj_set_size(g_alert, LCD_W, LCD_H);
@@ -3567,7 +3595,18 @@ static void alert_show(const char *msg){
     lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(l, 180);
     lv_label_set_text(l, msg);
+    if(title){
+        lv_obj_set_style_pad_top(panel, DLG_TITLE_H + 6, 0);
+        dlg_title(panel, 200, 10, DLG_TITLE_H + 6, title);
+        lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_row(panel, 8, 0);
+        lv_obj_t *ok = lv_button_create(panel);
+        lv_obj_set_size(ok, 60, 28);
+        lv_obj_t *ol = lv_label_create(ok); lv_label_set_text(ol, "OK"); lv_obj_center(ol);
+        lv_obj_add_event_cb(ok, alert_ok_cb, LV_EVENT_CLICKED, NULL);
+    }
 }
+static void alert_show(const char *msg){ alert_titled(NULL, msg); }
 
 /* a transient, auto-dismissing confirmation (Palm-style). Unlike alert_show
  * (a modal you tap to close), this is a non-clickable pill just above the Graffiti
@@ -11884,8 +11923,8 @@ static void st_show_dash(void){
     lv_obj_t *rb = st_btn(content, 124, 40, 110, 56, b, st_reviews_cb, 0, 1);
     lv_obj_set_style_text_align(lv_obj_get_child(lb, 0), LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_align(lv_obj_get_child(rb, 0), LV_TEXT_ALIGN_CENTER, 0);
-    if(!lessons) lv_obj_add_state(lb, LV_STATE_DISABLED);
-    if(!g_st->srs.due_total) lv_obj_add_state(rb, LV_STATE_DISABLED);
+    /* never dimmed (Palm: "display an alert dialog that explains why the
+     * button does not apply"): an empty one says why when it's tapped */
 
     /* where everything stands, by the course's own group names */
     char g[200];
@@ -12045,6 +12084,13 @@ static void st_lessons_cb(lv_event_t *e){
     uint16_t level;
     int batch = g_st->c.batch > 20 ? 20 : g_st->c.batch;
     int n = srs_lessons(&g_st->srs, g_st->lesson, batch, &level);
+    if(n <= 0){
+        alert_titled("Lessons", g_st->srs.started >= g_st->c.n_items
+                   ? "You've had every lesson in this course. Reviews keep it fresh."
+                   : "No new lessons yet. More open as the ones you've learned "
+                     "come through their reviews.");
+        return;
+    }
     g_st->nlesson = n < batch ? n : batch;
     g_st->card = 0;
     if(g_st->nlesson > 0) st_show_card(); else st_show_dash();
@@ -12278,9 +12324,28 @@ static void st_show_done(void){
 static void st_reviews_cb(lv_event_t *e){
     (void)e;
     if(!g_st) return;
-    srs_scan(&g_st->srs, st_now());
+    uint32_t now = st_now();
+    srs_scan(&g_st->srs, now);
     int n = g_st->srs.n_due;
-    if(!n){ st_show_dash(); return; }
+    if(!n){                                      /* say when, rather than dim the button */
+        uint32_t at = g_st->srs.next_due;
+        char m[96];
+        if(!at) snprintf(m, sizeof m, "No reviews are due. Reviews come after a lesson.");
+        else {
+            time_t ta = (time_t)at, tn = (time_t)now;
+            struct tm a, b; localtime_r(&ta, &a); localtime_r(&tn, &b);
+            char hm[12]; fmt_hm(a.tm_hour, a.tm_min, hm, sizeof hm);
+            if(a.tm_yday == b.tm_yday && a.tm_year == b.tm_year)
+                snprintf(m, sizeof m, "No reviews are due. The next is at %s.", hm);
+            else if(at - now < 2u * 86400u && (a.tm_yday == b.tm_yday + 1 || a.tm_yday == 0))
+                snprintf(m, sizeof m, "No reviews are due. The next is tomorrow at %s.", hm);
+            else
+                snprintf(m, sizeof m, "No reviews are due. The next is on %d/%d.", a.tm_mon + 1, a.tm_mday);
+        }
+        alert_titled("Reviews", m);
+        st_show_dash();
+        return;
+    }
     uint8_t *quiz = malloc((size_t)n);
     if(!quiz){ toast_show("(low memory)"); return; }
     for(int i = 0; i < n; i++){
@@ -12405,7 +12470,7 @@ static void act_st_remove(lv_event_t *e){
     lv_obj_add_flag(g_st_confirm, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(g_st_confirm, st_confirm_no_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *p = lv_obj_create(g_st_confirm);
-    lv_obj_set_size(p, 210, 110);
+    lv_obj_set_size(p, 210, 110 + DLG_TITLE_H);
     lv_obj_center(p);
     lv_obj_set_style_bg_color(p, lv_color_white(), 0);
     lv_obj_set_style_border_width(p, 1, 0);
@@ -12416,11 +12481,13 @@ static void act_st_remove(lv_event_t *e){
     lv_obj_add_flag(p, LV_OBJ_FLAG_CLICKABLE);
     char q[120];
     snprintf(q, sizeof q, "Remove \"%s\" and your progress in it from the card?", g_st->c.title);
-    st_label(p, q, NULL, 190);
-    lv_obj_t *no = st_btn(p, 0, 0, 90, 28, "Cancel", st_confirm_no_cb, 0, 0);
-    lv_obj_align(no, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    dlg_title(p, 210, 8, 8, "Remove Course");
+    lv_obj_t *ql = st_label(p, q, NULL, 190);
+    lv_obj_align(ql, LV_ALIGN_TOP_LEFT, 0, DLG_TITLE_H - 2);
     lv_obj_t *yes = st_btn(p, 0, 0, 90, 28, "Remove", st_remove_yes_cb, 0, 1);
-    lv_obj_align(yes, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_align(yes, LV_ALIGN_BOTTOM_LEFT, 0, 0);       /* the verb on the left */
+    lv_obj_t *no = st_btn(p, 0, 0, 90, 28, "Cancel", st_confirm_no_cb, 0, 0);
+    lv_obj_align(no, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
 }
 
 static void st_menu(lv_obj_t *panel){

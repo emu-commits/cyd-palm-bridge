@@ -16,6 +16,28 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-15 — Palm's alert conventions
+
+`PALM_ARCHIVE_REVIEW.md` §3.4, from the UI Guidelines' chapter on forms:
+
+- **The verb on the left.** Palm's alerts answer the question with its own
+  verb first, then Cancel. Delete, Stop (HotSync) and Remove (a Study course)
+  were on the right; they're on the left now. A tap outside the panel is
+  still Cancel, which matches Palm's least-destructive default.
+- **A title that names the operation**: `dlg_title()` draws Palm's black
+  strip across a dialog's top ("Delete Memo", "HotSync", "Remove Course").
+  `alert_titled()` is a Palm alert: the title, the message, and OK at the
+  bottom left. `alert_show()` without a title is unchanged.
+- **Never dimmed; it says why.** Study's Lessons and Reviews doors were
+  disabled when empty. Now a tap explains: no new lessons yet (or every
+  lesson done), or when the next review is due ("tomorrow at 12:23a").
+  HotSync's button while stopping keeps its disabled look, because it is a
+  progress state, not a command that doesn't apply.
+
+Gates: `p4_delete_confirm` and `p4_deleted` (the left button deletes),
+`p4_reviews_why`, and `p4_remove_course` then `p4_course_kept` (Cancel, now
+on the right, keeps it).
+
 ### 2026-10-15 — The title opens the menu, and the menu remembers
 
 `PALM_ARCHIVE_REVIEW.md` §3.3. Since Palm OS 3.5, tapping a form's title has

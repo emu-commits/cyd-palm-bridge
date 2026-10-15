@@ -55,9 +55,12 @@ tests the sync separately. One commit each.
   (§3.3) `[s]` (2026-10-15; `p3_title_menu`, `p3_menu_remembered`)
 - [ ] P3 on glass: the title is an easy target and doesn't fight the category
   pop-up `[d]`
-- [ ] **P4 — alert conventions** (§3.4): the verb on the left and Cancel on
+- [x] **P4 — alert conventions** (§3.4): the verb on the left and Cancel on
   the right, alert titles that name the operation, no dimmed buttons (a tap
-  says why instead) `[s]`
+  says why instead) `[s]` (2026-10-15; `p4_delete_confirm`, `p4_reviews_why`,
+  `p4_remove_course`)
+- [ ] P4 on glass: the delete dialog of a synced event (title, question, the
+  "From this device only" note and the buttons don't touch) `[d]`
 - [ ] **P5 — Find matches the start of words** (§3.5): "the" finds "Then",
   not "Lathe"; `find_test` covers it `[s]`
 - [ ] **P6 — reminders that wait** (§3.6): event alarms that came due while the

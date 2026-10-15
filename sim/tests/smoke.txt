@@ -620,6 +620,21 @@ t 1200
 c 195 56
 t 400
 s p1_memos_kept
+# P4: Palm's alert order -- the verb on the left, Cancel on its right, and a
+# title naming the operation. Delete "Left by Home" from its own detail.
+c 120 130
+t 400
+c 24 12
+t 300
+s p4_detail_menu
+c 60 86
+t 400
+s p4_delete_confirm
+# Delete is the LEFT button now (it was on the right): the panel is 200 wide,
+# centred, so its left button is at x 30..112.
+c 70 196
+t 1200
+s p4_deleted
 c 18 225
 t 300
 # HotSync -- launcher row 2 col 2, back in the middle where it is findable
@@ -1627,6 +1642,13 @@ t 200
 c 120 130
 t 400
 s study_dash_after_reviews
+# P4: an empty Reviews door isn't dimmed; a tap says when the next one is due.
+# The alert takes the next tap to close, as Palm's do.
+c 180 92
+t 300
+s p4_reviews_why
+c 120 160
+t 300
 # the Week screen, as Coach's and Guru's: today's lesson and reviews in the
 # chart (history.dat), the stage groups, and her advice; a tap goes back
 c 201 185
@@ -1666,6 +1688,16 @@ t 600
 s study_check_course
 c 120 160
 t 300
+# P4: Remove course has a titled dialog with Remove on the left; Cancel (right)
+# keeps the course, which the rest of the tour needs.
+c 226 12
+t 400
+c 60 236
+t 400
+s p4_remove_course
+c 172 200
+t 300
+s p4_course_kept
 c 200 12
 t 300
 E leaving Study
