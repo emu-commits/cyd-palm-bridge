@@ -42,6 +42,10 @@ void ui_test_type(const char *text);
  * lesson without waiting for them. */
 #include <stdint.h>
 void ui_test_study_skew(int32_t seconds);
+/* Look for reminders over (now - back, now + ahead] at once, as a wake would
+ * over the time the screen was dark: the tour can't wait for an alarm, and an
+ * event made "today" may be either side of the clock when it runs. */
+void ui_test_reminders(int32_t back, int32_t ahead);
 #endif
 
 #endif

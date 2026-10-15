@@ -2,6 +2,7 @@
 #ifndef DATA_H
 #define DATA_H
 #include <stdint.h>
+#include <time.h>
 #include "appinfo.h"   /* CatTable */
 
 /* seed demo PDBs on the SD card for any that are missing (so views have content
@@ -45,6 +46,13 @@ void data_datebook(data_row_cb cb, void *ctx);
 void data_cal_day(int y, int m, int d, data_row_cb cb, void *ctx);
 /* PalmOS Month view: marks[1..31]=1 for each day in month y/m that has an event. */
 void data_cal_month_marks(int y, int m, uint8_t marks[32]);
+/* Events whose alarm came due in (from, to], local time: cb(uid, "HH:MM  desc",
+ * "YYYY-MM-DD" of that occurrence) once per occurrence, repeats expanded, at most the last
+ * DATA_ALARM_DAYS days of the span. The alarm is the start less the
+ * record's advance (minutes, hours or days). Returns how many. Ignores the
+ * category filter: a reminder is owed whatever the list is showing. */
+#define DATA_ALARM_DAYS 7
+int data_cal_alarms(time_t from, time_t to, data_row_cb cb, void *ctx);
 void data_address(data_row_cb cb, void *ctx);
 void data_todo(data_row_cb cb, void *ctx);
 void data_memo(data_row_cb cb, void *ctx);

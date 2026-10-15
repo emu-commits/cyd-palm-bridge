@@ -26,6 +26,8 @@
  *   P <who> <hex>   fail unless the store holds that password for <who>: `a` for
  *                   the account, or a Wi-Fi slot 1..4. Proves the typing landed,
  *                   so an X that finds nothing means "wiped", not "never typed"
+ *   R <back> <ahead>  look for event reminders due over (now-back, now+ahead]
+ *                   (ui_test_reminders), as a wake does over its dark time
  *   A <seconds>     move Study's clock on (ui_test_study_skew): reviews come
  *                   due hours after a lesson, and the tour can't wait for them
  *   B               remember the heap in use now...
@@ -289,6 +291,10 @@ int main(int argc, char **argv){
             sim_step(60);
         }
         else if(line[0] == 'A' && line[1] == ' '){ ui_test_study_skew((int32_t)atol(line + 2)); sim_step(60); }
+        else if(line[0] == 'R' && line[1] == ' '){
+            char *e; long back = strtol(line + 2, &e, 10), ahead = strtol(e, NULL, 10);
+            ui_test_reminders((int32_t)back, (int32_t)ahead); sim_step(100);
+        }
         else if(line[0] == 'B' && (line[1] == '\n' || !line[1])){
             heap_mark = sim_heap_used();
             fprintf(stderr, "heap: %zu bytes in use (marked)\n", heap_mark);

@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include <time.h>
 #include "data.h"
 #include "appcfg.h"
 #include "palm.h"
@@ -161,6 +162,49 @@ int main(void){
         CK(mon == 1 && tue == 0, "on Monday 12 Oct 2026, not Tuesday");
         uint8_t marks[32]; data_cal_month_marks(2026, 10, marks);
         CK(marks[5] && marks[12] && marks[19] && marks[26] && !marks[13], "every Monday of the month dotted");
+    }
+
+    printf("-- reminders: alarms that came due in a span --\n");
+    {
+        /* Wed 12 Mar 2031 09:00, five minutes' notice; the Standup above (every
+         * Monday 09:00, no alarm); an hour's notice on a weekly Friday 14:00
+         * from 2030; and an untimed event with an alarm, which can't ring */
+        Appt one; memset(&one, 0, sizeof one);
+        one.hasTime = 1; one.sH = 9; one.eH = 10; one.year = 2031; one.month = 3; one.day = 12;
+        one.hasAlarm = 1; one.alarmAdv = 5; one.alarmUnit = 0;
+        snprintf(one.description, sizeof one.description, "Dentist");
+        CK(data_save_cal(0, 0, &one), "an event with five minutes' notice");
+        Appt wk; memset(&wk, 0, sizeof wk);
+        wk.hasTime = 1; wk.sH = 14; wk.eH = 15; wk.year = 2030; wk.month = 1; wk.day = 4;   /* a Friday */
+        wk.hasRepeat = 1; wk.repeatType = repeatWeekly; wk.repeatFreq = 1; wk.repeatForever = 1; wk.repeatOn = 1 << 5;
+        wk.hasAlarm = 1; wk.alarmAdv = 1; wk.alarmUnit = 1;
+        snprintf(wk.description, sizeof wk.description, "Review");
+        CK(data_save_cal(0, 0, &wk), "a weekly event with an hour's notice");
+        Appt nt; memset(&nt, 0, sizeof nt);
+        nt.year = 2031; nt.month = 3; nt.day = 12; nt.hasAlarm = 1; nt.alarmAdv = 5;
+        snprintf(nt.description, sizeof nt.description, "Untimed");
+        CK(data_save_cal(0, 0, &nt), "an untimed event with an alarm");
+
+        struct tm t = {0}; t.tm_year = 2031 - 1900; t.tm_mon = 2; t.tm_mday = 12; t.tm_isdst = -1;
+        t.tm_hour = 8; t.tm_min = 55; time_t at = mktime(&t);           /* the Dentist's alarm */
+        int n = 0;
+        n = 0; data_cal_alarms(at - 3600, at - 1, countRow, &n);
+        CK(n == 0, "not before its time");
+        n = 0; data_cal_alarms(at - 3600, at, countRow, &n);
+        CK(n == 1, "due at start less five minutes (the span's end counts)");
+        n = 0; data_cal_alarms(at, at + 600, countRow, &n);
+        CK(n == 0, "and only once: a span that starts at it doesn't repeat it");
+        /* Friday 14 Mar 2031 14:00 less an hour is 13:00 */
+        t.tm_mday = 14; t.tm_hour = 13; t.tm_min = 0; time_t fri = mktime(&t);
+        n = 0; data_cal_alarms(fri - 60, fri, countRow, &n);
+        CK(n == 1, "a weekly event from 2030 rings on this week's Friday, an hour early");
+        n = 0; data_cal_alarms(fri, fri + 3599, countRow, &n);
+        CK(n == 0, "nothing in the hour after it");
+        /* a device asleep for a month: only the last DATA_ALARM_DAYS days */
+        n = 0; data_cal_alarms(fri - 30 * 86400L, fri, countRow, &n);
+        CK(n == 2, "a month asleep: the Dentist and this Friday, not four weeks of Fridays");
+        n = 0; data_cal_alarms(at, at - 1, countRow, &n);
+        CK(n == 0, "an empty span is nothing");
     }
 
     printf(fails ? "== data: %d FAILURE(S) ==\n" : "== data: all passed ==\n", fails);

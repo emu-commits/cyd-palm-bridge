@@ -445,6 +445,44 @@ void data_cal_month_marks(int y,int m, uint8_t marks[32]){
     MarkIt mk={y,m,marks}; live_read(DB_CAL,cbCalMark,&mk);
 }
 
+/* reminders: an alarm in (from, to] belongs to a start in (from+adv, to+adv],
+ * so walk the days that span covers and ask each whether the event is on it */
+typedef struct { data_row_cb cb; void *ctx; time_t from, to; int n; } AlarmIt;
+static long alarm_advance(const Appt *a){
+    long unit = a->alarmUnit == 2 ? 86400L : a->alarmUnit == 1 ? 3600L : 60L;   /* Palm: min, hours, days */
+    return a->alarmAdv > 0 ? (long)a->alarmAdv * unit : 0;
+}
+static int cbCalAlarm(const PdbRec *r, int i, void *ctx){
+    (void)i; AlarmIt *it = ctx; Appt a;
+    if(ApptUnpack(r->data, r->len, &a) || !a.hasAlarm || !a.hasTime) return 0;
+    long adv = alarm_advance(&a);
+    time_t lo = it->from + adv, hi = it->to + adv;
+    if(hi - lo > (time_t)DATA_ALARM_DAYS * 86400) lo = hi - (time_t)DATA_ALARM_DAYS * 86400;
+    struct tm day; localtime_r(&lo, &day);
+    day.tm_hour = 12; day.tm_min = day.tm_sec = 0; day.tm_isdst = -1;   /* noon: clear of DST edges */
+    for(int k = 0; k <= DATA_ALARM_DAYS + 1; k++){
+        struct tm d = day; d.tm_mday += k;
+        time_t noon = mktime(&d);
+        struct tm n; localtime_r(&noon, &n);
+        struct tm st = n; st.tm_hour = a.sH; st.tm_min = a.sM; st.tm_sec = 0; st.tm_isdst = -1;
+        time_t start = mktime(&st);
+        if(start > hi) break;
+        if(start <= lo || !appt_occurs_on(&a, n.tm_year + 1900, n.tm_mon + 1, n.tm_mday)) continue;
+        char pri[96], ymd[40];   /* room for any int: the device builds with -Werror=format-truncation */
+        snprintf(pri, sizeof pri, "%02d:%02d  %.80s", a.sH, a.sM, a.description);
+        snprintf(ymd, sizeof ymd, "%04d-%02d-%02d", n.tm_year + 1900, n.tm_mon + 1, n.tm_mday);
+        it->cb(r->uniqueID, pri, ymd, it->ctx);
+        it->n++;
+    }
+    return 0;
+}
+int data_cal_alarms(time_t from, time_t to, data_row_cb cb, void *ctx){
+    if(to <= from || !cb) return 0;
+    AlarmIt it = { cb, ctx, from, to, 0 };
+    live_read(DB_CAL, cbCalAlarm, &it);
+    return it.n;
+}
+
 static int cbAddr(const PdbRec *r, int i, void *ctx){
     (void)i; It *it=ctx; Addr a;
     if(g_catfilter>=0 && (r->attr & 0x0F)!=g_catfilter) return 0;

@@ -67,8 +67,9 @@ tests the sync separately. One commit each.
 - [ ] An event made on the device with Repeat Daily (Details) shows on its day
   and the days after, and on the phone after a sync with "Send my changes";
   one made that way before this fix shows again too `[d]`
-- [ ] **P6 — reminders that wait** (§3.6): event alarms that came due while the
+- [x] **P6 — reminders that wait** (§3.6): event alarms that came due while the
   screen was dark are listed once on wake, dismissed together with OK `[s]`
+  (2026-10-15; `p6_reminders_on_wake`, `p6_still_there`, `p6_after_wake`)
 - [ ] P6 on glass: an event with an alarm five minutes out; leave the device
   asleep past it; wake: the list names it `[d]`
 - [ ] Is the speaker connector populated (2-pin, beside the SD slot on most

@@ -7766,6 +7766,110 @@ static void dash_paint(void){
     lv_obj_invalidate(g_dash_cv);
 }
 
+/* ---- reminders: Palm's Attention Manager, without the sound ---------------
+ * An event's alarm used to be synced and kept and never shown: there's no
+ * speaker. Palm's answer to "the handheld was off all day" was one list of
+ * every reminder that came due, dismissed together, instead of a pile of
+ * alerts. That needs no sound. Each wake (the lock is refreshed then) and
+ * every 30 s while the screen is lit, the alarms due since the last look are
+ * listed in one box over whatever is showing, the lock included. Like Palm's,
+ * it's dismissed only by its OK: a stray tap mustn't lose a reminder nobody
+ * read. The rows live in the box's labels; nothing stays resident but the
+ * time of the last look. */
+#define REM_MAX 8
+static lv_obj_t *g_rem_box, *g_rem_list;
+static int       g_rem_n;
+static time_t    g_rem_seen;                 /* alarms up to here have been shown */
+#ifdef UI_DEVTOOLS
+static int32_t   g_rem_skew;                 /* the tour's clock, ahead of the real one */
+#endif
+static void rem_close_cb(lv_event_t *e){ (void)e;
+    if(g_rem_box){ lv_obj_del(g_rem_box); g_rem_box = g_rem_list = NULL; }
+    g_rem_n = 0;
+}
+static void rem_open(void){
+    g_rem_box = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_rem_box, LCD_W, LCD_H);
+    lv_obj_set_style_bg_color(g_rem_box, COL_LINE, 0);
+    lv_obj_set_style_bg_opa(g_rem_box, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(g_rem_box, 0, 0);
+    lv_obj_set_style_radius(g_rem_box, 0, 0);
+    lv_obj_set_style_pad_all(g_rem_box, 0, 0);
+    lv_obj_add_flag(g_rem_box, LV_OBJ_FLAG_CLICKABLE);       /* absorbs taps; OK only */
+    lv_obj_t *p = lv_obj_create(g_rem_box);
+    lv_obj_set_width(p, 220);
+    lv_obj_set_height(p, LV_SIZE_CONTENT);
+    lv_obj_center(p);
+    lv_obj_set_style_bg_color(p, COL_BODY, 0);
+    lv_obj_set_style_border_width(p, 1, 0);
+    lv_obj_set_style_border_color(p, COL_LINE, 0);
+    lv_obj_set_style_radius(p, 0, 0);
+    lv_obj_set_style_pad_all(p, 10, 0);
+    lv_obj_set_style_pad_top(p, DLG_TITLE_H + 6, 0);
+    lv_obj_set_flex_flow(p, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(p, 8, 0);
+    lv_obj_clear_flag(p, LV_OBJ_FLAG_SCROLLABLE);
+    dlg_title(p, 220, 10, DLG_TITLE_H + 6, "Reminders");
+    g_rem_list = lv_obj_create(p);                         /* one row per reminder */
+    lv_obj_set_size(g_rem_list, 200, LV_SIZE_CONTENT);
+    lv_obj_set_style_border_width(g_rem_list, 0, 0);
+    lv_obj_set_style_pad_all(g_rem_list, 0, 0);
+    lv_obj_set_style_pad_row(g_rem_list, 4, 0);
+    lv_obj_set_flex_flow(g_rem_list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag(g_rem_list, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *ok = lv_button_create(p);
+    lv_obj_set_size(ok, 60, 28);
+    lv_obj_t *ol = lv_label_create(ok); lv_label_set_text(ol, "OK"); lv_obj_center(ol);
+    lv_obj_add_event_cb(ok, rem_close_cb, LV_EVENT_CLICKED, NULL);
+}
+/* one reminder: "HH:MM  desc" and its day from the data layer; the time as
+ * the clock reads, and the day too when it isn't today (a long sleep, or an
+ * alarm a day ahead of its event) */
+static void rem_row(uint32_t uid, const char *pri, const char *sec, void *ctx){
+    (void)uid; (void)ctx;
+    if(g_rem_n >= REM_MAX) return;
+    if(!g_rem_box) rem_open();
+    int h = 0, m = 0, y = 0, mo = 0, d = 0;
+    char hm[12] = "", when[40] = "";   /* room for any int (-Werror=format-truncation) */
+    if(sscanf(pri, "%2d:%2d", &h, &m) == 2) fmt_hm(h, m, hm, sizeof hm);
+    int ty, tm, td; cal_today(&ty, &tm, &td);
+    if(sec && sscanf(sec, "%d-%d-%d", &y, &mo, &d) == 3 && (y != ty || mo != tm || d != td))
+        snprintf(when, sizeof when, "%s %d/%d ", CAL_WD[cal_wday(y, mo, d)], mo, d);
+    const char *desc = strlen(pri) > 7 ? pri + 7 : "";
+    lv_obj_t *l = lv_label_create(g_rem_list);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(l, 200);
+    lv_label_set_text_fmt(l, "%s%s  %s", when, hm, desc[0] ? desc : "(no description)");
+    g_rem_n++;
+}
+static void rem_check_span(time_t from, time_t to){
+    if(to <= from) return;
+    g_rem_seen = to;
+    data_cal_alarms(from, to, rem_row, NULL);
+}
+/* What came due since the last look. The first look after boot only sets the
+ * mark: what came due before the device was on is not a wake's to report. A
+ * clock not yet set reports nothing; Coach's session owns the screen and the
+ * reminders wait for it. */
+static void rem_check(void){
+    time_t now = time(NULL);
+#ifdef UI_DEVTOOLS
+    now += g_rem_skew;
+#endif
+    struct tm t; localtime_r(&now, &t);
+    if(t.tm_year + 1900 < 2024 || co_owns_screen()) return;
+    if(!g_rem_seen){ g_rem_seen = now; return; }
+    rem_check_span(g_rem_seen, now);
+}
+static void rem_tick(lv_timer_t *tm){ (void)tm; if(!power_screen_off()) rem_check(); }
+#ifdef UI_DEVTOOLS
+void ui_test_reminders(int32_t back, int32_t ahead){
+    time_t now = time(NULL) + g_rem_skew;
+    g_rem_skew += ahead;
+    rem_check_span(now - back, now + ahead);
+}
+#endif
+
 void ui_show_lock(void){
     /* COACH OWNS THE SCREEN: while a session runs the mark and the countdown are
      * what a tap must reveal, and once it ends the reflect screen is. The port
@@ -7774,7 +7878,7 @@ void ui_show_lock(void){
      * answered by the dashboard -- and content_clear() below would have deleted
      * "how did it go" on the way past. */
     if(co_owns_screen()) return;
-    if(g_lock){ dash_paint(); return; }             /* already showing -> just refresh */
+    if(g_lock){ dash_paint(); rem_check(); return; }   /* already showing -> just refresh */
     /* the lock is a child of the SCREEN, and the Calculator (like every
      * modal) lives on lv_layer_top(), which LVGL always draws above the screen
      * -- so the lock would come up UNDERNEATH an open calculator. Hide it
@@ -7982,6 +8086,7 @@ void ui_show_lock(void){
       } }
 
     dash_paint();
+    rem_check();
 }
 
 /* keep the locked clock fresh (minute tick); no-op while unlocked. */
@@ -12566,6 +12671,7 @@ void ui_init(void){
     lv_obj_align(clock_lbl, LV_ALIGN_CENTER, 0, 0);
     clock_tick(NULL);
     lv_timer_create(clock_tick, 15000, NULL);
+    lv_timer_create(rem_tick, 30000, NULL);     /* reminders due while it's in use */
 
     /* category pop-up trigger (top-right, Palm convention) */
     cat_trigger = lv_button_create(bar);

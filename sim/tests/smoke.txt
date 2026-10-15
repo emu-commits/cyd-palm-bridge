@@ -330,6 +330,33 @@ s cal_event_saved
 c 120 40
 t 400
 s cal_event_in_week
+# P6: reminders. The event above has an alarm; the screen sleeps (`L`), and the
+# wake looks for reminders due over the dark time (`R`: a day back to two
+# ahead, so it holds an event made "today" whenever the tour runs). One list,
+# over the lock, dismissed only by OK; then the unlock comes back to the week.
+L
+t 300
+R 86400 172800
+t 300
+s p6_reminders_on_wake
+# a tap beside the box must not lose it (Palm: dismissed only by OK)...
+c 120 280
+t 300
+s p6_still_there
+# ...OK does; then the swipe, and the week comes back (P1)
+c 45 195
+t 300
+d 120 275
+t 30
+m 120 210
+t 30
+m 120 140
+t 30
+m 120 90
+t 30
+u
+t 400
+s p6_after_wake
 c 18 225
 t 300
 # Address list -> record detail -> edit form (C4 bottom bar) -> Done (I4 toast)

@@ -16,6 +16,40 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-15 — Reminders that wait for you
+
+`PALM_ARCHIVE_REVIEW.md` §3.6, Palm OS 4's Attention Manager. Event alarms
+sync both ways and the Details sheet sets them, but nothing ever showed one:
+"alarms that actually fire" (`PRODUCT_PLAN.md` #3) waits on sound. The
+Attention Manager's half doesn't need sound. Every reminder that came due
+while the handheld was off goes in one list, dismissed together.
+
+- **The data**: `data_cal_alarms(from, to, cb)` gives each occurrence whose
+  alarm (the start less the record's advance, in minutes, hours or days)
+  falls in `(from, to]`, repeats expanded. Each comes with its date, and at
+  most the span's last `DATA_ALARM_DAYS` (7) days are looked at, so a
+  month asleep doesn't list four weeks of a weekly event. Untimed events
+  have no moment to ring and are skipped.
+- **The screen**: each wake (the lock is refreshed then) and every 30 s
+  while lit, `rem_check()` looks at what came due since the last look and
+  lists it in one titled "Reminders" box on `lv_layer_top()`, over the lock
+  or the app. A row reads "10:30p  Dentist", with the day added when it
+  isn't today. As on Palm, only OK dismisses it: a stray tap mustn't lose a
+  reminder nobody has read. The first look after boot only sets the mark,
+  a clock not yet set reports nothing, and Coach's session holds them back.
+  Resident cost: one `time_t` and three pointers. The rows live in the
+  box's labels.
+- **The smoke** can't wait for an alarm, so `R <back> <ahead>`
+  (`ui_test_reminders`) looks over an explicit span. It runs from a day back
+  to two ahead, which holds an event made "today" whenever the tour runs.
+
+Gates: `make -C sim data` (due at the start less the advance, the span's end
+included and only once, a weekly from 2030 an hour early on this week's
+Friday, a month asleep cut to a week, an untimed event never);
+`p6_reminders_on_wake` (the tour's daily event: today, Fri and Sat, over the
+lock), `p6_still_there` (a tap beside it changes nothing),
+`p6_after_wake` (OK, the swipe, and the Week view again).
+
 ### 2026-10-15 — A repeat set on the device repeats
 
 Found while building reminders (P6): the smoke's `cal_event_in_week`, the
