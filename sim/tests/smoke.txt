@@ -476,6 +476,20 @@ t 200
 c 215 40
 t 500
 s q7_todo_added
+# P3: tapping the title opens the menu (Palm 3.5 on).
+c 24 12
+t 300
+s p3_title_menu
+# ...and it reopens on the item chosen last, while the same screen is up.
+# "Hide Completed" (y 132) redraws the list, which is still the same screen;
+# picked again from the remembered row, it puts the list back as it was.
+c 80 132
+t 400
+c 24 12
+t 300
+s p3_menu_remembered
+c 80 132
+t 400
 # To Do due-date picker: open the first record -> Edit -> the Due trigger -> pick
 # a day off the calendar. This walk exists because tapping a calendar day used to
 # SEGFAULT here (exit 139, so this gate would have caught it): the calendar's

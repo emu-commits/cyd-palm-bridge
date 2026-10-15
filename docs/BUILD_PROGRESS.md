@@ -16,6 +16,26 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-15 — The title opens the menu, and the menu remembers
+
+`PALM_ARCHIVE_REVIEW.md` §3.3. Since Palm OS 3.5, tapping a form's title has
+opened its menu; the Zen of Palm holds this up as the example of a feature
+that costs a novice nothing and saves the regular a reach. The title label is
+clickable now, with a 6 px larger click area so a short title is still a
+target, and it calls the same `menu_open()` as Menu.
+
+Palm also reopens the menu on the item chosen last, for as long as that form
+is up. `menu_remember_cb` is the first event handler on every menu item: it
+records the action and the screen's identity, which is the resume record's
+app and view, not one drawing of it, because Show Completed redraws the
+To Do list and it's still the same form. The remembered row is drawn
+inverted. Going to another screen forgets it.
+
+Gates: `p3_title_menu` (the To Do list's menu, opened from the title),
+`p3_menu_remembered` (after Hide Completed, the title reopens the menu with
+that row inverted, reading Show Completed). Picking it again puts the list
+back for the rest of the tour.
+
 ### 2026-10-15 — Write on the Day view to make an event
 
 `PALM_ARCHIVE_REVIEW.md` §3.2, from the Zen of Palm: "just write a 3 to

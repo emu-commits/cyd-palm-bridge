@@ -5586,6 +5586,28 @@ static void act_about(lv_event_t *e){ (void)e;
     lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 20);
 }
 
+/* Palm reopens the menu on the item chosen last, for as long as the same form
+ * is up. "The same form" is the screen's identity in the resume record (the app
+ * and its view), not one drawing of it: Show Completed redraws the To Do list,
+ * and the list is still the form the choice was made on. */
+static struct {
+    lv_event_cb_t cb;
+    char    app[sizeof g_resume.app];
+    uint8_t view;
+    int8_t  appdef;
+} g_menu_last;
+static uint8_t menu_view_now(void){ return g_resume.stale ? RV_NONE : g_resume.view; }
+static int menu_last_here(void){
+    return g_menu_last.cb && !strcmp(g_menu_last.app, g_resume.app) &&
+           g_menu_last.view == menu_view_now() &&
+           (g_menu_last.view == RV_NONE || g_menu_last.appdef == g_resume.appdef);
+}
+static void menu_remember_cb(lv_event_t *e){
+    g_menu_last.cb = (lv_event_cb_t)lv_event_get_user_data(e);
+    snprintf(g_menu_last.app, sizeof g_menu_last.app, "%s", g_resume.app);
+    g_menu_last.view   = menu_view_now();
+    g_menu_last.appdef = g_resume.appdef;
+}
 static lv_obj_t *menu_item_lbl(lv_obj_t *par, const char *txt, lv_event_cb_t cb){
     lv_obj_t *b = lv_button_create(par);
     lv_obj_set_width(b, lv_pct(100));
@@ -5594,6 +5616,13 @@ static lv_obj_t *menu_item_lbl(lv_obj_t *par, const char *txt, lv_event_cb_t cb)
     lv_obj_t *l = lv_label_create(b);
     lv_label_set_text(l, txt);
     lv_obj_align(l, LV_ALIGN_LEFT_MID, 2, 0);
+    if(cb == g_menu_last.cb && menu_last_here()){       /* the last choice, inverted */
+        lv_obj_set_style_bg_color(b, COL_LINE, 0);
+        lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+        lv_obj_set_style_text_color(l, COL_BODY, 0);
+    }
+    /* first, so it records before the action replaces the screen */
+    lv_obj_add_event_cb(b, menu_remember_cb, LV_EVENT_CLICKED, (void *)cb);
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     return l;
 }
@@ -12448,6 +12477,12 @@ void ui_init(void){
     lv_obj_set_style_text_color(title_lbl, COL_TITLE_FG, 0);   /* white on black (Palm) */
     lv_obj_set_style_text_font(title_lbl, &lv_font_palm_bold, 0);
     lv_obj_align(title_lbl, LV_ALIGN_LEFT_MID, 6, 0);
+    /* Palm 3.5 on: tapping the form's title opens the menu. Nothing to learn
+     * for anyone who never tries it, one tap saved for whoever does. The
+     * click area reaches the bar's edges, so a short title is still a target. */
+    lv_obj_add_flag(title_lbl, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_ext_click_area(title_lbl, 6);
+    lv_obj_add_event_cb(title_lbl, menu_cb, LV_EVENT_CLICKED, NULL);
 
     /* live clock, centered in the title bar (Palm shows the time up top). Titles
      * are left-aligned + short and the category trigger is far right, so center

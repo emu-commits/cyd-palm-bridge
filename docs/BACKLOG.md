@@ -51,8 +51,8 @@ tests the sync separately. One commit each.
   hour, a letter starts the description; New stays `[s]` (2026-10-15;
   `p2_digit_event`, `p2_letter_event`)
 - [ ] P2 on glass: writing "3" on the day view opens a 3 pm event on that day `[d]`
-- [ ] **P3 — tap the title to open the menu; it reopens on the last item**
-  (§3.3) `[s]`
+- [x] **P3 — tap the title to open the menu; it reopens on the last item**
+  (§3.3) `[s]` (2026-10-15; `p3_title_menu`, `p3_menu_remembered`)
 - [ ] P3 on glass: the title is an easy target and doesn't fight the category
   pop-up `[d]`
 - [ ] **P4 — alert conventions** (§3.4): the verb on the left and Cancel on
