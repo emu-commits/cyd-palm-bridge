@@ -47,8 +47,9 @@ tests the sync separately. One commit each.
   `p1_memos_kept`, `p1_day_resumed`)
 - [ ] P1 on glass: write half a memo, let the screen sleep, wake and swipe up:
   the memo is there, saved; the same for an event; Home from an edit saves it `[d]`
-- [ ] **P2 — write in the Day view to make an event** (§3.2): a digit sets the
-  hour, a letter starts the description; New stays `[s]`
+- [x] **P2 — write in the Day view to make an event** (§3.2): a digit sets the
+  hour, a letter starts the description; New stays `[s]` (2026-10-15;
+  `p2_digit_event`, `p2_letter_event`)
 - [ ] P2 on glass: writing "3" on the day view opens a 3 pm event on that day `[d]`
 - [ ] **P3 — tap the title to open the menu; it reopens on the last item**
   (§3.3) `[s]`

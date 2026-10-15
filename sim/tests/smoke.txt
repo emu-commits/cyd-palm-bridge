@@ -266,6 +266,20 @@ t 30
 u
 t 400
 s p1_day_resumed
+# P2: writing on the Day view makes an event, as on a Palm. A digit is the start
+# hour (3 -> 3:00 pm) and a letter starts the description. Both are cancelled
+# (Cancel, bottom right), so the walk below finds the day as it was.
+k 3
+t 300
+s p2_digit_event
+c 204 190
+t 400
+k Lunch
+t 300
+s p2_letter_event
+c 204 190
+t 400
+s p2_day_unchanged
 # C4 event Details: menu -> New -> Details -> toggle Alarm on + cycle Repeat ->
 # close -> Done (persists via ApptPack). Plain buttons only -> pool-safe.
 c 18 300

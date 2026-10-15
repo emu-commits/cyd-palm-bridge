@@ -16,6 +16,27 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-15 — Write on the Day view to make an event
+
+`PALM_ARCHIVE_REVIEW.md` §3.2, from the Zen of Palm: "just write a 3 to
+create an event that starts at 3:00". The Day view has no focused field, so a
+stroke there was recognised and dropped. Now the first character written
+there opens New event on the day shown (`day_write_to_new()`):
+
+- **a digit is the start hour**, read inside a waking day: 1 to 7 are 1 to
+  7 pm, 8 and 9 am, and 0 is 10 am. The digit is used up; the description
+  has the focus.
+- **a letter starts the description** and is typed as any letter is, so the
+  field's capitals rule applies.
+
+New event stays on the screen for anyone who doesn't know this. The smoke's
+typing hook (`k`) takes the same path, so the gate drives it as the
+recogniser would.
+
+Gates: `p2_digit_event` ("3" gives a 3:00 pm event on the day shown),
+`p2_letter_event` ("Lunch" in the description), `p2_day_unchanged` (both
+cancelled; the day as it was).
+
 ### 2026-10-15 — Waking goes back to where you were, and leaving a form saves it
 
 From `PALM_ARCHIVE_REVIEW.md` §3.1 (Palm's "return to the last form" and

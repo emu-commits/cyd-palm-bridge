@@ -283,6 +283,8 @@ static struct {
     int16_t  y; int8_t m, d;    /* Date Book's day, week or month */
 } g_resume;
 static int g_edit_live;
+static int g_day_open;          /* Date Book's Day view is the screen (write to New) */
+static int g_new_hour = -1;     /* a New event's start hour, written on the Day view */
 static const AppDef *g_edit_app;  /* the form's app and field count, kept apart: */
 static int g_edit_nf;            /* screens reset cur_app and g_nfields before they clear */
 static int g_locking;           /* ui_show_lock() is clearing the content */
@@ -1708,6 +1710,8 @@ static void show_edit(uint32_t uid){
         g_due_optional = 0;                       /* an event must have a date */
         g_ev_h = a.hasTime ? a.sH : 9;
         g_ev_m = a.hasTime ? a.sM : 0;
+        if(!uid && g_new_hour >= 0){ g_ev_h = g_new_hour; g_ev_m = 0; }
+        g_new_hour = -1;
         form_field(form,"Description",a.description,255,&y);
         field_mode(TA_CAP_FIRST, NULL);
 
@@ -2155,6 +2159,7 @@ static void show_datebook_day(int y,int m,int d){
     cur_app=&APPDEFS[0]; cur_uid=0;     /* Date Book context (menu New/Categories) */
     content_clear();
     resume_view(RV_DAY, 0, y, m, d);
+    g_day_open = 1;
     char t[36]; snprintf(t,sizeof t,"%s %d/%d",CAL_WD[cal_wday(y,m,d)],m,d);
     lv_label_set_text(title_lbl,t);
     update_cat_trigger();
@@ -6883,6 +6888,24 @@ static void show_punct(int on){
         lv_obj_add_flag(graf_punct_lbl, LV_OBJ_FLAG_HIDDEN);
     }
 }
+/* Palm's Date Book: "just write a 3 to create an event that starts at 3:00".
+ * On the Day view no field has focus, so a character written there used to go
+ * nowhere. Now the first one opens New event on the day shown: a digit is the
+ * start hour, read inside a waking day (1-7 are 1-7 pm, 8 and 9 am, 0 is 10
+ * am), and a letter is the description's first letter, typed as usual. New
+ * stays on the screen for whoever doesn't know this.
+ * Returns 0 if c isn't for it, 1 if it was taken whole (a digit), 2 if the
+ * form is open and c should be typed into it (a letter). */
+static int day_write_to_new(char c){
+    if(!g_day_open) return 0;
+    int digit = c >= '0' && c <= '9';
+    int letter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+    if(!digit && !letter) return 0;
+    if(digit){ int d = c - '0'; g_new_hour = d == 0 ? 10 : d <= 7 ? d + 12 : d; }
+    cur_app = &APPDEFS[0];
+    show_edit(0);
+    return digit ? 1 : 2;
+}
 /* user_data: 0 = letters (abc pad), 1 = digits (123 pad) */
 static void graf_up_cb(lv_event_t *e){
     int digits = (int)(intptr_t)lv_event_get_user_data(e);
@@ -6905,7 +6928,8 @@ static void graf_up_cb(lv_event_t *e){
         if(g_secret && graf_case == CASE_SHIFT){ graf_case = CASE_NONE; show_case(); }
         return;
     }
-    if(!active_ta){ graf_case = CASE_NONE; show_case(); return; }
+    if(!active_ta && day_write_to_new(c) != 2){ graf_case = CASE_NONE; show_case(); return; }
+    if(!active_ta) return;
     if(c == '\b'){                                     /* backspace: keep caps lock */
         lv_textarea_delete_char(active_ta);
         if(graf_case == CASE_SHIFT){ graf_case = CASE_NONE; show_case(); }
@@ -8714,6 +8738,7 @@ static void content_clear(void){
         cur_app = was; g_nfields = was_nf;
     }
     if(!g_locking) g_resume.stale = 1;   /* the next screen says what it is */
+    g_day_open = 0;
     lv_obj_clean(content);
     /* only the screen that asks for it keeps it; Study, swapping one of its
      * own screens for another, says for itself (st_screen) */
@@ -9492,6 +9517,8 @@ void ui_test_type(const char *text){
         for(const char *p = text; *p; p++) secret_key(*p);
         return;
     }
+    /* the Day view takes its first character as the recogniser hands it over */
+    if(!active_ta && text && *text && day_write_to_new(*text) == 1) text++;
     if(!active_ta) return;
     if(!text){ lv_textarea_set_text(active_ta, ""); return; }   /* clear */
     for(const unsigned char *p = (const unsigned char *)text; *p; p++)
