@@ -569,6 +569,7 @@ static int rwFate(const PdbRec *r, uint8_t *attr, const uint8_t **d, int *len, v
  * seed's range (1..n): HotSync holds those back from the push, so a user's
  * record that landed there -- after every sample was deleted, say -- would
  * silently never sync. */
+static uint32_t s_last_new_uid;
 static uint32_t new_uid(const char *path, uint32_t maxuid){
     uint32_t nu = maxuid + 1;
     for(int a = 0; a < 4; a++)
@@ -576,8 +577,10 @@ static uint32_t new_uid(const char *path, uint32_t maxuid){
             uint32_t dn = (uint32_t)data_demo_count(a);
             if(nu <= dn) nu = dn + 1;
         }
+    s_last_new_uid = nu;
     return nu;
 }
+uint32_t data_last_new_uid(void){ return s_last_new_uid; }
 typedef struct { uint32_t uid; int found; } Look;
 static int lookCb(const PdbRec *r, int i, void *c){ (void)i; Look *l = c;
     if(r->uniqueID == l->uid){ l->found = 1; return 1; }

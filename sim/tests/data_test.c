@@ -89,6 +89,11 @@ int main(void){
     CK(data_save_todo(0, 0, &t), "a new to do of the user's own");
     g_first = 0; data_todo(firstRow, NULL);
     CK(g_first > (uint32_t)dn, "gets a uid ABOVE the demo range, so HotSync will push it");
+    /* an edit form saved on the way out (the lock, Home) reopens on its
+     * record, so a new one's uid has to be known once the card assigned it */
+    CK(data_last_new_uid() == g_first, "data_last_new_uid() names the record just created");
+    CK(data_save_todo(g_first, -1, &t) && data_last_new_uid() == g_first,
+       "saving it again changes nothing there (an edit, not a new record)");
 
     /* ---- a real account's size: every rewrite streams --------------------
      * Edits, deletes and category changes used to go through a 12 KB,

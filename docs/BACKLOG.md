@@ -38,12 +38,13 @@ the current behaviour and the change for each. On branch
 `claude/palm-behaviours`, which sits on the untested sync work: the owner
 tests the sync separately. One commit each.
 
-- [ ] **P1 — come back to where you were, and never lose an edit** (the bug,
+- [x] **P1 — come back to where you were, and never lose an edit** (the bug,
   §3.1). The lock's `content_clear()` threw the open app away, unlock always
   built the launcher, and an edit form open when the screen slept (or on
   Home) was discarded. Save an edit with at least one character on the way
   out (lock and Home; the form's Cancel still discards), remember the screen,
-  and rebuild it on unlock `[s]`
+  and rebuild it on unlock `[s]` (2026-10-15; `p1_resumed_edit`, `p1_home_saved`,
+  `p1_memos_kept`, `p1_day_resumed`)
 - [ ] P1 on glass: write half a memo, let the screen sleep, wake and swipe up:
   the memo is there, saved; the same for an event; Home from an edit saves it `[d]`
 - [ ] **P2 — write in the Day view to make an event** (§3.2): a digit sets the

@@ -252,6 +252,20 @@ s datebook_week
 c 120 80
 t 400
 s datebook_day2
+# P1: a sleep over the Day view wakes on the Day view (it woke on the launcher).
+L
+t 300
+d 120 275
+t 30
+m 120 210
+t 30
+m 120 140
+t 30
+m 120 90
+t 30
+u
+t 400
+s p1_day_resumed
 # C4 event Details: menu -> New -> Details -> toggle Alarm on + cycle Repeat ->
 # close -> Done (persists via ApptPack). Plain buttons only -> pool-safe.
 c 18 300
@@ -540,6 +554,44 @@ s planner_checklist_both
 c 120 78
 t 400
 s planner_checklist_untick
+c 18 225
+t 300
+# P1: the lock used to free the open app, so a wake always landed on the
+# launcher and an edit form open when the screen slept was lost. Write half a
+# memo, sleep (`L`), wake: the form must be back with the words in it, saved.
+# Then a second memo left by Home: saved too, with a "Saved" toast.
+c 195 56
+t 400
+c 215 40
+t 400
+k Half a thought
+t 200
+L
+t 300
+d 120 275
+t 30
+m 120 210
+t 30
+m 120 140
+t 30
+m 120 90
+t 30
+u
+t 400
+s p1_resumed_edit
+c 36 188
+t 1200
+c 215 40
+t 400
+k Left by Home
+t 200
+c 18 225
+t 200
+s p1_home_saved
+t 1200
+c 195 56
+t 400
+s p1_memos_kept
 c 18 225
 t 300
 # HotSync -- launcher row 2 col 2, back in the middle where it is findable

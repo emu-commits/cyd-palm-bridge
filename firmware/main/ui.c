@@ -254,6 +254,44 @@ static lv_obj_t *active_ta;            /* last-focused textarea (Graffiti target
 static char     *g_secret;             /* the password editor's own buffer, or NULL */
 static void      secret_key(char c);   /* ...and how a key reaches it */
 
+/* ---- leaving a form saves it; waking goes back to where you were ----------
+ * Palm's rules: "If the user has been editing data, save the data before the
+ * user exits the form", and an app reopens on the form you left. Here the lock
+ * frees the open app when the screen sleeps (the pool can't hold an app and
+ * the dashboard at once), so without this every wake landed on the launcher
+ * and an edit form open at the time was thrown away.
+ *
+ * g_edit_live: an edit form is up and nothing has saved or cancelled it yet.
+ * content_clear() saves it on the way past -- Home, Find, Menu, the lock --
+ * if it holds at least one character (Palm's minimum for a record worth
+ * keeping). Done saves it itself and Cancel discards it, and both clear the
+ * flag first.
+ *
+ * The resume record is what unlock rebuilds in place of the launcher. The app
+ * comes from show_app() and lasts until another app (or the launcher, Find,
+ * Settings) replaces it. The view inside a data app is finer and is marked
+ * stale by every content_clear(), so it only survives if the screen that
+ * cleared the content set it again; a sub-screen nobody can rebuild falls
+ * back to its app's own entry. */
+enum { RV_NONE, RV_LIST, RV_DETAIL, RV_EDIT, RV_DAY, RV_WEEK, RV_MONTH };
+static struct {
+    char     app[16];           /* show_app() name, "Find", "Settings", or "" */
+    uint8_t  view;              /* RV_*, valid while !stale */
+    uint8_t  stale;
+    int8_t   appdef;            /* APPDEFS index for the data views */
+    uint32_t uid;
+    int16_t  y; int8_t m, d;    /* Date Book's day, week or month */
+} g_resume;
+static int g_edit_live;
+static const AppDef *g_edit_app;  /* the form's app and field count, kept apart: */
+static int g_edit_nf;            /* screens reset cur_app and g_nfields before they clear */
+static int g_locking;           /* ui_show_lock() is clearing the content */
+static void resume_app(const char *name){
+    snprintf(g_resume.app, sizeof g_resume.app, "%s", name ? name : "");
+    g_resume.view = RV_NONE; g_resume.stale = 1;
+}
+static void resume_view(int view, uint32_t uid, int y, int m, int d);
+
 /* To Do due-date picker state: edited via the due popup, written on Save. */
 static int g_due_has, g_due_y, g_due_m, g_due_d;
 /* the SAME date popup now serves the To Do's due date and the Date Book's
@@ -1009,6 +1047,7 @@ static void list_view(const AppDef *ad){
     cur_app = ad;
     cur_uid = 0;
     content_clear();
+    resume_view(RV_LIST, 0, 0, 0, 0);
     g_listtbl = NULL;
     if(is_planner(ad)) g_planner_memo = (ad->app == APP_MEMO);
     lv_label_set_text(title_lbl, is_planner(ad) ? "Planner" : ad->name);
@@ -1063,7 +1102,9 @@ static void confirm_cancel_cb(lv_event_t *e){ (void)e; confirm_close(); }
 static void confirm_delete_cb(lv_event_t *e){ (void)e;
     const AppDef *a = cur_app; uint32_t u = del_uid;
     confirm_close();
-    if(a && u){ data_delete(a->app, u); cur_uid = 0; app_reopen(a); toast_show("Deleted"); }
+    /* deleted from its own edit form (Menu > Delete): the form must not be
+     * saved on the way out, or the record comes straight back */
+    if(a && u){ g_edit_live = 0; data_delete(a->app, u); cur_uid = 0; app_reopen(a); toast_show("Deleted"); }
 }
 static void ask_delete(uint32_t uid){
     if(g_confirm || !cur_app || data_app_readonly(cur_app->app)) return;
@@ -1237,6 +1278,7 @@ static void show_detail(uint32_t uid){
     if(!data_detail(cur_app->app, uid, buf, sizeof buf)) snprintf(buf,sizeof buf,"(not found)");
 
     content_clear();
+    resume_view(RV_DETAIL, uid, 0, 0, 0);
     int ch = PDA_H - TITLE_H;
     int istodo = (cur_app->app == APP_TODO);
     /* leave room for the action row (and a second row for ToDo's Mark Done) */
@@ -1507,8 +1549,12 @@ static void default_appt(Appt *a){
 static const char *fv(int i){ return lv_textarea_get_text(g_fields[i]); }
 static const char *iv(Addr *a, const char *s){ return (s && s[0]) ? AddrIntern(a, s) : NULL; }
 
-static void save_cb(lv_event_t *e){
-    (void)e;
+/* Write the open edit form to the card. 1 on success. Navigation is the
+ * caller's: Done reopens the app, a departure (content_clear) goes on to
+ * wherever it was going. */
+static int edit_commit(void){
+    if(!cur_app) return 0;
+    int ok = 0;
     if(cur_app->app == APP_CAL){
         Appt a; if(!data_get_cal(edit_uid,&a)) default_appt(&a);
         snprintf(a.description,sizeof a.description,"%s",fv(0));
@@ -1524,7 +1570,7 @@ static void save_cb(lv_event_t *e){
         if(g_ev_alarm && a.alarmAdv <= 0){ a.alarmAdv = 5; a.alarmUnit = 0; }  /* default 5 min */
         if(g_ev_repeat == repeatNone){ a.hasRepeat = 0; a.repeatType = repeatNone; }
         else { a.hasRepeat = 1; a.repeatType = g_ev_repeat; if(a.repeatFreq <= 0) a.repeatFreq = 1; }
-        data_save_cal(edit_uid,edit_cat,&a);
+        ok = data_save_cal(edit_uid,edit_cat,&a);
     } else if(cur_app->app == APP_TODO){
         Todo t; if(!data_get_todo(edit_uid,&t)) memset(&t,0,sizeof t);
         snprintf(t.description,sizeof t.description,"%s",fv(0));
@@ -1532,7 +1578,7 @@ static void save_cb(lv_event_t *e){
         if(g_todo_pri >= 1) t.priority = g_todo_pri;
         t.hasDue = g_due_has;
         if(g_due_has){ t.dueY=g_due_y; t.dueM=g_due_m; t.dueD=g_due_d; }
-        data_save_todo(edit_uid,edit_cat,&t);
+        ok = data_save_todo(edit_uid,edit_cat,&t);
     } else if(cur_app->app == APP_ADDR){
         Addr old; int have=data_get_addr(edit_uid,&old);
         Addr a; memset(&a,0,sizeof a);
@@ -1552,14 +1598,26 @@ static void save_cb(lv_event_t *e){
             for(unsigned k=0;k<sizeof keep/sizeof keep[0];k++) if(old.fields[keep[k]]) a.fields[keep[k]]=iv(&a,old.fields[keep[k]]);
             a.displayPhone=old.displayPhone;
         }
-        data_save_addr(edit_uid,edit_cat,&a);
+        ok = data_save_addr(edit_uid,edit_cat,&a);
     } else if(cur_app->app == APP_MEMO){
-        data_save_memo(edit_uid,edit_cat,fv(0));
+        ok = data_save_memo(edit_uid,edit_cat,fv(0));
     }
-    toast_show("Saved");
+    return ok;
+}
+/* At least one character in any field: Palm's minimum for a record to keep. */
+static int edit_has_text(void){
+    for(int i = 0; i < g_nfields; i++)
+        if(g_fields[i] && lv_textarea_get_text(g_fields[i])[0]) return 1;
+    return 0;
+}
+static void save_cb(lv_event_t *e){
+    (void)e;
+    g_edit_live = 0;
+    if(edit_commit()) toast_show("Saved");
+    else              toast_show("Could not save");
     app_reopen(cur_app);
 }
-static void cancel_cb(lv_event_t *e){ (void)e; app_reopen(cur_app); }
+static void cancel_cb(lv_event_t *e){ (void)e; g_edit_live = 0; app_reopen(cur_app); }
 
 static void details_btn_cb(lv_event_t *e){ (void)e; details_open(); }
 
@@ -1805,6 +1863,8 @@ static void show_edit(uint32_t uid){
 
     /* focus the first field so Graffiti has a target immediately */
     if(g_nfields > 0){ active_ta = g_fields[0]; lv_obj_add_state(g_fields[0], LV_STATE_FOCUSED); }
+    g_edit_live = 1; g_edit_app = cur_app; g_edit_nf = g_nfields;
+    resume_view(RV_EDIT, uid, 0, 0, 0);
 }
 
 /* HotSync screen (Sync Now + a status line polled from the background task) */
@@ -2094,6 +2154,7 @@ static void show_datebook_day(int y,int m,int d){
     g_cal_y=y; g_cal_m=m; g_cal_d=d;
     cur_app=&APPDEFS[0]; cur_uid=0;     /* Date Book context (menu New/Categories) */
     content_clear();
+    resume_view(RV_DAY, 0, y, m, d);
     char t[36]; snprintf(t,sizeof t,"%s %d/%d",CAL_WD[cal_wday(y,m,d)],m,d);
     lv_label_set_text(title_lbl,t);
     update_cat_trigger();
@@ -2172,6 +2233,7 @@ static void show_datebook_week(int y,int m,int d){
     g_wk_y=y; g_wk_m=m; g_wk_d=d;
     cal_add_days(&g_wk_y,&g_wk_m,&g_wk_d, -cal_wday(y,m,d));
     content_clear();
+    resume_view(RV_WEEK, 0, y, m, d);
     lv_label_set_text(title_lbl,"Week");
     update_cat_trigger();
 
@@ -2235,6 +2297,7 @@ static void show_datebook_month(int y,int m){
     g_cal_y=y; g_cal_m=m;
     cur_app=&APPDEFS[0]; cur_uid=0;
     content_clear();
+    resume_view(RV_MONTH, 0, y, m, 1);
     lv_label_set_text(title_lbl,"Date Book");
     update_cat_trigger();
 
@@ -2271,6 +2334,7 @@ static void app_reopen(const AppDef *a){
 }
 
 static void show_app(const char *name){
+    resume_app(name);
     if(!strcmp(name, "Date Book")){                 /* PalmOS Day view, not a flat list */
         data_set_category(-1);
         int y,m,d; cal_today(&y,&m,&d);
@@ -2298,6 +2362,46 @@ static void show_app(const char *name){
     lv_label_set_text_fmt(l, "%s\n\n(coming soon)", name);
     lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(l);
+}
+
+static void resume_view(int view, uint32_t uid, int y, int m, int d){
+    g_resume.view   = (uint8_t)view;
+    g_resume.stale  = 0;
+    g_resume.appdef = cur_app ? (int8_t)(cur_app - APPDEFS) : -1;
+    g_resume.uid    = uid;
+    g_resume.y = (int16_t)y; g_resume.m = (int8_t)m; g_resume.d = (int8_t)d;
+}
+static void show_find(void);
+/* What unlock shows: the view that was up when the lock went over it, else its
+ * app's own entry, else the launcher. A record that went away meanwhile (a
+ * sync can run while the screen is dark) falls back to its app. */
+static void resume_show(void){
+    if(!g_resume.stale && g_resume.view != RV_NONE &&
+       g_resume.appdef >= 0 && g_resume.appdef < NAPPDEFS){
+        cur_app = &APPDEFS[g_resume.appdef];
+        int app = cur_app->app;
+        uint32_t u = g_resume.uid;
+        int there = u && data_record_category(app, u) >= 0;
+        switch(g_resume.view){
+        case RV_LIST:   list_view(cur_app); return;
+        case RV_DETAIL: if(there){ show_detail(u); return; } break;
+        case RV_EDIT:
+            if(data_app_readonly(app)) break;
+            if(!u || there){ show_edit(u); return; }
+            break;
+        case RV_DAY:   show_datebook_day(g_resume.y, g_resume.m, g_resume.d); return;
+        case RV_WEEK:  show_datebook_week(g_resume.y, g_resume.m, g_resume.d); return;
+        case RV_MONTH: show_datebook_month(g_resume.y, g_resume.m); return;
+        }
+        app_reopen(cur_app);
+        return;
+    }
+    char name[sizeof g_resume.app];
+    snprintf(name, sizeof name, "%s", g_resume.app);
+    if(!name[0])                      show_launcher();
+    else if(!strcmp(name, "Find"))    show_find();
+    else if(!strcmp(name, "Settings")) show_settings();
+    else                              show_app(name);
 }
 
 /* ===================== Graffiti Trainer =========================
@@ -3384,6 +3488,7 @@ static void show_launcher(void){
     cur_app = NULL;
     cur_uid = 0;
     content_clear();                     /* clears g_on_launcher; re-set it below */
+    resume_app(NULL);
     g_on_launcher = 1;
     lv_label_set_text(title_lbl, "Applications");
     update_cat_trigger();   /* hides it (no data app) */
@@ -5098,6 +5203,7 @@ static void show_settings(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
     content_clear();
+    resume_app("Settings");
     lv_label_set_text(title_lbl, "Settings");
     update_cat_trigger();   /* hides the category picker (no data app) */
 
@@ -5389,6 +5495,7 @@ static void act_gentest(lv_event_t *e){ (void)e; menu_close();
  * fake meetings never get pushed into the user's real iCloud. Deletes only the
  * seeded records (the manifest tracks them); user edits/additions are kept. */
 static void act_remove_demo(lv_event_t *e){ (void)e; menu_close();
+    g_edit_live = 0;              /* a demo record's open form goes with it */
     int n = data_remove_demo();
     if(cur_app) app_reopen(cur_app); else show_launcher();
     char msg[40]; snprintf(msg, sizeof msg, "Removed %d demo record%s", n, n==1?"":"s");
@@ -5809,6 +5916,7 @@ static void show_find(void){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_findtbl = NULL; g_findq[0] = 0;
     content_clear();
+    resume_app("Find");
     lv_label_set_text(title_lbl, "Find");
     update_cat_trigger();
 
@@ -7401,11 +7509,10 @@ static void lock_release_cb(lv_event_t *e){ (void)e;
         g_greet_due = 0xFF;
         /* a calculator the lock went over comes back exactly as it was. */
         if(g_calc) lv_obj_clear_flag(g_calc, LV_OBJ_FLAG_HIDDEN);
-        /* the launcher is built lazily on the FIRST unlock (at boot the content area
-         * is empty behind the lock, so the launcher grid and the dashboard never share
-         * the 24 KB pool). Later wakes re-lock over whatever app is showing, so only
-         * rebuild the launcher when nothing is there. */
-        if(lv_obj_get_child_count(content) == 0) show_launcher();
+        /* the screen behind the lock is built here, on the unlock, so it and the
+         * dashboard never share the pool: the launcher on the first unlock after
+         * boot, and afterwards whatever the lock went over (resume_show). */
+        if(lv_obj_get_child_count(content) == 0) resume_show();
     }
 }
 
@@ -7596,8 +7703,11 @@ void ui_show_lock(void){
     /* Free whatever app view is in the content area first. The lock covers the whole
      * screen anyway, and this keeps the 24 KB LVGL pool holding only the chrome + the
      * dashboard at once (never chrome + an app + the dashboard). The content area is
-     * left empty, so unlocking rebuilds the launcher (see lock_release_cb). */
+     * left empty, and unlocking rebuilds what was there (resume_show). An edit
+     * form is saved on the way (content_clear). */
+    g_locking = 1;
     content_clear();
+    g_locking = 0;
     kill_kb();
     time_t now=0; time(&now);
     dash_weather_seed_sample(WX_PATH);
@@ -8590,6 +8700,20 @@ static lv_obj_t *g_zp_cv, *g_zp_status, *g_zp_timelbl;
  * be nulled here: their objects survive this call. */
 static void content_clear(void){
     if(!content) return;
+    /* an edit form being left any way but Done or Cancel is saved (see
+     * g_edit_live). Before the clean: the fields are still alive. */
+    if(g_edit_live){
+        g_edit_live = 0;
+        const AppDef *was = cur_app; int was_nf = g_nfields;
+        cur_app = g_edit_app; g_nfields = g_edit_nf;
+        if(edit_has_text() && edit_commit()){
+            uint32_t u = edit_uid ? edit_uid : data_last_new_uid();
+            if(g_locking) resume_view(RV_EDIT, u, 0, 0, 0);   /* reopen it on unlock */
+            else          toast_show("Saved");
+        }
+        cur_app = was; g_nfields = was_nf;
+    }
+    if(!g_locking) g_resume.stale = 1;   /* the next screen says what it is */
     lv_obj_clean(content);
     /* only the screen that asks for it keeps it; Study, swapping one of its
      * own screens for another, says for itself (st_screen) */

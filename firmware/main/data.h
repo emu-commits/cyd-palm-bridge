@@ -66,6 +66,10 @@ int data_get_todo(uint32_t uid, Todo *out);
 int data_save_cal(uint32_t uid, int cat, const Appt *in);
 int data_save_addr(uint32_t uid, int cat, const Addr *in);
 int data_save_todo(uint32_t uid, int cat, const Todo *in);
+/* the uid the last save that CREATED a record gave it (0 before any). A form
+ * saved on the way out reopens on its record, and a new one has no uid until
+ * the card has assigned it. */
+uint32_t data_last_new_uid(void);
 /* category index of a record (attr nibble), or -1 if not found */
 int data_record_category(int app, uint32_t uid);
 /* toggle a to-do's completed flag (and save). 1 on success. */

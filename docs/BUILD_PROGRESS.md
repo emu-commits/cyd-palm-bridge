@@ -16,6 +16,41 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-15 — Waking goes back to where you were, and leaving a form saves it
+
+From `PALM_ARCHIVE_REVIEW.md` §3.1 (Palm's "return to the last form" and
+"save the data before the user exits the form"). The lock frees the open app
+when the screen sleeps, which it must, because the pool can't hold an app and
+the dashboard at once. Unlock then always built the launcher, and an edit
+form open at the time was lost. So was one left by Home, Find or the Menu:
+only Done saved.
+
+- **Leaving saves.** `content_clear()` saves an edit form that nothing has
+  saved or cancelled (`g_edit_live`) if it holds at least one character,
+  Palm's minimum. Done and Cancel clear the flag first; Cancel still
+  discards. The form keeps its own app and field count, because Settings and
+  the launcher reset `cur_app` and `g_nfields` before they clear. A delete
+  from the form's own menu, and Remove demo data, drop the flag so the
+  record isn't written straight back.
+- **Unlock resumes.** A resume record (`g_resume`, 28 bytes) holds the app
+  from `show_app()`, or Find or Settings, and a finer data view: list,
+  detail, edit, or Date Book's day, week or month. Every `content_clear()`
+  marks the view stale, and the screens that can be rebuilt set it again.
+  `resume_show()` rebuilds the view, else the app's entry, else the
+  launcher. A record that went away meanwhile falls back to its app, and so
+  does a contact edit while Address is read-only. An edit form saved by the
+  lock reopens on its record: `data_last_new_uid()` gives a new record's
+  uid once the card has assigned it.
+- **Save reports failure.** Done used to toast "Saved" whatever the write
+  returned; it says "Could not save" now.
+
+Gates: the smoke writes half a memo, raises the lock (`L`) and unlocks
+(`p1_resumed_edit`: the form, with the text), leaves a second memo by Home
+(`p1_home_saved`, the toast), and the Planner lists both, once each
+(`p1_memos_kept`). A lock over the Day view wakes on it (`p1_day_resumed`).
+`make -C sim data` checks `data_last_new_uid()`. The pool's low-water mark
+is unchanged (6,460 B, at `r11_lock_over_calc`).
+
 ### 2026-10-14 — A read-only probe: does iCloud honour partial address-data?
 
 Whether the device can stop downloading contact photos depends on iCloud
