@@ -103,7 +103,7 @@ What was chosen:
 | The licence allow-list | `tools/game_allow.tsv`: each creature, tileset and character sheet we use, with its licence and credit line, checked by hand (§10) |
 | The region | `tools/game_region.json`: the maps, the start, the player's sheet, the encounter tables |
 | Stable ids | `tools/game_ids.tsv`: creature, move, status and area numbers a save refers to |
-| The data file | `/sdcard/games/monster/game.bin`, built from Tuxemon (clean licences only) and committed as `courses/critters/game.bin`; the web flasher can install it (§13 Q1) |
+| The data file | `/sdcard/games/monster/game.bin`, built from Tuxemon (clean licences only, `mkgame.py --strict`) and committed as `courses/critters/game.bin` with its credits in `courses/critters/README.md` (§13 Q1) |
 | The save | `/sdcard/games/monster/save.dat` |
 | Host gates | `make -C sim monster` (the dump round trip with `mkgame.py`, the formulas, walking, encounters, recorded battles, the save; the bot finishing from G4), `monster_fuzz` in `make ftest`, and `tests/mkgame_test.py` (the fixture rebuilt byte for byte) |
 | The fixture | `tests/data/game/`: `source.py` writes a small Tuxemon-shaped tree of our own (CC0); `game.bin` is its build, `battle.txt` the recorded battles |
@@ -342,8 +342,12 @@ one screen, scrolling included, was 34 (Route 1).
   creatures with whole evolution lines credited: the Agnite, Cardiling,
   Vamporm and Anoleaf lines, Eyenemy, Noctula and Selket and their
   evolutions, Zunna and Pigabyte.
-- **Character sheets:** the credits don't name files, so the spike's player
-  (`adventurer`) is marked `unverified`, and G3's build refuses that.
+- **Character sheets:** the credits don't name files, and the spike's
+  player (`adventurer`) turned out to descend from `red_front` (before 2022),
+  in a line the credits list as non-commercial or XYG-licensed. So the player
+  is **drawn for this project** (`tools/gen_player_sheet.py`, CC0, status
+  `ours` in the allow-list), and the committed build has no `unverified` line
+  (2026-10-16).
 - **Left out entirely:**
   - the tilesets under the "XYG Open Source License", and the four core
     sheets built from them (above);

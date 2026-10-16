@@ -1,12 +1,12 @@
 {
   "title": "Critters",
-  "note": "G0 spike region: two connected areas of Tuxemon's Spyder maps, to measure the format. G3 replaces it with the first region.",
+  "note": "The first region, committed as courses/critters/game.bin (2026-10-16): two connected areas of Tuxemon's Spyder maps, both drawn from clean tilesets only. Towns laid out from clean sheets come with G3.",
   "areas": [
     {"map": "spyder_route1", "name": "Route 1"},
     {"map": "spyder_brideswood", "name": "Brideswood"}
   ],
   "start": {"area": "spyder_route1", "x": 24, "y": 8, "facing": "down"},
-  "player": "adventurer",
+  "player": "player",
   "encounters": {
     "spyder_route1": [
       {"creature": "agnite",    "levels": [2, 4], "rate": 10},

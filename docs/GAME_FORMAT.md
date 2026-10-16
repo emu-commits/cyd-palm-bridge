@@ -42,7 +42,7 @@ Four files in `tools/` decide what's built:
 | File | What it holds |
 |---|---|
 | `mkgame.py` | The pinned Tuxemon commit (`TUXEMON_COMMIT`, the full SHA). The build refuses a checkout at any other commit, or with local changes under `mods/`. |
-| `game_allow.tsv` | The licence allow-list (`GAME_PLAN.md` §10). **Only what it lists is built**: tilesets, creatures and character sheets, each with licence, authors, source and a status (`credited` from Tuxemon's `ATTRIBUTIONS.md`, `unverified`, or `confirmed` by hand). A map cell from an unlisted tileset loses that layer's tile, and the build says how many. |
+| `game_allow.tsv` | The licence allow-list (`GAME_PLAN.md` §10). **Only what it lists is built**: tilesets, creatures and character sheets, each with licence, authors, source and a status (`credited` from Tuxemon's `ATTRIBUTIONS.md`, `unverified`, `confirmed` by hand, or `ours`: a character sheet drawn for this project, CC0, at `tools/game_art/<slug>.png`). `--strict` refuses any `unverified` line. A map cell from an unlisted tileset loses that layer's tile, and the build says how many. |
 | `game_region.json` | The region: which maps, their names, where the player starts, the player's sheet, and the encounter tables. The tables are ours, not Tuxemon's, because Tuxemon's name creatures the allow-list doesn't have. |
 | `game_ids.tsv` | Stable numbers for creatures, moves, statuses and areas, as `ids.tsv` is for courses. A save refers to these, so a rebuild that adds content keeps old saves working. `mkgame.py` appends new numbers and never renumbers. **Commit it.** |
 
@@ -71,7 +71,7 @@ it byte for byte; `--unpinned` is for that and nothing else.
 | `mods/*.yaml` | `config_combat`, `config_capture`, `config_monster`, `range_map`: the rules' constants |
 | `mods/tuxemon/maps/*.tmx` | The region's maps: tile layers, tile properties, collision objects, events |
 | `mods/tuxemon/gfx/sprites/battle/<slug>-sheet.png` | Battle sprites: the 64×64 front at (0,0), the 64×64 back at (64,0) |
-| `mods/tuxemon/sprites/<name>.png` | Character sheets: 48×128, twelve 16×32 frames, three per direction |
+| `mods/tuxemon/sprites/<name>.png` | Character sheets: 48×128, twelve 16×32 frames, three per direction (or `tools/game_art/<name>.png` for a sheet of our own, in the same layout) |
 | `mods/tuxemon/l18n/en_US/LC_MESSAGES/base.po` | English names and dialogue |
 
 **What it doesn't take:** Tuxemon's event scripts beyond the four verbs in

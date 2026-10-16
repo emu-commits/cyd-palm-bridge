@@ -208,8 +208,10 @@ def load_allow(path=ALLOW):
         if not line.strip() or line.startswith("#"):
             continue
         f = line.split("\t")
-        if len(f) != 6 or f[0] not in allow or f[5] not in ("credited", "unverified", "confirmed"):
+        if len(f) != 6 or f[0] not in allow or f[5] not in ("credited", "unverified", "confirmed", "ours"):
             fail(f"{path}:{n}: want kind, slug, licence, authors, source, status")
+        if f[5] == "ours" and (f[0] != "character" or f[4] != f"tools/game_art/{f[1]}.png"):
+            fail(f"{path}:{n}: a sheet of our own is a character at tools/game_art/{f[1]}.png")
         allow[f[0]][f[1]] = {"licence": f[2], "authors": f[3], "source": f[4], "status": f[5]}
     return allow
 
@@ -841,7 +843,8 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
     for c in chars:
         if c not in allow["character"]:
             fail(f"game_region.json: character {c} isn't in the allow-list")
-    char_imgs = [Image.open(root / "mods" / "tuxemon" / "sprites" / f"{c}.png").convert("RGBA") for c in chars]
+    char_imgs = [Image.open(TOOLS / "game_art" / f"{c}.png" if allow["character"][c]["status"] == "ours"
+                            else root / "mods" / "tuxemon" / "sprites" / f"{c}.png").convert("RGBA") for c in chars]
     for a in region["areas"]:
         ar = Area(root, a["map"], allowed, cache, report)
         mv, hop = ar.movement()

@@ -42,8 +42,11 @@ open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
   stays on on USB, dims and locks on battery, and the game pauses on lock;
   built into the current test image now (the yes for G2).
 - [ ] G2, the screens (`GAME_PLAN.md` §12).
-- [ ] The clean region: towns from clean sheets, the player's sheet
-  confirmed, `courses/critters/game.bin` and its credits.
+- [x] The clean file: `courses/critters/game.bin` (Route 1 and Brideswood,
+  20 creatures), built `--strict` with a player sheet of our own, its credits
+  in `courses/critters/README.md` and `NOTICE`, round-tripped in `make -C sim
+  monster` and checked in `tests/mkgame_test.py`.
+- [ ] Towns laid out from clean sheets (G3).
 - [ ] The web flasher's optional install.
 
 ## RESUME HERE — Palm behaviours from the archive review (approved 2026-10-15)

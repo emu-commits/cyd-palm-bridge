@@ -7,6 +7,9 @@
   2. ids.tsv: a creature without a number gets the next one; the others keep
      theirs.
   3. Bad regions are refused, each with a message that says what's wrong.
+  4. The committed game (courses/critters/game.bin, built from the pinned
+     Tuxemon with --strict) reads back clean, credits nothing unverified, and
+     the player's sheet (ours, CC0) matches its drawing.
 
 The C reader's side (its dump equal to mkgame's) is `make -C sim monster`.
 Needs Pillow and PyYAML at the pinned versions (tools/requirements-game.txt).
@@ -100,6 +103,35 @@ def main():
         r = subprocess.run([sys.executable, str(MKGAME), "--tuxemon", str(tree), "-o", str(t / "x.bin")],
                            capture_output=True, text=True)
         check(r.returncode != 0, "a build that isn't --unpinned needs the pinned checkout")
+        bad_allow = t / "allow_ours.tsv"
+        bad_allow.write_text((FIX / "allow.tsv").read_text() +
+                             "character\tstranger\tCC0 1.0\tus\tmods/tuxemon/sprites/stranger.png\tours\n")
+        r = build(tree, t / "bad.bin", ids, allow=bad_allow)
+        check(r.returncode != 0 and "tools/game_art/stranger.png" in r.stderr,
+              f"an 'ours' sheet that isn't in tools/game_art: {r.stderr.strip()}")
+
+    # 4. the committed game
+    game = ROOT / "courses" / "critters" / "game.bin"
+    r = subprocess.run([sys.executable, str(MKGAME), "--check", str(game)], capture_output=True, text=True)
+    check(r.returncode == 0 and ": ok" in r.stdout, f"courses/critters/game.bin --check: {r.stdout}{r.stderr}")
+    sys.path.insert(0, str(ROOT / "tools"))
+    import mkgame
+    allow = mkgame.load_allow()
+    bad = [f"{k} {s}" for k, d in allow.items() for s, v in d.items() if v["status"] == "unverified"]
+    check(not bad, f"tools/game_allow.tsv has unverified lines, so the committed game can't be rebuilt: {bad}")
+    data = game.read_bytes()
+    import struct
+    cred = ""
+    for i in range(struct.unpack_from("<H", data, 12)[0]):        # the section count
+        tag, off, ln, _ = struct.unpack_from("<4sIII", data, 32 + 16 * i)
+        if tag == b"CRED":
+            cred = data[off:off + ln].decode("utf-8")
+    check(cred.startswith(f"Game data from Tuxemon (GPLv3), commit {mkgame.TUXEMON_COMMIT[:12]}."),
+          "the committed game wasn't built from the pinned Tuxemon")
+    check("player: CYD Palm (CC0 1.0)" in cred, "the committed game's player isn't our sheet")
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "gen_player_sheet.py"), "--check"],
+                       capture_output=True, text=True)
+    check(r.returncode == 0, f"tools/game_art/player.png: {r.stdout}{r.stderr}")
 
     print(f"mkgame_test: {'FAILED' if fails else 'OK'} ({fails} failure{'' if fails == 1 else 's'})")
     return 1 if fails else 0

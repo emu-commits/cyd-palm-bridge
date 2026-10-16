@@ -228,15 +228,18 @@ build/srs_test: tests/srs_test.c $(FW)/srs.c $(FW)/srs.h $(FW)/study.c $(FW)/stu
 # monster.c, monster_play.c), under ASan and UBSan, on the fixture in
 # tests/data/game (ours, built by tools/mkgame.py from source.py). The round
 # trip first: the C reader's dump must equal mkgame.py's (stdlib only), byte
-# for byte. Then the formulas, walking, encounters, 40 seeded battles against
-# the recorded transcript, and the save. smoke32 runs it again 32-bit; make
+# for byte, for the fixture and for the game that ships (courses/critters).
+# Then the formulas, walking, encounters, 40 seeded battles against the
+# recorded transcript, and the save. smoke32 runs it again 32-bit; make
 # ftest fuzzes it. ----
 MONSTER_SRCS := tests/monster_test.c $(FW)/monster.c $(FW)/monster_play.c
 monster: build/monster_test
-	./build/monster_test dump ../tests/data/game/game.bin > build/monster_c.txt
-	python3 ../tools/mkgame.py --dump ../tests/data/game/game.bin > build/monster_py.txt
-	@cmp build/monster_c.txt build/monster_py.txt || { echo "monster: C and Python read game.bin differently"; exit 1; }
-	@echo "  round trip: tests/data/game/game.bin"
+	@for g in ../tests/data/game/game.bin ../courses/critters/game.bin; do \
+	    ./build/monster_test dump $$g > build/monster_c.txt && \
+	    python3 ../tools/mkgame.py --dump $$g > build/monster_py.txt && \
+	    cmp build/monster_c.txt build/monster_py.txt || { echo "monster: C and Python read $$g differently"; exit 1; }; \
+	    echo "  round trip: $$g"; \
+	done
 	./build/monster_test
 	@echo "sim monster: OK"
 

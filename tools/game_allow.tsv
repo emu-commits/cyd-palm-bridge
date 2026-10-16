@@ -14,6 +14,8 @@
 #            unverified: no entry found yet; used in G0 spikes only (G3's
 #                        build refuses any unverified line)
 #            confirmed:  checked by hand against the source link (G3)
+#            ours:       drawn for this project, CC0, at tools/game_art/<slug>.png
+#                        (characters only; tools/gen_player_sheet.py draws the player)
 #
 # Left out on purpose (section 10): anything under the "XYG Open Source
 # License" (Kelvin Shadewing's sets, and core_buildings, core_set pieces,
@@ -47,4 +49,7 @@ creature	selmatek	CC-BY-SA 4.0	Catch Challenger	https://wiki.tuxemon.org/index.p
 creature	zunna	CC-BY-SA 4.0	Spalding004; Sanglorian	https://wiki.tuxemon.org/index.php?title=Zunna	credited
 creature	pigabyte	CC-BY-SA 4.0	josepharaoh99	https://forum.tuxemon.org/viewtopic.php?id=72	credited
 
-character	adventurer	unknown	unknown	mods/tuxemon/sprites/adventurer.png	unverified
+# Tuxemon's `adventurer` sheet isn't used: it has no credit line, and its
+# history (red_front, before 2022) runs back through sheets the credits list as
+# non-commercial or XYG-licensed. The owner chose clean licences only (Q6).
+character	player	CC0 1.0	CYD Palm	tools/game_art/player.png	ours
