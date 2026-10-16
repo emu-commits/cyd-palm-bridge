@@ -55,8 +55,19 @@ PalmSim().then((m) => {
   /* ---- SD card = IndexedDB: mount, restore, THEN boot the Palm ---- */
   try { m.FS.mkdir('/sdcard'); } catch (e) {}
   m.FS.mount(m.FS.filesystems.IDBFS, {}, '/sdcard');
-  m.FS.syncfs(true, (err) => {
+  m.FS.syncfs(true, async (err) => {
     if (err) console.warn('sdcard restore failed (starting fresh):', err);
+    /* Critters' game file, as the web flasher would install it: the card gets
+       this site's copy each visit (a save and a paused battle are separate files
+       and stay). A failed fetch leaves the card as it was. */
+    try {
+      const r = await fetch('critters/game.bin', { cache: 'no-cache' });
+      if (r.ok) {
+        const b = new Uint8Array(await r.arrayBuffer());
+        for (const d of ['/sdcard/games', '/sdcard/games/monster']) { try { m.FS.mkdir(d); } catch (e) {} }
+        m.FS.writeFile('/sdcard/games/monster/game.bin', b);
+      }
+    } catch (e) { console.warn('Critters game file not installed:', e); }
     m._sim_boot();
 
     /* persist: scrub passwords out of config.ini FIRST, then write IndexedDB.
