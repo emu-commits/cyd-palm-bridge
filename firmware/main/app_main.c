@@ -32,6 +32,7 @@
 #include "data.h"
 #include "clock.h"
 #include "appcfg.h"
+#include "monster_install.h"
 
 static const char *TAG = "app";
 
@@ -105,6 +106,7 @@ void app_main(void){
     /* mount the SD card and seed demo PDBs so the views have content. */
     if(sd_mount()==ESP_OK){
         data_seed_if_empty();
+        monster_install();   /* the flasher's optional Critters, once per new game */
         /* Two-way sync is live, so anything sitting in the local Date Book gets
          * pushed to the real account. The devtools "Add test events" seed must
          * not be part of that. Clearing it at boot -- before any HotSync can run

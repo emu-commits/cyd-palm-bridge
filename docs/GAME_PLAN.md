@@ -104,6 +104,7 @@ What was chosen:
 | The region | `tools/game_region.json`: the maps, the start, the player's sheet, the encounter tables |
 | Stable ids | `tools/game_ids.tsv`: creature, move, status and area numbers a save refers to |
 | The data file | `/sdcard/games/monster/game.bin`, built from Tuxemon (clean licences only, `mkgame.py --strict`) and committed as `courses/critters/game.bin` with its credits in `courses/critters/README.md` (§13 Q1) |
+| The flasher's install | `partitions.csv`'s `game` partition (960 KB at 0x310000); `tools/package_firmware.py` writes `manifest-critters.json` beside `manifest.json`, the install page's checkbox picks it, and `firmware/main/monster_install.c` copies a new game to the card at boot (once per fingerprint, in `installed.txt`) |
 | The save | `/sdcard/games/monster/save.dat` |
 | Host gates | `make -C sim monster` (the dump round trip with `mkgame.py`, the formulas, walking, encounters, recorded battles, the save; the bot finishing from G4), `monster_fuzz` in `make ftest`, and `tests/mkgame_test.py` (the fixture rebuilt byte for byte) |
 | The fixture | `tests/data/game/`: `source.py` writes a small Tuxemon-shaped tree of our own (CC0); `game.bin` is its build, `battle.txt` the recorded battles |

@@ -54,7 +54,11 @@ open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
   in `courses/critters/README.md` and `NOTICE`, round-tripped in `make -C sim
   monster` and checked in `tests/mkgame_test.py`.
 - [ ] Towns laid out from clean sheets (G3).
-- [ ] The web flasher's optional install.
+- [x] The web flasher's optional install: a `game` partition, a second
+  manifest, a checkbox on the install page, the copy to the card at boot.
+- [d] Install from the web page with "Also install Critters" ticked: the
+  board starts, `games/monster/game.bin` is on the card, and Critters opens.
+  An install without the box leaves the card's game alone.
 
 ## RESUME HERE — Palm behaviours from the archive review (approved 2026-10-15)
 

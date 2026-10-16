@@ -16,6 +16,30 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-16 — The web flasher installs Critters, if asked
+
+`GAME_PLAN.md` §13 Q1: the committed `courses/critters/game.bin` is an
+optional install from the web flasher.
+
+- `partitions.csv` gains `game` (data, subtype 0x40, 960 KB at 0x310000,
+  after the 3 MB app). Nothing else moves, and the NVS check in
+  `package_firmware.py` still holds.
+- `tools/package_firmware.py` writes `manifest-critters.json` beside
+  `manifest.json`: the same parts plus `critters-game.bin` at the partition's
+  offset (refused if it isn't a game file or doesn't fit).
+- `sim/web/flash.html`: an "Also install Critters" checkbox, shown only when
+  the site has that manifest; it swaps the Install button's manifest.
+- `firmware/main/monster_install.c`, after the card mounts: a game in the
+  partition whose fingerprint isn't the one in `games/monster/installed.txt`
+  is copied to the card through `safefile.h`, opened once to check it, and
+  noted. So a game copied by hand is replaced only by a newer flash, and a
+  flash without the box (or an erased partition) leaves the card alone.
+
+Measured: the image 1,793,163 B; static DRAM 147,460 B (81.59 %). Checked:
+the firmware build and the packaging (both manifests written, the game at
+0x310000), the wasm build. Not checked here: the copy itself, which needs a
+card (QEMU has none): a `[d]` item.
+
 ### 2026-10-16 — Critters' G2: the screens, in the Games folder
 
 The owner approved `GAME_FORMAT.md`, answered `GAME_PLAN.md` §13 and said

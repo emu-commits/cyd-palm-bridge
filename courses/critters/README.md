@@ -2,7 +2,10 @@
 
 `game.bin` is the data of **Critters**, the monster game in the Games folder
 (`docs/GAME_PLAN.md`, format in `docs/GAME_FORMAT.md`). The device reads it
-from `/sdcard/games/monster/game.bin`: copy it there.
+from `/sdcard/games/monster/game.bin`. The web flasher installs it when
+"Also install Critters" is ticked: it goes into the board's `game` partition
+with the firmware, and the board copies it to the card when it starts
+(`firmware/main/monster_install.c`). Or copy it there by hand.
 
 **What's in it:** two connected areas of Tuxemon's Spyder maps (Route 1 and
 Brideswood), 20 creatures in whole evolution lines, their moves, and the

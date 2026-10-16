@@ -5,6 +5,10 @@
 
 Writes into out_dir:
   manifest.json            what the web page's Install button reads
+  manifest-critters.json   the same, plus Critters' game file (critters-game.bin)
+                           in the "game" partition; the page offers it as a
+                           checkbox, and the board copies it to the card at boot
+                           (firmware/main/monster_install.c)
   bootloader.bin, partition-table.bin, cyd_palm_bridge.bin
                            the three images, each at its own offset
   cyd-palm-<version>-full.bin
@@ -78,6 +82,22 @@ def main():
     }
     with open(os.path.join(out, 'manifest.json'), 'w') as f:
         json.dump(manifest, f, indent=2)
+        f.write('\n')
+
+    # Critters, optional: the committed game file into its own partition
+    game_off, game_size = partitions(os.path.join(build, '..', 'partitions.csv'))['game']
+    game = os.path.join(build, '..', '..', 'courses', 'critters', 'game.bin')
+    with open(game, 'rb') as f:
+        head = f.read(4)
+    if head != b'CYDG' or os.path.getsize(game) > game_size:
+        sys.exit(f'package_firmware: {game} isn\'t a game file that fits the game partition ({game_size} B)')
+    shutil.copyfile(game, os.path.join(out, 'critters-game.bin'))
+    print(f'  {game_off:#08x}  critters-game.bin  ({os.path.getsize(game)} bytes, the optional install)')
+    critters = dict(manifest, name='CYD Palm with Critters',
+                    builds=[{'chipFamily': 'ESP32',
+                             'parts': parts + [{'path': 'critters-game.bin', 'offset': game_off}]}])
+    with open(os.path.join(out, 'manifest-critters.json'), 'w') as f:
+        json.dump(critters, f, indent=2)
         f.write('\n')
 
     full = os.path.join(out, f'cyd-palm-{version}-full.bin')

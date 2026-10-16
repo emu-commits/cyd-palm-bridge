@@ -24,6 +24,9 @@
         border: 0; border-radius: 8px; padding: 10px 28px; cursor: pointer; }
   .go:hover { background: #4a7ee6; }
   code { background: #1f1f24; padding: 1px 4px; border-radius: 3px; font-size: 13px; }
+  #extras { margin: 14px 0 0; font-size: 15px; }
+  #extras label { cursor: pointer; }
+  #extras small { display: block; color: #9a9aa2; font-size: 13px; margin: 2px 0 0 1.6em; }
 </style>
 </head>
 <body>
@@ -51,6 +54,11 @@
       <span slot="not-allowed" class="warn">Web Serial needs a secure page.
         Open this over https.</span>
     </esp-web-install-button>
+    <p id="extras" hidden><label><input type="checkbox" id="critters"> Also install
+      <b>Critters</b>, the monster game</label>
+      <small>About 130 KB, written to the board with the firmware. The board copies
+        it to the microSD card when it starts, into <code>games/monster</code>.
+        Creatures and maps from Tuxemon, credited in the game.</small></p>
     <p id="version">Looking for the firmware…</p>
   </div>
 
@@ -113,13 +121,31 @@
   <p style="margin-top:32px"><a href="./">Try it in your browser first →</a></p>
 </main>
 <script>
+/* Critters is optional: the checkbox swaps the button's manifest for the one
+   that also writes the game (tools/package_firmware.py). A site without that
+   manifest shows no checkbox. */
+function offerCritters() {
+  fetch('firmware/manifest-critters.json', { method: 'HEAD', cache: 'no-store' })
+    .then((r) => {
+      if (!r.ok) return;
+      const box = document.getElementById('critters');
+      const btn = document.querySelector('esp-web-install-button');
+      document.getElementById('extras').hidden = false;
+      box.addEventListener('change', () => {
+        const m = box.checked ? 'firmware/manifest-critters.json' : 'firmware/manifest.json';
+        btn.setAttribute('manifest', m);
+        btn.manifest = m;
+      });
+    })
+    .catch(() => {});
+}
 /* The firmware is added to the site by CI (tools/package_firmware.py).
    A local `make -C sim wasm` has no firmware, so say that plainly instead of
    showing a button that fails. */
 const v = document.getElementById('version');
 fetch('firmware/manifest.json', { cache: 'no-store' })
   .then((r) => r.ok ? r.json() : Promise.reject(r.status))
-  .then((m) => { v.textContent = 'Firmware ' + m.version + ', built from the main branch.'; })
+  .then((m) => { v.textContent = 'Firmware ' + m.version + ', built from the main branch.'; offerCritters(); })
   .catch(() => {
     document.querySelector('esp-web-install-button').remove();
     v.textContent = 'This copy of the page has no firmware. The published site has it.';
