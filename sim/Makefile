@@ -46,6 +46,7 @@ APP_SRCS := \
     $(FW)/ui.c $(FW)/data.c $(FW)/graffiti.c $(FW)/appcfg.c $(FW)/secretstore.c $(FW)/clock.c \
     $(FW)/lv_font_palm.c $(FW)/lv_font_palm_bold.c $(FW)/lv_font_palm_bold_2x.c $(FW)/lv_font_kana.c $(FW)/lv_font_kana_20.c $(FW)/palm_icons.c \
     $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(BR)/dash.c $(FW)/minesweeper.c $(FW)/wordie.c $(FW)/sudoku.c $(FW)/zip.c $(FW)/coach.c $(FW)/guru.c $(FW)/guru_pool.c $(FW)/gurupool.c $(FW)/course.c $(FW)/srs.c $(FW)/study.c $(FW)/study_demo.c \
+    $(FW)/monster.c $(FW)/monster_play.c $(FW)/ui_monster.c \
     $(BR)/pdb.c $(BR)/datebook.c $(BR)/address.c $(BR)/todo.c $(BR)/appinfo.c \
     $(BR)/ical.c $(BR)/vcard.c $(BR)/tz.c $(BR)/charset.c \
     $(BR)/find.c $(BR)/calc.c $(BR)/config.c $(BR)/rss.c $(BR)/news.c $(BR)/feeds.c \
@@ -91,8 +92,13 @@ build/sim_host: build/liblvgl.a $(APP_SRCS) host_main.c sim_port.h sim_heap.h lv
 # screen leaves less than POOL_FLOOR free (host_main.c). That is the project's
 # most repeated failure -- a per-row widget where a virtualised table belongs --
 # and until now it was only ever caught by a person tapping the glass. ----
+# Critters' game file goes on the card first (the tour plays it); its save and
+# pause files from an earlier run go, so the tour starts a new game.
+CRITTERS_CARD := mkdir -p /sdcard/games/monster && cp ../courses/critters/game.bin /sdcard/games/monster/ && \
+    rm -f /sdcard/games/monster/save.dat /sdcard/games/monster/pause.dat
 smoke: host
 	rm -rf build/shots && mkdir -p build/shots
+	$(CRITTERS_CARD)
 	./build/sim_host build/shots < tests/smoke.txt
 	@ls build/shots/*.ppm >/dev/null
 	@echo "sim smoke: OK"
@@ -107,6 +113,7 @@ smoke32: lvgl-src
 	$(MAKE) clean
 	$(MAKE) build/sim_host CFLAGS="-O2 -g -Wall -m32 $(SIMDEF) $(INC)"
 	rm -rf build/shots && mkdir -p build/shots
+	$(CRITTERS_CARD)
 	./build/sim_host build/shots < tests/smoke.txt
 	@ls build/shots/*.ppm >/dev/null
 	$(CC) -m32 -O2 -Wall -Wextra -I$(FW) tests/course_test.c $(FW)/course.c -o build/course_test32

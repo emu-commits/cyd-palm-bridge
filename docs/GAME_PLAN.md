@@ -417,11 +417,23 @@ screenshots looked at.
     knows the last four moves its level reaches. `META` gained `0x22` (the
     IV maximum and the experience multipliers), so no rule's number is in
     the code.
-- **G2 — screens.** `ui_monster.c`: the map view, scrolling, the text box, the
-  battle screen, the controls, the transition screen. Gates: smoke
-  screenshots, pool parity, heap given back on leaving (the smoke tour's
-  `B`/`E` check). Measured: frame rate, area load time, heap during a sync
-  (QEMU).
+- **G2 — screens. Built 2026-10-16, in the simulator; the bench is next.**
+  - [x] `ui_monster.c`: the map view without a canvas (each draw band is
+    composed from an 8-bit tile cache into one RGB565 image: one draw task
+    per band), scrolling in four 4 px frames, the text box, the battle
+    screen, the D-pad and A/B, the transition cards; a choice of three
+    first creatures; Party, Save game, New game and Credits in the menu.
+  - [x] §13 Q3: the screen stays on while the game is open on USB power
+    (`power_on_usb()`); on battery it dims and locks as usual, and the lock
+    pauses the game: a battle goes to `pause.dat` and comes back on unlock.
+  - [x] Gates: the smoke tour (the `critters_*` shots, the lock and the
+    resume mid-battle, `B`/`E` on leaving), pool parity, `smoke32`.
+  - [x] Measured in the simulator, 32-bit as on the device: one heap block
+    of 52.5 KB with Route 1 open, all of it given back on leaving; the LVGL
+    pool 15.4 KB free at the tour's last game screen. Static DRAM +130 B
+    (81.59 % used, 33,268 B free); the image 1,792,267 B.
+  - [ ] Measured on the bench: frame rate, area load time, heap during a
+    sync (`BACKLOG.md`).
 - **G3 — content.**
   - The first region and its creatures through `mkgame.py --check`, reproducible.
   - The allow-list completed.

@@ -1834,6 +1834,140 @@ m 120 90
 t 30
 u
 t 400
+# Critters (GAME_PLAN.md G2), the monster game, from courses/critters/game.bin
+# (the Makefile puts it on the card). Full screen: the view above, the D-pad
+# (up 64,224 down 64,296 left 28,260 right 100,260) and A (204,246) and B
+# (150,280) below. UI_DEVTOOLS seeds a new game with 1, so the same creature
+# appears on the same step every run. The choice of three, the map, turning
+# then walking, a wild Vamporm in the grass, a turn of the battle; then the
+# LOCK in mid-battle (the game pauses into pause.dat) and the unlock, which
+# must come back to the same battle with the same HP; then Run, the menu's
+# Credits (scrolled both ways), Party and Save game, and leaving: every byte
+# of the game's block must come back (B at the Games folder, E after).
+c 18 225
+t 300
+c 195 110
+t 300
+B
+c 120 115
+t 600
+s critters_pick
+c 100 260
+t 200
+s critters_pick_next
+c 28 260
+t 200
+c 204 246
+t 300
+s critters_map
+c 204 246
+t 300
+c 100 260
+t 200
+s critters_turned
+d 100 260
+t 700
+u
+t 300
+s critters_walked
+d 64 296
+t 1500
+u
+t 600
+s critters_battle
+c 204 246
+t 300
+s critters_battle_menu
+c 204 246
+t 300
+s critters_moves
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+s critters_turn_done
+L
+t 300
+s critters_locked
+d 120 275
+t 30
+m 120 210
+t 30
+m 120 140
+t 30
+m 120 90
+t 30
+u
+t 600
+s critters_resumed
+c 64 296
+t 150
+c 64 296
+t 150
+c 64 296
+t 150
+s critters_run_sel
+c 204 246
+t 300
+s critters_run1
+c 204 246
+t 300
+s critters_run2
+c 204 246
+t 300
+s critters_run3
+c 204 246
+t 600
+s critters_run4
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+s critters_escaped
+c 226 12
+t 300
+c 60 210
+t 300
+s critters_credits
+c 64 296
+t 150
+c 64 296
+t 150
+c 64 224
+t 150
+s critters_credits_scrolled
+c 150 280
+t 300
+c 226 12
+t 300
+c 60 132
+t 300
+s critters_party
+c 150 280
+t 300
+c 226 12
+t 300
+c 60 158
+t 300
+s critters_saved
+t 1500
+c 200 12
+t 400
+c 195 110
+t 400
+E critters
 # I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.
 # (CI starts on a fresh /sdcard, so the seed + manifest exist here.)
 c 18 225

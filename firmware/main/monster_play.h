@@ -13,7 +13,7 @@
  * MEMORY: an MpWorld is about 6 KB (the party, the box of MP_BOX creatures,
  * four chunks and the area's head buffer pointer); the caller allocates it
  * with the screen and frees it on leaving. The area's head needs up to
- * MG_HEAD_MAX bytes, also the caller's.
+ * MG_HEAD_MAX bytes, also the caller's, or head_cap if it sets that.
  */
 #ifndef MONSTER_PLAY_H
 #define MONSTER_PLAY_H
@@ -102,7 +102,10 @@ typedef struct {
 typedef struct {
     MonGame   *g;
     MgArea     area;
-    uint8_t   *head;            /* the area's head: the caller's MG_HEAD_MAX bytes */
+    uint8_t   *head;            /* the area's head: the caller's buffer */
+    uint32_t   head_cap;        /* its size; 0 means MG_HEAD_MAX. Set before mp_new
+                                   or mp_load, which keep it (the screens size it
+                                   to the file's largest head) */
     uint8_t    x, y, facing;
     uint32_t   rng;
     uint8_t    n_party;

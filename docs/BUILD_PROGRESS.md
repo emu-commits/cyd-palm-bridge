@@ -16,6 +16,58 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-16 — Critters' G2: the screens, in the Games folder
+
+The owner approved `GAME_FORMAT.md`, answered `GAME_PLAN.md` §13 and said
+yes to G2 (built into the current test image, with the sync and Palm
+behaviour commits). The game is **Critters**, the fifth icon in Games.
+
+- **`firmware/main/ui_monster.c`**, a file of its own (`ui.c` has one entry,
+  one dispatch line, its menu items and `show_critters()`):
+  - **the view without a canvas.** Its draw event composes the band LVGL is
+    drawing (at most the 40-row draw buffer) from a cache of 64 tiles at a
+    byte a pixel and the area's palette into a 240 x 40 RGB565 buffer, and
+    draws that as one image: one draw task per band, not one per tile. A
+    battle composes the two creatures (4-bit, from the tile cache's memory)
+    and the HP bars the same way. Labels and the text box are a handful of
+    LVGL objects over it.
+  - **the controls** are one object that draws its D-pad and A and B; a
+    press acts at once, a tap turns, a held direction walks (after a 150 ms
+    wait when it turned first). A step is four 4 px frames.
+  - the transition cards (an area's name; a dark beat before a battle), the
+    choice of three first creatures (the first three that start an
+    evolution line, of different types), the battle's menus (moves that are
+    resting say so and stay, the cursor remembers the last move), learning
+    a fifth move, Party, Save game, New game (the old save stays until the
+    new game is saved) and Credits, read from the file's `CRED`.
+- **§13 Q3:** `power_on_usb()` (no plausible cell, or 4.15 V and up: the
+  charger's hold) keeps the screen on while the game is open; on battery it
+  dims and locks as usual. **The lock pauses the game:** closing writes the
+  save, and a battle in progress to `pause.dat` (checked against the file's
+  fingerprint and the rules on the way back), and the unlock reopens the
+  game in the same battle (`resume_show()` reopens "Critters").
+- `MpWorld.head_cap`: the head buffer is sized to the file's largest head
+  (2,384 B) instead of `MG_HEAD_MAX` (16 KB); a smaller one is refused, never
+  overrun (`make -C sim monster` checks both).
+
+**Measured:**
+
+| | |
+|---|---|
+| The game's heap block, Route 1 open (sim, 32-bit, `sim_heap` accounting) | 52,508 B; 0 B left after leaving (`B`/`E`) |
+| LVGL pool free at the last game screen (smoke32, the device's pool) | 15,364 B |
+| Static DRAM (`idf.py size`) | 147,468 B, 81.59 %, 33,268 B free (+130 B) |
+| Firmware image | 1,792,267 B |
+
+Not measured yet: the frame rate, an area's load time and the heap during a
+sync on the device (`BACKLOG.md`, the `[d]` items).
+
+**Gates:** the smoke tour plays it from `courses/critters/game.bin` (the
+Makefile puts it on the card): the choice, walking, a battle, the lock and
+the resume mid-battle, Run, Credits, Party, Save, leaving with every byte
+back. Run 64- and 32-bit; all twelve sim gates, `make test`/`ftest`,
+`mkcourse_test`, `mkgame_test` and the firmware build pass.
+
 ### 2026-10-16 — The monster game's G1: the reader and the rules, on the host
 
 `GAME_PLAN.md` §12 G1, which the owner asked for after G0. Nothing on the

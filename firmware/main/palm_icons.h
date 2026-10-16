@@ -12,6 +12,7 @@ extern const lv_image_dsc_t icon_mines;     /* Minesweeper (Games sub-launcher) 
 extern const lv_image_dsc_t icon_wordie;    /* Wordie (Games sub-launcher) */
 extern const lv_image_dsc_t icon_sudoku;    /* Sudoku (Games sub-launcher) */
 extern const lv_image_dsc_t icon_zip;       /* Zip path puzzle (Games sub-launcher) */
+extern const lv_image_dsc_t icon_critters;  /* Critters, the monster game (Games sub-launcher) */
 extern const lv_image_dsc_t icon_coach;     /* Coach focus timer (ritual Pomodoro) */
 extern const lv_image_dsc_t icon_guru;      /* Guru longevity habits (gen_guru_icon.py) */
 extern const lv_image_dsc_t icon_study;     /* Study, the SRS app (gen_study_icon.py) */

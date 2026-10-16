@@ -16,6 +16,9 @@ void ui_show_lock(void);
  * The port layer's idle blank and wake-poll stand down for the duration, so a tap
  * during a dark phase is not mistaken for a wake. */
 int  ui_owns_backlight(void);
+/* 1 while a screen asks to stay lit (Critters on USB power): the port layer
+ * doesn't blank it. On battery it dims and locks as usual. */
+int  ui_keep_awake(void);
 /* 1 while a screen of discrete keys (the Calculator, the phone keypad) is up:
  * the input layer may then split a jumping press into two taps (tapsplit.h). */
 int  ui_discrete_taps(void);

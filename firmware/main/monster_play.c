@@ -198,7 +198,7 @@ uint32_t mp_shake_check(MonGame *g, const MpCreature *c, const MgMon *m, uint32_
 /* ---- the world ----------------------------------------------------------- */
 
 static int enter_area(MpWorld *w, uint16_t i, uint8_t x, uint8_t y, uint8_t facing){
-    int r = mg_area_open(w->g, i, &w->area, w->head, MG_HEAD_MAX);
+    int r = mg_area_open(w->g, i, &w->area, w->head, w->head_cap ? w->head_cap : MG_HEAD_MAX);
     if(r) return werr(w, r, "%s", w->g->err);
     for(int k = 0; k < MP_CHUNKS; k++) w->chunk_ix[k] = -1;
     w->chunk_next = 0;
@@ -342,9 +342,11 @@ void mp_heal_party(MpWorld *w){
 }
 
 int mp_new(MpWorld *w, MonGame *g, uint8_t *head, uint32_t seed, uint16_t starter){
+    uint32_t cap = w->head_cap;
     memset(w, 0, sizeof *w);
     w->g = g;
     w->head = head;
+    w->head_cap = cap;
     w->rng = seed ? seed : 0x9E3779B9u;
     int r = enter_area(w, g->start_area, g->start_x, g->start_y, g->start_facing);
     if(r) return r;
@@ -739,9 +741,11 @@ static int get_rec(MpWorld *w, const uint8_t *p, MpCreature *c){
 int mp_load(MpWorld *w, MonGame *g, uint8_t *head, const char *path){
     uint8_t h[MP_SAVE_HEADER], rec[MP_SAVE_REC];
     int r;
+    uint32_t cap = w->head_cap;
     memset(w, 0, sizeof *w);
     w->g = g;
     w->head = head;
+    w->head_cap = cap;
     sf_recover(path);
     FILE *f = fopen(path, "rb");
     if(!f) return werr(w, MG_EIO, "no save");
@@ -776,7 +780,7 @@ out:
         char e[sizeof w->err];
         memcpy(e, w->err, sizeof e);
         memset(w, 0, sizeof *w);
-        w->g = g; w->head = head;
+        w->g = g; w->head = head; w->head_cap = cap;
         memcpy(w->err, e, sizeof e);
     }
     return r;

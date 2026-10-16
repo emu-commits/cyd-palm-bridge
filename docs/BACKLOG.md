@@ -41,7 +41,14 @@ open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
   `courses/critters/` and offered by the web flasher; "Critters"; the screen
   stays on on USB, dims and locks on battery, and the game pauses on lock;
   built into the current test image now (the yes for G2).
-- [ ] G2, the screens (`GAME_PLAN.md` §12).
+- [s] G2, the screens (`GAME_PLAN.md` §12): the `critters_*` smoke shots,
+  looked at (2026-10-16).
+- [d] Critters on the bench: the D-pad and A/B under a finger (a tap turns,
+  a hold walks), a step's smoothness and the frame rate, how long entering
+  Brideswood takes.
+- [d] Critters on USB power stays lit; unplugged it dims and locks as
+  usual, and waking comes back to the same battle (`power_on_usb()` reads
+  4.15 V and up as USB: a low cell that's charging counts as battery).
 - [x] The clean file: `courses/critters/game.bin` (Route 1 and Brideswood,
   20 creatures), built `--strict` with a player sheet of our own, its credits
   in `courses/critters/README.md` and `NOTICE`, round-tripped in `make -C sim

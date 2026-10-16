@@ -105,7 +105,7 @@ static void fix_crcs(uint8_t *b, long n){
 static long walked;
 
 static void play(MonGame *g){
-    MpWorld *w = malloc(sizeof *w);
+    MpWorld *w = calloc(1, sizeof *w);
     uint8_t *head = malloc(MG_HEAD_MAX);
     MpLog log;
     MpBattle b;

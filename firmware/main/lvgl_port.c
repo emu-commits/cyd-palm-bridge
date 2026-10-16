@@ -117,6 +117,9 @@ static int idle_step(void){
         }
         return power_screen_off();
     }
+    /* Critters on USB power keeps the screen on; on battery it dims and
+     * locks as usual, and the lock pauses the game (GAME_PLAN.md §13 Q3) */
+    if(ui_keep_awake()){ lv_display_trigger_activity(NULL); return 0; }
     if(secs > 0){
         uint32_t idle = lv_display_get_inactive_time(NULL);   /* ms since activity */
         if(idle > (uint32_t)secs * 1000){

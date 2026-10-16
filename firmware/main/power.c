@@ -207,6 +207,15 @@ int power_battery_pct(void){
     return 0;
 }
 
+/* The TP4054 holds a charging cell at 4.2 V; a resting full cell falls under
+ * 4.15 V within minutes of unplugging. */
+#define USB_HOLD_MV 4150
+
+int power_on_usb(void){
+    int mv = power_battery_mv();
+    return mv < 0 || mv < BAT_PLAUSIBLE_LO || mv > BAT_PLAUSIBLE_HI || mv >= USB_HOLD_MV;
+}
+
 void power_init(void){
     /* RTC8M-clocked so the PWM keeps running through light-sleep (the APB clock
      * stops in light-sleep; an APB-sourced LEDC would freeze the backlight). */

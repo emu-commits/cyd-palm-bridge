@@ -284,7 +284,7 @@ static void formulas(void){
 /* ---- 3. walking ---- */
 
 static void walking(void){
-    MpWorld *w = malloc(sizeof *w);
+    MpWorld *w = calloc(1, sizeof *w);
     MpLog log;
     MpBattle b;
     CHECK(mp_new(w, &G, HEAD, 1, mon_named("Emberkit")) == 0, "a new game: %s", w->err);
@@ -327,13 +327,31 @@ static void walking(void){
     CHECK(!strcmp(t, "Meadow. The burrow is east, past the trees."), "the sign says %s", t);
     w->facing = MG_S;
     CHECK(mp_interact(w, &log) == 0, "a sign behind the player");
+    /* head_cap: the screens size the head to the file's largest; a smaller
+     * one is refused, never overrun */
+    uint32_t most = 0;
+    for(uint32_t i = 0; i < G.n_areas; i++){
+        MgAreaDir d;
+        CHECK(mg_area_dir(&G, i, &d) == 0, "area %u's directory", (unsigned)i);
+        if(d.head_len > most) most = d.head_len;
+    }
+    w->head_cap = most;
+    CHECK(mp_new(w, &G, HEAD, 1, mon_named("Emberkit")) == 0 && w->head_cap == most,
+          "a head the size of the largest: %s", w->err);
+    w->x = 22; w->y = 9; w->facing = MG_E;
+    mp_step(w, MG_E, &b, &log);
+    CHECK(w->area.index == 1, "into the burrow with a head the size of the largest");
+    MgAreaDir d0;
+    mg_area_dir(&G, 0, &d0);
+    w->head_cap = d0.head_len - 1;
+    CHECK(mp_new(w, &G, HEAD, 1, mon_named("Emberkit")) != 0, "a head one byte short is refused");
     free(w);
 }
 
 /* ---- 4. encounters ---- */
 
 static void encounters(void){
-    MpWorld *w = malloc(sizeof *w);
+    MpWorld *w = calloc(1, sizeof *w);
     MpLog log;
     MpBattle b;
     mp_new(w, &G, HEAD, 99, mon_named("Emberkit"));
@@ -430,7 +448,7 @@ static int has_event(const MpLog *log, int kind){
 
 /* the outcomes the recorded battles may not reach */
 static void outcomes(void){
-    MpWorld *w = malloc(sizeof *w);
+    MpWorld *w = calloc(1, sizeof *w);
     MpLog log;
     MpBattle b;
     /* losing: healed, and back at the start */
@@ -467,7 +485,7 @@ static void outcomes(void){
 }
 
 static MpWorld *battles(void){
-    MpWorld *w = malloc(sizeof *w);
+    MpWorld *w = calloc(1, sizeof *w);
     MpLog log;
     MpBattle b;
     out_len = 0;
@@ -574,7 +592,7 @@ static void spit(const char *p, const uint8_t *b, long n){
 }
 
 static void saves(MpWorld *w){
-    MpWorld *v = malloc(sizeof *v);
+    MpWorld *v = calloc(1, sizeof *v);
     uint8_t head2[MG_HEAD_MAX];
     /* put something in the box, then a round trip */
     uint32_t rng = 5;

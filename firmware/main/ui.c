@@ -43,6 +43,7 @@
 #include "course.h"       /* Study: the course file reader                        */
 #include "srs.h"          /* Study: the schedulers and the progress on the card   */
 #include "study.h"        /* Study: a round's questions, and the courses on the card */
+#include "ui_monster.h"   /* Games: Critters, the monster game's screens          */
 #include "lvgl.h"
 #include <string.h>
 #include <strings.h>      /* strncasecmp for the Address Look Up filter */
@@ -160,6 +161,7 @@ static void st_free(void);       /* Study's session, when the screen leaves it *
 static void st_menu(lv_obj_t *panel);
 static int  g_st_open;
 static void show_app(const char *name);
+static void show_critters(void);
 
 /* a borderless, non-scrolling panel with a solid fill */
 static lv_obj_t *panel(lv_obj_t *parent, int x, int y, int w, int h, lv_color_t col){
@@ -2395,6 +2397,7 @@ static void show_app(const char *name){
     if(!strcmp(name, "Coach")){ show_coach(); return; }
     if(!strcmp(name, "Guru")){ show_guru(); return; }
     if(!strcmp(name, "Study")){ show_study(); return; }
+    if(!strcmp(name, "Critters")){ show_critters(); return; }
     cur_app = NULL;
     content_clear();
     lv_label_set_text(title_lbl, name);
@@ -5922,6 +5925,17 @@ static void act_power(lv_event_t *e){ (void)e; menu_close(); show_power(); }
  * screen -- a half-edited record included. The grid has nothing to lose. */
 static void act_lock(lv_event_t *e){ (void)e; menu_close(); ui_show_lock(); }
 
+/* Critters' items (ui_monster.c does the work) */
+static void act_mon_party(lv_event_t *e){ (void)e; menu_close(); mon_ui_party(); }
+static void act_mon_new(lv_event_t *e){ (void)e; menu_close(); mon_ui_new_game(); }
+static void act_mon_credits(lv_event_t *e){ (void)e; menu_close(); mon_ui_credits(); }
+static void act_mon_save(lv_event_t *e){
+    (void)e;
+    menu_close();
+    if(!mon_ui_save()) toast_show("Saved");
+    else alert_titled("Not Saved", mon_ui_error());
+}
+
 /* Palm menu: tap Menu (silkscreen) -> pull-down of the context's commands,
  * grouped by Palm's menu categories (Record / Options). */
 static void menu_open(void){
@@ -5991,6 +6005,15 @@ static void menu_open(void){
         menu_item(panel, "Reset counters", act_co_reset);
     }
     if(g_st_open) st_menu(panel);                          /* Study only */
+    if(mon_ui_open()){                                      /* Critters only */
+        menu_header(panel, "Critters");
+        if(mon_ui_playing()){
+            menu_item(panel, "Party", act_mon_party);
+            menu_item(panel, "Save game", act_mon_save);
+        }
+        menu_item(panel, "New game", act_mon_new);
+        menu_item(panel, "Credits", act_mon_credits);
+    }
     if(data_demo_present())
         menu_item(panel, "Remove demo data", act_remove_demo);
 #ifdef UI_SEED_TESTEVENTS
@@ -9122,6 +9145,9 @@ static void content_clear(void){
     /* Study: its pictures' buffers now that their canvases are gone, and the
      * whole session unless a Study screen is replacing this one */
     st_free();
+    /* Critters: saved, and its block freed (a battle is kept in pause.dat,
+     * so the lock pauses the game rather than ending it) */
+    mon_ui_close();
 }
 static uint32_t  g_zp_seq;                  /* varies the board each New */
 static PlayClock g_zp_clk;                  /* pausable solve timer (playclock.h) */
@@ -9369,9 +9395,9 @@ static void games_pause_clocks(void){
  * a thing you open to drill at, it keeps a score and a streak, and it is not where
  * any of your data lives. Kana comes with it -- the "あ" button inside Graffiti has
  * always been the only way in, and that is unchanged. */
-static const char           *GAMES[]      = { "Mines", "Wordie", "Sudoku", "Zip", "Graffiti" };
+static const char           *GAMES[]      = { "Mines", "Wordie", "Sudoku", "Zip", "Critters", "Graffiti" };
 static const lv_image_dsc_t *GAME_ICONS[] = { &icon_mines, &icon_wordie, &icon_sudoku,
-                                              &icon_zip, &icon_graffiti };
+                                              &icon_zip, &icon_critters, &icon_graffiti };
 #define NGAMES ((int)(sizeof(GAMES)/sizeof(GAMES[0])))
 
 static void games_pick_cb(lv_event_t *e){
@@ -9380,6 +9406,7 @@ static void games_pick_cb(lv_event_t *e){
     else if(!strcmp(g,"Wordie"))   show_wordie();
     else if(!strcmp(g,"Sudoku"))   show_sudoku();
     else if(!strcmp(g,"Zip"))      show_zip();
+    else if(!strcmp(g,"Critters")) show_app("Critters");    /* the unlock comes back to it */
     else if(!strcmp(g,"Graffiti")) show_trainer();
 }
 static void show_games(void){
@@ -9419,6 +9446,18 @@ static void show_games(void){
         lv_label_set_text(lbl, GAMES[i]);
         lv_obj_set_style_text_font(lbl, &lv_font_palm, 0);
     }
+}
+
+/* Critters: the monster game (docs/GAME_PLAN.md). Full screen: the view and
+ * its controls take the Graffiti strip's room. ui_monster.c builds it and
+ * content_clear() closes it. */
+static void show_critters(void){
+    kill_kb(); cur_app = NULL; cur_uid = 0;
+    content_clear();
+    ui_full_screen(1);
+    lv_label_set_text(title_lbl, "Critters");
+    update_cat_trigger();
+    mon_ui_show(content);
 }
 
 /* ========================= Coach (ritual focus timer) =======================
@@ -9831,6 +9870,7 @@ static int         g_co_flash_left;      /* phases still to run                 
  * wake-poll leave it alone -- otherwise a tap during a dark phase reads as a wake
  * and the two fight over the same LEDC duty. */
 int ui_owns_backlight(void){ return g_co_flash != NULL; }
+int ui_keep_awake(void){ return mon_ui_keep_awake(); }
 
 #ifdef UI_DEVTOOLS
 /* See ui.h: let the smoke script write into the focused field. One character at
