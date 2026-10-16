@@ -1,10 +1,10 @@
 # Game plan — a monster-catching RPG built from Tuxemon's open content
 
-> **Status: G0 done (2026-10-16), awaiting the owner's review.** The owner
-> asked for G0, the file format and the converter, on 2026-10-16:
-> `docs/GAME_FORMAT.md` is the format, `tools/mkgame.py` the converter, and
-> §12 says what G0 found. **Don't start G1 without the owner's yes**, and
-> see §13 Q6 first: Tuxemon's town buildings are under a licence this plan
+> **Status: G1 done (2026-10-16), on the host only.** The owner asked for G0
+> (the format and the converter) and then G1 (the rules) on 2026-10-16, and
+> liked the Tuxemon renders. §12 says what each found. **Don't start G2 (the
+> screens, the first thing on the device) without the owner's yes.** §13 Q6
+> is still open: Tuxemon's town buildings are under a licence this plan
 > leaves out. The sync engine work (`BACKLOG.md` §Engine) is unaffected.
 
 A small Game Boy-style monster-catching RPG in the Games menu: walk a tile map,
@@ -92,7 +92,8 @@ What was chosen:
 
 | What | Where |
 |---|---|
-| Rules, battle maths, save and load, the area reader | `firmware/main/monster.c` (no LVGL; host-testable, like `zip.c` and `srs.c`) |
+| The file reader | `firmware/main/monster.c` (no LVGL; host-testable, like `course.c`) |
+| Rules, battles, the world's events, save and load | `firmware/main/monster_play.c` (no LVGL, like `srs.c`) |
 | The bot | `firmware/main/monster_bot.c` (no LVGL) |
 | Screens, drawing and controls | **a new file**, `firmware/main/ui_monster.c`, not another section of `ui.c` (already 12,340 lines) |
 | Entry | `GAMES[]` in `ui.c` (one entry and one dispatch line) |
@@ -103,7 +104,8 @@ What was chosen:
 | Stable ids | `tools/game_ids.tsv`: creature, move, status and area numbers a save refers to |
 | The data file | `/sdcard/games/monster/game.bin` (built from Tuxemon; see §13 Q1 on how it reaches the card) |
 | The save | `/sdcard/games/monster/save.dat` |
-| Host gates | `make -C sim monster` (rules, save round trip, area reader, bot finishes) and `monster_fuzz` in `make ftest` |
+| Host gates | `make -C sim monster` (the dump round trip with `mkgame.py`, the formulas, walking, encounters, recorded battles, the save; the bot finishing from G4), `monster_fuzz` in `make ftest`, and `tests/mkgame_test.py` (the fixture rebuilt byte for byte) |
+| The fixture | `tests/data/game/`: `source.py` writes a small Tuxemon-shaped tree of our own (CC0); `game.bin` is its build, `battle.txt` the recorded battles |
 | Docs | `docs/GAME_FORMAT.md` (the file layout, written in G0) |
 
 ## 4) Content: what Tuxemon gives us
@@ -384,16 +386,32 @@ screenshots looked at.
   - [x] Q4: 8 bits for maps, 4 for creatures (§7, `GAME_FORMAT.md` §4). The
     renders are drawn from the file by `mkgame.py --preview`, the same
     pixels the device would draw; there's no simulator screen until G2.
-  - [ ] The owner reviews the format, the renders and §13 Q6.
+  - [x] The renders: the owner liked them (2026-10-16).
+  - [ ] The owner reviews the format and §13 Q6.
   - Not done in G0, on purpose: a host gate for `mkgame.py` (it needs the
     390 MB Tuxemon checkout, so it comes with G1's C reader and a small
     fixture of our own), people (NPCs) and trainers (G3).
-- **G1 — rules, on the host.** `monster.c`: the file reader, stats, damage,
-  catching, experience, learning moves, evolving, events, save and load.
-  Gates:
-  - a seeded battle matches a recorded result;
-  - save round trip, and every truncation refused;
-  - `monster_fuzz`.
+- **G1 — rules, on the host. Done 2026-10-16.**
+  - [x] `monster.c`, the reader: everything in `GAME_FORMAT.md` §6, and a
+    dump equal to `mkgame.py --dump` byte for byte (the fixture and the real
+    Tuxemon build both).
+  - [x] `monster_play.c`, the rules: stats, damage, hitting, statuses,
+    order, catching, running, experience, learning (with "knows four"
+    handed to the screen), evolving, losing; the world's events (steps,
+    ledges, warps and their facing, encounter zones, signs); the save,
+    by stable ids, through `safefile.h`. Integer arithmetic, one seeded
+    generator.
+  - [x] Gates: `make -C sim monster` (hand-worked formulas, every movement
+    rule, the encounter rate and weights, 40 seeded battles against
+    `tests/data/game/battle.txt`, the save's round trip with every truncation
+    and bit flip refused), `monster_fuzz` (every truncation, about 41,000
+    flipped bits, 2,500 hostile files, each that opens then played), and
+    `tests/mkgame_test.py`. `smoke32` runs `monster` 32-bit.
+  - [x] Found in Tuxemon's source and written into `GAME_FORMAT.md` §2: ties
+    are random, `speed_offset` isn't used in battles, and a wild creature
+    knows the last four moves its level reaches. `META` gained `0x22` (the
+    IV maximum and the experience multipliers), so no rule's number is in
+    the code.
 - **G2 — screens.** `ui_monster.c`: the map view, scrolling, the text box, the
   battle screen, the controls, the transition screen. Gates: smoke
   screenshots, pool parity, heap given back on leaving (the smoke tour's

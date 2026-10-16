@@ -1,0 +1,21 @@
+{
+  "title": "Fixture",
+  "note": "The gates' region: tests/data/game/source.py's two maps and five creatures, all ours (CC0).",
+  "areas": [
+    {"map": "fixture_meadow", "name": "Meadow"},
+    {"map": "fixture_burrow", "name": "Burrow"}
+  ],
+  "start": {"area": "fixture_meadow", "x": 3, "y": 4, "facing": "down"},
+  "player": "fixture_walker",
+  "encounters": {
+    "fixture_meadow": [
+      {"creature": "emberkit", "levels": [2, 4], "rate": 40},
+      {"creature": "puddlop",  "levels": [2, 3], "rate": 35},
+      {"creature": "thornet",  "levels": [3, 5], "rate": 25}
+    ],
+    "fixture_burrow": [
+      {"creature": "rustmole", "levels": [4, 6], "rate": 70},
+      {"creature": "blazecat", "levels": [6, 7], "rate": 30}
+    ]
+  }
+}

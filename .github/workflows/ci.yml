@@ -30,9 +30,10 @@ jobs:
   # The course builder: every committed course.srs must rebuild from its source
   # to the same bytes, with the pinned Pillow and the pinned font (which
   # mkcourse downloads and checks by SHA-256). tests/mkcourse_test.py also checks
-  # the ids.tsv rules and that bad sources are refused.
+  # the ids.tsv rules and that bad sources are refused. tests/mkgame_test.py does
+  # the same for the monster game's fixture (tests/data/game; no Tuxemon needed).
   course-builder:
-    name: Course builder (mkcourse, byte-for-byte rebuild)
+    name: "Course and game builders (mkcourse, mkgame: byte-for-byte rebuilds)"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -47,6 +48,10 @@ jobs:
         run: python3 tests/mkcourse_test.py
       - name: The demo course passes --check
         run: python3 tools/mkcourse.py --check courses/demo-kanji/course.srs
+      - name: Pinned PyYAML (the game converter; same Pillow)
+        run: pip install -r tools/requirements-game.txt
+      - name: Rebuild the game fixture, ids rules, refusals (mkgame)
+        run: python3 tests/mkgame_test.py
 
   sync-gates:
     name: Sync gates (Radicale)
@@ -147,6 +152,8 @@ jobs:
         run: make -C sim course
       - name: Study scheduler and progress gate (a year per scheduler, torn logs, remapping, unlocks)
         run: make -C sim srs
+      - name: Monster game (reader, rules, saves; round trip with mkgame)
+        run: make -C sim monster
       - name: Build + run the scripted UI tour (real ui.c, screenshots)
         run: make -C sim smoke
       - name: Convert screenshots to PNG

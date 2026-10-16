@@ -1,0 +1,1441 @@
+battle 1 at 7,12
+  step 0 7 12 0 
+  encounter 1 2 2 0 Puddlop
+ turn 0: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 10 
+  use 1 7 0 0 Splash Jet
+  damage 0 200 0 27 
+ turn 1: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 17 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 3 
+ turn 2: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 10 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 3 
+ turn 3: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 10 
+  use 1 7 0 0 Splash Jet
+  damage 0 200 0 27 
+ turn 4: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 10 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 3 
+ turn 5: 2 -1
+  run 0 0 0 0 
+party: Emberkit/5/9/100 box 0
+battle 2 at 7,12
+  step 0 7 12 0 
+  encounter 1 0 4 0 Emberkit
+ turn 0: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 6 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 4 
+ turn 1: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 6 
+  use 1 5 0 0 Scratch
+  damage 0 100 0 12 
+ turn 2: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 7 
+  immune 1 0 0 0 
+  use 1 5 0 0 Scratch
+  damage 0 100 0 12 
+ turn 3: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 6 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 4 
+ turn 4: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 7 
+  use 1 1 0 0 Ember
+  damage 0 50 0 5 
+ turn 5: 0 3
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  use 1 5 0 0 Scratch
+  damage 0 100 0 12 
+  status-heal 0 2 0 4 
+ turn 6: 0 0
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 4 
+  use 0 1 0 0 Ember
+  damage 1 50 0 7 
+  status-heal 0 2 0 4 
+ turn 7: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 6 
+  use 1 1 0 0 Ember
+  damage 0 50 0 5 
+  status-heal 0 2 0 4 
+ turn 8: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 6 
+  use 1 5 0 0 Scratch
+  damage 0 100 0 12 
+  status-heal 0 2 0 4 
+ turn 9: 0 1
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 4 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 14 
+  status-heal 0 2 0 4 
+ turn 10: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  shake 1 2 0 0 
+  shake 1 3 0 0 
+  shake 1 4 0 0 
+  caught 1 1 0 0 
+party: Emberkit/5/18/100 Emberkit/4/4/51 box 0
+battle 3 at 7,12
+  step 0 7 12 0 
+  encounter 1 0 3 0 Emberkit
+ turn 0: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 7 
+  use 1 5 0 0 Scratch
+  damage 0 100 0 9 
+ turn 1: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 7 
+  use 1 5 0 0 Scratch
+  damage 0 100 0 9 
+ turn 2: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 16 
+  use 1 1 0 0 Ember
+  damage 0 50 0 4 
+  immune 0 0 0 0 
+ turn 3: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 7 
+  use 1 5 0 0 Scratch
+  damage 0 100 0 9 
+ turn 4: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  shake 1 2 0 0 
+  shake 1 3 0 0 
+  shake 1 4 0 0 
+  caught 1 2 0 0 
+party: Emberkit/5/41/100 Emberkit/4/69/51 Emberkit/3/18/21 box 0
+battle 4 at 8,12
+  step 0 8 12 0 
+  encounter 1 0 3 0 Emberkit
+ turn 0: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 7 
+  immune 1 0 0 0 
+  use 1 1 0 0 Ember
+  damage 0 50 0 4 
+ turn 1: 0 3
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  use 1 5 0 0 Scratch
+  damage 0 100 0 12 
+  status-heal 0 2 0 4 
+ turn 2: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 18 
+  use 1 5 0 0 Scratch
+  damage 0 100 0 12 
+  status-heal 0 2 0 4 
+ turn 3: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 18 
+  use 1 1 0 0 Ember
+  miss 1 0 0 0 
+  status-heal 0 2 0 4 
+ turn 4: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  shake 1 2 0 0 
+  shake 1 3 0 0 
+  shake 1 4 0 0 
+  caught 1 3 0 0 
+party: Emberkit/5/25/100 Emberkit/4/69/51 Emberkit/3/18/21 Emberkit/3/10/21 box 0
+battle 5 at 8,12
+  step 0 8 12 0 
+  encounter 1 0 4 0 Emberkit
+ turn 0: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 7 
+  use 1 5 0 0 Scratch
+  damage 0 100 0 13 
+ turn 1: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 18 
+  use 1 1 0 0 Ember
+  damage 0 50 0 5 
+ turn 2: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 6 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 5 
+ turn 3: 0 3
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  use 1 1 0 0 Ember
+  damage 0 50 0 5 
+  status-heal 0 2 0 4 
+ turn 4: 0 1
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 5 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 18 
+  status-heal 0 2 0 4 
+ turn 5: 0 0
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 5 
+  use 0 1 0 0 Ember
+  damage 1 50 0 7 
+  status-heal 0 2 0 4 
+ turn 6: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  shake 1 2 0 0 
+  shake 1 3 0 0 
+  shake 1 4 0 0 
+  caught 1 4 0 0 
+party: Emberkit/5/46/100 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/2/51 box 0
+battle 6 at 8,12
+  step 0 8 12 0 
+  encounter 1 0 3 0 Emberkit
+ turn 0: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 6 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 4 
+ turn 1: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 7 
+  immune 1 0 0 0 
+  use 1 1 0 0 Ember
+  damage 0 50 0 4 
+ turn 2: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 6 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 4 
+ turn 3: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 7 
+  use 1 5 0 0 Scratch
+  damage 0 100 0 11 
+ turn 4: 0 3
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 4 
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  status-heal 0 2 0 4 
+ turn 5: 0 0
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 4 
+  use 0 1 0 0 Ember
+  damage 1 50 0 7 
+  immune 1 0 0 0 
+  status-heal 0 2 0 4 
+ turn 6: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 6 
+  use 1 5 0 0 Scratch
+  damage 0 100 0 11 
+  status-heal 0 2 0 4 
+ turn 7: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 7 
+  immune 1 0 0 0 
+  use 1 5 0 0 Scratch
+  damage 0 100 0 11 
+  status-heal 0 2 0 4 
+ turn 8: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  shake 1 2 0 0 
+  shake 1 3 0 0 
+  shake 1 4 0 0 
+  caught 1 5 0 0 
+party: Emberkit/5/9/100 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/2/51 Emberkit/3/5/21 box 0
+battle 7 at 7,12
+  step 0 7 12 0 
+  encounter 1 3 4 0 Thornet
+ turn 0: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 6 
+  use 1 8 0 0 Toxic Flare
+  damage 0 50 0 4 
+  status 0 1 0 0 
+  status-hurt 0 1 0 9 
+ turn 1: 0 0
+  use 0 1 0 0 Ember
+  damage 1 400 0 54 
+  use 1 9 0 0 Vine Whip
+  damage 0 50 0 3 
+  status-hurt 0 1 0 9 
+ turn 2: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  shake 1 2 0 0 
+  shake 1 3 0 0 
+  shake 1 4 0 0 
+  caught 1 0 1 0 
+party: Emberkit/5/47/100 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 1
+battle 8 at 8,12
+  step 0 8 12 0 
+  encounter 1 3 4 0 Thornet
+ turn 0: 0 0
+  use 0 1 0 0 Ember
+  miss 0 0 0 0 
+  use 1 8 0 0 Toxic Flare
+  damage 0 50 0 4 
+  status 0 1 0 0 
+  status-hurt 0 1 0 9 
+ turn 1: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 16 
+  use 1 9 0 0 Vine Whip
+  damage 0 50 0 4 
+  status-hurt 0 1 0 9 
+ turn 2: 0 0
+  use 0 1 0 0 Ember
+  damage 1 400 0 46 
+  faint 1 0 0 0 
+  status-hurt 0 1 0 9 
+  exp 0 0 0 16 
+  win 0 0 0 0 
+party: Emberkit/5/12/116 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 1
+battle 9 at 8,12
+  step 0 8 12 0 
+  encounter 1 2 3 0 Puddlop
+ turn 0: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 14 
+  use 1 7 0 0 Splash Jet
+  damage 0 200 0 37 
+ turn 1: 0 3
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 3 
+  status-heal 0 2 0 4 
+ turn 2: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 14 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 3 
+  status-heal 0 2 0 4 
+ turn 3: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 10 
+  use 1 7 0 0 Splash Jet
+  miss 1 0 0 0 
+  status-heal 0 2 0 4 
+ turn 4: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 10 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 3 
+  status-heal 0 2 0 4 
+ turn 5: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 14 
+  status 1 0 0 0 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 3 
+  status-heal 0 2 0 4 
+  status-hurt 1 0 0 13 
+ turn 6: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  shake 1 2 0 0 
+  shake 1 3 0 0 
+  shake 1 4 0 0 
+  caught 1 1 1 0 
+party: Emberkit/5/43/116 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 2
+battle 10 at 8,12
+  step 0 8 12 0 
+  encounter 1 2 3 0 Puddlop
+ turn 0: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 11 
+  use 1 7 0 0 Splash Jet
+  damage 0 200 0 36 
+ turn 1: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 11 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 2 
+ turn 2: 2 -1
+  run 0 0 0 0 
+party: Emberkit/5/5/116 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 2
+battle 11 at 8,12
+  step 0 8 12 0 
+  encounter 1 3 5 0 Thornet
+ turn 0: 0 0
+  use 0 1 0 0 Ember
+  damage 1 400 0 50 
+  use 1 9 0 0 Vine Whip
+  damage 0 50 0 4 
+ turn 1: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 12 
+  faint 1 0 0 0 
+  exp 0 0 0 25 
+  win 0 0 0 0 
+party: Emberkit/5/68/141 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 2
+battle 12 at 8,12
+  step 0 8 12 0 
+  encounter 1 0 3 0 Emberkit
+ turn 0: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 7 
+  use 1 5 0 0 Scratch
+  damage 0 100 0 9 
+ turn 1: 0 1
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 3 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 17 
+ turn 2: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 7 
+  immune 1 0 0 0 
+  use 1 5 0 0 Scratch
+  damage 0 100 0 9 
+ turn 3: 0 3
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  use 1 5 0 0 Scratch
+  damage 0 100 0 9 
+  status-heal 0 2 0 4 
+ turn 4: 0 1
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 3 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 17 
+  status-heal 0 2 0 4 
+ turn 5: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 2 
+  faint 1 0 0 0 
+  status-heal 0 2 0 4 
+  exp 0 0 0 7 
+  win 0 0 0 0 
+party: Emberkit/5/47/148 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 2
+battle 13 at 8,12
+  step 0 8 12 0 
+  encounter 1 2 3 0 Puddlop
+ turn 0: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 13 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 3 
+ turn 1: 0 3
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 3 
+  status-heal 0 2 0 4 
+ turn 2: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 12 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 3 
+  status-heal 0 2 0 4 
+ turn 3: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 13 
+  use 1 7 0 0 Splash Jet
+  damage 0 200 0 33 
+  status-heal 0 2 0 4 
+ turn 4: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 12 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 3 
+  status-heal 0 2 0 4 
+ turn 5: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 9 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 3 
+  status-heal 0 2 0 4 
+ turn 6: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 13 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 3 
+  status-heal 0 2 0 4 
+ turn 7: 0 3
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 3 
+  status-heal 0 2 0 4 
+ turn 8: 1 -1
+  throw 0 0 0 0 
+  break-free 1 0 0 0 
+  use 1 7 0 0 Splash Jet
+  damage 0 200 0 21 
+  faint 0 0 0 0 
+  need-swap 0 0 0 0 
+ turn 9: 3 1
+  swap 0 1 0 0 
+ turn 10: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  shake 1 2 0 0 
+  shake 1 3 0 0 
+  shake 1 4 0 0 
+  caught 1 2 1 0 
+party: Emberkit/5/0/148 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 3
+battle 14 at 7,12
+  step 0 7 12 0 
+  encounter 1 3 4 0 Thornet
+ turn 0: 0 0
+  use 0 1 0 0 Ember
+  miss 0 0 0 0 
+  use 1 8 0 0 Toxic Flare
+  damage 0 50 0 4 
+ turn 1: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 14 
+  use 1 9 0 0 Vine Whip
+  damage 0 50 0 3 
+ turn 2: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 14 
+  use 1 9 0 0 Vine Whip
+  miss 1 0 0 0 
+ turn 3: 0 0
+  use 0 1 0 0 Ember
+  miss 0 0 0 0 
+  use 1 8 0 0 Toxic Flare
+  miss 1 0 0 0 
+ turn 4: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 14 
+  use 1 9 0 0 Vine Whip
+  damage 0 50 0 3 
+ turn 5: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 14 
+  use 1 9 0 0 Vine Whip
+  damage 0 50 0 3 
+ turn 6: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  shake 1 2 0 0 
+  shake 1 3 0 0 
+  shake 1 4 0 0 
+  caught 1 3 1 0 
+party: Emberkit/5/59/148 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 4
+battle 15 at 8,12
+  step 0 8 12 0 
+  encounter 1 3 3 0 Thornet
+ turn 0: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 7 
+  use 1 8 0 0 Toxic Flare
+  miss 1 0 0 0 
+ turn 1: 0 0
+  use 0 1 0 0 Ember
+  damage 1 400 0 49 
+  faint 1 0 0 0 
+  exp 0 0 0 9 
+  win 0 0 0 0 
+party: Emberkit/5/59/157 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 4
+battle 16 at 8,12
+  step 0 8 12 0 
+  encounter 1 0 2 0 Emberkit
+ turn 0: 0 3
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  use 1 5 0 0 Scratch
+  damage 0 100 0 7 
+  status-heal 0 2 0 4 
+ turn 1: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 20 
+  use 1 1 0 0 Ember
+  damage 0 50 0 3 
+  status-heal 0 2 0 4 
+ turn 2: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 20 
+  use 1 5 0 0 Scratch
+  damage 0 100 0 7 
+  status-heal 0 2 0 4 
+ turn 3: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 5 
+  faint 1 0 0 0 
+  status-heal 0 2 0 4 
+  exp 0 0 0 3 
+  win 0 0 0 0 
+party: Emberkit/5/58/160 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 4
+battle 17 at 8,12
+  step 0 8 12 0 
+  encounter 1 3 5 0 Thornet
+ turn 0: 0 0
+  use 0 1 0 0 Ember
+  damage 1 400 0 47 
+  use 1 8 0 0 Toxic Flare
+  damage 0 50 0 5 
+ turn 1: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 5 
+  use 1 9 0 0 Vine Whip
+  damage 0 50 0 4 
+ turn 2: 1 -1
+  throw 0 0 0 0 
+  break-free 1 0 0 0 
+  use 1 9 0 0 Vine Whip
+  damage 0 50 0 4 
+ turn 3: 0 0
+  use 0 1 0 0 Ember
+  damage 1 400 0 11 
+  faint 1 0 0 0 
+  exp 0 0 0 25 
+  level 0 0 6 0 
+  evolve 0 0 1 0 Blazecat
+  win 0 0 0 0 
+party: Blazecat/6/76/185 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 4
+battle 18 at 8,12
+  step 0 8 12 0 
+  encounter 1 3 5 0 Thornet
+ turn 0: 0 3
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 5 
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  status-heal 0 2 0 6 
+ turn 1: 0 0
+  use 1 8 0 0 Toxic Flare
+  damage 0 50 0 11 
+  status 0 1 0 0 
+  use 0 1 0 0 Ember
+  miss 0 0 0 0 
+  status-hurt 0 1 0 12 
+ turn 2: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 10 
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 5 
+  status-hurt 0 1 0 12 
+ turn 3: 0 1
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 5 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 26 
+  status-hurt 0 1 0 12 
+ turn 4: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 10 
+  use 1 8 0 0 Toxic Flare
+  miss 1 0 0 0 
+  status-hurt 0 1 0 12 
+ turn 5: 2 -1
+  run-fail 0 0 0 0 
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 5 
+  status-hurt 0 1 0 3 
+  faint 0 0 0 0 
+  need-swap 0 0 0 0 
+ turn 6: 3 1
+  swap 0 1 0 0 
+ turn 7: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 5 
+  use 1 9 0 0 Vine Whip
+  damage 0 50 0 5 
+ turn 8: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  shake 1 2 0 0 
+  shake 1 3 0 0 
+  shake 1 4 0 0 
+  caught 1 4 1 0 
+party: Blazecat/6/0/185 Emberkit/4/64/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 5
+battle 19 at 8,12
+  step 0 8 12 0 
+  encounter 1 3 5 0 Thornet
+ turn 0: 0 0
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 5 
+  use 0 1 0 0 Ember
+  damage 1 400 0 24 
+ turn 1: 0 3
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 5 
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  status-heal 0 2 0 6 
+ turn 2: 0 0
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 5 
+  use 0 1 0 0 Ember
+  damage 1 400 0 24 
+  status 1 0 0 0 
+  status-heal 0 2 0 6 
+  status-hurt 1 0 0 9 
+ turn 3: 0 1
+  use 1 8 0 0 Toxic Flare
+  damage 0 50 0 11 
+  status 0 1 0 0 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 15 
+  faint 1 0 0 0 
+  status-hurt 0 1 0 12 
+  exp 0 0 0 25 
+  win 0 0 0 0 
+party: Blazecat/6/77/210 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 5
+battle 20 at 7,12
+  step 0 7 12 0 
+  encounter 1 2 3 0 Puddlop
+ turn 0: 0 0
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 3 
+  use 0 1 0 0 Ember
+  damage 1 50 0 7 
+  status-hurt 0 1 0 12 
+ turn 1: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 24 
+  use 1 7 0 0 Splash Jet
+  damage 0 200 0 18 
+  status-hurt 0 1 0 12 
+ turn 2: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 24 
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 3 
+  status-hurt 0 1 0 12 
+ turn 3: 0 0
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 3 
+  use 0 1 0 0 Ember
+  miss 0 0 0 0 
+  status-hurt 0 1 0 12 
+ turn 4: 0 1
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 2 
+  faint 0 0 0 0 
+  need-swap 0 0 0 0 
+ turn 5: 3 1
+  swap 0 1 0 0 
+ turn 6: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 12 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 4 
+ turn 7: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 11 
+  use 1 3 0 0 Quick Jab
+  damage 0 100 0 4 
+ turn 8: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  shake 1 2 0 0 
+  shake 1 3 0 0 
+  shake 1 4 0 0 
+  caught 1 5 1 0 
+party: Blazecat/6/0/210 Emberkit/4/61/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 6
+battle 21 at 7,12
+  step 0 7 12 0 
+  encounter 1 2 2 0 Puddlop
+ turn 0: 0 0
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 2 
+  use 0 1 0 0 Ember
+  damage 1 50 0 7 
+ turn 1: 0 3
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 2 
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  status-heal 0 2 0 4 
+  status-end 0 2 0 0 
+ turn 2: 0 1
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 2 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 22 
+ turn 3: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 7 
+  use 1 7 0 0 Splash Jet
+  damage 0 200 0 16 
+ turn 4: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 24 
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 2 
+ turn 5: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 24 
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 2 
+ turn 6: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  shake 1 2 0 0 
+  shake 1 3 0 0 
+  shake 1 4 0 0 
+  caught 1 6 1 0 
+party: Blazecat/6/81/210 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 7
+battle 22 at 8,12
+  step 0 8 12 0 
+  encounter 1 2 2 0 Puddlop
+ turn 0: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 24 
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 3 
+ turn 1: 0 3
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 3 
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  status-heal 0 2 0 6 
+ turn 2: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 24 
+  use 1 7 0 0 Splash Jet
+  damage 0 200 0 14 
+  status-heal 0 2 0 6 
+ turn 3: 0 0
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 3 
+  use 0 1 0 0 Ember
+  damage 1 50 0 7 
+  status 1 0 0 0 
+  status-heal 0 2 0 6 
+  status-hurt 1 0 0 11 
+ turn 4: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  shake 1 2 0 0 
+  shake 1 3 0 0 
+  shake 1 4 0 0 
+  caught 1 7 1 0 
+party: Blazecat/6/76/210 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 8
+battle 23 at 7,12
+  step 0 7 12 0 
+  encounter 1 0 3 0 Emberkit
+ turn 0: 0 1
+  use 1 1 0 0 Ember
+  damage 0 100 0 20 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 26 
+ turn 1: 0 0
+  use 1 5 0 0 Scratch
+  damage 0 50 0 2 
+  use 0 1 0 0 Ember
+  damage 1 50 0 3 
+ turn 2: 0 3
+  use 1 5 0 0 Scratch
+  damage 0 50 0 2 
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  status-heal 0 2 0 6 
+ turn 3: 0 1
+  use 1 1 0 0 Ember
+  damage 0 100 0 20 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 24 
+  faint 1 0 0 0 
+  status-heal 0 2 0 6 
+  exp 0 0 0 7 
+  win 0 0 0 0 
+party: Blazecat/6/44/217 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 8
+battle 24 at 7,12
+  step 0 7 12 0 
+  encounter 1 0 3 0 Emberkit
+ turn 0: 0 0
+  use 1 5 0 0 Scratch
+  damage 0 50 0 2 
+  use 0 1 0 0 Ember
+  miss 0 0 0 0 
+ turn 1: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 13 
+  use 1 5 0 0 Scratch
+  damage 0 50 0 2 
+ turn 2: 0 0
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 4 
+  use 0 1 0 0 Ember
+  damage 1 50 0 4 
+ turn 3: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 13 
+  use 1 1 0 0 Ember
+  damage 0 100 0 18 
+ turn 4: 0 0
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 4 
+  use 0 1 0 0 Ember
+  damage 1 50 0 4 
+ turn 5: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 13 
+  use 1 1 0 0 Ember
+  damage 0 100 0 18 
+  immune 0 0 0 0 
+ turn 6: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  shake 1 2 0 0 
+  shake 1 3 0 0 
+  shake 1 4 0 0 
+  caught 1 8 1 0 
+party: Blazecat/6/55/217 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 9
+battle 25 at 8,12
+  step 0 8 12 0 
+  encounter 1 0 3 0 Emberkit
+ turn 0: 0 0
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 4 
+  use 0 1 0 0 Ember
+  damage 1 50 0 3 
+ turn 1: 0 3
+  use 1 1 0 0 Ember
+  damage 0 100 0 19 
+  immune 0 0 0 0 
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  status-heal 0 2 0 6 
+ turn 2: 0 0
+  use 1 5 0 0 Scratch
+  damage 0 50 0 2 
+  use 0 1 0 0 Ember
+  damage 1 50 0 3 
+  status-heal 0 2 0 6 
+ turn 3: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 11 
+  use 1 1 0 0 Ember
+  damage 0 100 0 19 
+  immune 0 0 0 0 
+  status-heal 0 2 0 6 
+ turn 4: 0 0
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 4 
+  use 0 1 0 0 Ember
+  damage 1 50 0 3 
+  immune 1 0 0 0 
+  status-heal 0 2 0 6 
+ turn 5: 0 2
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 4 
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 11 
+  status-heal 0 2 0 6 
+ turn 6: 0 0
+  use 1 1 0 0 Ember
+  miss 1 0 0 0 
+  use 0 1 0 0 Ember
+  damage 1 50 0 3 
+  status-heal 0 2 0 6 
+ turn 7: 0 3
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 4 
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  status-heal 0 2 0 6 
+ turn 8: 0 2
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 4 
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 11 
+  status-heal 0 2 0 6 
+ turn 9: 0 1
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 4 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 11 
+  faint 1 0 0 0 
+  status-heal 0 2 0 6 
+  exp 0 0 0 7 
+  win 0 0 0 0 
+party: Blazecat/6/45/224 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 9
+battle 26 at 8,12
+  step 0 8 12 0 
+  encounter 1 3 5 0 Thornet
+ turn 0: 0 3
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 5 
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  status-heal 0 2 0 5 
+  status-end 0 2 0 0 
+ turn 1: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 10 
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 5 
+ turn 2: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 10 
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 5 
+ turn 3: 0 0
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 5 
+  use 0 1 0 0 Ember
+  damage 1 400 0 25 
+ turn 4: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  shake 1 2 0 0 
+  shake 1 3 0 0 
+  shake 1 4 0 0 
+  caught 1 9 1 0 
+party: Blazecat/6/88/224 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 10
+battle 27 at 8,12
+  step 0 8 12 0 
+  encounter 1 0 2 0 Emberkit
+ turn 0: 0 0
+  use 1 5 0 0 Scratch
+  damage 0 50 0 1 
+  use 0 1 0 0 Ember
+  damage 1 50 0 3 
+  immune 1 0 0 0 
+ turn 1: 0 1
+  use 1 1 0 0 Ember
+  damage 0 100 0 14 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 32 
+ turn 2: 0 1
+  use 1 5 0 0 Scratch
+  damage 0 50 0 1 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 20 
+  faint 1 0 0 0 
+  exp 0 0 0 3 
+  win 0 0 0 0 
+party: Blazecat/6/72/227 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 10
+battle 28 at 8,12
+  step 0 8 12 0 
+  encounter 1 3 3 0 Thornet
+ turn 0: 0 3
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 3 
+  status-heal 0 2 0 6 
+ turn 1: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 33 
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 3 
+  status-heal 0 2 0 6 
+ turn 2: 0 0
+  use 1 8 0 0 Toxic Flare
+  miss 1 0 0 0 
+  use 0 1 0 0 Ember
+  damage 1 400 0 24 
+  faint 1 0 0 0 
+  status-heal 0 2 0 6 
+  exp 0 0 0 9 
+  win 0 0 0 0 
+party: Blazecat/6/84/236 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 10
+battle 29 at 7,12
+  step 0 7 12 0 
+  encounter 1 0 4 0 Emberkit
+ turn 0: 0 0
+  use 1 1 0 0 Ember
+  damage 0 100 0 23 
+  immune 0 0 0 0 
+  use 0 1 0 0 Ember
+  damage 1 50 0 3 
+ turn 1: 0 1
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 4 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 31 
+ turn 2: 0 0
+  use 1 1 0 0 Ember
+  damage 0 100 0 23 
+  immune 0 0 0 0 
+  use 0 1 0 0 Ember
+  damage 1 50 0 3 
+  immune 1 0 0 0 
+ turn 3: 0 1
+  use 1 5 0 0 Scratch
+  damage 0 50 0 2 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 23 
+  faint 1 0 0 0 
+  exp 0 0 0 12 
+  win 0 0 0 0 
+party: Blazecat/6/32/248 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 10
+battle 30 at 7,12
+  step 0 7 12 0 
+  encounter 1 0 2 0 Emberkit
+ turn 0: 0 0
+  use 1 5 0 0 Scratch
+  damage 0 50 0 2 
+  use 0 1 0 0 Ember
+  miss 0 0 0 0 
+ turn 1: 0 1
+  use 1 5 0 0 Scratch
+  damage 0 50 0 2 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 40 
+ turn 2: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  shake 1 2 0 0 
+  shake 1 3 0 0 
+  shake 1 4 0 0 
+  caught 1 10 1 0 
+party: Blazecat/6/99/248 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 11
+battle 31 at 7,12
+  step 0 7 12 0 
+  encounter 1 0 3 0 Emberkit
+ turn 0: 0 0
+  use 1 1 0 0 Ember
+  damage 0 100 0 18 
+  use 0 1 0 0 Ember
+  damage 1 50 0 3 
+ turn 1: 0 3
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 4 
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  status-heal 0 2 0 6 
+ turn 2: 0 1
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 4 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 36 
+  status-heal 0 2 0 6 
+ turn 3: 0 0
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 4 
+  use 0 1 0 0 Ember
+  miss 0 0 0 0 
+  status-heal 0 2 0 6 
+ turn 4: 0 1
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 4 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 26 
+  faint 1 0 0 0 
+  status-heal 0 2 0 6 
+  exp 0 0 0 7 
+  win 0 0 0 0 
+party: Blazecat/6/89/255 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 11
+battle 32 at 7,12
+  step 0 7 12 0 
+  encounter 1 3 4 0 Thornet
+ turn 0: 0 0
+  use 1 8 0 0 Toxic Flare
+  damage 0 50 0 9 
+  status 0 1 0 0 
+  use 0 1 0 0 Ember
+  damage 1 400 0 27 
+  status-hurt 0 1 0 12 
+ turn 1: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 11 
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 4 
+  status-hurt 0 1 0 12 
+ turn 2: 0 0
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 4 
+  use 0 1 0 0 Ember
+  damage 1 400 0 25 
+  faint 1 0 0 0 
+  status-hurt 0 1 0 12 
+  exp 0 0 0 16 
+  win 0 0 0 0 
+party: Blazecat/6/36/271 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 11
+battle 33 at 8,12
+  step 0 8 12 0 
+  encounter 1 3 3 0 Thornet
+ turn 0: 0 0
+  use 1 8 0 0 Toxic Flare
+  damage 0 50 0 8 
+  use 0 1 0 0 Ember
+  damage 1 400 0 30 
+ turn 1: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 12 
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 3 
+ turn 2: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  break-free 1 0 0 0 
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 3 
+ turn 3: 0 0
+  use 1 8 0 0 Toxic Flare
+  damage 0 50 0 8 
+  status 0 1 0 0 
+  use 0 1 0 0 Ember
+  damage 1 400 0 10 
+  faint 1 0 0 0 
+  status-hurt 0 1 0 12 
+  exp 0 0 0 9 
+  level 0 0 7 0 
+  win 0 0 0 0 
+party: Blazecat/7/76/280 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 11
+battle 34 at 7,12
+  step 0 7 12 0 
+  encounter 1 3 4 0 Thornet
+ turn 0: 0 0
+  use 1 8 0 0 Toxic Flare
+  damage 0 50 0 8 
+  use 0 1 0 0 Ember
+  miss 0 0 0 0 
+  status-hurt 0 1 0 13 
+ turn 1: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 12 
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 3 
+  status-hurt 0 1 0 13 
+ turn 2: 0 1
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 3 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 37 
+  status-hurt 0 1 0 13 
+ turn 3: 0 0
+  use 1 8 0 0 Toxic Flare
+  damage 0 50 0 8 
+  status 0 1 0 0 
+  use 0 1 0 0 Ember
+  damage 1 400 0 15 
+  faint 1 0 0 0 
+  status-hurt 0 1 0 13 
+  exp 0 0 0 16 
+  win 0 0 0 0 
+party: Blazecat/7/2/296 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 11
+battle 35 at 7,12
+  step 0 7 12 0 
+  encounter 1 2 2 0 Puddlop
+ turn 0: 0 0
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 3 
+  use 0 1 0 0 Ember
+  damage 1 50 0 8 
+  status 1 0 0 0 
+  status-hurt 1 0 0 11 
+ turn 1: 0 3
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  use 1 7 0 0 Splash Jet
+  damage 0 200 0 15 
+  status-heal 0 2 0 6 
+  status-hurt 1 0 0 11 
+ turn 2: 0 0
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 3 
+  use 0 1 0 0 Ember
+  damage 1 50 0 8 
+  status-heal 0 2 0 6 
+  status-hurt 1 0 0 11 
+ turn 3: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 27 
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 3 
+  status-heal 0 2 0 6 
+  status-hurt 1 0 0 11 
+ turn 4: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  shake 1 2 0 0 
+  shake 1 3 0 0 
+  shake 1 4 0 0 
+  caught 1 11 1 0 
+party: Blazecat/7/104/296 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 12
+battle 36 at 8,12
+  step 0 8 12 0 
+  encounter 1 0 4 0 Emberkit
+ turn 0: 0 0
+  use 1 1 0 0 Ember
+  damage 0 100 0 23 
+  use 0 1 0 0 Ember
+  damage 1 50 0 3 
+  immune 1 0 0 0 
+ turn 1: 0 1
+  use 1 5 0 0 Scratch
+  damage 0 50 0 3 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 29 
+ turn 2: 0 0
+  use 1 1 0 0 Ember
+  damage 0 100 0 23 
+  immune 0 0 0 0 
+  use 0 1 0 0 Ember
+  damage 1 50 0 3 
+ turn 3: 0 2
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 5 
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 12 
+ turn 4: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  shake 1 2 0 0 
+  shake 1 3 0 0 
+  shake 1 4 0 0 
+  caught 1 12 1 0 
+party: Blazecat/7/50/296 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 13
+battle 37 at 7,12
+  step 0 7 12 0 
+  encounter 1 2 2 0 Puddlop
+ turn 0: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 29 
+  use 1 7 0 0 Splash Jet
+  damage 0 200 0 13 
+ turn 1: 0 0
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 2 
+  use 0 1 0 0 Ember
+  damage 1 50 0 8 
+ turn 2: 0 1
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 2 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 24 
+ turn 3: 0 1
+  use 0 5 0 0 Scratch
+  damage 1 100 0 24 
+  use 1 7 0 0 Splash Jet
+  damage 0 200 0 13 
+ turn 4: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  shake 1 2 0 0 
+  shake 1 3 0 0 
+  break-free 1 0 0 0 
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 2 
+ turn 5: 0 1
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 2 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 9 
+  faint 1 0 0 0 
+  exp 0 0 0 5 
+  win 0 0 0 0 
+party: Blazecat/7/76/301 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 13
+battle 38 at 8,12
+  step 0 8 12 0 
+  encounter 1 3 4 0 Thornet
+ turn 0: 0 1
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 4 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 28 
+ turn 1: 0 0
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 4 
+  use 0 1 0 0 Ember
+  miss 0 0 0 0 
+ turn 2: 0 1
+  use 1 8 0 0 Toxic Flare
+  damage 0 50 0 8 
+  status 0 1 0 0 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 28 
+  status-hurt 0 1 0 13 
+ turn 3: 0 0
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 4 
+  use 0 1 0 0 Ember
+  damage 1 400 0 12 
+  faint 1 0 0 0 
+  status-hurt 0 1 0 13 
+  exp 0 0 0 16 
+  win 0 0 0 0 
+party: Blazecat/7/30/317 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 13
+battle 39 at 7,12
+  step 0 7 12 0 
+  encounter 1 2 3 0 Puddlop
+ turn 0: 0 0
+  use 0 1 0 0 Ember
+  damage 1 50 0 8 
+  use 1 7 0 0 Splash Jet
+  damage 0 200 0 16 
+ turn 1: 0 1
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 3 
+  use 0 5 0 0 Scratch
+  damage 1 100 0 21 
+ turn 2: 0 0
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 3 
+  use 0 1 0 0 Ember
+  damage 1 50 0 8 
+  status 1 0 0 0 
+  status-hurt 1 0 0 11 
+ turn 3: 0 3
+  use 0 6 0 0 Soothe
+  status 0 2 0 0 
+  use 1 7 0 0 Splash Jet
+  miss 1 0 0 0 
+  status-heal 0 2 0 6 
+  status-hurt 1 0 0 11 
+ turn 4: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 28 
+  use 1 3 0 0 Quick Jab
+  damage 0 50 0 3 
+  status-heal 0 2 0 6 
+  status-hurt 1 0 0 8 
+  faint 1 0 0 0 
+  exp 0 0 0 11 
+  win 0 0 0 0 
+party: Blazecat/7/97/328 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 13
+battle 40 at 8,12
+  step 0 8 12 0 
+  encounter 1 3 4 0 Thornet
+ turn 0: 0 0
+  use 1 8 0 0 Toxic Flare
+  damage 0 50 0 8 
+  status 0 1 0 0 
+  use 0 1 0 0 Ember
+  damage 1 400 0 33 
+  status 1 0 0 0 
+  status-hurt 0 1 0 13 
+  status-hurt 1 0 0 8 
+ turn 1: 0 2
+  use 0 3 0 0 Quick Jab
+  damage 1 100 0 13 
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 3 
+  status-hurt 0 1 0 13 
+  status-hurt 1 0 0 8 
+ turn 2: 1 -1
+  throw 0 0 0 0 
+  shake 1 1 0 0 
+  shake 1 2 0 0 
+  break-free 1 0 0 0 
+  use 1 9 0 0 Vine Whip
+  damage 0 25 0 3 
+  status-hurt 0 1 0 13 
+  status-hurt 1 0 0 4 
+  faint 1 0 0 0 
+  exp 0 0 0 16 
+  win 0 0 0 0 
+party: Blazecat/7/44/344 Emberkit/4/69/51 Emberkit/3/55/21 Emberkit/3/53/21 Emberkit/4/58/51 Emberkit/3/51/21 box 13

@@ -1,0 +1,22 @@
+# kind<TAB>slug<TAB>number: stable numbers for what a save refers to.
+# Maintained by tools/mkgame.py; commit it. Never renumber or reuse a number.
+area	fixture_meadow	1
+area	fixture_burrow	2
+creature	emberkit	1
+creature	blazecat	2
+creature	puddlop	3
+creature	thornet	4
+creature	rustmole	5
+move	bash	1
+move	ember	2
+move	focus_beam	3
+move	quick_jab	4
+move	rest	5
+move	scratch	6
+move	soothe	7
+move	splash_jet	8
+move	toxic_flare	9
+move	vine_whip	10
+status	burn	1
+status	poison	2
+status	recover	3

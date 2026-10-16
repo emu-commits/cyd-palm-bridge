@@ -16,6 +16,76 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-16 — The monster game's G1: the reader and the rules, on the host
+
+`GAME_PLAN.md` §12 G1, which the owner asked for after G0. Nothing on the
+device changes: the firmware's `CMakeLists.txt` doesn't list the new files
+yet (G2 will).
+
+- **`firmware/main/monster.c`** reads `game.bin` as `course.c` reads a
+  course: every read bounded, every record's positions and strings checked
+  on open, an area's head, chunks and sprites when read, `mg_verify()` for
+  the rest. Its dump equals `mkgame.py --dump` byte for byte, on the fixture
+  and on the real Tuxemon build.
+- **`firmware/main/monster_play.c`** is the rules (`GAME_FORMAT.md` §2) in
+  integer arithmetic with one xorshift generator; the world's events; and
+  the save (32 B, then 40 B a creature, by stable ids, through `safefile.h`).
+  Each action returns a list of events for the screens to tell.
+- **The fixture**, `tests/data/game/`: `source.py` writes a Tuxemon-shaped
+  tree of our own (CC0): 5 creatures, 10 moves plus one left out, 6 types,
+  two maps (24 × 20 and 18 × 17) with water, a ledge, a fence and a wall as
+  lines, a one-way gate, trees with overlays, warps, zones, signs and an
+  unlisted tileset. `mkgame.py --unpinned` builds it: 44,772 B.
+- `META` gained `0x22` (the IV maximum, the experience multipliers), so the
+  real build is 132,380 B (20 B more).
+
+**Measured** (gcc, `sizeof`, 32-bit as on the device / 64-bit):
+
+| | 32-bit | 64-bit |
+|---|---|---|
+| `MonGame` (the open file, with the type table and shapes) | 1,016 B | 1,024 B |
+| `MpWorld` (party, box of 30, four chunks) | 4,748 B | 4,784 B |
+| `MpBattle` / `MpLog` | 56 / 580 B | 56 / 580 B |
+| An area's head (the caller's; the most accepted) | up to 16 KB; 152-184 B in the fixture, 0.6-2.4 KB in the spike | |
+
+No static data: `size` shows 0 B of `data` and `bss` for both files. In G2's
+heap budget (`GAME_PLAN.md` §9) that's about 6 KB plus the area's head.
+
+**Gates:**
+- `make -C sim monster` (ASan and UBSan): the dump round trip; the formulas
+  against numbers worked by hand (stats, the three experience groups, the
+  multiplier and its clamp, four damage cases, speed, the shake check
+  within 0.01 % of Tuxemon's float); every movement rule; 20,000 steps in the
+  grass for the 11 % rate and the 40/35/25 weights; losing, a level-up that
+  learns with four known, an evolution; 40 seeded battles against
+  `battle.txt` (31,551 B); the save's round trip (832 B: a party of 6 and
+  14 in the box), all 832 truncations and 6,656 flipped bits refused, an
+  unknown creature and a newer version refused, and a finished `.tmp`
+  promoted.
+- `monster_fuzz` (`make ftest`): 44,772 truncations, 41,456 flipped bits
+  (every bit before `ADAT`, 30,000 at random after it), 2,500 hostile files
+  with every CRC fixed, of which 808 opened and were played. 20 s under
+  ASan on this machine.
+- `tests/mkgame_test.py`: the fixture rebuilt twice to the committed bytes,
+  at 4 bits too, `ids.tsv` kept, a missing number given the next one, five
+  bad regions refused.
+- Proved to fail: a byte changed in `battle.txt`, and `mg_verify()` made to
+  pass everything (the fuzzer then reports the first flipped bit it
+  misses).
+
+**Found on the way:**
+- Tuxemon breaks a speed tie at random (`sub_priority`), never applies
+  `speed_offset` in a battle (only its tests do), and gives a new creature
+  the last four moves its level reaches, not the level-1 ones. `GAME_FORMAT.md`
+  §2 had the last two wrong or open.
+- The first `META` duplicate check gave the start (`0x10`) and the rules
+  (`0x20`) the same bit, and refused every file; the round trip caught it
+  on the first run.
+- `tests/nodelete.sh` failed `make test` on the section tag `"MOVE"` in
+  `monster.c` (the format's moves, not the HTTP method). The tags are now one
+  string of 4-byte tags, as the file holds them; the gate wasn't loosened
+  and no `nodelete-ok` was added.
+
 ### 2026-10-16 — The monster game's G0: the file format and the converter
 
 `GAME_PLAN.md` §12 G0, which the owner asked for. Nothing on the device

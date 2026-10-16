@@ -66,7 +66,7 @@ CRC_ON_OPEN = {b"META", b"TYPE", b"SHAP", b"STAT", b"MOVE", b"MONS", b"LRNS",
 # META keys (GAME_FORMAT.md 3.2)
 K_TITLE, K_SOURCE, K_BUILD = 0x01, 0x02, 0x03
 K_START = 0x10
-K_RULES, K_CAPTURE = 0x20, 0x21
+K_RULES, K_CAPTURE, K_GROWTH = 0x20, 0x21, 0x22
 
 RANGES = ["melee", "touch", "ranged", "reach", "reliable", "special"]
 SPEEDS = ["extremely_slow", "very_slow", "slow", "normal", "fast", "very_fast", "extremely_fast"]
@@ -693,7 +693,10 @@ def meta_entry(key, value):
     return struct.pack("<HH", key, len(value)) + value
 
 
-def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=True):
+def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=True,
+          source=f"Tuxemon {TUXEMON_COMMIT}"):
+    """`source` names where the content came from: the pinned commit, or, for
+    the test fixture (--unpinned), what the caller says."""
     from PIL import Image
     allow = load_allow(allow_path)
     region = json.loads(Path(region_path).read_text(encoding="utf-8"))
@@ -943,7 +946,7 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
     if st["area"] not in area_ix:
         fail(f"game_region.json: the start area {st['area']} isn't in the region")
     META = meta_entry(K_TITLE, text_ok(region["title"], "title").encode())
-    META += meta_entry(K_SOURCE, f"Tuxemon {TUXEMON_COMMIT}".encode())
+    META += meta_entry(K_SOURCE, source.encode())
     META += meta_entry(K_BUILD, f"mkgame {FORMAT_MAJOR}.{FORMAT_MINOR}".encode())
     META += meta_entry(K_START, struct.pack("<HBBB3x", area_ix[st["area"]], st["x"], st["y"],
                                             DIRS[st.get("facing", "down")]))
@@ -956,10 +959,15 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
                                               cc["shake_denominator"], cc["shake_divisor"],
                                               cc["shake_hp_multiplier"], cc["shake_current_hp_multiplier"],
                                               cc["shake_hp_divisor"]))
+    eg = mc["experience_groups"]
+    META += meta_entry(K_GROWTH, struct.pack("<4I", int(mc["iv_range"][1]),
+                                             *(round(float(eg[g]["multiplier"]) * 100) for g in EXP_GROUPS)))
 
     # credits
-    cred = [f"Game data from Tuxemon (GPLv3), commit {TUXEMON_COMMIT[:12]}.",
-            "github.com/Tuxemon/Tuxemon", ""]
+    if source.startswith("Tuxemon "):
+        cred = [f"Game data from Tuxemon (GPLv3), commit {source[8:20]}.", "github.com/Tuxemon/Tuxemon", ""]
+    else:
+        cred = [f"Game data from {source}.", ""]
     for kind, title in (("creature", "Creatures"), ("tileset", "Tiles"), ("character", "Characters")):
         cred.append(title)
         for s in sorted(allow[kind]):
@@ -1153,6 +1161,7 @@ def dump(g):
     out.append(f"start area {a} at {x},{y} facing {f}")
     out.append("rules " + " ".join(map(str, struct.unpack("<8I", m[K_RULES]))))
     out.append("capture " + " ".join(map(str, struct.unpack("<7I", m[K_CAPTURE]))))
+    out.append("growth " + " ".join(map(str, struct.unpack("<4I", m[K_GROWTH]))))
     names, table = g.types()
     for n, row in zip(names, table):
         out.append(f"type {n} " + " ".join(map(str, row)))
@@ -1286,6 +1295,9 @@ def main(argv=None):
     ap.add_argument("--dump", action="store_true", help="print the canonical dump")
     ap.add_argument("--preview", metavar="DIR", help="draw each file's areas and sprites into DIR")
     ap.add_argument("--report", action="store_true", help="print the build report")
+    ap.add_argument("--unpinned", metavar="SOURCE",
+                    help="build from a tree that isn't the pinned checkout, naming it SOURCE "
+                         "(the test fixture, tests/data/game/; never for a real build)")
     ap.add_argument("--strict", action="store_true",
                     help="refuse allow-list lines that are still unverified (G3's build)")
     args = ap.parse_args(argv)
@@ -1294,10 +1306,16 @@ def main(argv=None):
             fetch(args.tuxemon)
             print(f"Tuxemon {TUXEMON_COMMIT[:12]} in {args.tuxemon}")
         if args.output:
-            root = check_source(args.tuxemon)
+            if args.unpinned:
+                root, source = Path(args.tuxemon), args.unpinned
+                if not (root / "mods" / "tuxemon" / "db").is_dir():
+                    fail(f"{root} isn't a Tuxemon-shaped tree")
+            else:
+                root, source = check_source(args.tuxemon), f"Tuxemon {TUXEMON_COMMIT}"
             report = []
             ids = load_ids(args.ids)
-            data = build(root, args.bpp, report, ids, args.allow, args.region, spike=not args.strict)
+            data = build(root, args.bpp, report, ids, args.allow, args.region, spike=not args.strict,
+                         source=source)
             save_ids(ids, args.ids)
             Path(args.output).write_bytes(data)
             Game(data)

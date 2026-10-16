@@ -9,9 +9,9 @@ CORE    = bridge/pdb.c bridge/datebook.c bridge/address.c bridge/ical.c bridge/v
 
 PROGS   = roundtrip bridge_cli incremental synctoken category bigsync multiapp \
           uidmatch idempotent massdel streamparse find_test calc_test config_test rss_test news_test wx_test \
-          feeds_test break_test geoip_test objfile_test recur_test toobig safefile_test sort_test window fidelity todos mget_test fuzz_test course_fuzz rss_asan mget_asan
+          feeds_test break_test geoip_test objfile_test recur_test toobig safefile_test sort_test window fidelity todos mget_test fuzz_test course_fuzz monster_fuzz rss_asan mget_asan
 
-all: $(addprefix $(B)/,$(filter-out fuzz_test course_fuzz rss_asan mget_asan,$(PROGS)))
+all: $(addprefix $(B)/,$(filter-out fuzz_test course_fuzz monster_fuzz rss_asan mget_asan,$(PROGS)))
 
 # `make wx_test` builds build/wx_test
 $(PROGS): %: $(B)/%
@@ -149,6 +149,14 @@ $(B)/fuzz_test: tests/fuzz_test.c $(CORE) | dirs
 $(B)/course_fuzz: tests/course_fuzz.c firmware/main/course.c firmware/main/course.h | dirs
 	$(CC) $(CFLAGS) -Ifirmware/main -fsanitize=address,undefined -fno-sanitize-recover=all -o $@ tests/course_fuzz.c firmware/main/course.c
 
+# the monster game's file comes off the SD card too: every truncation, bit
+# flips, and hostile (CRC-fixed) copies of the fixture, each one that opens
+# then played (steps, battles, a save and a load), under sanitizers
+$(B)/monster_fuzz: tests/monster_fuzz.c firmware/main/monster.c firmware/main/monster.h \
+                   firmware/main/monster_play.c firmware/main/monster_play.h bridge/safefile.h | dirs
+	$(CC) $(CFLAGS) -Ifirmware/main -Ibridge -fsanitize=address,undefined -fno-sanitize-recover=all -o $@ \
+	    tests/monster_fuzz.c firmware/main/monster.c firmware/main/monster_play.c
+
 # the RSS parser eats untrusted network bytes -> also run its gate under sanitizers
 $(B)/rss_asan: tests/rss_test.c bridge/rss.c | dirs
 	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -o $@ $^
@@ -176,10 +184,11 @@ test: nodelete roundtrip objfile_test recur_test find_test calc_test config_test
 	./$(B)/mget_test
 
 # parser hardening sweep (sanitizer build; a bit slower)
-ftest: fuzz_test rss_asan course_fuzz mget_asan
+ftest: fuzz_test rss_asan course_fuzz monster_fuzz mget_asan
 	./$(B)/fuzz_test
 	./$(B)/rss_asan
 	./$(B)/course_fuzz
+	MONSTER_SAVE=$(B)/monster_fuzz_save.bin ./$(B)/monster_fuzz
 	./$(B)/mget_asan
 
 # needs Radicale running on localhost:5232 (see README)

@@ -1,8 +1,10 @@
 # Game format — `game.bin`, version 1
 
-> **Status: draft for the owner's review (G0, 2026-10-16).** `tools/mkgame.py`
-> writes and reads it; there's no C reader yet (G1). It may still change
-> before G1 starts, without a version bump, because nothing has shipped.
+> **Status: G1 (2026-10-16).** `tools/mkgame.py` writes and reads it, and
+> `firmware/main/monster.c` reads it in C (`monster_play.c` plays its rules);
+> the two readers' dumps are compared byte for byte (`make -C sim monster`).
+> G1 added `META` key `0x22` (§3.2). It may still change without a version
+> bump until something ships.
 
 `game.bin` holds everything the monster game reads from the card: the
 rules' numbers, the creatures, their moves and battle sprites, the areas
@@ -49,6 +51,13 @@ Four files in `tools/` decide what's built:
 the time, the machine or dict order; Pillow (12.3.0) and PyYAML (6.0.2) are
 pinned; the palette reduction is Pillow's median cut with fixed k-means
 passes and no dithering.
+
+**The test fixture** (`tests/data/game/`) is a build of our own content, so
+the gates never need Tuxemon: `source.py` writes a small tree in Tuxemon's
+layout (five invented creatures, ten moves, two maps, tiles and sprites drawn
+from numbers, all CC0), and `mkgame.py --unpinned` builds it, naming the
+source in `META` instead of a Tuxemon commit. `tests/mkgame_test.py` rebuilds
+it byte for byte; `--unpinned` is for that and nothing else.
 
 **What the build takes from Tuxemon:**
 
@@ -108,7 +117,9 @@ resistance to touch and ranged moves.
 
 **Hitting.** One random number *r* in [0, 1) is drawn per creature per turn;
 a move hits when `accuracy ≥ r`. A move that gives a status draws a second
-number *p* and gives it when it also hits and `potency ≥ p`.
+number *p* and gives it when it also hits and `potency ≥ p`. G1 draws *r* and
+*p* in ten-thousandths and hits when `r < accuracy` (the same but for the
+one chance in 2^53 that Tuxemon's float lands exactly on it).
 
 **Healing.** A healing move restores `floor(7 + level × healing_power)`.
 
@@ -120,6 +131,10 @@ number *p* and gives it when it also hits and `potency ≥ p`.
 | burn | loses floor(max HP / 8) | Fire types | stays until healed |
 | recover | gains min(max HP / 16, what's missing); ends at full HP | | ends |
 
+A creature has one status at a time; a new one replaces it (Tuxemon's
+`on_negative_status: replaced`). Statuses act at the end of each turn, after
+both moves.
+
 The divisors, immunities and persistence come from Tuxemon's status files
 (`STAT`). Tuxemon also lowers HP on the overworld every 10 steps while
 poisoned (`step_interval`); the first version doesn't.
@@ -128,11 +143,18 @@ poisoned (`step_interval`); the first version doesn't.
 
     speed_score = floor(max(1, speed × (1 + move_speed × 0.25)) + dodge × 0.01)
 
-`move_speed` runs from −3 (extremely slow) to +3 (extremely fast).
-Tuxemon's `config_combat.yaml` also has a random `speed_offset` (50); G1
-reads where it's applied before copying it.
+`move_speed` runs from −3 (extremely slow) to +3 (extremely fast). **A tie
+is a coin toss** (Tuxemon sorts on a random `sub_priority` last).
+`config_combat.yaml`'s `speed_offset` (50) is used only by Tuxemon's tests,
+not its battles, so G1 leaves it out. Catching, running and swapping come
+before the other side's move.
 
 **Recharge.** A move used can't be used again for `recharge` turns.
+
+**Met in the wild.** The level is drawn evenly from the table row's range,
+each IV evenly from 0 to the maximum (`META` `0x22`), the experience is the
+level's floor, and the moves are **the last four its learnset reaches by its
+level** (Tuxemon's `set_moves`), not only the level-1 ones.
 
 **Catching.** With *HP* the target's max HP and *cur* its current HP:
 
@@ -145,7 +167,9 @@ creature breaks free if it's above `floor(shake_check)`. At a catch rate of
 100 and both modifiers 1, `shake_check` is 65,540 before *u*. A catch rate
 of 0 would divide by zero in Tuxemon; G1 treats it as uncatchable. The
 first version has one capture device and no status modifiers, so both
-modifiers are 1.
+modifiers are 1. G1 computes the fourth root exactly in integers (`catch_check
+/ 100` scaled by 10^16, two integer square roots): for a full-HP creature
+with a rate of 90 that's 48,500 against Tuxemon's 48,505.
 
 **Running away** (wild battles):
 `chance = 0.4 + 0.15 × (attempts + own level − wild level)`.
@@ -153,13 +177,21 @@ modifiers are 1.
 **Experience.** The total to reach level *L* is `floor(m × L³)`, with *m*
 from the creature's experience group: default 1.0, fast 0.8, slow 1.25.
 Beating a creature at level *L* gives `floor(its total / L)` (about *L*²
-for one met at its level's floor), shared among the creatures that fought
-it. Levels run from 1 to 100.
+for one met at its level's floor), shared evenly among the creatures that
+fought it and are still standing. Levels run from 1 to 100. The
+multipliers are the file's (`META` `0x22`), in hundredths, so the totals are
+exact.
 
 **Evolving and learning.** At the level in `MONS`, a creature becomes the
 one named there (keeping its experience). At each level in its learnset, it
-learns that move; with four already, one has to be forgotten (G1 decides
-how the player chooses).
+learns that move; with four already, the battle says so (`MP_EV_LEARN_FULL`)
+and the screen asks which to forget, or none (`mp_learn()`). HP rises by what
+the maximum rose by. Evolving happens at or after the level, so a creature
+caught above it evolves at its next level-up.
+
+**Losing.** When every creature in the party has fainted, the party is
+healed and the player is put back at the start. (Tuxemon sends the player to
+the last healing centre; the first region has none yet.)
 
 **Moves left out.** A move is built only if every effect it has is
 `damage`, `healing` (on itself or the target) or `give` of one of the three
@@ -220,6 +252,11 @@ Entries one after another: u16 key, u16 length *n*, *n* bytes of value.
 | `0x10` | Start: u16 area (its position in `AREA`), u8 x, u8 y, u8 facing (0 N, 1 E, 2 S, 3 W), 3 B zero |
 | `0x20` | Rules, u32 × 8: COEFF_DAMAGE (7), stat coefficient (7), multiplier minimum and maximum in hundredths (25, 400), experience exponent (3), maximum level (100), moves known (4), party size (6) |
 | `0x21` | Catching, u32 × 7: shakes (4), shake constant (524325), shake denominator (8), shake divisor (65536), HP multiplier (3), current-HP multiplier (2), HP divisor (3) |
+| `0x22` | Growth, u32 × 4: the IVs' maximum (15), then the experience groups' multipliers in hundredths: default (100), fast (80), slow (125). Added in G1. |
+
+`0x10`, `0x20`, `0x21` and `0x22` are required, and each may appear once. The
+reader refuses values that would overflow its arithmetic (`monster.c`,
+`parse_meta()`).
 
 ### 3.3 `TYPE`: types
 
@@ -504,8 +541,9 @@ and column scrolling in, was 34 (Route 1) and 13 (Brideswood), so a cache of
 
 The reader treats the file as untrusted, as `course.c` does. G1's C reader
 does all of the following, and `monster_fuzz` proves it under ASan and
-UBSan. `mkgame.py`'s reader already does the file, area and picture checks;
-the range checks on records' positions come with G1.
+UBSan (with each file that opens then played: steps, battles, a save and a
+load). `monster.c` does all of it; `mkgame.py`'s reader does the file, area
+and picture checks.
 
 - **On open:** the magic, major version, header CRC and file size; the
   section table's CRC, every section inside the file, 4-aligned, in order,

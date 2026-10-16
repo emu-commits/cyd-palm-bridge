@@ -22,16 +22,21 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 
 ---
 
-## Paused — a monster-catching game (G0 done 2026-10-16, awaiting the owner)
+## Paused — a monster-catching game (G1 done 2026-10-16, awaiting the owner)
 
 `GAME_PLAN.md` is the plan: a C engine in the Games menu, with content from
 Tuxemon (GPLv3 data, mostly CC-BY-SA art) converted into one file on the card,
-on-screen controls and an Auto-play checkbox. **G0 is built** (the owner
-asked for it on 2026-10-16): `GAME_FORMAT.md` and `tools/mkgame.py`, with
-nothing on the device. **Don't start G1 without the owner's yes.**
+on-screen controls and an Auto-play checkbox. **G0 and G1 are built** (the
+owner asked for each on 2026-10-16), with nothing on the device yet:
+`GAME_FORMAT.md` and `tools/mkgame.py`, then the reader (`monster.c`) and
+the rules (`monster_play.c`) with their host gates. **Don't start G2 (the
+screens) without the owner's yes.**
 
-- [ ] The owner reviews `GAME_FORMAT.md` and the renders (Q4: 8-bit maps,
-  4-bit creatures).
+- [x] The renders: the owner looked at Tuxemon's Route 1 as the device would
+  draw it, 8-bit (2026-10-16: "Looks good"). The Spriters Resource was
+  asked about and ruled out: its rips are the games' owners', not free.
+- [ ] The owner reviews `GAME_FORMAT.md` (G1 added `META` `0x22` and wrote
+  down the rules it settled in §2).
 - [ ] The owner decides §13 Q6: Tuxemon's town buildings are partly
   XYG-licensed; the recommendation is towns laid out from the clean sheets.
 - [ ] Still open from the plan: §13 Q1, Q2, Q3, Q5.
