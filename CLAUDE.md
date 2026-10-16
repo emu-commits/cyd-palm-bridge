@@ -22,14 +22,16 @@ before touching anything.
 - `docs/SRS_PLAN.md`: the built-in spaced-repetition app. **This is the
   current project; see "Current work" below.**
 - `docs/GAME_PLAN.md`: a monster-catching game from Tuxemon's content.
-  **G0 and G1 done 2026-10-16** (`docs/GAME_FORMAT.md`, `tools/mkgame.py`,
-  `firmware/main/monster.c` and `monster_play.c` with host gates). The
-  owner approved the format and answered §13 the same day: **G2 is
-  approved**, built into the current test image; clean licences only (no
-  XYG sheets, towns from clean ones); the built `game.bin` is committed
-  under `courses/critters/` and the web flasher can install it; the game
-  pauses when the device locks. Gates use the fixture in
-  `tests/data/game/` (ours); the Tuxemon checkout never enters the repo.
+  **G0, G1 and G2 done 2026-10-16**: the format and converter, the rules
+  (`monster.c`, `monster_play.c`), and the screens (`ui_monster.c`,
+  "Critters" in the Games folder), built into the current test image as
+  the owner asked. Clean licences only (no XYG sheets; the player is our own
+  drawing, `tools/gen_player_sheet.py`); the built file is committed as
+  `courses/critters/game.bin` (`mkgame.py --strict`), the smoke tour plays
+  it, and the web flasher can install it (`monster_install.c`). The lock
+  pauses the game (`pause.dat`); on USB power the screen stays on. Next: the
+  owner's bench items, then G3 (towns from clean sheets, people, trainers).
+  The Tuxemon checkout never enters the repo.
 - `docs/APP_PLATFORM_PLAN.md`: native C apps loaded from the SD card.
   **On hold since 2026-09-29**; don't build any of it without the user's yes.
 
