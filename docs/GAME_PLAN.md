@@ -1,12 +1,11 @@
 # Game plan — a monster-catching RPG built from Tuxemon's open content
 
-> **Status: G1 done (2026-10-16), on the host only; G2 approved.** The owner
-> asked for G0 (the format and the converter) and then G1 (the rules) on
-> 2026-10-16, liked the Tuxemon renders, approved `GAME_FORMAT.md` and
-> answered §13's questions the same day (Q1–Q6 under "Decided (2026-10-16)").
-> Q5's answer is the go-ahead for G2: the game is built into the current test
-> image, on top of the sync and Palm-behaviour commits. §12 says what each
-> phase found.
+> **Status: G3 done (2026-10-16), in the simulator; the bench is next.** G0
+> (the format and the converter), G1 (the rules) and G2 (the screens) were
+> built on 2026-10-16 as the owner asked; then G3, the first region: two towns
+> laid out for this game, Route 1, the Brideswood and the Cotton Tunnel,
+> people and keepers, a Warden to beat, and a choice of six looks for the
+> player. §12 says what each phase found; §13 has the owner's decisions.
 
 A small Game Boy-style monster-catching RPG in the Games menu: walk a tile map,
 meet creatures in the grass, battle, catch and train them, beat trainers. An
@@ -83,6 +82,12 @@ What was chosen:
   and evolve at set levels.
 - **Party and storage:** up to six in the party; the rest are stored. A centre
   in each town heals the party.
+- **People:** townspeople to talk to, healers who rest the party (a loss
+  comes back to the last one), keepers who battle with up to three creatures
+  (spotting the player from a few cells off), and flags that open the way
+  (a foreman who stands aside once a keeper is beaten) or bring someone out.
+- **A new game** asks how the player looks (six colourings of our own
+  drawing), then which of three first critters to take.
 - **Saving:** one save slot on the card, written on request and when leaving
   the game.
 - **Auto-play:** a checkbox in the game's menu (§8).
@@ -101,7 +106,9 @@ What was chosen:
 | The converter | `tools/mkgame.py`: Tuxemon's YAML, PNG and Tiled files to `game.bin` (Pillow and PyYAML pinned in `tools/requirements-game.txt`) |
 | Pinned source | Tuxemon at a fixed commit (the full SHA in `mkgame.py`), fetched by `mkgame.py --fetch`; the build refuses any other commit or a changed checkout. **Not vendored** into the repo. |
 | The licence allow-list | `tools/game_allow.tsv`: each creature, tileset and character sheet we use, with its licence and credit line, checked by hand (§10) |
-| The region | `tools/game_region.json`: the maps, the start, the player's sheet, the encounter tables |
+| The region | `tools/game_region.json`: the maps, the start, the player's looks, the starters, the encounter tables, and each area's warps, zones, signs and people |
+| The towns | `tools/game_maps/*.json`: layouts of our own from the clean tilesets (`GAME_FORMAT.md` §1) |
+| The player's looks | `tools/gen_player_sheet.py` draws the six sheets in `tools/game_art/` (CC0) |
 | Stable ids | `tools/game_ids.tsv`: creature, move, status and area numbers a save refers to |
 | The data file | `/sdcard/games/monster/game.bin`, built from Tuxemon (clean licences only, `mkgame.py --strict`) and committed as `courses/critters/game.bin` with its credits in `courses/critters/README.md` (§13 Q1) |
 | The flasher's install | `partitions.csv`'s `game` partition (960 KB at 0x310000); `tools/package_firmware.py` writes `manifest-critters.json` beside `manifest.json`, the install page's checkbox picks it, and `firmware/main/monster_install.c` copies a new game to the card at boot (once per fingerprint, in `installed.txt`) |
@@ -135,10 +142,11 @@ engine (`create_npc`, `start_battle`, conditions on variables). We take map
 layouts, warps, encounter zones and trainers, and write a small event set of
 our own (§6).
 
-**The first region:** a playable slice chosen from Tuxemon's maps: a home
-town, two routes, a cave and a town with a gym, with about 20 creatures from
-the allow-list. More areas are added later by rebuilding `game.bin`, without
-reflashing.
+**The first region (built in G3):** Larkhollow (ours) → Route 1 →
+Brideswood → Cotton Tunnel → Kestrel (ours), with 27 creatures from the
+allow-list. Tuxemon's Route 1 doesn't reach the Brideswood on foot (its east
+half is walled off by trees), so the way on is Route 1's open north edge.
+More areas are added later by rebuilding `game.bin`, without reflashing.
 
 ## 5) The game file on the card
 
@@ -349,6 +357,15 @@ one screen, scrolling included, was 34 (Route 1).
   is **drawn for this project** (`tools/gen_player_sheet.py`, CC0, status
   `ours` in the allow-list), and the committed build has no `unverified` line
   (2026-10-16).
+- **The townspeople (G3)** are Tuxemon's sheets. `ATTRIBUTIONS.md`'s
+  "Character Front Sprites" says who drew each one's overland sprite, and the
+  sources were checked on 2026-10-16: pboop's people are CC0 on OpenGameArt,
+  the Superpowers Asset Packs are CC0 (their `LICENSE.txt`), and the Catch
+  Challenger datapack, the source of most of them, is credited by Tuxemon as
+  CC BY, but its own repository states no licence. **The owner chose to use
+  the Catch Challenger sheets on Tuxemon's word** (§13); they're marked "per
+  Tuxemon" in the allow-list and the credits. Granny (overland by Pixel
+  Scuba, no licence found) is left out.
 - **Left out entirely:**
   - the tilesets under the "XYG Open Source License", and the four core
     sheets built from them (above);
@@ -435,10 +452,37 @@ screenshots looked at.
     (81.59 % used, 33,268 B free); the image 1,792,267 B.
   - [ ] Measured on the bench: frame rate, area load time, heap during a
     sync (`BACKLOG.md`).
-- **G3 — content.**
-  - The first region and its creatures through `mkgame.py --check`, reproducible.
-  - The allow-list completed.
-  - The `NOTICE` section and the Credits screen.
+- **G3 — content. Built 2026-10-16, in the simulator.**
+  - [x] The format's minor version 1 (`GAME_FORMAT.md`): people in each
+    area's head (talk, trainer, healer; flags to set, hide and show), the
+    player's looks (`META` `0x11`), the starters (`0x12`); the save's version
+    2 (the flags, where a loss comes back to, the look; version 1 still
+    loads).
+  - [x] The rules (`monster_play.c`): people in the way, A to talk, a
+    trainer's sight and team (no catching, no running), healers and the
+    respawn, flags.
+  - [x] The towns, laid out from the clean sheets (`tools/game_maps/`, read by
+    `mkgame.py`'s `OwnArea`, with sand paths' edges filled in), and the
+    region: five areas, 27 creatures, 17 people, a story and dialogue of our
+    own (`tools/game_region.json`). `mkgame.py --strict` builds it; its
+    report and `--check` are clean.
+  - [x] The allow-list completed: seven more creatures from `ATTRIBUTIONS.md`
+    (Nut, Bolt, Arthrobolt, Cateye, Dune Pincher, Djinnbo, Propellercat),
+    fifteen townspeople's sheets, the player's six looks. The `NOTICE`
+    section and `courses/critters/README.md` follow the Credits screen.
+  - [x] The screens: people drawn from the tile cache (each frame two
+    entries; the cache grew to 96 tiles for Kestrel's 60), the talk and the
+    keeper's script, "Keeper Ada's Cardiling", the look choice, cards with a
+    pointer to each creature in battle (the owner found the bars confusing),
+    a resting move skipped by the cursor and each turn's menu starting at
+    Fight.
+  - [x] Gates: `make -C sim monster` (people, sight, a trainer's team, the
+    guard, the herald, the healer and a loss back to them, the save's story
+    record and a version 1 save), `monster_fuzz` (it found a refused area
+    left with a people count and no list: fixed in `mg_area_open`),
+    `tests/mkgame_test.py` (refusals for bad people, and the committed region
+    walked from the start to every area and person), and the smoke tour (the
+    `critters_*` shots, with `G area x y facing` to jump there).
 - **G4 — Auto-play.** `monster_bot.c`, the checkbox, the "bot finishes the
   region" gate.
 - **G5 — the bench.** The owner's `[d]` items: playability of the controls,
@@ -456,6 +500,18 @@ Later, separate decisions: more regions, sound, more effects.
 3. **On-screen controls,** one touch at a time.
 4. **An Auto-play checkbox,** with the bot doubling as a host gate.
 5. **Built in, in the Games menu,** with all heap freed on leaving.
+
+**Decided (2026-10-16, during G3):**
+
+- **The player's looks:** the colour variants first drawn as townspeople
+  became a choice of six looks for the player; the townspeople should be
+  individually distinct instead.
+- **The townspeople:** Tuxemon's own sheets, **including the Catch
+  Challenger ones on Tuxemon's word** that they're CC BY (the datapack's
+  repository states no licence). Asked and answered; recorded in the
+  allow-list.
+- **The battle screen:** each creature's name and HP bar in a card that
+  points at its picture (the owner found the old layout confusing).
 
 **Decided (2026-10-16, the owner's answers to the open questions):**
 

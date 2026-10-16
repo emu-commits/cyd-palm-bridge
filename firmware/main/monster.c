@@ -32,7 +32,7 @@ static const char TAGS[] = "METATYPESHAPSTATMOVEMONSLRNSENCTAREAADATSPRTTEXTCRED
 /* checked on open: everything small (section 6) */
 #define CRC_ON_OPEN(i) ((i) != MG_ADAT && (i) != MG_SPRT && (i) != MG_CRED)
 
-enum { K_TITLE = 0x01, K_SOURCE, K_BUILD, K_START = 0x10, K_RULES = 0x20, K_CAPTURE, K_GROWTH };
+enum { K_TITLE = 0x01, K_SOURCE, K_BUILD, K_START = 0x10, K_LOOKS, K_STARTERS, K_RULES = 0x20, K_CAPTURE, K_GROWTH };
 
 static uint16_t le16(const uint8_t *p){ return (uint16_t)(p[0] | p[1] << 8); }
 static uint32_t le32(const uint8_t *p){
@@ -210,6 +210,18 @@ static int parse_meta(MonGame *g, const uint8_t *m, uint32_t len){
             g->start_x = v[2]; g->start_y = v[3]; g->start_facing = v[4];
             if(v[5] | v[6] | v[7]) return bad(g, "the start has a non-zero pad");
             break;
+        case K_LOOKS:       /* minor version 1: the player's looks, the first sheets of every area */
+            if(n != 4 || !v[0] || v[0] > 8 || v[1] | v[2] | v[3]) return bad(g, "the player's looks are out of range");
+            g->looks = v[0];
+            break;
+        case K_STARTERS:    /* minor version 1: the three first creatures offered */
+            if(n != 8 || le16(v + 6)) return bad(g, "the starters are out of range");
+            for(int i = 0; i < 3; i++){
+                g->starters[i] = le16(v + 2 * i);
+                if(g->starters[i] >= g->n_mons) return bad(g, "the starters are out of range");
+            }
+            g->n_starters = 3;
+            break;
         case K_RULES:
             if(n != 32) return bad(g, "the rules are %u bytes", n);
             for(int i = 0; i < 8; i++) g->rules[i] = le32(v + 4 * i);
@@ -227,6 +239,7 @@ static int parse_meta(MonGame *g, const uint8_t *m, uint32_t len){
         }
     }
     if(!(seen & (1u << K_START))) return bad(g, "META has no start");
+    if(!(seen & (1u << K_LOOKS))) g->looks = 1;          /* a 1.0 file: one player sheet */
     if(!(seen & (1u << 24)) || !(seen & (1u << 25)) || !(seen & (1u << 26))) return bad(g, "META has no rules");
     const uint32_t *R = g->rules, *C = g->capture, *G = g->growth;
     /* bounds that keep every sum in monster_play.c inside 64 bits */
@@ -611,7 +624,7 @@ static int rect_ok(const uint8_t *p, uint16_t w, uint16_t h){
     return p[2] && p[3] && p[0] + p[2] <= w && p[1] + p[3] <= h;
 }
 
-int mg_area_open(MonGame *g, uint32_t i, MgArea *a, uint8_t *buf, uint32_t cap){
+static int area_open(MonGame *g, uint32_t i, MgArea *a, uint8_t *buf, uint32_t cap){
     int r;
     memset(a, 0, sizeof *a);
     if((r = mg_area_dir(g, i, &a->dir))) return r;
@@ -625,14 +638,14 @@ int mg_area_open(MonGame *g, uint32_t i, MgArea *a, uint8_t *buf, uint32_t cap){
     a->bpp = buf[4]; a->colours = buf[5];
     a->n_tiles = le16(buf + 6); a->ccols = le16(buf + 8); a->crows = le16(buf + 10);
     a->n_warps = le16(buf + 12); a->n_zones = le16(buf + 14); a->n_signs = le16(buf + 16);
-    a->n_overlays = le16(buf + 18); a->n_chars = le16(buf + 20);
+    a->n_overlays = le16(buf + 18); a->n_chars = le16(buf + 20); a->n_people = le16(buf + 22);
     a->tiles_off = le32(buf + 24); a->tiles_len = le32(buf + 28); a->tiles_crc = le32(buf + 32);
     a->chars_off = le32(buf + 36); a->chars_len = le32(buf + 40); a->chars_crc = le32(buf + 44);
     a->chunk0 = le32(buf + 48);
     unsigned id = (unsigned)d->id;
     if(a->w != d->w || a->h != d->h || (a->bpp != 4 && a->bpp != 8) || !a->colours || a->colours >= 1u << a->bpp ||
        a->n_tiles > 4095 || a->ccols != (a->w + MG_CHUNK - 1) / MG_CHUNK || a->crows != (a->h + MG_CHUNK - 1) / MG_CHUNK ||
-       !a->n_chars || a->n_chars > 16 || le16(buf + 22))
+       a->n_chars < g->looks || a->n_chars > 16 || a->n_people > MG_MAX_PEOPLE)
         return bad(g, "area %u: a value out of range", id);
     for(int k = 52; k < HEAD_FIXED; k++) if(buf[k]) return bad(g, "area %u: a non-zero pad", id);
     uint32_t tsz = MG_TILE * MG_TILE * a->bpp / 8, fsz = MG_CHAR_W * MG_CHAR_H * a->bpp / 8;
@@ -651,6 +664,7 @@ int mg_area_open(MonGame *g, uint32_t i, MgArea *a, uint8_t *buf, uint32_t cap){
     TAKE(a->zones, 8u * a->n_zones);
     TAKE(a->signs, 16u * a->n_signs);
     TAKE(a->overlays, 4u * a->n_overlays);
+    TAKE(a->people, 48u * a->n_people);
     TAKE(a->cdir, 8u * nchunks);
     #undef TAKE
     if(o != d->head_len) return bad(g, "area %u: its head is %u bytes, its lists %u", id, (unsigned)d->head_len, (unsigned)o);
@@ -684,9 +698,46 @@ int mg_area_open(MonGame *g, uint32_t i, MgArea *a, uint8_t *buf, uint32_t cap){
            (k && le16(p) <= le16(p - 4)))
             return bad(g, "area %u: overlay %u is out of range", id, (unsigned)k);
     }
+    for(uint32_t k = 0; k < a->n_people; k++){
+        const uint8_t *p = a->people + 48 * k;
+        MgStr s;
+        int team = 0, ok = p[0] < a->w && p[1] < a->h && p[2] <= 3 && p[3] >= g->looks && p[3] < a->n_chars &&
+                           p[4] <= MG_P_HEALER && p[5] <= 15 && le16(p + 6) < MG_FLAGS &&
+                           le16(p + 8) < MG_FLAGS && le16(p + 10) < MG_FLAGS;
+        for(int j = 0; ok && j < MG_TEAM; j++){
+            uint16_t mon = le16(p + 36 + 4 * j);
+            uint8_t lv = p[38 + 4 * j];
+            if(p[39 + 4 * j]) ok = 0;
+            else if(mon == MG_NONE16) ok = !lv;
+            else ok = j == team++ && mon < g->n_mons && lv && lv <= g->rules[5];
+        }
+        /* a trainer has creatures and a flag to remember the win by; no one else has creatures */
+        if(ok) ok = p[4] == MG_P_TRAINER ? team && le16(p + 6) : !team && !p[5];
+        for(uint32_t j = 0; ok && j < k; j++)
+            if(a->people[48 * j] == p[0] && a->people[48 * j + 1] == p[1]) ok = 0;   /* one to a cell */
+        if(!ok) return bad(g, "area %u: person %u is out of range", id, (unsigned)k);
+        for(int j = 0; j < 3; j++) if((r = str_check(g, p + 12 + 8 * j, &s))) return r;
+    }
     for(uint32_t k = 0; k < nchunks; k++)
         if(le32(a->cdir + 8 * k) != a->chunk0 + k * MG_CHUNK_BYTES) return bad(g, "area %u: chunk %u is out of place", id, (unsigned)k);
     return 0;
+}
+
+/* a refused area is left empty: no list a later call could walk into */
+int mg_area_open(MonGame *g, uint32_t i, MgArea *a, uint8_t *buf, uint32_t cap){
+    int r = area_open(g, i, a, buf, cap);
+    if(r) memset(a, 0, sizeof *a);
+    return r;
+}
+
+void mg_person(const MgArea *a, uint32_t i, MgPerson *q){
+    const uint8_t *p = a->people + 48 * i;
+    q->x = p[0]; q->y = p[1]; q->facing = p[2]; q->sheet = p[3]; q->kind = p[4]; q->sight = p[5];
+    q->flag = le16(p + 6); q->hide_if = le16(p + 8); q->show_if = le16(p + 10);
+    q->name.off = le32(p + 12);  q->name.len = le16(p + 16);
+    q->text.off = le32(p + 20);  q->text.len = le16(p + 24);
+    q->after.off = le32(p + 28); q->after.len = le16(p + 32);
+    for(int j = 0; j < MG_TEAM; j++){ q->mon[j] = le16(p + 36 + 4 * j); q->level[j] = p[38 + 4 * j]; }
 }
 
 void mg_warp(const MgArea *a, uint32_t i, MgWarp *w){

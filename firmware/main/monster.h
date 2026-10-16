@@ -11,7 +11,8 @@
  *   on open      the header, the section table, the CRCs of every section but
  *                ADAT, SPRT and CRED, and every record's positions and strings;
  *   on an area   the head's CRC, that its lists fill it exactly, every warp,
- *                zone, sign and overlay; each chunk's CRC and cells when read;
+ *                zone, sign, overlay and person; each chunk's CRC and cells
+ *                when read;
  *   a sprite     its record's CRC, when read;
  *   mg_verify()  all of that for every area and sprite, plus the CRCs of the
  *                tiles, the character sheets, ADAT, SPRT and CRED.
@@ -41,6 +42,9 @@
 #define MG_SPRITE_MAX   (40 + 2048 * 2)     /* a 64 x 64, 4-bit, two-frame record */
 #define MG_NONE8        0xFF
 #define MG_NONE16       0xFFFF
+#define MG_MAX_PEOPLE   32                  /* in one area */
+#define MG_FLAGS        256                 /* the story's flags are 1 .. MG_FLAGS - 1 */
+#define MG_TEAM         3                   /* a trainer's creatures */
 
 /* results: 0 is success; these are all < 0 */
 #define MG_EIO      (-1)    /* the card couldn't be read */
@@ -62,6 +66,8 @@ enum { MG_S_POISON = 1, MG_S_BURN, MG_S_RECOVER };
 enum { MG_HP, MG_ARMOUR, MG_DODGE, MG_MELEE_ST, MG_RANGED_ST, MG_SPEED, MG_NSTATS };
 /* facing: N E S W */
 enum { MG_N, MG_E, MG_S, MG_W };
+/* what a person does when spoken to (GAME_FORMAT.md 3.11, minor version 1) */
+enum { MG_P_TALK, MG_P_TRAINER, MG_P_HEALER };
 
 typedef struct { uint32_t off, len, crc; } MgSect;
 typedef struct { uint32_t off; uint16_t len; } MgStr;      /* a string reference into TEXT */
@@ -105,6 +111,15 @@ typedef struct {
 typedef struct { uint8_t x, y, w, h; uint16_t to; uint8_t tx, ty, facing; } MgWarp;
 typedef struct { uint8_t x, y, w, h; uint16_t table, chance; } MgZone;  /* chance: 1/100 % */
 typedef struct { uint8_t x, y, w, h, facing; MgStr text; } MgSign;
+/* A person standing in an area. Flags are numbered 1 .. MG_FLAGS - 1; 0 is none.
+ * Present while show_if is 0 or set, and hide_if is 0 or clear. */
+typedef struct {
+    uint8_t  x, y, facing, sheet, kind, sight;   /* sheet: the area's character sheet, after the looks */
+    uint16_t flag, hide_if, show_if;             /* flag: set once beaten (a trainer) or spoken to */
+    MgStr    name, text, after;                  /* after: what's said once flag is set (may be empty) */
+    uint16_t mon[MG_TEAM];                       /* a trainer's creatures; MG_NONE16 past the last */
+    uint8_t  level[MG_TEAM];
+} MgPerson;
 
 /* An area that's been entered: its head lives in the caller's buffer. */
 typedef struct {
@@ -112,9 +127,9 @@ typedef struct {
     MgAreaDir dir;
     uint16_t w, h;
     uint8_t  bpp, colours;
-    uint16_t n_tiles, ccols, crows, n_warps, n_zones, n_signs, n_overlays, n_chars;
+    uint16_t n_tiles, ccols, crows, n_warps, n_zones, n_signs, n_overlays, n_chars, n_people;
     uint32_t tiles_off, tiles_len, tiles_crc, chars_off, chars_len, chars_crc, chunk0;
-    const uint8_t *palette, *tflags, *warps, *zones, *signs, *overlays, *cdir;   /* into the head */
+    const uint8_t *palette, *tflags, *warps, *zones, *signs, *overlays, *people, *cdir;   /* into the head */
 } MgArea;
 
 typedef struct {
@@ -127,6 +142,9 @@ typedef struct {
     char     title[40];
     uint16_t start_area;
     uint8_t  start_x, start_y, start_facing;
+    uint8_t  looks;         /* the player's looks: every area's first character sheets (1 in a 1.0 file) */
+    uint8_t  n_starters;    /* 3 if the file names the first creatures to choose from, else 0 */
+    uint16_t starters[3];
     uint32_t rules[8];      /* COEFF_DAMAGE, stat coefficient, multiplier min, max (1/100),
                                experience exponent, maximum level, moves known, party size */
     uint32_t capture[7];    /* shakes, constant, denominator, divisor, HP mult, current-HP mult, HP divisor */
@@ -172,6 +190,7 @@ void mg_warp(const MgArea *a, uint32_t i, MgWarp *w);
 void mg_zone(const MgArea *a, uint32_t i, MgZone *z);
 void mg_sign(const MgArea *a, uint32_t i, MgSign *s);
 void mg_overlay(const MgArea *a, uint32_t i, uint16_t *cell, uint16_t *tile);
+void mg_person(const MgArea *a, uint32_t i, MgPerson *p);
 /* palette entry i as RGB565 (0 for index 0 and past the colours: black) */
 uint16_t mg_palette(const MgArea *a, uint32_t i);
 /* Chunk ci (row by row): 256 u16 tiles then 256 movement bytes, CRC checked,

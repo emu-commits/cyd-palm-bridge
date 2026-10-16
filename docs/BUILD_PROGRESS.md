@@ -16,6 +16,55 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-16 — Critters' G3: the first region, its people, and the web emulator's card
+
+The owner asked for G3 (`GAME_PLAN.md` §12) and a deploy to the web
+emulator. Along the way they decided three things (§13): the colour variants
+first drawn as townspeople became **six looks the player chooses from**; the
+townspeople are **Tuxemon's own sheets, the Catch Challenger ones taken on
+Tuxemon's CC BY word** (the datapack's own repository states no licence);
+and the battle screen's names and bars go in **cards that point at their
+creature**.
+
+- **The format is 1.1** (`GAME_FORMAT.md`): people in each area's head
+  (48 B each: talk, trainer or healer; a flag to set, one to hide by, one to
+  show by; name, text, after; a trainer's three creatures), `META` `0x11`
+  (the player's looks, every area's first sheets) and `0x12` (the
+  starters). A 1.0 file still reads. **The save is version 2**: the flags,
+  where a loss comes back to, the look; a version 1 save loads.
+- **The rules** (`monster_play.c`): people are in the way; A talks (they
+  turn to the player); a trainer battles when spoken to or when the player
+  steps into their sight, their creatures one after another, no catching or
+  running; a healer rests the party and becomes where a loss comes back to.
+- **The converter**: layouts of our own (`tools/game_maps/`, `OwnArea`:
+  legend, stamps with solid masks, sand paths' edges by autotile), and
+  per-area warps, zones, signs and people in `game_region.json`.
+- **The region**: Larkhollow → Route 1 → Brideswood → Cotton Tunnel →
+  Kestrel. Tuxemon's Route 1 doesn't reach the Brideswood on foot (trees wall
+  off its east half), so its open north edge leads there. 27 creatures (seven
+  added: Nut, Bolt, Arthrobolt, Cateye, Dune Pincher, Djinnbo, Propellercat),
+  17 people, a story and dialogue of our own. 501,056 B.
+- **The screens**: people from the tile cache (a frame is two entries; the
+  cache is 96 tiles, since Kestrel shows 60), the keeper's script ("Keeper
+  Ada spots you!", "...sends out Cardiling!"), the look choice, battle cards,
+  a resting move skipped by the cursor, and each turn's menu at Fight (it
+  used to keep Run, so A A A after a failed run ran again but after a
+  Catch note fought). The smoke tour's `G area x y facing` jumps there.
+- **The web emulator** fetches `critters/game.bin` (copied into the site by
+  `make -C sim wasm`) onto its card before booting, so Critters plays there.
+- **Found by the fuzz gate:** a refused area kept its people count with no
+  list behind it; `mg_area_open` now leaves a refused area empty.
+
+Measured (smoke32, 32-bit as on the device): one heap block of 61,356 B
+while playing (52.5 KB in G2: the cache's 32 more tiles are 8 KB), 64,312 B
+with the credits open, 0 B left after leaving. The LVGL pool at least
+15,248 B free on the game's screens. The image 1,798,179 B; static DRAM
+147,460 B (81.59 %, unchanged). Gates: all of `CLAUDE.md`'s, green
+(`make test`, `make ftest`, every sim gate, smoke and smoke32,
+`mkcourse_test.py`, `mkgame_test.py`, the firmware build, wasm). The walk
+check in `mkgame_test.py` reaches every area and person from the start with
+Foreman Dale gone, and Kestrel is shut while he stands.
+
 ### 2026-10-16 — The web flasher installs Critters, if asked
 
 `GAME_PLAN.md` §13 Q1: the committed `courses/critters/game.bin` is an

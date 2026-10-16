@@ -60,6 +60,8 @@ static int dump(const char *path){
         }
     }
     printf("start area %u at %u,%u facing %u\n", g.start_area, g.start_x, g.start_y, g.start_facing);
+    printf("looks %u\n", g.looks);
+    if(g.n_starters) printf("starters %u %u %u\n", g.starters[0], g.starters[1], g.starters[2]);
     printf("rules");   for(int i = 0; i < 8; i++) printf(" %u", (unsigned)g.rules[i]);   printf("\n");
     printf("capture"); for(int i = 0; i < 7; i++) printf(" %u", (unsigned)g.capture[i]); printf("\n");
     printf("growth");  for(int i = 0; i < 4; i++) printf(" %u", (unsigned)g.growth[i]);  printf("\n");
@@ -147,6 +149,20 @@ static int dump(const char *path){
             mg_sign(&a, k, &s);
             text(&g, s.text, t);
             printf("  talk %u,%u %ux%u facing %u: %s\n", s.x, s.y, s.w, s.h, s.facing, t);
+        }
+        for(uint32_t k = 0; k < a.n_people; k++){
+            MgPerson p;
+            mg_person(&a, k, &p);
+            printf("  person %u,%u facing %u sheet %u kind %u sight %u flags %u/%u/%u team", p.x, p.y, p.facing,
+                   p.sheet, p.kind, p.sight, p.flag, p.hide_if, p.show_if);
+            if(p.mon[0] == MG_NONE16) printf(" -");
+            for(int j = 0; j < MG_TEAM && p.mon[j] != MG_NONE16; j++) printf(" %u:%u", p.mon[j], p.level[j]);
+            text(&g, p.name, t);
+            printf(": %s | ", t);
+            text(&g, p.text, t);
+            printf("%s | ", t);
+            text(&g, p.after, t);
+            printf("%s\n", t);
         }
         /* the cells (u16 each) and movement bytes, row by row across the chunks */
         uint32_t cc = 0, mc = 0;
@@ -321,12 +337,12 @@ static void walking(void){
     /* the sign: facing it from below */
     char t[128];
     w->x = 5; w->y = 3; w->facing = MG_N;
-    CHECK(mp_interact(w, &log) == 1 && log.ev[0].kind == MP_EV_SIGN, "reading the sign");
+    CHECK(mp_interact(w, NULL, &log) == 1 && log.ev[0].kind == MP_EV_SIGN, "reading the sign");
     MgStr s = { log.ev[0].n, log.ev[0].b };
     mg_text(&G, s, t, sizeof t);
     CHECK(!strcmp(t, "Meadow. The burrow is east, past the trees."), "the sign says %s", t);
     w->facing = MG_S;
-    CHECK(mp_interact(w, &log) == 0, "a sign behind the player");
+    CHECK(mp_interact(w, NULL, &log) == 0, "a sign behind the player");
     /* head_cap: the screens size the head to the file's largest; a smaller
      * one is refused, never overrun */
     uint32_t most = 0;
@@ -345,6 +361,107 @@ static void walking(void){
     mg_area_dir(&G, 0, &d0);
     w->head_cap = d0.head_len - 1;
     CHECK(mp_new(w, &G, HEAD, 1, mon_named("Emberkit")) != 0, "a head one byte short is refused");
+    free(w);
+}
+
+/* ---- 3b. people (minor version 1): talking, flags, trainers, healers ---- */
+
+static int has_ev(const MpLog *log, int kind){
+    for(int i = 0; i < log->n; i++) if(log->ev[i].kind == kind) return 1;
+    return 0;
+}
+
+static void said(const MpLog *log, const char *want, const char *what){
+    char t[128] = "";
+    for(int i = 0; i < log->n; i++)
+        if(log->ev[i].kind == MP_EV_TALK){
+            MgStr s = { log->ev[i].n, log->ev[i].b };
+            mg_text(&G, s, t, sizeof t);
+        }
+    CHECK(!strcmp(t, want), "%s: said \"%s\", not \"%s\"", what, t, want);
+}
+
+static void people(void){
+    MpWorld *w = calloc(1, sizeof *w);
+    MpLog log;
+    MpBattle b;
+    MgPerson fen;
+    CHECK(mp_new(w, &G, HEAD, 3, mon_named("Emberkit")) == 0, "a new game: %s", w->err);
+    CHECK(G.looks == 2 && w->area.n_people == 2, "two looks, and two people in the meadow");
+    mg_person(&w->area, 0, &fen);
+    CHECK(fen.kind == MG_P_TRAINER && fen.sight == 2 && fen.mon[1] == mon_named("Thornet") && fen.level[1] == 4 &&
+          fen.mon[2] == MG_NONE16, "Keeper Fen's record");
+    /* the guard is in the way */
+    CHECK(press_from(w, 3, 15, MG_S).kind == MP_EV_BUMP, "the guard blocks the path");
+    w->x = 3; w->y = 15; w->facing = MG_S;
+    CHECK(mp_interact(w, &b, &log) == 1 && b.over, "talking to the guard");
+    said(&log, "Beat Fen first.", "the guard");
+    CHECK(w->pface[1] == MG_N, "the guard turns to the player");
+    /* Fen sees the player step into her line, two cells off */
+    w->x = 3; w->y = 13; w->facing = MG_S;
+    mp_step(w, MG_S, &b, &log);
+    CHECK(log.n == 5 && log.ev[0].kind == MP_EV_STEP && log.ev[1].kind == MP_EV_SPOTTED && log.ev[2].kind == MP_EV_TALK &&
+          log.ev[3].kind == MP_EV_TRAINER && log.ev[4].kind == MP_EV_SENDS && log.ev[4].a == mon_named("Puddlop"),
+          "spotted: step, spotted, talk, battle, sends out");
+    CHECK(!b.over && b.trainer == 1 && b.n_team == 2 && w->facing == MG_E, "the trainer's battle");
+    CHECK(mp_turn(w, &b, MP_ACT_CATCH, 0, &log) == MG_ERANGE, "no catching a keeper's critter");
+    CHECK(mp_turn(w, &b, MP_ACT_RUN, 0, &log) == MG_ERANGE, "no running from a keeper");
+    /* a strong Emberkit wins it: Puddlop, then Thornet, then the win and the flag */
+    uint32_t rng = 9;
+    mp_make(&G, &rng, mon_named("Blazecat"), 40, &w->party[0]);
+    b.active = 0;
+    int sends = 0, turns = 0;
+    while(!b.over && turns++ < 40){
+        int slot = 0;
+        while(slot < MP_MOVES && (w->party[0].moves[slot] == MP_NO_MOVE || b.recharge[0][slot])) slot++;
+        mp_turn(w, &b, MP_ACT_MOVE, slot < MP_MOVES ? slot : -1, &log);
+        if(has_ev(&log, MP_EV_SENDS)) sends++;
+    }
+    CHECK(b.over && sends == 1 && has_ev(&log, MP_EV_WIN) && has_ev(&log, MP_EV_BEATEN), "beating Fen (%d turns)", turns);
+    said(&log, "Fen is beaten.", "Fen after the battle");
+    CHECK(mp_flag(w, fen.flag), "Fen's flag is set");
+    /* beaten: she says her piece and doesn't battle again */
+    w->x = 4; w->y = 14; w->facing = MG_E;
+    CHECK(mp_interact(w, &b, &log) == 1 && b.over && !has_ev(&log, MP_EV_TRAINER), "Fen won't battle twice");
+    said(&log, "Fen is beaten.", "Fen, beaten");
+    w->x = 3; w->y = 13; w->facing = MG_S;
+    mp_step(w, MG_S, &b, &log);
+    CHECK(b.over && !has_ev(&log, MP_EV_SPOTTED), "a beaten trainer doesn't see the player");
+    /* the guard has gone */
+    CHECK(press_from(w, 3, 15, MG_S).kind == MP_EV_STEP && w->y == 16, "the guard steps aside once Fen is beaten");
+    /* the village: the elder's flag, the herald the flag brought, the nurse */
+    w->x = 3; w->y = 1; w->facing = MG_N;
+    mp_step(w, MG_N, &b, &log);
+    CHECK(w->area.index == 2 && w->x == 6 && w->y == 8, "into the village");
+    w->x = 5; w->y = 3; w->facing = MG_N;
+    mp_interact(w, &b, &log);
+    said(&log, "Hello, keeper.", "the elder, first");
+    mp_interact(w, &b, &log);
+    said(&log, "Again?", "the elder, again");
+    w->x = 9; w->y = 3; w->facing = MG_N;
+    CHECK(mp_interact(w, &b, &log) == 1, "the herald is there once Fen is beaten");
+    said(&log, "Fen is beaten!", "the herald");
+    w->party[0].hp = 1;
+    w->x = 2; w->y = 3; w->facing = MG_N;
+    CHECK(mp_interact(w, &b, &log) == 1 && has_ev(&log, MP_EV_HEALED) && w->party[0].hp == w->party[0].stat[MG_HP],
+          "the nurse rests the party");
+    CHECK(w->has_respawn && w->respawn_area == 2 && w->respawn_x == 2 && w->respawn_y == 3, "and a loss comes back here");
+    /* lose a battle: back to the nurse, rested */
+    w->x = 6; w->y = 8; w->facing = MG_S;
+    mp_place(w, 0, 10, 12, MG_S);
+    MpCreature big;
+    mp_make(&G, &rng, mon_named("Blazecat"), 60, &big);
+    mp_make(&G, &rng, mon_named("Puddlop"), 2, &w->party[0]);
+    w->n_party = 1;
+    mp_battle_start(w, &b, &big);
+    turns = 0;
+    while(!b.over && turns++ < 40) mp_turn(w, &b, MP_ACT_MOVE, 0, &log);
+    CHECK(has_ev(&log, MP_EV_LOSE) && w->area.index == 2 && w->x == 2 && w->y == 3 && w->facing == MG_N &&
+          w->party[0].hp == w->party[0].stat[MG_HP], "losing goes back to the nurse");
+    /* a fresh game: Fen battles when spoken to, as well */
+    CHECK(mp_new(w, &G, HEAD, 3, mon_named("Emberkit")) == 0, "a new game");
+    w->x = 4; w->y = 14; w->facing = MG_E;
+    CHECK(mp_interact(w, &b, &log) == 1 && !b.over && b.trainer == 1 && has_ev(&log, MP_EV_TRAINER), "Fen, spoken to");
     free(w);
 }
 
@@ -598,17 +715,23 @@ static void saves(MpWorld *w){
     uint32_t rng = 5;
     mp_make(&G, &rng, mon_named("Thornet"), 4, &w->box[w->n_box++]);
     w->party[0].status = 1;
+    mp_set_flag(w, 2);
+    mp_set_flag(w, 255);
+    w->look = 1;
+    w->has_respawn = 1; w->respawn_area = 2; w->respawn_x = 4; w->respawn_y = 5; w->respawn_facing = MG_W;
     CHECK(mp_save(w, SAVE) == 0, "saving: %s", w->err);
     CHECK(mp_load(v, &G, head2, SAVE) == 0, "loading: %s", v->err);
     CHECK(v->n_party == w->n_party && v->n_box == w->n_box && v->x == w->x && v->y == w->y &&
           v->facing == w->facing && v->rng == w->rng && v->area.index == w->area.index, "the world after a round trip");
+    CHECK(!memcmp(v->flags, w->flags, sizeof w->flags) && v->look == 1 && v->has_respawn && v->respawn_area == 2 &&
+          v->respawn_x == 4 && v->respawn_y == 5 && v->respawn_facing == MG_W, "the story after a round trip");
     for(int i = 0; i < w->n_party; i++)
         CHECK(!memcmp(&v->party[i], &w->party[i], sizeof w->party[i]), "party member %d after a round trip", i);
     for(int i = 0; i < w->n_box; i++)
         CHECK(!memcmp(&v->box[i], &w->box[i], sizeof w->box[i]), "box %d after a round trip", i);
     long n;
     uint8_t *good = slurp(SAVE, &n);
-    CHECK(n == MP_SAVE_HEADER + MP_SAVE_REC * (w->n_party + w->n_box), "the save is %ld bytes", n);
+    CHECK(n == MP_SAVE_HEADER + MP_SAVE_REC * (1 + w->n_party + w->n_box), "the save is %ld bytes", n);
     /* every truncation, and every flipped bit, refused */
     int took = 0;
     for(long k = 0; k < n; k++){
@@ -628,7 +751,7 @@ static void saves(MpWorld *w){
     printf("  save: %ld bytes; %ld truncations and %ld flipped bits refused\n", n, n, n * 8);
     /* a creature this file doesn't have (the CRCs fixed, so the id is what's checked) */
     memcpy(bad, good, (size_t)n);
-    bad[MP_SAVE_HEADER] = 77;
+    bad[MP_SAVE_HEADER + MP_SAVE_REC] = 77;
     uint32_t crc = mg_crc32(0, bad + MP_SAVE_HEADER, (uint32_t)(n - MP_SAVE_HEADER));
     for(int i = 0; i < 4; i++) bad[24 + i] = (uint8_t)(crc >> (8 * i));
     crc = mg_crc32(0, bad, 28);
@@ -637,11 +760,32 @@ static void saves(MpWorld *w){
     CHECK(mp_load(v, &G, head2, SAVE) == MG_EBAD && strstr(v->err, "creature"), "an unknown creature: %s", v->err);
     /* a newer version */
     memcpy(bad, good, (size_t)n);
-    bad[4] = 2;
+    bad[4] = MP_SAVE_VERSION + 1;
     crc = mg_crc32(0, bad, 28);
     for(int i = 0; i < 4; i++) bad[28 + i] = (uint8_t)(crc >> (8 * i));
     spit(SAVE, bad, n);
     CHECK(mp_load(v, &G, head2, SAVE) == MG_EVERSION, "a newer save");
+    /* a look this file doesn't have */
+    memcpy(bad, good, (size_t)n);
+    bad[MP_SAVE_HEADER + 39] = G.looks;
+    crc = mg_crc32(0, bad + MP_SAVE_HEADER, (uint32_t)(n - MP_SAVE_HEADER));
+    for(int i = 0; i < 4; i++) bad[24 + i] = (uint8_t)(crc >> (8 * i));
+    crc = mg_crc32(0, bad, 28);
+    for(int i = 0; i < 4; i++) bad[28 + i] = (uint8_t)(crc >> (8 * i));
+    spit(SAVE, bad, n);
+    CHECK(mp_load(v, &G, head2, SAVE) == MG_EBAD, "a look past the file's");
+    /* a version 1 save (before the story's record) still loads, with no flags */
+    long n1 = n - MP_SAVE_REC;
+    memcpy(bad, good, MP_SAVE_HEADER);
+    memcpy(bad + MP_SAVE_HEADER, good + MP_SAVE_HEADER + MP_SAVE_REC, (size_t)(n1 - MP_SAVE_HEADER));
+    bad[4] = 1; bad[5] = 0;
+    crc = mg_crc32(0, bad + MP_SAVE_HEADER, (uint32_t)(n1 - MP_SAVE_HEADER));
+    for(int i = 0; i < 4; i++) bad[24 + i] = (uint8_t)(crc >> (8 * i));
+    crc = mg_crc32(0, bad, 28);
+    for(int i = 0; i < 4; i++) bad[28 + i] = (uint8_t)(crc >> (8 * i));
+    spit(SAVE, bad, n1);
+    CHECK(mp_load(v, &G, head2, SAVE) == 0 && !mp_flag(v, 2) && !v->has_respawn && !v->look &&
+          v->n_party == w->n_party, "a version 1 save: %s", v->err);
     /* a crash after the .tmp was written whole, before the swap: it's promoted */
     remove(SAVE);
     char tmp[300];
@@ -665,6 +809,7 @@ int main(int argc, char **argv){
     printf("monster: %u creatures, %u moves, %u areas\n", (unsigned)G.n_mons, (unsigned)G.n_moves, (unsigned)G.n_areas);
     formulas();
     walking();
+    people();
     encounters();
     outcomes();
     MpWorld *w = battles();

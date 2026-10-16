@@ -7,3 +7,5 @@ creature	puddlop	CC0	cyd-palm-bridge	tests/data/game/source.py	confirmed
 creature	rustmole	CC0	cyd-palm-bridge	tests/data/game/source.py	confirmed
 creature	thornet	CC0	cyd-palm-bridge	tests/data/game/source.py	confirmed
 character	fixture_walker	CC0	cyd-palm-bridge	tests/data/game/source.py	confirmed
+character	fixture_rover	CC0	cyd-palm-bridge	tests/data/game/source.py	confirmed
+character	fixture_keeper	CC0	cyd-palm-bridge	tests/data/game/source.py	confirmed

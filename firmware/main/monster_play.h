@@ -11,7 +11,7 @@
  * a list of events (MpEvent) that the screens turn into words and pictures.
  *
  * MEMORY: an MpWorld is about 6 KB (the party, the box of MP_BOX creatures,
- * four chunks and the area's head buffer pointer); the caller allocates it
+ * four chunks, the flags and the area's head buffer pointer); the caller allocates it
  * with the screen and frees it on leaving. The area's head needs up to
  * MG_HEAD_MAX bytes, also the caller's, or head_cap if it sets that.
  */
@@ -77,7 +77,14 @@ enum {
     MP_EV_LEARN_FULL,   /* party member a could learn move b but knows four: mp_learn() */
     MP_EV_EVOLVE,       /* party member a becomes creature b */
     MP_EV_WIN,
-    MP_EV_LOSE,         /* every creature fainted: healed, back at the start */
+    MP_EV_LOSE,         /* every creature fainted: healed, back where they last rested */
+    /* people (minor version 1) */
+    MP_EV_TALK,         /* person a says text n (offset), b its length */
+    MP_EV_SPOTTED,      /* trainer a sees the player */
+    MP_EV_TRAINER,      /* a battle with trainer a starts */
+    MP_EV_SENDS,        /* the trainer sends out creature a at level b */
+    MP_EV_BEATEN,       /* trainer a is beaten (their flag is set) */
+    MP_EV_HEALED,       /* the party is rested, and this is where a loss comes back to */
 };
 
 typedef struct {
@@ -96,7 +103,10 @@ typedef struct {
     uint8_t    fought;          /* party members that took part (bits) */
     uint8_t    need_swap, over, run_tries;
     uint8_t    recharge[2][MP_MOVES];
-    MpCreature wild;
+    MpCreature wild;            /* the other side's creature: wild, or the trainer's out now */
+    uint8_t    trainer;         /* 0 wild; else the person's position in the area + 1 */
+    uint8_t    n_team, next;    /* a trainer's creatures, and the next to come out */
+    MpCreature team[MG_TEAM];   /* a trainer's, as made when the battle started */
 } MpBattle;
 
 typedef struct {
@@ -116,6 +126,12 @@ typedef struct {
     int32_t    chunk_ix[MP_CHUNKS];          /* -1 empty */
     uint8_t    chunk[MP_CHUNKS][MG_CHUNK_BYTES];
     uint8_t    chunk_next;
+    /* the story: flags 1 .. MG_FLAGS - 1, and where a loss comes back to */
+    uint8_t    flags[MG_FLAGS / 8];
+    uint8_t    has_respawn, respawn_x, respawn_y, respawn_facing;
+    uint8_t    look;                         /* which of the player's looks (below g->looks) */
+    uint16_t   respawn_area;
+    uint8_t    pface[MG_MAX_PEOPLE];         /* the area's people's facing now (they turn to talk) */
     char       err[80];
 } MpWorld;
 
@@ -143,11 +159,20 @@ uint32_t mp_shake_check(MonGame *g, const MpCreature *c, const MgMon *m, uint32_
 int  mp_new(MpWorld *w, MonGame *g, uint8_t *head, uint32_t seed, uint16_t starter);
 /* the movement byte at (x, y) of the current area (0x0F outside it) */
 int  mp_cell(MpWorld *w, int x, int y, uint16_t *tile, uint8_t *move);
-/* One press of a direction: turn, step, hop, warp, maybe meet a wild creature
- * (then *b is filled and the battle starts). */
+/* One press of a direction: turn, step, hop, warp; then maybe a trainer sees
+ * the player, or a wild creature appears (then *b is filled and the battle
+ * starts). People are in the way like walls. */
 int  mp_step(MpWorld *w, int dir, MpBattle *b, MpLog *log);
-/* The A button: the sign the player faces, if any. */
-int  mp_interact(MpWorld *w, MpLog *log);
+/* The A button: the person or sign the player faces. 1 if there was one; a
+ * trainer not yet beaten starts a battle (b filled, b->over 0). */
+int  mp_interact(MpWorld *w, MpBattle *b, MpLog *log);
+/* Put the player at (x, y) of area i (the simulator's tour; a warp otherwise). */
+int  mp_place(MpWorld *w, uint16_t area, uint8_t x, uint8_t y, uint8_t facing);
+/* flags */
+int  mp_flag(const MpWorld *w, uint16_t f);
+void mp_set_flag(MpWorld *w, uint16_t f);
+/* is person p of the current area standing there now? */
+int  mp_present(const MpWorld *w, const MgPerson *p);
 /* heal the party: full HP, no status */
 void mp_heal_party(MpWorld *w);
 
@@ -163,6 +188,7 @@ int  mp_wild_choice(MpWorld *w, MpBattle *b);
 /* ---- the save ---- */
 #define MP_SAVE_HEADER 32
 #define MP_SAVE_REC    40
+#define MP_SAVE_VERSION 2       /* 2 added the story's flags and the respawn; 1 still loads */
 int  mp_save(MpWorld *w, const char *path);
 /* Load into a world made with mp_new's arguments' game; refuses a damaged
  * file, and one naming creatures, moves or areas this game file doesn't have. */

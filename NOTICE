@@ -44,9 +44,14 @@ pinned commit. Tuxemon's data (creatures, moves, maps) is **GPLv3**; the
 creature sprites and tilesets in the file are **CC BY-SA 4.0**, each credited
 by name in [`courses/critters/README.md`](courses/critters/README.md) and on
 the game's Credits screen. Only what `tools/game_allow.tsv` lists goes in:
-nothing under the XYG licence and nothing non-commercial. The player's sprite
-sheet (`tools/game_art/player.png`) and the Critters icon were drawn for this
-project and are public domain (CC0 1.0). Nothing from Pokémon is used.
+nothing under the XYG licence and nothing non-commercial. The townspeople are
+Tuxemon's character sheets, each credited: CC BY-SA 4.0, CC0 (pboop; the
+Superpowers Asset Packs by Pixel-boy, Sparklin Labs), or CC BY as Tuxemon
+credits the Catch Challenger datapack (Jordan and Herman Brule), whose own
+repository states no licence. The player's six looks
+(`tools/game_art/player*.png`) and the Critters icon were drawn for this
+project and are public domain (CC0 1.0). The towns' layouts and all the
+dialogue are this project's (GPLv3). Nothing from Pokémon is used.
 
 ## The host bridge (`bridge/`) — MIT
 

@@ -29,4 +29,9 @@ void mon_ui_party(void);
 void mon_ui_new_game(void);      /* asks first */
 void mon_ui_credits(void);
 
+#ifdef UI_DEVTOOLS
+/* The smoke tour: put the player at (x, y) of area i, facing N E S W = 0..3. */
+void mon_ui_test_place(int area, int x, int y, int facing);
+#endif
+
 #endif

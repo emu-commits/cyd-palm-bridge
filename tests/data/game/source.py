@@ -11,7 +11,10 @@ drawn here. tools/mkgame.py builds it with --unpinned into game.bin beside
 this file; tests/mkgame_test.py checks that the build is reproducible, and
 make -C sim monster reads the result with the C reader.
 
-It covers what the converter and the reader handle: water (surfable 0),
+It covers what the converter and the reader handle (with region.json and
+village.json beside this file, which add a layout of our own, two looks for
+the player, and people: a trainer with sight, a healer, a guard a flag sends
+away, someone a flag brings): water (surfable 0),
 walls (walkable 0), a ledge (hop, enter_from), a one-way cell, collision
 rectangles and lines, overlays (the tree tops), warps both ways, encounter
 zones with and without a chance, signs with a facing, events that are
@@ -200,7 +203,7 @@ def sprite_sheet(slug, colours):
     return im
 
 
-def character_sheet():
+def character_sheet(shirt=(200, 40, 40)):
     """48 x 128: twelve 16 x 32 frames, three per direction."""
     from PIL import Image, ImageDraw
     im = Image.new("RGBA", (48, 128), (0, 0, 0, 0))
@@ -208,7 +211,7 @@ def character_sheet():
     for f in range(12):
         x, y = f % 3 * 16, f // 3 * 32
         d.ellipse((x + 4, y + 8, x + 11, y + 15), fill=(240, 200, 160, 255))      # head
-        d.rectangle((x + 4, y + 16, x + 11, y + 25), fill=(200, 40, 40, 255))      # shirt
+        d.rectangle((x + 4, y + 16, x + 11, y + 25), fill=shirt + (255,))          # shirt
         step = (f % 3) - 1
         d.rectangle((x + 4 + step, y + 26, x + 6 + step, y + 31), fill=(40, 40, 120, 255))
         d.rectangle((x + 9 - step, y + 26, x + 11 - step, y + 31), fill=(40, 40, 120, 255))
@@ -389,6 +392,8 @@ def main(out):
     p = tux / "sprites" / "fixture_walker.png"
     p.parent.mkdir(parents=True, exist_ok=True)
     character_sheet().save(p)
+    character_sheet((40, 90, 200)).save(tux / "sprites" / "fixture_rover.png")     # the player's second look
+    character_sheet((40, 150, 60)).save(tux / "sprites" / "fixture_keeper.png")    # the people
     write(tux / "maps" / "fixture_meadow.tmx", meadow())
     write(tux / "maps" / "fixture_burrow.tmx", burrow())
     po = '# the fixture\'s names\nmsgid ""\nmsgstr ""\n"Content-Type: text/plain; charset=UTF-8\\n"\n\n'

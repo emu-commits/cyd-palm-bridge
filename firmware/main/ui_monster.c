@@ -9,14 +9,16 @@
  * to LVGL as ONE RGB565 image. So a frame costs one draw task per band, not
  * one per tile, and the heap holds 64 tiles at a byte a pixel (16 KB) instead
  * of a 42-84 KB canvas. A battle draws the two creatures the same way, from
- * the tile cache's memory (the map isn't drawn then).
+ * the tile cache's memory (the map isn't drawn then). The people standing in
+ * an area are drawn from the same cache: each frame is two cache entries, its
+ * top and bottom halves, read from the card when first drawn.
  *
  * THE CONTROLS (240 x 120) are one object that draws its own D-pad and A and
  * B buttons. A press acts at once; holding a direction keeps walking. The
  * panel registers one touch at a time, so there are no combinations.
  *
  * MEMORY: one block, allocated when the game opens and freed when it closes
- * (about 52 KB, plus the largest area head in the file). If it can't be had,
+ * (about 60 KB, plus the largest area head in the file). If it can't be had,
  * for example during a sync, the game says so and doesn't open.
  *
  * Saving: when leaving (the lock included) and from the menu. A battle in
@@ -47,7 +49,7 @@
 #define VH         176
 #define PAD_H      120
 #define BAND_ROWS  40               /* the display's draw buffer: lvgl_port.c BUF_ROWS */
-#define NCACHE     64               /* tiles kept; the most on one screen was 34 (G0) */
+#define NCACHE     96               /* tiles kept: Kestrel shows 60, and the people take two each */
 #define TICK_MS    30
 #define STEP_TICKS 4                /* a step: four frames of 4 px */
 #define TURN_HOLD  5                /* ticks a turn waits before a held press walks */
@@ -80,9 +82,10 @@ typedef struct {
     int16_t  from_x, from_y;        /* the step's start, in cells */
     uint8_t  battle_after;          /* a wild creature met on this step */
 
-    /* the starter choice */
+    /* the look, then the starter */
     uint16_t pick[3];
     uint8_t  npick, pick_note;      /* a note is showing before the choice */
+    uint8_t  picking_look, look;    /* choosing how the player looks first (a file with more than one) */
 
     /* what a battle shows while the script plays (the rules have moved on) */
     uint16_t sh_hp[MP_PARTY], sh_mon[MP_PARTY], sh_wild_hp;
@@ -91,6 +94,10 @@ typedef struct {
     uint8_t  learn_pending, last_move, to_moves;    /* to_moves: a note, then the moves again */
     uint8_t  learn_who;
     uint16_t learn_move;
+    uint8_t  to_menu;               /* a note, then the battle menu again */
+    uint16_t sh_wild_mon, sh_wild_max;
+    uint8_t  sh_wild_lv;
+    char     keeper[NAME_LEN];      /* the trainer in this battle */
 
     /* the area's pictures */
     uint16_t lut[256];
@@ -157,7 +164,10 @@ static void cache_clear(Mon *m){
     m->spr_mon[0] = m->spr_mon[1] = MG_NONE16;
 }
 
-/* tile t's pixels, or NULL for none (tile 0, or one that can't be read) */
+#define HALF_KEY 0x8000          /* a cache key past every tile: half of a character frame */
+
+/* tile t's pixels, or NULL for none (tile 0, or one that can't be read). A key
+ * HALF_KEY + 2 k + h is the top (h 0) or bottom half of character frame k. */
 static const uint8_t *tile(Mon *m, uint16_t t){
     if(!t) return NULL;
     int old = 0;
@@ -166,25 +176,33 @@ static const uint8_t *tile(Mon *m, uint16_t t){
         if(m->tile_id[i] == t){ m->tile_age[i] = m->clock; return m->tiles[i]; }
         if(m->tile_age[i] < m->tile_age[old]) old = i;
     }
-    uint8_t raw[MG_TILE * MG_TILE];
     m->tile_id[old] = 0xFFFF;
-    if(mg_tile(&m->g, &m->w.area, t, raw, sizeof raw)) return NULL;
-    unpack(raw, m->tiles[old], MG_TILE * MG_TILE, m->w.area.bpp);
+    if(t >= HALF_KEY){
+        uint8_t raw[MG_CHAR_W * MG_CHAR_H];
+        uint32_t k = (uint32_t)(t - HALF_KEY) / 2, h = (uint32_t)(t - HALF_KEY) % 2, bytes = MG_TILE * MG_TILE * m->w.area.bpp / 8;
+        if(mg_frame(&m->g, &m->w.area, k, raw, sizeof raw)) return NULL;
+        unpack(raw + h * bytes, m->tiles[old], MG_TILE * MG_TILE, m->w.area.bpp);
+    }
+    else{
+        uint8_t raw[MG_TILE * MG_TILE];
+        if(mg_tile(&m->g, &m->w.area, t, raw, sizeof raw)) return NULL;
+        unpack(raw, m->tiles[old], MG_TILE * MG_TILE, m->w.area.bpp);
+    }
     m->tile_id[old] = t;
     m->tile_age[old] = m->clock;
     return m->tiles[old];
 }
 
-/* the area just entered: its palette, the player's frames, a fresh cache */
+/* the area just entered: its palette, the player's frames (their look's), a fresh cache */
 static void area_pictures(Mon *m){
     for(int i = 0; i < 256; i++) m->lut[i] = mg_palette(&m->w.area, (uint32_t)i);
     cache_clear(m);
     m->have_frames = 0;
-    if(m->w.area.n_chars){
+    if(m->w.area.n_chars > m->w.look){
         uint8_t raw[MG_CHAR_W * MG_CHAR_H];
         int ok = 1;
         for(int k = 0; ok && k < MG_CHAR_FRAMES; k++){
-            ok = !mg_frame(&m->g, &m->w.area, (uint32_t)k, raw, sizeof raw);
+            ok = !mg_frame(&m->g, &m->w.area, (uint32_t)(m->w.look * MG_CHAR_FRAMES + k), raw, sizeof raw);
             if(ok) unpack(raw, m->frames[k], MG_CHAR_W * MG_CHAR_H, m->w.area.bpp);
         }
         m->have_frames = (uint8_t)ok;
@@ -262,6 +280,17 @@ static void camera(Mon *m, int px, int py, int *cx, int *cy){
     *cx = x; *cy = y;
 }
 
+/* the rows of a character sheet by facing (N E S W): back, right, front, left */
+static const uint8_t ROW[4] = { 3, 2, 0, 1 };
+
+/* a standing person, frame f of the area's character frames, its feet in cell (x, y) */
+static void figure(Mon *m, const Rect *c, int bw, int f, int sx, int sy){
+    for(int h = 0; h < 2; h++){
+        const uint8_t *p = tile(m, (uint16_t)(HALF_KEY + 2 * f + h));
+        if(p) blit8(m->band, bw, c, sx, sy + h * MG_TILE, MG_TILE, MG_TILE, p, m->lut, 1);
+    }
+}
+
 static void compose_map(Mon *m, const Rect *c, int bw){
     int px, py, lift, cx, cy;
     player_px(m, &px, &py, &lift);
@@ -277,14 +306,26 @@ static void compose_map(Mon *m, const Rect *c, int bw){
             if(p) blit8(m->band, bw, c, sx, sy, MG_TILE, MG_TILE, p, m->lut, 0);
             else fill(m->band, bw, c, sx, sy, MG_TILE, MG_TILE, 0);
         }
-    /* the player: rows front, left, right, back; columns step, stand, step */
-    static const uint8_t ROW[4] = { 3, 2, 0, 1 };
-    int sx = px - cx, sy = py - cy - (MG_CHAR_H - MG_TILE) + lift;
-    if(m->have_frames){
-        int f = ROW[m->w.facing & 3] * 3 + (m->anim ? m->walk_col : 1);
-        blit8(m->band, bw, c, sx, sy, MG_CHAR_W, MG_CHAR_H, m->frames[f], m->lut, 1);
+    /* the people and the player, the nearer (lower) drawn last; columns step, stand, step */
+    int sx = px - cx, sy = py - cy - (MG_CHAR_H - MG_TILE) + lift, drawn = 0;
+    for(int pass = 0; pass < 2; pass++){
+        for(uint32_t k = 0; k < m->w.area.n_people; k++){
+            MgPerson q;
+            mg_person(&m->w.area, k, &q);
+            int qy = q.y * MG_TILE;
+            if((pass == 0) != (qy <= py) || !mp_present(&m->w, &q)) continue;
+            if(q.x < x0 - 1 || q.x > x1 + 1 || q.y < y0 || q.y > y1 + 2) continue;
+            figure(m, c, bw, q.sheet * MG_CHAR_FRAMES + ROW[m->w.pface[k] & 3] * 3 + 1,
+                   q.x * MG_TILE - cx, qy - cy - (MG_CHAR_H - MG_TILE));
+        }
+        if(drawn) continue;
+        drawn = 1;
+        if(m->have_frames){
+            int f = ROW[m->w.facing & 3] * 3 + (m->anim ? m->walk_col : 1);
+            blit8(m->band, bw, c, sx, sy, MG_CHAR_W, MG_CHAR_H, m->frames[f], m->lut, 1);
+        }
+        else fill(m->band, bw, c, sx + 3, sy + 18, 10, 12, 0xF800);
     }
-    else fill(m->band, bw, c, sx + 3, sy + 18, 10, 12, 0xF800);
     /* what's drawn over the player: tree tops, roof edges */
     for(uint32_t i = 0; i < m->w.area.n_overlays; i++){
         uint16_t cell, t;
@@ -310,20 +351,63 @@ static void hp_bar(Mon *m, const Rect *c, int bw, int x, int y, int w, uint32_t 
     fill(m->band, bw, c, x, y, f, 5, rgb(col));
 }
 
+/* A creature's card: its name, level and HP bar in a framed box, with a
+ * pointer from the box's side (dir +1 right, -1 left) to its picture, so
+ * which bar belongs to which creature is plain at a glance. */
+static void card(Mon *m, const Rect *c, int bw, int x, int y, int w, int h, int dir){
+    uint16_t edge = rgb(0x303030), face = rgb(0xFFFFFF);
+    fill(m->band, bw, c, x, y, w, h, edge);
+    fill(m->band, bw, c, x + 2, y + 2, w - 4, h - 4, face);
+    int tip = 9, cy = y + h / 2, bx = dir > 0 ? x + w - 2 : x + 1;
+    for(int i = 0; i <= tip; i++){                  /* the pointer: rows narrowing to a tip */
+        int half = tip - i, px = bx + dir * i;
+        fill(m->band, bw, c, px, cy - half - 1, 1, 2 * half + 3, edge);
+        if(half) fill(m->band, bw, c, px, cy - half + 1, 1, 2 * half - 1, face);
+    }
+}
+
+#define FOE_SPR_X  166
+#define FOE_SPR_Y  0
+#define ME_SPR_X   14
+#define ME_SPR_Y   40
+#define FOE_CARD_X 6
+#define FOE_CARD_Y 8
+#define ME_CARD_X  92
+#define ME_CARD_Y  57
+#define CARD_W     140
+
 static void compose_battle(Mon *m, const Rect *c, int bw){
     fill(m->band, bw, c, 0, 0, VW, VH, rgb(0xF4F1E4));
-    /* laid out above a four-line menu (the box's top is at y 104) */
-    fill(m->band, bw, c, 146, 54, 88, 8, rgb(0xC9D8A8));           /* the ground they stand on */
-    fill(m->band, bw, c, 10, 92, 88, 8, rgb(0xC9D8A8));
-    if(!m->sh_wild_gone && m->spr_mon[1] != MG_NONE16) blit_sprite(m->band, bw, c, 158, 0, SPR(m, 1), 0, 1);
-    if(!m->sh_me_gone && m->spr_mon[0] != MG_NONE16) blit_sprite(m->band, bw, c, 22, 34, SPR(m, 0), 1, 1);
+    /* laid out above a four-line menu (the box's top is at y 104): the other
+     * side's creature top right with its card to its left, the player's
+     * bottom left with its card to its right */
+    fill(m->band, bw, c, FOE_SPR_X - 8, 54, 80, 8, rgb(0xC9D8A8));     /* the ground they stand on */
+    fill(m->band, bw, c, ME_SPR_X - 6, 94, 80, 8, rgb(0xC9D8A8));
+    card(m, c, bw, FOE_CARD_X, FOE_CARD_Y, CARD_W, 36, +1);
+    card(m, c, bw, ME_CARD_X, ME_CARD_Y, CARD_W, 46, -1);
+    if(!m->sh_wild_gone && m->spr_mon[1] != MG_NONE16) blit_sprite(m->band, bw, c, FOE_SPR_X, FOE_SPR_Y, SPR(m, 1), 0, 1);
+    if(!m->sh_me_gone && m->spr_mon[0] != MG_NONE16) blit_sprite(m->band, bw, c, ME_SPR_X, ME_SPR_Y, SPR(m, 0), 1, 1);
     MpCreature *me = &m->w.party[m->sh_active];
-    hp_bar(m, c, bw, 10, 24, 100, m->sh_wild_hp, m->b.wild.stat[MG_HP]);
-    hp_bar(m, c, bw, 112, 70, 110, m->sh_hp[m->sh_active], me->stat[MG_HP]);
+    hp_bar(m, c, bw, FOE_CARD_X + 7, FOE_CARD_Y + 22, CARD_W - 14, m->sh_wild_hp, m->sh_wild_max);
+    hp_bar(m, c, bw, ME_CARD_X + 7, ME_CARD_Y + 22, CARD_W - 14, m->sh_hp[m->sh_active], me->stat[MG_HP]);
 }
 
 static void compose_pick(Mon *m, const Rect *c, int bw){
     fill(m->band, bw, c, 0, 0, VW, VH, rgb(0xF4F1E4));
+    if(m->picking_look){
+        /* the look, standing, at 3x: its two halves from the start area's sheets */
+        const int k = 3, x0 = (VW - MG_CHAR_W * k) / 2, y0 = 4;
+        for(int h = 0; h < 2; h++){
+            const uint8_t *p = tile(m, (uint16_t)(HALF_KEY + 2 * (m->look * MG_CHAR_FRAMES + 1) + h));
+            if(!p) continue;
+            for(int j = imax(c->y1, y0 + h * MG_TILE * k); j <= imin(c->y2, y0 + (h + 1) * MG_TILE * k - 1); j++)
+                for(int i = imax(c->x1, x0); i <= imin(c->x2, x0 + MG_TILE * k - 1); i++){
+                    uint8_t v = p[((j - y0) / k - h * MG_TILE) * MG_TILE + (i - x0) / k];
+                    if(v) m->band[(j - c->y1) * bw + (i - c->x1)] = m->lut[v];
+                }
+        }
+        return;
+    }
     if(m->spr_mon[1] != MG_NONE16) blit_sprite(m->band, bw, c, (VW - 128) / 2, 0, SPR(m, 1), 0, 2);
 }
 
@@ -419,7 +503,7 @@ static void battle_labels(Mon *m){
         return;
     }
     MpCreature *me = &m->w.party[m->sh_active];
-    snprintf(t, sizeof t, "%s  Lv %u", mon_name(m, m->b.wild.mon, a), m->b.wild.level);
+    snprintf(t, sizeof t, "%s  Lv %u", mon_name(m, m->sh_wild_mon, a), m->sh_wild_lv);
     lv_label_set_text(m->foe, t);
     snprintf(t, sizeof t, "%s  Lv %u", mon_name(m, m->sh_mon[m->sh_active], a), me->level);
     lv_label_set_text(m->me, t);
@@ -435,15 +519,38 @@ static void shown_now(Mon *m){
     for(int i = 0; i < m->w.n_party; i++){ m->sh_hp[i] = m->w.party[i].hp; m->sh_mon[i] = m->w.party[i].mon; }
     m->sh_active = m->b.active;
     m->sh_wild_hp = m->b.wild.hp;
+    m->sh_wild_mon = m->b.wild.mon;
+    m->sh_wild_lv = m->b.wild.level;
+    m->sh_wild_max = m->b.wild.stat[MG_HP];
     m->sh_me_gone = !m->w.party[m->b.active].hp;
     m->sh_wild_gone = !m->b.wild.hp;
 }
 
 static void battle_show(Mon *m){
     sprite_load(m, 0, m->sh_mon[m->sh_active]);
-    sprite_load(m, 1, m->b.wild.mon);
+    sprite_load(m, 1, m->sh_wild_mon);
     battle_labels(m);
     redraw();
+}
+
+/* the keeper in this battle: their name, from the area's people */
+static void keeper_name(Mon *m){
+    MgPerson q;
+    m->keeper[0] = 0;
+    if(!m->b.trainer || m->b.trainer > m->w.area.n_people) return;
+    mg_person(&m->w.area, m->b.trainer - 1u, &q);
+    if(mtext(&m->g, q.name, m->keeper, sizeof m->keeper)) m->keeper[0] = 0;
+}
+
+/* person k's name */
+static const char *person_name(Mon *m, uint32_t k, char *buf){
+    MgPerson q;
+    buf[0] = 0;
+    if(k < m->w.area.n_people){
+        mg_person(&m->w.area, k, &q);
+        if(mtext(&m->g, q.name, buf, NAME_LEN)) buf[0] = 0;
+    }
+    return buf;
 }
 
 static void battle_menu(Mon *m){
@@ -481,7 +588,11 @@ static void moves_menu(Mon *m){
         ptr[n] = lines[n]; n++;
     }
     snprintf(lines[n], 48, "Back"); ptr[n] = lines[n]; n++;
+    /* the last move used, unless it's resting: then the first that can be used */
     m->sel = m->last_move < MP_MOVES ? m->last_move : 0;
+    if(c->moves[m->sel] == MP_NO_MOVE || m->b.recharge[0][m->sel])
+        for(int k = 0; k < MP_MOVES; k++)
+            if(c->moves[k] != MP_NO_MOVE && !m->b.recharge[0][k]){ m->sel = (uint8_t)k; break; }
     menu_show(m, MN_MOVES, ptr, n, 1);
 }
 
@@ -506,8 +617,10 @@ static void forget_menu(Mon *m){
 static int ev_text(Mon *m, const MpEvent *e, char *t, size_t cap){
     char a[NAME_LEN], b[NAME_LEN];
     int s = e->side;
-    const char *who = s ? "The wild " : "";
-    const char *nm = s ? mon_name(m, m->b.wild.mon, a) : mon_name(m, m->sh_mon[m->sh_active], a);
+    char kp[NAME_LEN + 4];
+    snprintf(kp, sizeof kp, "%s's ", m->keeper);
+    const char *who = s ? (m->b.trainer && m->keeper[0] ? kp : "The wild ") : "";
+    const char *nm = s ? mon_name(m, m->sh_wild_mon, a) : mon_name(m, m->sh_mon[m->sh_active], a);
     uint16_t *hp = s ? &m->sh_wild_hp : &m->sh_hp[m->sh_active];
     switch(e->kind){
     case MP_EV_ENCOUNTER:
@@ -517,6 +630,32 @@ static int ev_text(Mon *m, const MpEvent *e, char *t, size_t cap){
         if(mtext(&m->g, st, t, (uint32_t)cap)) snprintf(t, cap, "The sign can't be read.");
         return 1;
     }
+    case MP_EV_TALK: {
+        MgStr st = { e->n, e->b };
+        int k = snprintf(t, cap, "%s%s", person_name(m, e->a, a), a[0] ? ": " : "");
+        if(k < 0 || (size_t)k >= cap) k = 0;
+        if(!e->b || mtext(&m->g, st, t + k, (uint32_t)(cap - (size_t)k))) return 0;
+        redraw();                                   /* they turned to face the player */
+        return 1;
+    }
+    case MP_EV_SPOTTED:
+        redraw();
+        snprintf(t, cap, "%s spots you!", person_name(m, e->a, a)); return 1;
+    case MP_EV_TRAINER:
+        person_name(m, e->a, m->keeper);
+        return 0;
+    case MP_EV_SENDS:
+        m->sh_wild_mon = e->a;
+        m->sh_wild_lv = (uint8_t)e->b;
+        m->sh_wild_hp = m->sh_wild_max = m->b.wild.mon == e->a ? m->b.wild.stat[MG_HP] : 1;
+        if(m->b.wild.mon == e->a) m->sh_wild_hp = m->b.wild.hp;
+        m->sh_wild_gone = 0;
+        battle_show(m);
+        snprintf(t, cap, "%s sends out %s!", m->keeper[0] ? m->keeper : "The keeper", mon_name(m, e->a, a)); return 1;
+    case MP_EV_BEATEN:
+        snprintf(t, cap, "You beat %s!", person_name(m, e->a, a)); return 1;
+    case MP_EV_HEALED:
+        snprintf(t, cap, "Your critters are rested."); return 1;
     case MP_EV_USE:
         snprintf(t, cap, "%s%s uses %s.", who, nm, move_name(m, e->a, b)); return 1;
     case MP_EV_MISS:
@@ -571,7 +710,7 @@ static int ev_text(Mon *m, const MpEvent *e, char *t, size_t cap){
     case MP_EV_CAUGHT:
         m->sh_wild_gone = 1;
         redraw();
-        snprintf(t, cap, "Caught %s! It %s.", mon_name(m, m->b.wild.mon, a),
+        snprintf(t, cap, "Caught %s! It %s.", mon_name(m, m->sh_wild_mon, a),
                  e->b ? "goes into storage" : "joins your party");
         return 1;
     case MP_EV_RUN_FAIL:
@@ -598,8 +737,10 @@ static int ev_text(Mon *m, const MpEvent *e, char *t, size_t cap){
         if(e->a == m->sh_active) battle_show(m);
         snprintf(t, cap, "%s becomes %s!", a, mon_name(m, e->b, b)); return 1;
     case MP_EV_LOSE:
-        snprintf(t, cap, "Your critters are all worn out. You hurry back to where you started, "
+        snprintf(t, cap, "Your critters are all worn out. You hurry back to where you last rested, "
                  "and they're rested."); return 1;
+    case MP_EV_WIN:
+        return 0;
     default:
         return 0;
     }
@@ -619,16 +760,23 @@ static void script_done(Mon *m){
         shown_now(m);
         battle_show(m);
         if(m->b.need_swap) party_menu(m, MN_SWAP, 0);
-        else battle_menu(m);
+        else { m->sel = 0; battle_menu(m); }      /* each turn's menu starts at Fight */
         return;
     }
     box_hide(m);
 }
 
 static void script_next(Mon *m){
-    char t[160];
+    char t[320];
     while(m->pos < m->log.n){
-        const MpEvent *e = &m->log.ev[m->pos++];
+        const MpEvent *e = &m->log.ev[m->pos];
+        if(m->scene == SC_MAP && (e->kind == MP_EV_TRAINER || e->kind == MP_EV_ENCOUNTER)){
+            ev_text(m, e, t, sizeof t);
+            m->pos++;
+            card_show(m, "", CARD_BATTLE, 8);     /* the battle goes on from the next event */
+            return;
+        }
+        m->pos++;
         if(ev_text(m, e, t, sizeof t)){ box_say(m, t); return; }
     }
     script_done(m);
@@ -675,27 +823,34 @@ static void scene_map(Mon *m){
 
 static void scene_battle(Mon *m){
     m->scene = SC_BATTLE;
+    m->sel = 0;                     /* a new battle's menu starts at Fight */
     m->last_move = 0;
     m->to_moves = 0;
     lv_obj_add_flag(m->card, LV_OBJ_FLAG_HIDDEN);
     cache_clear(m);
     shown_now(m);
-    m->sh_wild_hp = m->b.wild.hp;
+    keeper_name(m);
     battle_show(m);
 }
 
 static void card_end(Mon *m){
     if(m->card_next == CARD_BATTLE){
         scene_battle(m);
-        script_start(m);            /* the step's log: "A wild X appears!" */
+        if(m->log.n && m->pos && m->log.ev[m->pos - 1].kind == MP_EV_ENCOUNTER) m->pos--;
+        script_next(m);             /* the step's log from where it got to: "A wild X appears!" */
     }
     else scene_map(m);
 }
 
-/* the starters: the first three creatures that begin an evolution line, each
- * of a different first type; then any creature at its first stage */
+/* the starters: the three the file names (META 0x12); or, in a file without
+ * them, the first three creatures that begin an evolution line, each of a
+ * different first type, then any creature at its first stage */
 static void pick_candidates(Mon *m){
     m->npick = 0;
+    if(m->g.n_starters){                    /* the file names them */
+        for(int i = 0; i < m->g.n_starters; i++) m->pick[m->npick++] = m->g.starters[i];
+        return;
+    }
     for(int pass = 0; pass < 3 && m->npick < 3; pass++)
         for(uint32_t i = 0; i < m->g.n_mons && m->npick < 3; i++){
             MgMon r;
@@ -710,6 +865,13 @@ static void pick_candidates(Mon *m){
             }
             if(!dup) m->pick[m->npick++] = (uint16_t)i;
         }
+}
+
+static void look_show(Mon *m){
+    char t[96];
+    snprintf(t, sizeof t, "Choose how you look.\n<  %u of %u  >", m->look + 1u, m->g.looks);
+    box_say(m, t);
+    redraw();
 }
 
 static void pick_show(Mon *m){
@@ -735,6 +897,15 @@ static void scene_pick(Mon *m){
     lv_obj_add_flag(m->card, LV_OBJ_FLAG_HIDDEN);
     battle_labels(m);
     cache_clear(m);
+    m->picking_look = 0;
+    if(m->g.looks > 1 && !mg_area_open(&m->g, m->g.start_area, &m->w.area, m->head, m->head_cap)){
+        /* the looks are every area's first sheets: the start area's will do */
+        for(int i = 0; i < 256; i++) m->lut[i] = mg_palette(&m->w.area, (uint32_t)i);
+        m->picking_look = 1;
+        if(m->look >= m->g.looks) m->look = 0;
+        look_show(m);
+        return;
+    }
     pick_show(m);
 }
 
@@ -749,12 +920,13 @@ static uint32_t new_seed(void){
 static void pick_choose(Mon *m){
     m->w.head_cap = m->head_cap;
     if(mp_new(&m->w, &m->g, m->head, new_seed(), m->pick[m->sel])){ fail(m, "The game couldn't start.", m->w.err); return; }
+    m->w.look = m->look < m->g.looks ? m->look : 0;
     m->started = 1;
     char a[NAME_LEN], t[200], area[NAME_LEN];
     if(mtext(&m->g, m->w.area.dir.name, area, sizeof area)) area[0] = 0;
     scene_map(m);
-    snprintf(t, sizeof t, "%s is yours. Wild critters live in the tall grass%s%s.",
-             mon_name(m, m->w.party[0].mon, a), area[0] ? " of " : "", area);
+    snprintf(t, sizeof t, "%s is yours. Wild critters live in the tall grass, and A talks to the people of %s.",
+             mon_name(m, m->w.party[0].mon, a), area[0] ? area : "these parts");
     box_say(m, t);
 }
 
@@ -794,6 +966,14 @@ static int pause_read(Mon *m){
     MpBattle *b = &p.b;
     if(b->active >= m->w.n_party || b->wild.mon >= m->g.n_mons || !b->wild.hp ||
        b->wild.status > m->g.n_statuses || !b->wild.level) return 0;
+    if(b->trainer){
+        MgPerson q;
+        if(b->trainer > m->w.area.n_people || b->n_team > MG_TEAM || !b->n_team || b->next > b->n_team) return 0;
+        mg_person(&m->w.area, b->trainer - 1u, &q);
+        if(q.kind != MG_P_TRAINER || mp_flag(&m->w, q.flag)) return 0;
+        for(int i = b->next; i < b->n_team; i++)
+            if(b->team[i].mon >= m->g.n_mons || !b->team[i].level || b->team[i].status > m->g.n_statuses) return 0;
+    }
     for(int s = 0; s < MP_MOVES; s++)
         if(b->wild.moves[s] != MP_NO_MOVE && b->wild.moves[s] >= m->g.n_moves) return 0;
     MpCreature c = b->wild;
@@ -824,6 +1004,10 @@ static void choose(Mon *m){
             if(any) moves_menu(m); else do_turn(m, MP_ACT_MOVE, -1);
         }
         else if(s == 1) party_menu(m, MN_SWAP, 1);
+        else if(m->b.trainer){
+            m->to_menu = 1;
+            box_say(m, s == 2 ? "You can't catch another keeper's critter." : "There's no running from a keeper's battle.");
+        }
         else if(s == 2) do_turn(m, MP_ACT_CATCH, 0);
         else do_turn(m, MP_ACT_RUN, 0);
         break;
@@ -878,8 +1062,10 @@ static void press_a(Mon *m){
         if(m->scene == SC_ERROR) return;
         if(m->learn_pending){ forget_menu(m); return; }
         if(m->to_moves){ m->to_moves = 0; moves_menu(m); return; }
+        if(m->to_menu){ m->to_menu = 0; m->sel = 0; battle_menu(m); return; }
         if(m->scene == SC_PICK){
-            if(m->pick_note){ m->pick_note = 0; pick_show(m); }
+            if(m->pick_note){ m->pick_note = 0; if(m->picking_look) look_show(m); else pick_show(m); }
+            else if(m->picking_look){ m->picking_look = 0; cache_clear(m); pick_show(m); }
             else pick_choose(m);
             return;
         }
@@ -892,7 +1078,9 @@ static void press_a(Mon *m){
         return;
     }
     if(m->scene == SC_MAP && !m->anim){
-        if(mp_interact(&m->w, &m->log) > 0) script_start(m);
+        int r = mp_interact(&m->w, &m->b, &m->log);
+        if(r < 0){ fail(m, "Something went wrong.", m->w.err); return; }
+        if(r > 0) script_start(m);
     }
 }
 
@@ -929,6 +1117,12 @@ static void press_dir(Mon *m, int d){
         }
         return;
     }
+    if(m->scene == SC_PICK && m->ui == UI_TEXT && m->picking_look && !m->pick_note){
+        int n = m->g.looks;
+        m->look = (uint8_t)((m->look + (d == BT_E || d == BT_S ? 1 : n - 1)) % n);
+        look_show(m);
+        return;
+    }
     if(m->scene == SC_PICK && m->ui == UI_TEXT && m->npick > 1 && !m->pick_note){
         if(d == BT_E || d == BT_S) m->sel = (uint8_t)((m->sel + 1) % m->npick);
         else m->sel = (uint8_t)((m->sel + m->npick - 1) % m->npick);
@@ -942,6 +1136,7 @@ static void press_dir(Mon *m, int d){
 static void walk(Mon *m, int d){
     int fx = m->w.x, fy = m->w.y, area = m->w.area.index;
     int r = mp_step(&m->w, d, &m->b, &m->log);
+    m->pos = 0;
     if(r){ fail(m, "The map couldn't be read.", m->w.err); return; }
     int warp = 0, hop = 0, step = 0;
     for(int i = 0; i < m->log.n; i++){
@@ -983,7 +1178,7 @@ static void tick_cb(lv_timer_t *t){
         redraw();
         if(!m->anim && m->battle_after){
             m->battle_after = 0;
-            card_show(m, "", CARD_BATTLE, 8);
+            script_start(m);          /* a keeper's words first; then the card, at the battle */
         }
         return;
     }
@@ -1155,11 +1350,11 @@ static void build(Mon *m, lv_obj_t *parent){
     lv_obj_add_flag(m->card, LV_OBJ_FLAG_HIDDEN);
 
     m->foe = label(m->view, &lv_font_palm_bold, lv_color_hex(0x000000));
-    lv_obj_set_pos(m->foe, 10, 6);
+    lv_obj_set_pos(m->foe, FOE_CARD_X + 6, FOE_CARD_Y + 4);
     m->me = label(m->view, &lv_font_palm_bold, lv_color_hex(0x000000));
-    lv_obj_set_pos(m->me, 112, 52);
+    lv_obj_set_pos(m->me, ME_CARD_X + 6, ME_CARD_Y + 4);
     m->mehp = label(m->view, &lv_font_palm, lv_color_hex(0x000000));
-    lv_obj_set_pos(m->mehp, 112, 78);
+    lv_obj_set_pos(m->mehp, ME_CARD_X + 6, ME_CARD_Y + 29);
 
     m->box = lv_obj_create(m->view);
     lv_obj_remove_style_all(m->box);
@@ -1307,6 +1502,18 @@ void mon_ui_new_game(void){
     m->sel = 1;
     menu_show(m, MN_NEW, L, 2, 1);
 }
+
+#ifdef UI_DEVTOOLS
+void mon_ui_test_place(int area, int x, int y, int facing){
+    Mon *m = g_mon;
+    if(!m || !m->started || m->scene != SC_MAP || m->anim || area < 0 || x < 0 || y < 0 || facing < 0) return;
+    if(mp_place(&m->w, (uint16_t)area, (uint8_t)x, (uint8_t)y, (uint8_t)(facing & 3))){
+        fail(m, "That place couldn't be reached.", m->w.err);
+        return;
+    }
+    scene_map(m);
+}
+#endif
 
 void mon_ui_credits(void){
     Mon *m = g_mon;

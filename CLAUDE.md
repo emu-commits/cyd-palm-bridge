@@ -22,16 +22,18 @@ before touching anything.
 - `docs/SRS_PLAN.md`: the built-in spaced-repetition app. **This is the
   current project; see "Current work" below.**
 - `docs/GAME_PLAN.md`: a monster-catching game from Tuxemon's content.
-  **G0, G1 and G2 done 2026-10-16**: the format and converter, the rules
-  (`monster.c`, `monster_play.c`), and the screens (`ui_monster.c`,
-  "Critters" in the Games folder), built into the current test image as
-  the owner asked. Clean licences only (no XYG sheets; the player is our own
-  drawing, `tools/gen_player_sheet.py`); the built file is committed as
+  **G0 to G3 done 2026-10-16**: the format (now 1.1: people, looks,
+  starters) and converter, the rules (`monster.c`, `monster_play.c`), the
+  screens (`ui_monster.c`, "Critters" in the Games folder), and the first
+  region: two towns of our own layout (`tools/game_maps/`), three Tuxemon
+  maps, keepers and townspeople (`tools/game_region.json`). No XYG sheets;
+  the player's six looks are our drawing (`tools/gen_player_sheet.py`); the
+  townspeople are Tuxemon's sheets, the Catch Challenger ones used on
+  Tuxemon's CC BY word (the owner's choice). The built file is committed as
   `courses/critters/game.bin` (`mkgame.py --strict`), the smoke tour plays
-  it, and the web flasher can install it (`monster_install.c`). The lock
-  pauses the game (`pause.dat`); on USB power the screen stays on. Next: the
-  owner's bench items, then G3 (towns from clean sheets, people, trainers).
-  The Tuxemon checkout never enters the repo.
+  it (`G area x y facing` jumps), the web flasher can install it, and the
+  web emulator puts it on its card. Next: the owner's bench items, then G4
+  (Auto-play). The Tuxemon checkout never enters the repo.
 - `docs/APP_PLATFORM_PLAN.md`: native C apps loaded from the SD card.
   **On hold since 2026-09-29**; don't build any of it without the user's yes.
 

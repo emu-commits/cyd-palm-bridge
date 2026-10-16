@@ -1834,15 +1834,18 @@ m 120 90
 t 30
 u
 t 400
-# Critters (GAME_PLAN.md G2), the monster game, from courses/critters/game.bin
+# Critters (GAME_PLAN.md G2 and G3), the monster game, from courses/critters/game.bin
 # (the Makefile puts it on the card). Full screen: the view above, the D-pad
 # (up 64,224 down 64,296 left 28,260 right 100,260) and A (204,246) and B
-# (150,280) below. UI_DEVTOOLS seeds a new game with 1, so the same creature
-# appears on the same step every run. The choice of three, the map, turning
-# then walking, a wild Vamporm in the grass, a turn of the battle; then the
-# LOCK in mid-battle (the game pauses into pause.dat) and the unlock, which
-# must come back to the same battle with the same HP; then Run, the menu's
-# Credits (scrolled both ways), Party and Save game, and leaving: every byte
+# (150,280) below. UI_DEVTOOLS seeds a new game with 1, so the same creatures
+# appear on the same steps every run, and `G area x y facing` puts the player
+# somewhere without the walk. The tour: the choice of look and of the first
+# critter; Larkhollow, turning to Mum and resting there (which is also where a
+# loss comes back to); walking; Route 1's grass and a wild Vamporm, a turn,
+# the LOCK in mid-battle (pause.dat) and the unlock to the same battle, then
+# Run; Keeper Ada spotting the player, her two critters, no catching hers; the
+# loss, back at Mum's; Foreman Dale barring the tunnel; Kestrel's nurse; then
+# the menu's Credits (scrolled), Party and Save game, and leaving: every byte
 # of the game's block must come back (B at the Games folder, E after).
 c 18 225
 t 300
@@ -1851,6 +1854,12 @@ t 300
 B
 c 120 115
 t 600
+s critters_look
+c 100 260
+t 200
+s critters_look_next
+c 204 246
+t 300
 s critters_pick
 c 100 260
 t 200
@@ -1862,15 +1871,26 @@ t 300
 s critters_map
 c 204 246
 t 300
-c 100 260
+c 28 260
 t 200
 s critters_turned
+c 204 246
+t 300
+s critters_talk
+c 204 246
+t 300
+s critters_rested
+c 204 246
+t 300
 d 100 260
 t 700
 u
 t 300
 s critters_walked
-d 64 296
+G 1 10 4 1
+t 200
+s critters_route1
+d 100 260
 t 1500
 u
 t 600
@@ -1916,26 +1936,184 @@ t 300
 s critters_run1
 c 204 246
 t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+s critters_run_menu
+c 64 296
+t 150
+c 64 296
+t 150
+c 64 296
+t 150
+c 204 246
+t 300
 s critters_run2
 c 204 246
-t 300
-s critters_run3
-c 204 246
 t 600
-s critters_run4
-c 204 246
-t 300
-c 204 246
-t 300
-c 204 246
-t 300
-c 204 246
-t 300
-c 204 246
-t 300
-c 204 246
-t 300
 s critters_escaped
+G 1 24 15 0
+t 200
+c 64 224
+t 600
+s critters_spotted
+c 204 246
+t 300
+s critters_keeper
+c 204 246
+t 300
+t 900
+s critters_sends
+c 204 246
+t 300
+s critters_keeper_menu
+c 64 296
+t 150
+c 64 296
+t 150
+c 204 246
+t 300
+s critters_no_catch
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+s critters_after_keeper
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+s critters_after_keeper2
+c 204 246
+t 300
+s critters_lost1
+c 204 246
+t 300
+s critters_lost2
+c 204 246
+t 300
+t 1000
+s critters_home_again
+c 204 246
+t 300
+s critters_home_again2
+G 3 35 5 0
+t 300
+s critters_tunnel
+c 64 224
+t 400
+s critters_tunnel_step
+c 204 246
+t 300
+s critters_dale
+c 204 246
+t 300
+G 4 6 17 0
+t 300
+s critters_kestrel
+c 204 246
+t 300
+s critters_nurse
+c 204 246
+t 300
+s critters_nurse2
+c 204 246
+t 300
 c 226 12
 t 300
 c 60 210

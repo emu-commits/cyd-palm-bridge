@@ -22,7 +22,7 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 
 ---
 
-## Paused — a monster-catching game (G1 done 2026-10-16, awaiting the owner)
+## A monster-catching game: Critters (G3 done 2026-10-16 in the simulator; the bench is next)
 
 `GAME_PLAN.md` is the plan: a C engine in the Games menu, with content from
 Tuxemon (GPLv3 data, mostly CC-BY-SA art) converted into one file on the card,
@@ -53,7 +53,19 @@ open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
   20 creatures), built `--strict` with a player sheet of our own, its credits
   in `courses/critters/README.md` and `NOTICE`, round-tripped in `make -C sim
   monster` and checked in `tests/mkgame_test.py`.
-- [ ] Towns laid out from clean sheets (G3).
+- [s] G3, the first region (`GAME_PLAN.md` §12): Larkhollow and Kestrel laid
+  out from the clean sheets, Route 1, the Brideswood and the Cotton Tunnel;
+  people, keepers, healers, the foreman who stands aside, Warden Ivy; the
+  player's six looks; the battle cards. The `critters_*` smoke shots looked
+  at (2026-10-16).
+- [d] Critters on the bench after G3: choosing a look and a first critter;
+  talking (A facing someone); a keeper spotting you on Route 1 and their
+  second creature coming out; the battle cards read clearly; losing brings
+  you back to the last healer; walking Larkhollow to Kestrel (Foreman Dale
+  in the tunnel moves once Keeper Tom in the Brideswood is beaten); the
+  frame rate in Kestrel, the busiest screen (60 tiles and six people).
+- [ ] G4, Auto-play: `monster_bot.c`, the checkbox, and the gate that the bot
+  finishes the region (beats Warden Ivy) from a fixed seed.
 - [x] The web flasher's optional install: a `game` partition, a second
   manifest, a checkbox on the install page, the copy to the card at boot.
 - [d] Install from the web page with "Also install Critters" ticked: the

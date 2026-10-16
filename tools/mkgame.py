@@ -38,7 +38,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mkcourse import fold, latin_fallback  # noqa: E402  (one set of text rules)
 
-FORMAT_MAJOR, FORMAT_MINOR = 1, 0
+FORMAT_MAJOR, FORMAT_MINOR = 1, 1      # 1.1 added people to the areas
 MAGIC = b"CYDG"
 
 TUXEMON_URL = "https://github.com/Tuxemon/Tuxemon.git"
@@ -57,6 +57,10 @@ CHAR_W, CHAR_H, CHAR_FRAMES = 16, 32, 12
 BELOW_LAYERS = 3              # Tuxemon draws characters after tile layer index 2
 VIEW_W, VIEW_H = 15, 11       # the game view in cells (240 x 176)
 MAX_AREA_CELLS = 255          # width and height each
+MAX_PEOPLE = 32               # in one area (monster.h MG_MAX_PEOPLE)
+MAX_FLAGS = 256               # flags are numbered 1 .. 255
+TEAM = 3                      # a trainer's creatures
+PERSON_KINDS = {"talk": 0, "trainer": 1, "healer": 2}
 
 SECTIONS = [b"META", b"TYPE", b"SHAP", b"STAT", b"MOVE", b"MONS", b"LRNS",
             b"ENCT", b"AREA", b"ADAT", b"SPRT", b"TEXT", b"CRED"]
@@ -65,7 +69,7 @@ CRC_ON_OPEN = {b"META", b"TYPE", b"SHAP", b"STAT", b"MOVE", b"MONS", b"LRNS",
 
 # META keys (GAME_FORMAT.md 3.2)
 K_TITLE, K_SOURCE, K_BUILD = 0x01, 0x02, 0x03
-K_START = 0x10
+K_START, K_LOOKS, K_STARTERS = 0x10, 0x11, 0x12
 K_RULES, K_CAPTURE, K_GROWTH = 0x20, 0x21, 0x22
 
 RANGES = ["melee", "touch", "ranged", "reach", "reliable", "special"]
@@ -600,6 +604,165 @@ class Area:
         return (int(m.group(1)) if m else 0, k)
 
 
+class PngSheet:
+    """A tileset read straight from its picture, for a layout of our own: no
+    tile properties (the layout says what's solid)."""
+
+    def __init__(self, root, name, cache):
+        from PIL import Image
+        p = root / "mods" / "tuxemon" / "gfx" / "tilesets" / f"{name}.png"
+        if not p.exists():
+            fail(f"tileset {name}: no {p.name} in the tree")
+        if str(p) not in cache:
+            cache[str(p)] = Image.open(p).convert("RGBA")
+        self.name = name
+        self.image = cache[str(p)]
+        self.columns = self.image.width // TILE
+        self.count = self.columns * (self.image.height // TILE)
+        self.props = {}
+
+    def tile(self, k):
+        if not 0 <= k < self.count:
+            fail(f"tileset {self.name}: no tile {k}")
+        x, y = k % self.columns * TILE, k // self.columns * TILE
+        return self.image.crop((x, y, x + TILE, y + TILE))
+
+
+class OwnArea(Area):
+    """An area laid out for this game (GAME_PLAN.md section 13 Q6: towns from
+    the clean sheets), from a JSON layout beside the region file:
+
+      size     [w, h]
+      sheets   {"o": "core_outdoor", ...}: short names for tilesets
+      legend   {char: {"tiles": ["o:12", ...] bottom first, "solid": bool,
+                       "enter": "down,left" (sides it can be entered from),
+                       "hop": bool (a ledge), "above": ["o:40"] (drawn over the player)}}
+      rows     h strings of w legend characters
+      autotile {"path": "=", "ground": ".", "N": "o:191", "SE": "o:266", "dNW": "o:192", ...}:
+               a ground cell beside path cells takes the edge tile for the sides
+               they're on (N S E W, two of them, or d + a diagonal alone)
+      stamps   [{"sheet": "c", "from": [col, row, w, h], "at": [x, y],
+                 "repeat": [nx, ny], "solid": true or ["#.#", ...] (a mask, # solid),
+                 "above": n (its top n rows are drawn over the player)}]
+
+    Only tilesets on the allow-list may be named; the layout's own cells are
+    ours (GPLv3 with the rest of the repo)."""
+
+    def __init__(self, root, slug, path, allowed, cache, report):
+        self.slug = slug
+        try:
+            L = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            fail(f"{slug}: the layout {path}: {e}")
+        self.w, self.h = L["size"]
+        if not (1 <= self.w <= MAX_AREA_CELLS and 1 <= self.h <= MAX_AREA_CELLS):
+            fail(f"{slug}: {self.w}x{self.h} cells; the limit is {MAX_AREA_CELLS} a side")
+        sheets = {}
+        for k, name in sorted(L["sheets"].items()):
+            if name not in allowed:
+                fail(f"{slug}: tileset {name} isn't on the allow-list")
+            sheets[k] = PngSheet(root, name, cache)
+
+        def tref(t):
+            k, _, n = t.partition(":")
+            if k not in sheets or not n.isdigit():
+                fail(f"{slug}: a tile {t!r}: want sheet:number")
+            sh = sheets[k]
+            sh.tile(int(n))
+            return (sh, int(n))
+        rows = L["rows"]
+        if len(rows) != self.h or any(len(r) != self.w for r in rows):
+            fail(f"{slug}: the rows aren't {self.w} x {self.h}")
+        n = self.w * self.h
+        layers = [[None] * n for _ in range(4)]       # ground, detail, stamps below; over the player
+        self.mv, self.hop = [0] * n, set()
+        legend = L["legend"]
+        for y, row in enumerate(rows):
+            for x, ch in enumerate(row):
+                if ch not in legend:
+                    fail(f"{slug}: {ch!r} at {x},{y} isn't in the legend")
+                e = legend[ch]
+                i = y * self.w + x
+                ts = [tref(t) for t in e["tiles"]]
+                if not 1 <= len(ts) <= 2:
+                    fail(f"{slug}: legend {ch!r}: one or two tiles")
+                for k, t in enumerate(ts):
+                    layers[k][i] = t
+                if e.get("above"):
+                    layers[3][i] = tref(e["above"][0])
+                self.mv[i] = self._move(e, f"legend {ch!r}")
+                if e.get("hop"):
+                    self.hop.add(i)
+        at = L.get("autotile")
+        if at:
+            # a ground cell beside a path cell takes the edge that faces it
+            path = at["path"]
+
+            def isp(x, y):
+                return 0 <= x < self.w and 0 <= y < self.h and rows[y][x] == path
+            for y, row in enumerate(rows):
+                for x, ch in enumerate(row):
+                    if ch != at["ground"]:
+                        continue
+                    n, e, so, w = isp(x, y - 1), isp(x + 1, y), isp(x, y + 1), isp(x - 1, y)
+                    key = "".join(k for k, v in (("N", n), ("S", so)) if v) + \
+                        "".join(k for k, v in (("E", e), ("W", w)) if v)
+                    if not key:
+                        key = "".join("d" + k for k, v in (("SE", isp(x + 1, y + 1)), ("SW", isp(x - 1, y + 1)),
+                                                          ("NE", isp(x + 1, y - 1)), ("NW", isp(x - 1, y - 1))) if v)
+                    if (not key.startswith("d") and ("N" in key and "S" in key or "E" in key and "W" in key)) or \
+                            key.count("d") > 1:
+                        key = "center"             # a sliver of ground between paths: path too
+                    if key and key in at:
+                        layers[0][y * self.w + x] = tref(at[key])
+                    elif key:
+                        fail(f"{slug}: the ground at {x},{y} borders the path as {key}, which the autotile lacks")
+        for si, st in enumerate(L.get("stamps", [])):
+            sh = sheets.get(st["sheet"]) or fail(f"{slug}: stamp {si}: no sheet {st['sheet']!r}")
+            c0, r0, sw, shh = st["from"]
+            nx, ny = st.get("repeat", [1, 1])
+            above = int(st.get("above", 0))
+            solid = st.get("solid", False)
+            mask = solid if isinstance(solid, list) else None
+            if mask is not None and (len(mask) != shh or any(len(m) != sw for m in mask)):
+                fail(f"{slug}: stamp {si}: its mask isn't {sw} x {shh}")
+            for ry in range(ny):
+                for rx in range(nx):
+                    for dy in range(shh):
+                        for dx in range(sw):
+                            x, y = st["at"][0] + rx * sw + dx, st["at"][1] + ry * shh + dy
+                            if not (0 <= x < self.w and 0 <= y < self.h):
+                                fail(f"{slug}: stamp {si} runs off the area at {x},{y}")
+                            i = y * self.w + x
+                            t = (sh, (r0 + dy) * sh.columns + c0 + dx)
+                            sh.tile(t[1])
+                            if sh.tile(t[1]).getchannel("A").getextrema()[1] == 0:
+                                continue                        # an empty cell of the sheet
+                            layers[3 if dy < above else 2][i] = t
+                            if (mask[dy][dx] == "#") if mask is not None else solid:
+                                self.mv[i] = 0x0F
+        self.layers = [(f"layer{k}", c) for k, c in enumerate(layers)]
+        self.lost = {}
+        self.props = {}
+        self.objects = []
+
+    def _move(self, e, what):
+        if e.get("solid"):
+            return 0x0F
+        if e.get("enter"):
+            enter = dir_list(e["enter"])
+            if not enter:
+                fail(f"{self.slug}: {what}: enter {e['enter']!r}")
+            return sum(1 << d for d in range(4) if d not in enter)
+        return 0
+
+    def movement(self):
+        return list(self.mv), set(self.hop)
+
+    def events(self, region_maps, rules, report):
+        return [], [], []
+
+
 # ---------------------------------------------------------------- colours
 
 def rgba_pixels(im):
@@ -693,6 +856,88 @@ class Text:
 
 def meta_entry(key, value):
     return struct.pack("<HH", key, len(value)) + value
+
+
+def region_events(a, ar, mv, area_ix, rules, ids, flag_names):
+    """The warps, zones, signs and people game_region.json gives an area
+    (GAME_FORMAT.md 3.11): what Tuxemon's own events don't, or can't say."""
+    where = f"game_region.json: {ar.slug}"
+
+    def rect(r, what):
+        if len(r) == 2:
+            r = [r[0], r[1], 1, 1]
+        x, y, w, h = r
+        if not (0 <= x and 0 <= y and w >= 1 and h >= 1 and x + w <= ar.w and y + h <= ar.h):
+            fail(f"{where}: {what} {r} isn't inside the area")
+        return (x, y, x + w, y + h)
+
+    def facing(v, what):
+        if v is None or v == "any":
+            return 0xFF
+        if v not in DIRS:
+            fail(f"{where}: {what}: facing {v!r}")
+        return DIRS[v]
+
+    def flag(name, what):
+        if not name:
+            return 0
+        if not re.fullmatch(r"[a-z0-9_]+", name):
+            fail(f"{where}: {what}: flag {name!r} (lower case, digits and _)")
+        n = assign_id(ids, "flag", name)
+        if n >= MAX_FLAGS:
+            fail(f"{where}: flag {name} is number {n}; the limit is {MAX_FLAGS - 1}")
+        flag_names.add(name)
+        return n
+
+    warps, zones, talks, persons = [], [], [], []
+    for w in a.get("warps", []):
+        if w["to"] not in area_ix:
+            fail(f"{where}: a warp to {w['to']}, not in the region")
+        warps.append((rect(w["at"], "a warp"), w["to"], int(w["x"]), int(w["y"]), facing(w.get("facing"), "a warp")))
+    for z in a.get("zones", []):
+        if z["table"] not in rules.encounters:
+            fail(f"{where}: a zone uses table {z['table']}, which game_region.json's encounters don't have")
+        chance = float(z.get("chance", 1.0))
+        if not 0 < chance <= 100:
+            fail(f"{where}: a zone's chance {chance} %")
+        zones.append((rect(z["at"], "a zone"), z["table"], round(chance * 100)))
+    for sg in a.get("signs", []):
+        talks.append((rect(sg["at"], "a sign"), facing(sg.get("facing"), "a sign"), text_ok(sg["text"], f"{where} sign")))
+    cells = set()
+    for k, pe in enumerate(a.get("people", [])):
+        what = f"person {k} ({pe.get('name', '?')})"
+        x, y = pe["at"]
+        if not (0 <= x < ar.w and 0 <= y < ar.h):
+            fail(f"{where}: {what} stands outside the area")
+        if (x, y) in cells:
+            fail(f"{where}: {what} shares a cell")
+        cells.add((x, y))
+        kind = pe.get("kind", "talk")
+        if kind not in PERSON_KINDS:
+            fail(f"{where}: {what}: kind {kind!r}")
+        team = []
+        for c, lv in pe.get("team", []):
+            if c not in rules.mons:
+                fail(f"{where}: {what}: {c} isn't in the allow-list")
+            if not 1 <= lv <= 100:
+                fail(f"{where}: {what}: level {lv}")
+            team.append((c, int(lv)))
+        sight = int(pe.get("sight", 0))
+        f = flag(pe.get("flag"), what)
+        if kind == "trainer":
+            if not 1 <= len(team) <= TEAM or not f:
+                fail(f"{where}: {what}: a trainer needs 1 to {TEAM} creatures and a flag")
+            if not 0 <= sight <= 15:
+                fail(f"{where}: {what}: sight {sight}")
+        elif team or sight:
+            fail(f"{where}: {what}: only a trainer has creatures or sight")
+        persons.append({"x": x, "y": y, "facing": facing(pe.get("facing", "down"), what) & 3, "sheet": pe["sheet"],
+                        "kind": PERSON_KINDS[kind], "sight": sight, "flag": f,
+                        "hide_if": flag(pe.get("hide_if"), what), "show_if": flag(pe.get("show_if"), what),
+                        "name": text_ok(pe.get("name", ""), f"{where} {what} name"),
+                        "text": text_ok(pe["text"], f"{where} {what} text"),
+                        "after": text_ok(pe.get("after", ""), f"{where} {what} after"), "team": team})
+    return warps, zones, talks, persons
 
 
 def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=True,
@@ -839,14 +1084,27 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
     allowed = set(allow["tileset"])
     cache = {}
     AREA, ADAT = b"", bytearray()
-    chars = [region["player"]]
-    for c in chars:
+    region_dir = Path(region_path).resolve().parent
+    sheet_imgs = {}
+
+    def sheet_img(c, where):
         if c not in allow["character"]:
-            fail(f"game_region.json: character {c} isn't in the allow-list")
-    char_imgs = [Image.open(TOOLS / "game_art" / f"{c}.png" if allow["character"][c]["status"] == "ours"
-                            else root / "mods" / "tuxemon" / "sprites" / f"{c}.png").convert("RGBA") for c in chars]
+            fail(f"game_region.json: {where}: character {c} isn't in the allow-list")
+        if c not in sheet_imgs:
+            sheet_imgs[c] = Image.open(TOOLS / "game_art" / f"{c}.png" if allow["character"][c]["status"] == "ours"
+                                       else root / "mods" / "tuxemon" / "sprites" / f"{c}.png").convert("RGBA")
+        return sheet_imgs[c]
+    looks = region["player"] if isinstance(region["player"], list) else [region["player"]]
+    if not 1 <= len(looks) <= 8 or len(set(looks)) != len(looks):
+        fail("game_region.json: the player: 1 to 8 different sheets")
+    for c in looks:
+        sheet_img(c, "the player")
+    flag_names = set()
     for a in region["areas"]:
-        ar = Area(root, a["map"], allowed, cache, report)
+        if a.get("layout"):
+            ar = OwnArea(root, a["map"], region_dir / a["layout"], allowed, cache, report)
+        else:
+            ar = Area(root, a["map"], allowed, cache, report)
         mv, hop = ar.movement()
         below, above = ar.composite()
         tiles, tix = [], {}
@@ -861,6 +1119,18 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
         overlays = [(i, tile_id(t)) for i, t in enumerate(above) if t is not None]
         if len(tiles) > 4095:
             fail(f"{ar.slug}: {len(tiles)} different tiles; the limit is 4095")
+        people = a.get("people", [])
+        if len(people) > MAX_PEOPLE:
+            fail(f"{ar.slug}: {len(people)} people; the limit is {MAX_PEOPLE}")
+        chars = list(looks)
+        for pe in people:
+            if pe.get("sheet") in looks:
+                fail(f"{ar.slug}: {pe.get('name')} wears one of the player's looks")
+            if pe.get("sheet") not in chars:
+                chars.append(pe.get("sheet"))
+        if len(chars) > 16:
+            fail(f"{ar.slug}: {len(chars)} character sheets; the limit is 16")
+        char_imgs = [sheet_img(c, ar.slug) for c in chars]
         frames = []
         for im in char_imgs:
             for f in range(CHAR_FRAMES):
@@ -873,7 +1143,12 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
         tflags = bytearray(len(tiles) + 1)
         for i in hop:
             tflags[lo_ids[i]] |= 1
-        warps, zones, talks = ar.events(region_maps, rules, report)
+        warps, zones, talks = ar.events(region_maps, rules, report) if a.get("tuxemon_events", True) \
+            else ([], [], [])
+        ex_warps, ex_zones, ex_talks, persons = region_events(a, ar, mv, area_ix, rules, ids, flag_names)
+        warps += ex_warps
+        zones += ex_zones
+        talks += ex_talks
         ccols, crows = -(-ar.w // CHUNK), -(-ar.h // CHUNK)
         chunks = []
         for cy in range(crows):
@@ -899,6 +1174,12 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
             body += struct.pack("<BBBBBxH", x0, y0, x1 - x0, y1 - y0, fc, 0) + text.ref(s)
         for i, t in overlays:
             body += struct.pack("<HH", i, t)
+        for pe in persons:
+            body += struct.pack("<BBBBBBHHH", pe["x"], pe["y"], pe["facing"], chars.index(pe["sheet"]),
+                                pe["kind"], pe["sight"], pe["flag"], pe["hide_if"], pe["show_if"])
+            body += text.ref(pe["name"]) + text.ref(pe["text"]) + text.ref(pe["after"])
+            team = [(mon_ix[c], lv) for c, lv in pe["team"]] + [(0xFFFF, 0)] * (TEAM - len(pe["team"]))
+            body += b"".join(struct.pack("<HBx", m, lv) for m, lv in team)
         head_len = 64 + len(body) + 8 * len(chunks)
         tiles_off = (head_len + 3) & ~3
         chars_off = tiles_off + len(tile_bytes)
@@ -909,7 +1190,7 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
             cdir += struct.pack("<II", off, crc32(c))
             off += len(c)
         hdr = struct.pack("<HHBBHHHHHHHHHIIIIIIII", ar.w, ar.h, bpp, len(pal), len(tiles), ccols, crows,
-                          len(warps), len(zones), len(talks), len(overlays), len(chars), 0,
+                          len(warps), len(zones), len(talks), len(overlays), len(chars), len(persons),
                           tiles_off, len(tile_bytes), crc32(tile_bytes),
                           chars_off, len(char_bytes), crc32(char_bytes), chunk0, 0)
         hdr += b"\0" * (64 - len(hdr))
@@ -931,7 +1212,7 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
                             seen.add(ov[i])
                 worst = max(worst, len(seen))
         report.append(f"{ar.slug}: {ar.w}x{ar.h} cells, {len(tiles)} tiles, {len(overlays)} overlays, "
-                      f"{len(warps)} warps, {len(zones)} zones, {len(talks)} talks; "
+                      f"{len(warps)} warps, {len(zones)} zones, {len(talks)} talks, {len(persons)} people; "
                       f"{len(pal)} colours; head {len(head)} B, tiles {len(tile_bytes)} B, "
                       f"characters {len(char_bytes)} B, {len(chunks)} chunks of {len(chunks[0])} B; "
                       f"at most {worst} tiles on one screen")
@@ -953,6 +1234,13 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
     META += meta_entry(K_BUILD, f"mkgame {FORMAT_MAJOR}.{FORMAT_MINOR}".encode())
     META += meta_entry(K_START, struct.pack("<HBBB3x", area_ix[st["area"]], st["x"], st["y"],
                                             DIRS[st.get("facing", "down")]))
+    if len(looks) > 1:
+        META += meta_entry(K_LOOKS, struct.pack("<B3x", len(looks)))
+    if "starters" in region:
+        sts = region["starters"]
+        if len(sts) != 3 or any(c not in mon_ix for c in sts):
+            fail("game_region.json: starters: three creatures from the allow-list")
+        META += meta_entry(K_STARTERS, struct.pack("<3H2x", *(mon_ix[c] for c in sts)))
     mc, cc, cb = rules.monster_cfg, rules.capture, rules.combat
     lo, hi = cb["multiplier_range"]
     META += meta_entry(K_RULES, struct.pack("<8I", 7, int(mc["coeff_stats"]), round(lo * 100), round(hi * 100),
@@ -971,9 +1259,12 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
         cred = [f"Game data from Tuxemon (GPLv3), commit {source[8:20]}.", "github.com/Tuxemon/Tuxemon", ""]
     else:
         cred = [f"Game data from {source}.", ""]
+    used_chars = set(sheet_imgs)
     for kind, title in (("creature", "Creatures"), ("tileset", "Tiles"), ("character", "Characters")):
         cred.append(title)
         for s in sorted(allow[kind]):
+            if kind == "character" and s not in used_chars:
+                continue
             v = allow[kind][s]
             nm = rules.name(s) if kind == "creature" else s
             cred.append(f"{nm}: {v['authors'].replace('; ', ', ')} ({v['licence']})")
@@ -1077,8 +1368,10 @@ class Game:
         return out
 
     def area(self, aid, name, blk, head_len):
-        (w, h, bpp, ncol, nt, ccols, crows, nw, nz, ntk, nov, nch, _, toff, tlen, tcrc,
+        (w, h, bpp, ncol, nt, ccols, crows, nw, nz, ntk, nov, nch, npe, toff, tlen, tcrc,
          coff, clen, ccrc, chunk0, _) = struct.unpack_from("<HHBBHHHHHHHHHIIIIIIII", blk)
+        if npe > MAX_PEOPLE:
+            fail(f"area {aid}: {npe} people")
         if bpp not in (4, 8):
             fail(f"area {aid}: {bpp} bits per pixel")
         a = {"id": aid, "name": name, "w": w, "h": h, "bpp": bpp, "ntiles": nt}
@@ -1102,6 +1395,13 @@ class Game:
         o += 16 * ntk
         a["overlays"] = dict(struct.unpack_from("<HH", blk, o + 4 * i) for i in range(nov))
         o += 4 * nov
+        a["people"] = []
+        for i in range(npe):
+            v = struct.unpack_from("<BBBBBBHHH", blk, o + 48 * i)
+            team = [struct.unpack_from("<HB", blk, o + 48 * i + 36 + 4 * j) for j in range(TEAM)]
+            a["people"].append(v + tuple(self.s(blk, o + 48 * i + 12 + 8 * j) for j in range(3)) +
+                               (tuple(t for t in team if t[0] != 0xFFFF),))
+        o += 48 * npe
         cdir = [struct.unpack_from("<II", blk, o + 8 * i) for i in range(ccols * crows)]
         o += 8 * len(cdir)
         if o != head_len:
@@ -1162,6 +1462,9 @@ def dump(g):
     out.append(f"source {m[K_SOURCE].decode()}")
     a, x, y, f = struct.unpack_from("<HBBB", m[K_START])
     out.append(f"start area {a} at {x},{y} facing {f}")
+    out.append(f"looks {m[K_LOOKS][0] if K_LOOKS in m else 1}")
+    if K_STARTERS in m:
+        out.append("starters " + " ".join(map(str, struct.unpack_from("<3H", m[K_STARTERS]))))
     out.append("rules " + " ".join(map(str, struct.unpack("<8I", m[K_RULES]))))
     out.append("capture " + " ".join(map(str, struct.unpack("<7I", m[K_CAPTURE]))))
     out.append("growth " + " ".join(map(str, struct.unpack("<4I", m[K_GROWTH]))))
@@ -1201,6 +1504,10 @@ def dump(g):
             out.append(f"  zone {z[0]},{z[1]} {z[2]}x{z[3]} encounter {z[4]} chance {z[5]}")
         for t in a["talks"]:
             out.append(f"  talk {t[0]},{t[1]} {t[2]}x{t[3]} facing {t[4]}: {t[5]}")
+        for p in a["people"]:
+            team = " ".join(f"{m}:{lv}" for m, lv in p[12]) or "-"
+            out.append(f"  person {p[0]},{p[1]} facing {p[2]} sheet {p[3]} kind {p[4]} sight {p[5]} "
+                       f"flags {p[6]}/{p[7]}/{p[8]} team {team}: {p[9]} | {p[10]} | {p[11]}")
         out.append(f"  cells crc {crc32(struct.pack(f'<{len(a['cells'])}H', *a['cells'])):08x} "
                    f"move crc {crc32(bytes(a['move'])):08x} overlays {len(a['overlays'])}")
     out.append("credits " + f"{crc32(g.sec[b'CRED']):08x}")
@@ -1246,12 +1553,17 @@ def preview(g, outdir, tag, start=None):
     for ai, a in enumerate(g.areas()):
         im, put = draw_area(a)
         px = im.load()
-        # the player at the start (frame 0, facing down), then the overlays
-        if a["frames"] and ai == sa:
-            fr = a["frames"][0]
-            ox, oy = sx * TILE, sy * TILE - (CHAR_H - TILE)
-            for j, v in enumerate(fr):
-                if v:
+        # the people standing, the player at the start (facing down), then the overlays
+        stand = [10, 7, 1, 4]                 # N E S W: the middle frame of rows back, right, front, left
+        figs = [(p[0], p[1], p[3] * CHAR_FRAMES + stand[p[2]]) for p in a["people"]]
+        if ai == sa:
+            figs.append((sx, sy, 1))
+        for x, y, f in sorted(figs, key=lambda t: t[1]):
+            if f >= len(a["frames"]):
+                continue
+            ox, oy = x * TILE, y * TILE - (CHAR_H - TILE)
+            for j, v in enumerate(a["frames"][f]):
+                if v and 0 <= oy + j // CHAR_W:
                     px[ox + j % CHAR_W, oy + j // CHAR_W] = a["palette"][v]
         for i, t in a["overlays"].items():
             put(a["tiles"][t], i % a["w"] * TILE, i // a["w"] * TILE, True)

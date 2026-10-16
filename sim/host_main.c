@@ -30,6 +30,9 @@
  *                   (ui_test_reminders), as a wake does over its dark time
  *   A <seconds>     move Study's clock on (ui_test_study_skew): reviews come
  *                   due hours after a lesson, and the tour can't wait for them
+ *   G <area> <x> <y> <facing>  Critters: put the player there (mon_ui_test_place),
+ *                   so the tour can reach the towns and the keepers without
+ *                   a hundred steps of walking
  *   B               remember the heap in use now...
  *   E <what>        ...and fail unless it's the same again: a screen that was
  *                   opened and left must give back every byte it took
@@ -48,6 +51,7 @@
 #include "sim_port.h"
 #include "sim_heap.h"
 #include "ui.h"
+#include "ui_monster.h"
 #include "data.h"
 #include "appcfg.h"
 #include "clock.h"
@@ -291,6 +295,11 @@ int main(int argc, char **argv){
             sim_step(60);
         }
         else if(line[0] == 'A' && line[1] == ' '){ ui_test_study_skew((int32_t)atol(line + 2)); sim_step(60); }
+        else if(line[0] == 'G' && line[1] == ' '){
+            int ga, gx, gy, gf;
+            if(sscanf(line + 2, "%d %d %d %d", &ga, &gx, &gy, &gf) != 4){ fprintf(stderr, "script: bad G: %s", line); rc = 1; break; }
+            mon_ui_test_place(ga, gx, gy, gf); sim_step(200);
+        }
         else if(line[0] == 'R' && line[1] == ' '){
             char *e; long back = strtol(line + 2, &e, 10), ahead = strtol(e, NULL, 10);
             ui_test_reminders((int32_t)back, (int32_t)ahead); sim_step(100);

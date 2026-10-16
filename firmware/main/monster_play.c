@@ -204,7 +204,35 @@ static int enter_area(MpWorld *w, uint16_t i, uint8_t x, uint8_t y, uint8_t faci
     w->chunk_next = 0;
     if(x >= w->area.w || y >= w->area.h) return werr(w, MG_ERANGE, "a place outside the area");
     w->x = x; w->y = y; w->facing = facing & 3;
+    for(uint32_t k = 0; k < w->area.n_people; k++) w->pface[k] = w->area.people[48 * k + 2];
     return 0;
+}
+
+int mp_place(MpWorld *w, uint16_t area, uint8_t x, uint8_t y, uint8_t facing){
+    return enter_area(w, area, x, y, facing);
+}
+
+/* ---- flags and people ---- */
+
+int mp_flag(const MpWorld *w, uint16_t f){
+    return f && f < MG_FLAGS && (w->flags[f / 8] >> (f % 8) & 1);
+}
+
+void mp_set_flag(MpWorld *w, uint16_t f){
+    if(f && f < MG_FLAGS) w->flags[f / 8] |= (uint8_t)(1u << (f % 8));
+}
+
+int mp_present(const MpWorld *w, const MgPerson *p){
+    return (!p->show_if || mp_flag(w, p->show_if)) && !(p->hide_if && mp_flag(w, p->hide_if));
+}
+
+/* the person standing at (x, y), or -1 */
+static int person_at(const MpWorld *w, int x, int y, MgPerson *p){
+    for(uint32_t k = 0; k < w->area.n_people; k++){
+        mg_person(&w->area, k, p);
+        if(p->x == x && p->y == y && mp_present(w, p)) return (int)k;
+    }
+    return -1;
 }
 
 int mp_cell(MpWorld *w, int x, int y, uint16_t *tile, uint8_t *move){
@@ -273,6 +301,29 @@ static int encounter(MpWorld *w, uint16_t table, MpBattle *b, MpLog *log){
     return mp_battle_start(w, b, &wild);
 }
 
+static int trainer_battle(MpWorld *w, uint32_t k, MpBattle *b, MpLog *log);
+
+/* a trainer not yet beaten who has the player in sight: they look along
+ * their facing, up to `sight` cells, and walls and people block the view */
+static int spotted(MpWorld *w, int *err){
+    *err = 0;
+    for(uint32_t k = 0; k < w->area.n_people; k++){
+        MgPerson p;
+        mg_person(&w->area, k, &p);
+        if(p.kind != MG_P_TRAINER || !p.sight || mp_flag(w, p.flag) || !mp_present(w, &p)) continue;
+        int d = p.facing, x = p.x, y = p.y, ok;
+        for(int n = 1; n <= p.sight; n++){
+            if((*err = can_step(w, x, y, d, &ok))) return -1;
+            if(!ok) break;
+            x += DX[d]; y += DY[d];
+            if(x == w->x && y == w->y){ w->pface[k] = (uint8_t)d; return (int)k; }
+            MgPerson q;
+            if(person_at(w, x, y, &q) >= 0) break;
+        }
+    }
+    return -1;
+}
+
 int mp_step(MpWorld *w, int dir, MpBattle *b, MpLog *log){
     int ok, r;
     if(log){ log->n = 0; log->overflow = 0; }
@@ -283,7 +334,9 @@ int mp_step(MpWorld *w, int dir, MpBattle *b, MpLog *log){
         say(log, MP_EV_TURN, 0, (uint32_t)dir, 0, 0);
         return 0;
     }
+    MgPerson pp;
     if((r = can_step(w, w->x, w->y, dir, &ok))) return r;
+    if(ok && person_at(w, w->x + DX[dir], w->y + DY[dir], &pp) >= 0) ok = 0;
     if(!ok){ say(log, MP_EV_BUMP, 0, w->x, w->y, 0); return 0; }
     w->x = (uint8_t)(w->x + DX[dir]);
     w->y = (uint8_t)(w->y + DY[dir]);
@@ -293,6 +346,7 @@ int mp_step(MpWorld *w, int dir, MpBattle *b, MpLog *log){
     if(w->area.tflags[t] & 1){
         /* a ledge: jump on over it, if there's somewhere to land */
         if((r = can_step(w, w->x, w->y, dir, &ok))) return r;
+        if(ok && person_at(w, w->x + DX[dir], w->y + DY[dir], &pp) >= 0) ok = 0;
         if(ok){
             w->x = (uint8_t)(w->x + DX[dir]);
             w->y = (uint8_t)(w->y + DY[dir]);
@@ -310,6 +364,18 @@ int mp_step(MpWorld *w, int dir, MpBattle *b, MpLog *log){
         say(log, MP_EV_WARP, 0, w->x, w->y, wp.to);
         return 0;
     }
+    if(b && alive(w)){
+        int k = spotted(w, &r);
+        if(r) return r;
+        if(k >= 0){
+            MgPerson t;
+            mg_person(&w->area, (uint32_t)k, &t);
+            say(log, MP_EV_SPOTTED, 0, (uint32_t)k, 0, 0);
+            w->facing = (uint8_t)((t.facing + 2) & 3);
+            say(log, MP_EV_TALK, 0, (uint32_t)k, t.text.len, t.text.off);
+            return trainer_battle(w, (uint32_t)k, b, log);
+        }
+    }
     for(uint32_t k = 0; k < w->area.n_zones; k++){
         MgZone z;
         mg_zone(&w->area, k, &z);
@@ -320,9 +386,32 @@ int mp_step(MpWorld *w, int dir, MpBattle *b, MpLog *log){
     return 0;
 }
 
-int mp_interact(MpWorld *w, MpLog *log){
+int mp_interact(MpWorld *w, MpBattle *b, MpLog *log){
     if(log){ log->n = 0; log->overflow = 0; }
+    if(b) b->over = 1;
     int fx = w->x + DX[w->facing], fy = w->y + DY[w->facing];
+    MgPerson p;
+    int k = person_at(w, fx, fy, &p);
+    if(k >= 0){
+        int done = mp_flag(w, p.flag);
+        MgStr t = done && p.after.len ? p.after : p.text;
+        w->pface[k] = (uint8_t)((w->facing + 2) & 3);
+        say(log, MP_EV_TALK, 0, (uint32_t)k, t.len, t.off);
+        if(p.kind == MG_P_TRAINER){
+            if(done || !b || !alive(w)) return 1;
+            int r = trainer_battle(w, (uint32_t)k, b, log);
+            return r ? r : 1;
+        }
+        if(p.kind == MG_P_HEALER){
+            mp_heal_party(w);
+            w->has_respawn = 1;
+            w->respawn_area = w->area.index;
+            w->respawn_x = w->x; w->respawn_y = w->y; w->respawn_facing = w->facing;
+            say(log, MP_EV_HEALED, 0, (uint32_t)k, 0, 0);
+        }
+        mp_set_flag(w, p.flag);
+        return 1;
+    }
     for(uint32_t k = 0; k < w->area.n_signs; k++){
         MgSign s;
         mg_sign(&w->area, k, &s);
@@ -370,6 +459,25 @@ int mp_battle_start(MpWorld *w, MpBattle *b, const MpCreature *wild){
         return 0;
     }
     return MG_ERANGE;
+}
+
+static int trainer_battle(MpWorld *w, uint32_t k, MpBattle *b, MpLog *log){
+    MonGame *g = w->g;
+    MgPerson p;
+    MpCreature team[MG_TEAM];
+    int r, n = 0;
+    mg_person(&w->area, k, &p);
+    for(int j = 0; j < MG_TEAM && p.mon[j] != MG_NONE16; j++, n++)
+        if((r = mp_make(g, &w->rng, p.mon[j], p.level[j], &team[j]))) return werr(w, r, "%s", g->err);
+    if(!n) return werr(w, MG_EBAD, "a trainer with no creatures");
+    if((r = mp_battle_start(w, b, &team[0]))) return werr(w, r, "no creature can fight");
+    b->trainer = (uint8_t)(k + 1);
+    b->n_team = (uint8_t)n;
+    b->next = 1;
+    memcpy(b->team, team, sizeof(MpCreature) * (size_t)n);
+    say(log, MP_EV_TRAINER, 0, k, 0, 0);
+    say(log, MP_EV_SENDS, 1, team[0].mon, team[0].level, 0);
+    return 0;
 }
 
 int mp_wild_choice(MpWorld *w, MpBattle *b){
@@ -516,7 +624,9 @@ static int resolve(MpWorld *w, MpBattle *b, MpLog *log){
     int r;
     if(!alive(w)){
         mp_heal_party(w);
-        if((r = enter_area(w, g->start_area, g->start_x, g->start_y, g->start_facing))) return r;
+        if(w->has_respawn) r = enter_area(w, w->respawn_area, w->respawn_x, w->respawn_y, w->respawn_facing);
+        else r = enter_area(w, g->start_area, g->start_x, g->start_y, g->start_facing);
+        if(r) return r;
         say(log, MP_EV_LOSE, 0, 0, 0, 0);
         battle_end(w, b);
         return 0;
@@ -534,7 +644,26 @@ static int resolve(MpWorld *w, MpBattle *b, MpLog *log){
                 if((r = grow(w, i, log))) return r;
             }
         }
+        if(b->trainer && b->next < b->n_team){
+            /* the trainer's next creature; those who fight it share its experience */
+            b->wild = b->team[b->next++];
+            memset(b->recharge[1], 0, sizeof b->recharge[1]);
+            say(log, MP_EV_SENDS, 1, b->wild.mon, b->wild.level, 0);
+            b->fought = (uint8_t)(1u << b->active);
+            if(!w->party[b->active].hp){
+                b->need_swap = 1;
+                say(log, MP_EV_NEED_SWAP, 0, 0, 0, 0);
+            }
+            return 0;
+        }
         say(log, MP_EV_WIN, 0, 0, 0, 0);
+        if(b->trainer){
+            MgPerson p;
+            mg_person(&w->area, b->trainer - 1u, &p);
+            mp_set_flag(w, p.flag);
+            say(log, MP_EV_BEATEN, 0, b->trainer - 1u, 0, 0);
+            if(p.after.len) say(log, MP_EV_TALK, 0, b->trainer - 1u, p.after.len, p.after.off);
+        }
         battle_end(w, b);
         return 0;
     }
@@ -592,10 +721,11 @@ int mp_turn(MpWorld *w, MpBattle *b, int act_kind, int arg, MpLog *log){
         break;
     case MP_ACT_CATCH: {
         uint32_t room = g->rules[7] < MP_PARTY ? g->rules[7] : MP_PARTY;
-        if(w->n_party >= room && w->n_box >= MP_BOX) return MG_ERANGE;
+        if(b->trainer || (w->n_party >= room && w->n_box >= MP_BOX)) return MG_ERANGE;
         break;
     }
     case MP_ACT_RUN:
+        if(b->trainer) return MG_ERANGE;
         break;
     default:
         return MG_ERANGE;
@@ -649,13 +779,28 @@ int mp_turn(MpWorld *w, MpBattle *b, int act_kind, int arg, MpLog *log){
 }
 
 /* ---- the save -------------------------------------------------------------
- * A 32-byte header: "CYDS", u16 version 1, u16 box count, u32 the game file's
- * fingerprint, u32 the generator, u32 area id, u8 x, y, facing, party count,
- * u32 CRC-32 of the records, u32 CRC-32 of bytes 0-27. Then 40 bytes per
- * creature, the party first: u32 creature id, u32 experience, u16 HP, u8
- * level, u8 0, u32 status id (0 none), u8 iv x 6, u16 0, u32 move id x 4
- * (0 none). Ids, not positions, so a rebuilt game file (game_ids.tsv keeps
- * the numbers) still loads the save. Replaced whole (safefile.h). */
+ * A 32-byte header: "CYDS", u16 version (2), u16 box count, u32 the game
+ * file's fingerprint, u32 the generator, u32 area id, u8 x, y, facing, party
+ * count, u32 CRC-32 of the records, u32 CRC-32 of bytes 0-27. Then, from
+ * version 2, a 40-byte record of the story: the flags (32 B, flag f is bit
+ * f % 8 of byte f / 8), u32 the area id a loss comes back to (0: the start),
+ * u8 x, y, facing, u8 the player's look. Then 40 bytes per creature, the party first: u32
+ * creature id, u32 experience, u16 HP, u8 level, u8 0, u32 status id (0
+ * none), u8 iv x 6, u16 0, u32 move id x 4 (0 none). The records' CRC covers
+ * the story's record too. Ids, not positions, so a rebuilt game file
+ * (game_ids.tsv keeps the numbers) still loads the save. A version 1 save
+ * (no story record) loads with no flags set. Replaced whole (safefile.h). */
+
+static void put_story(MpWorld *w, uint8_t *p){
+    MgAreaDir d;
+    memset(p, 0, MP_SAVE_REC);
+    memcpy(p, w->flags, sizeof w->flags);
+    if(w->has_respawn && !mg_area_dir(w->g, w->respawn_area, &d)){
+        put32(p + 32, d.id);
+        p[36] = w->respawn_x; p[37] = w->respawn_y; p[38] = w->respawn_facing;
+    }
+    p[39] = w->look;
+}
 
 static void put_rec(MonGame *g, const MpCreature *c, uint8_t *p){
     MgMon m;
@@ -672,16 +817,18 @@ static void put_rec(MonGame *g, const MpCreature *c, uint8_t *p){
 }
 
 int mp_save(MpWorld *w, const char *path){
-    uint8_t h[MP_SAVE_HEADER], rec[MP_SAVE_REC];
-    uint32_t crc = 0, n = (uint32_t)w->n_party + w->n_box;
+    uint8_t h[MP_SAVE_HEADER], rec[MP_SAVE_REC], story[MP_SAVE_REC];
+    uint32_t crc, n = (uint32_t)w->n_party + w->n_box;
     SafeFile sf;
+    put_story(w, story);
+    crc = mg_crc32(0, story, MP_SAVE_REC);
     for(uint32_t i = 0; i < n; i++){
         put_rec(w->g, i < w->n_party ? &w->party[i] : &w->box[i - w->n_party], rec);
         crc = mg_crc32(crc, rec, MP_SAVE_REC);
     }
     memset(h, 0, sizeof h);
     memcpy(h, "CYDS", 4);
-    put16(h + 4, 1);
+    put16(h + 4, MP_SAVE_VERSION);
     put16(h + 6, w->n_box);
     put32(h + 8, w->g->fingerprint);
     put32(h + 12, w->rng);
@@ -691,7 +838,7 @@ int mp_save(MpWorld *w, const char *path){
     put32(h + 28, mg_crc32(0, h, 28));
     FILE *f = sf_open(&sf, path, "wb");
     if(!f) return werr(w, MG_EIO, "can't write the save");
-    int ok = fwrite(h, 1, sizeof h, f) == sizeof h;
+    int ok = fwrite(h, 1, sizeof h, f) == sizeof h && fwrite(story, 1, sizeof story, f) == sizeof story;
     for(uint32_t i = 0; ok && i < n; i++){
         put_rec(w->g, i < w->n_party ? &w->party[i] : &w->box[i - w->n_party], rec);
         ok = fwrite(rec, 1, MP_SAVE_REC, f) == MP_SAVE_REC;
@@ -754,10 +901,29 @@ int mp_load(MpWorld *w, MonGame *g, uint8_t *head, const char *path){
         werr(w, MG_EBAD, "the save is damaged");
         goto out;
     }
-    if(le16(h + 4) != 1){ r = werr(w, MG_EVERSION, "a save from a newer version"); goto out; }
+    uint32_t version = le16(h + 4);
+    if(!version || version > MP_SAVE_VERSION){ r = werr(w, MG_EVERSION, "a save from a newer version"); goto out; }
     uint32_t nbox = le16(h + 6), nparty = h[23];
     if(!nparty || nparty > MP_PARTY || nparty > g->rules[7] || nbox > MP_BOX){ werr(w, MG_EBAD, "the save is damaged"); goto out; }
     uint32_t crc = 0;
+    if(version >= 2){
+        if(fread(rec, 1, MP_SAVE_REC, f) != MP_SAVE_REC){ werr(w, MG_EBAD, "the save is cut short"); goto out; }
+        crc = mg_crc32(crc, rec, MP_SAVE_REC);
+        if(rec[0] & 1 || rec[39] >= g->looks){ werr(w, MG_EBAD, "the save is damaged"); goto out; }   /* flag 0 is none */
+        memcpy(w->flags, rec, sizeof w->flags);
+        w->look = rec[39];
+        uint32_t rid = le32(rec + 32);
+        if(rid){
+            MgAreaDir d;
+            if(mg_find_area(g, rid, &w->respawn_area) || mg_area_dir(g, w->respawn_area, &d) ||
+               rec[36] >= d.w || rec[37] >= d.h || rec[38] > 3){
+                werr(w, MG_EBAD, "the save rests in an area this game file doesn't have"); goto out;
+            }
+            w->has_respawn = 1;
+            w->respawn_x = rec[36]; w->respawn_y = rec[37]; w->respawn_facing = rec[38];
+        }
+        else if(rec[36] || rec[37] || rec[38]){ werr(w, MG_EBAD, "the save is damaged"); goto out; }
+    }
     for(uint32_t i = 0; i < nparty + nbox; i++){
         if(fread(rec, 1, MP_SAVE_REC, f) != MP_SAVE_REC){ werr(w, MG_EBAD, "the save is cut short"); goto out; }
         crc = mg_crc32(crc, rec, MP_SAVE_REC);

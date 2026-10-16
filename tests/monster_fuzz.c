@@ -113,7 +113,7 @@ static void play(MonGame *g){
         if(mp_new(w, g, head, rnd() | 1, starter)) continue;
         for(int i = 0; i < 300; i++){
             mp_step(w, (int)(rnd() % 4), &b, &log);
-            if(rnd() % 8 == 0) mp_interact(w, &log);
+            if(b.over && rnd() % 8 == 0) mp_interact(w, &b, &log);
             for(int t = 0; t < 60 && !b.over; t++){
                 int act = (int)(rnd() % 4), arg = (int)(rnd() % 6) - 1;
                 mp_turn(w, &b, act, arg, &log);
