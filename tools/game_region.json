@@ -1,0 +1,20 @@
+{
+  "title": "Critters",
+  "note": "G0 spike region: two connected areas of Tuxemon's Spyder maps, to measure the format. G3 replaces it with the first region.",
+  "areas": [
+    {"map": "spyder_route1", "name": "Route 1"},
+    {"map": "spyder_brideswood", "name": "Brideswood"}
+  ],
+  "start": {"area": "spyder_route1", "x": 24, "y": 8, "facing": "down"},
+  "player": "adventurer",
+  "encounters": {
+    "spyder_route1": [
+      {"creature": "agnite",    "levels": [2, 4], "rate": 10},
+      {"creature": "cardiling", "levels": [2, 4], "rate": 20},
+      {"creature": "vamporm",   "levels": [2, 4], "rate": 20},
+      {"creature": "anoleaf",   "levels": [2, 4], "rate": 15},
+      {"creature": "noctula",   "levels": [3, 5], "rate": 15},
+      {"creature": "zunna",     "levels": [3, 5], "rate": 20}
+    ]
+  }
+}

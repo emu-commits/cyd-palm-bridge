@@ -16,6 +16,67 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-16 — The monster game's G0: the file format and the converter
+
+`GAME_PLAN.md` §12 G0, which the owner asked for. Nothing on the device
+changes; it's a document and a computer-side tool.
+
+- **`docs/GAME_FORMAT.md`** is `game.bin`'s format, in `course.srs`'s style:
+  a section table with CRCs; creatures, moves, types, shapes, statuses,
+  learnsets and encounter tables as fixed records; areas as blocks of a
+  head (palette, warps, encounter zones, signs, overlays), tiles, the
+  characters' frames, and 16×16-cell chunks with a movement byte per cell
+  (can't enter / can't leave across each side). Its §2 is Tuxemon's rules
+  (stats, damage, hitting, statuses, catching, experience) read from its
+  source at the pinned commit.
+- **`tools/mkgame.py`** builds it from a Tuxemon checkout at commit
+  `9e6258f` (`--fetch` clones it; any other commit, or local changes, is
+  refused), building only what `tools/game_allow.tsv` lists. Its own reader
+  backs `--check`, `--dump` (for G1's C reader to match) and `--preview`
+  (the areas and sprites drawn from the built file, through RGB565).
+  `tools/game_region.json` is the region; `tools/game_ids.tsv` the stable
+  numbers.
+
+**Measured** (Pillow 12.3.0, PyYAML 6.0.2, the spike region: Spyder's
+Route 1 and Brideswood, 20 creatures):
+
+| | 8-bit maps | 4-bit maps |
+|---|---|---|
+| `game.bin` | 132,360 B | 117,376 B |
+| Battle sprites (20 × 4,136 B, always 4-bit) | 82,720 B | 82,720 B |
+| Route 1 (40 × 20): head, tiles, frames, chunks | 596 + 14,080 + 6,144 + 4,608 B | 496 + 7,040 + 3,072 + 4,608 B |
+| Brideswood (40 × 40) | 2,396 + 3,328 + 6,144 + 6,912 B | 2,360 + 1,664 + 3,072 + 6,912 B |
+| Colours used | 65 and 33: exact | 15 each |
+
+- Route 1 composites into 55 distinct tiles, Brideswood into 13 (and 538
+  overlay cells, the tree tops). The most different tiles on one screen,
+  scrolling included: 34 and 13.
+- Two builds compare equal with `cmp`, at both depths. The reader refused
+  all of 1,000 truncations and 3,000 single-bit flips (a scratch script).
+- Moves: the 20 creatures learn 76; 27 have only effects the first version
+  plays, 49 are left out.
+- 4 bits per pixel lost the encounter grass's colour (it looked like the
+  trees) and the flowers' reds and yellows, so maps are 8-bit (Q4). The
+  15-colour battle sprites (9 of the 20 had more) looked the same as the
+  originals. Building the 4-bit palette from distinct colours rather than
+  pixel counts banded Brideswood's ground, so that was dropped.
+- With 8-bit tiles, the heap estimate is 48 KB without a canvas or 74 KB
+  with an 8-bit one (`GAME_PLAN.md` §9); G2 measures.
+
+**Found on the way:**
+- **Tuxemon's towns use XYG-licensed art.** `core_buildings`, `core_set
+  pieces`, `core_indoor_walls` and `core_indoor_floors` are built partly
+  from Kelvin Shadewing's XYG sets (`ATTRIBUTIONS.md`), which the plan
+  excludes. With only the five clean core sheets allowed, 40 of the 263
+  maps lose nothing (routes, caves, tunnels), but every town loses its
+  houses. That's `GAME_PLAN.md` §13 Q6, for the owner.
+- Water is solid through a tile's `surfable: 0`, not through collision
+  objects; a first build let the player walk on Route 1's lake.
+- A short commit id can't be fetched from GitHub (`couldn't find remote ref
+  9e6258f`), so the pin is the full SHA.
+- Tuxemon's `base.po` has a string broken by a raw line break
+  (`spyder_omnichannel_dempsey1`); the reader joins it.
+
 ### 2026-10-15 — Tips: the "i" that teaches what the screen can't show
 
 `PALM_ARCHIVE_REVIEW.md` §3.8. Palm's dialogs carried an "i" in the corner

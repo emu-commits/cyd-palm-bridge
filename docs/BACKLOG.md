@@ -22,12 +22,19 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 
 ---
 
-## Paused — a monster-catching game (planned 2026-10-12, awaiting the owner)
+## Paused — a monster-catching game (G0 done 2026-10-16, awaiting the owner)
 
 `GAME_PLAN.md` is the plan: a C engine in the Games menu, with content from
 Tuxemon (GPLv3 data, mostly CC-BY-SA art) converted into one file on the card,
-on-screen controls and an Auto-play checkbox. **Nothing is built. Don't start
-G1 without the owner's yes;** its open questions are §13 Q1–Q5.
+on-screen controls and an Auto-play checkbox. **G0 is built** (the owner
+asked for it on 2026-10-16): `GAME_FORMAT.md` and `tools/mkgame.py`, with
+nothing on the device. **Don't start G1 without the owner's yes.**
+
+- [ ] The owner reviews `GAME_FORMAT.md` and the renders (Q4: 8-bit maps,
+  4-bit creatures).
+- [ ] The owner decides §13 Q6: Tuxemon's town buildings are partly
+  XYG-licensed; the recommendation is towns laid out from the clean sheets.
+- [ ] Still open from the plan: §13 Q1, Q2, Q3, Q5.
 
 ## RESUME HERE — Palm behaviours from the archive review (approved 2026-10-15)
 

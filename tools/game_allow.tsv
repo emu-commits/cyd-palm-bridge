@@ -1,0 +1,50 @@
+# The game's licence allow-list (docs/GAME_PLAN.md section 10).
+#
+# tools/mkgame.py builds ONLY what is listed here. Anything else in Tuxemon (a
+# tileset, a creature's sprite, a character sheet) is left out of game.bin.
+# A map cell drawn from an unlisted tileset loses that layer's tile, and the
+# build reports how many cells lost one.
+#
+# Columns: kind, slug, licence, authors, source, status
+#   kind     tileset | creature | character
+#   slug     the tileset's name in Tiled, the creature's slug, or the sheet's
+#            file name in mods/tuxemon/sprites (without .png)
+#   status   credited:   the licence and authors are taken from Tuxemon's
+#                        ATTRIBUTIONS.md at the pinned commit
+#            unverified: no entry found yet; used in G0 spikes only (G3's
+#                        build refuses any unverified line)
+#            confirmed:  checked by hand against the source link (G3)
+#
+# Left out on purpose (section 10): anything under the "XYG Open Source
+# License" (Kelvin Shadewing's sets, and core_buildings, core_set pieces,
+# core_indoor_walls and core_indoor_floors, which ATTRIBUTIONS.md says are
+# built partly from them); LimeZu's purchased sets; anything non-commercial.
+
+tileset	core_outdoor	CC-BY-SA 4.0	rubberduck; Buch; luke83; PastTheFuture; Midi; George_; ArMM1998; Redshrike; Isaiah658; Drummyfish; Sanglorian	ATTRIBUTIONS.md "Core Outdoor"	credited
+tileset	core_outdoor_nature	CC-BY-SA 4.0	rubberduck; Buch; luke83; PastTheFuture; Midi; George_; ArMM1998; ZaPaper	ATTRIBUTIONS.md "Core Outdoor Nature"	credited
+tileset	core_outdoor_water	CC-BY-SA 4.0	rubberduck; Buch; luke83; PastTheFuture; Midi; George_; ArMM1998; ZaPaper	ATTRIBUTIONS.md "Core Outdoor Water"	credited
+tileset	core_city_and_country	CC-BY-SA 4.0	ArMM1998	ATTRIBUTIONS.md "Core City and Country"	credited
+tileset	core_indoor_stairs	CC-BY-SA 4.0	rubberduck; ArMM1998; Redshrike; Mike Bramson	ATTRIBUTIONS.md "Core Indoor Stairs"	credited
+
+creature	agnite	CC-BY-SA 4.0	Leo; Sanglorian; extyrannomon	https://wiki.tuxemon.org/index.php?title=Agnite	credited
+creature	agnidon	CC-BY-SA 4.0	Leo	https://wiki.tuxemon.org/index.php?title=Agnidon	credited
+creature	agnigon	CC-BY-SA 4.0	Leo	https://wiki.tuxemon.org/index.php?title=Agnigon	credited
+creature	cardiling	CC-BY-SA 4.0	Spalding004; Kyu	https://wiki.tuxemon.org/index.php?title=Cardiling	credited
+creature	cardiwing	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Cardiwing	credited
+creature	cardinale	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Cardinale	credited
+creature	vamporm	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Vamporm	credited
+creature	dracune	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Dracune	credited
+creature	fluttaflap	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Fluttaflap	credited
+creature	anoleaf	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Anoleaf	credited
+creature	gectile	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Gectile	credited
+creature	velocitile	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Velocitile	credited
+creature	eyenemy	CC-BY-SA 4.0	Cavalcadeur	http://forum.tuxemon.org/viewtopic.php?id=43	credited
+creature	eyesore	CC-BY-SA 4.0	Cavalcadeur; josepharaoh99	https://forum.tuxemon.org/viewtopic.php?pid=366#p366	credited
+creature	noctula	CC-BY-SA 4.0	Catch Challenger	https://wiki.tuxemon.org/index.php?title=Noctula	credited
+creature	noctalo	CC-BY-SA 4.0	Catch Challenger	https://wiki.tuxemon.org/index.php?title=Noctalo	credited
+creature	selket	CC-BY-SA 4.0	Catch Challenger	https://wiki.tuxemon.org/index.php?title=Selket	credited
+creature	selmatek	CC-BY-SA 4.0	Catch Challenger	https://wiki.tuxemon.org/index.php?title=Selmatek	credited
+creature	zunna	CC-BY-SA 4.0	Spalding004; Sanglorian	https://wiki.tuxemon.org/index.php?title=Zunna	credited
+creature	pigabyte	CC-BY-SA 4.0	josepharaoh99	https://forum.tuxemon.org/viewtopic.php?id=72	credited
+
+character	adventurer	unknown	unknown	mods/tuxemon/sprites/adventurer.png	unverified
