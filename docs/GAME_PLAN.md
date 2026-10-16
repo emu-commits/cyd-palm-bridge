@@ -1,11 +1,12 @@
 # Game plan — a monster-catching RPG built from Tuxemon's open content
 
-> **Status: G1 done (2026-10-16), on the host only.** The owner asked for G0
-> (the format and the converter) and then G1 (the rules) on 2026-10-16, and
-> liked the Tuxemon renders. §12 says what each found. **Don't start G2 (the
-> screens, the first thing on the device) without the owner's yes.** §13 Q6
-> is still open: Tuxemon's town buildings are under a licence this plan
-> leaves out. The sync engine work (`BACKLOG.md` §Engine) is unaffected.
+> **Status: G1 done (2026-10-16), on the host only; G2 approved.** The owner
+> asked for G0 (the format and the converter) and then G1 (the rules) on
+> 2026-10-16, liked the Tuxemon renders, approved `GAME_FORMAT.md` and
+> answered §13's questions the same day (Q1–Q6 under "Decided (2026-10-16)").
+> Q5's answer is the go-ahead for G2: the game is built into the current test
+> image, on top of the sync and Palm-behaviour commits. §12 says what each
+> phase found.
 
 A small Game Boy-style monster-catching RPG in the Games menu: walk a tile map,
 meet creatures in the grass, battle, catch and train them, beat trainers. An
@@ -102,7 +103,7 @@ What was chosen:
 | The licence allow-list | `tools/game_allow.tsv`: each creature, tileset and character sheet we use, with its licence and credit line, checked by hand (§10) |
 | The region | `tools/game_region.json`: the maps, the start, the player's sheet, the encounter tables |
 | Stable ids | `tools/game_ids.tsv`: creature, move, status and area numbers a save refers to |
-| The data file | `/sdcard/games/monster/game.bin` (built from Tuxemon; see §13 Q1 on how it reaches the card) |
+| The data file | `/sdcard/games/monster/game.bin`, built from Tuxemon (clean licences only) and committed as `courses/critters/game.bin`; the web flasher can install it (§13 Q1) |
 | The save | `/sdcard/games/monster/save.dat` |
 | Host gates | `make -C sim monster` (the dump round trip with `mkgame.py`, the formulas, walking, encounters, recorded battles, the save; the bot finishing from G4), `monster_fuzz` in `make ftest`, and `tests/mkgame_test.py` (the fixture rebuilt byte for byte) |
 | The fixture | `tests/data/game/`: `source.py` writes a small Tuxemon-shaped tree of our own (CC0); `game.bin` is its build, `battle.txt` the recorded battles |
@@ -387,7 +388,7 @@ screenshots looked at.
     renders are drawn from the file by `mkgame.py --preview`, the same
     pixels the device would draw; there's no simulator screen until G2.
   - [x] The renders: the owner liked them (2026-10-16).
-  - [ ] The owner reviews the format and §13 Q6.
+  - [x] The owner reviewed the format and answered §13 Q6 (2026-10-16).
   - Not done in G0, on purpose: a host gate for `mkgame.py` (it needs the
     390 MB Tuxemon checkout, so it comes with G1's C reader and a small
     fixture of our own), people (NPCs) and trainers (G3).
@@ -439,37 +440,26 @@ Later, separate decisions: more regions, sound, more effects.
 4. **An Auto-play checkbox,** with the bot doubling as a host gate.
 5. **Built in, in the Games menu,** with all heap freed on leaving.
 
-**Open, for the owner:**
+**Decided (2026-10-16, the owner's answers to the open questions):**
 
-- **Q1 — how the data reaches the card.** Options:
-  - `game.bin` is built by the owner on a computer with `mkgame.py` (it
-    fetches the pinned Tuxemon) and copied to the card; the repo holds no art;
-  - or the built file is committed under `courses/`-style data and installed
-    on first run, which puts CC-BY-SA art into the repo (allowed, with credits).
-
-  Recommendation: the first, at least until the allow-list is complete.
-- **Q2 — the name** in the Games menu. Suggested: "Critters". "Tuxemon" is
-  possible too, with credit, if the owner prefers it.
-- **Q3 — the screen during Auto-play:** stay on (uses the battery) or dim as
-  usual (the game keeps playing either way). Recommendation: stay on while the
-  board is on USB power, dim as usual on battery.
-- **Q4 — 4 or 8 bits per pixel** for the map view. **G0's answer: 8 bits**
-  for map tiles (exact; 4 bits lost the encounter grass's colour) and 4 bits
-  for battle sprites (no visible loss). `GAME_FORMAT.md` §4 has the renders'
-  findings, and §9 here the heap it costs.
-- **Q5 — when:** after the sync engine's open items (To Do, Address), or
-  before.
-- **Q6 — towns' buildings (new in G0).** Every Tuxemon town draws its houses
-  from sheets that are partly under the XYG licence (§10), and the plan leaves
-  XYG out. Options:
-  - **find the XYG licence's text** (its site wasn't reachable) and decide
-    whether it's compatible; if it is, the four sheets go on the allow-list;
-  - **build towns from clean sheets only:** `core_city_and_country` (based
-    on ArMM1998's public-domain "City and Country") is allowed and has two
-    cottages, towers, a market stall and a castle gate, in a brighter style
-    than the routes. The towns would be laid out in Tiled for this game,
-    with Tuxemon's routes kept as they are;
-  - **draw or source the buildings** from another CC0 or CC-BY set.
-
-  Recommendation: the second, at least for the first region's two towns.
-  It's map work in Tiled, not engine work, and it removes the question.
+- **The format:** `GAME_FORMAT.md` is approved as written ("fine").
+- **Q1 — how the data reaches the card:** the built `game.bin` **is
+  committed**, under `courses/critters/` with its credits, and the **web
+  flasher offers it as an optional install**. So the repo now holds the
+  built file's CC-BY-SA art and GPLv3 data (allowed, with credits: §10); the
+  Tuxemon checkout itself still never enters it, and the gates keep using
+  the fixture of our own.
+- **Q2 — the name:** "Critters".
+- **Q3 — the screen:** on USB power it stays on, during Auto-play too. On
+  battery it dims and locks as usual, and **the game pauses when the device
+  locks** (Auto-play included); it carries on from the same moment on
+  waking.
+- **Q4 — 4 or 8 bits per pixel:** G0's answer, 8 bits for map tiles and 4
+  for battle sprites (`GAME_FORMAT.md` §4).
+- **Q5 — when:** now. The game is built into **the current test image**,
+  on top of all the sync and Palm-behaviour commits, so one flash carries
+  both. This is the yes for G2.
+- **Q6 — towns' buildings:** **clean licences only.** Nothing under the XYG
+  licence, nor the four core sheets built from it, goes into the game. Towns
+  are laid out for this game from the clean sheets (`core_city_and_country`
+  and the other allowed ones); Tuxemon's routes are kept as they are.

@@ -29,17 +29,22 @@ Tuxemon (GPLv3 data, mostly CC-BY-SA art) converted into one file on the card,
 on-screen controls and an Auto-play checkbox. **G0 and G1 are built** (the
 owner asked for each on 2026-10-16), with nothing on the device yet:
 `GAME_FORMAT.md` and `tools/mkgame.py`, then the reader (`monster.c`) and
-the rules (`monster_play.c`) with their host gates. **Don't start G2 (the
-screens) without the owner's yes.**
+the rules (`monster_play.c`) with their host gates. The owner answered every
+open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
 
 - [x] The renders: the owner looked at Tuxemon's Route 1 as the device would
   draw it, 8-bit (2026-10-16: "Looks good"). The Spriters Resource was
   asked about and ruled out: its rips are the games' owners', not free.
-- [ ] The owner reviews `GAME_FORMAT.md` (G1 added `META` `0x22` and wrote
-  down the rules it settled in §2).
-- [ ] The owner decides §13 Q6: Tuxemon's town buildings are partly
-  XYG-licensed; the recommendation is towns laid out from the clean sheets.
-- [ ] Still open from the plan: §13 Q1, Q2, Q3, Q5.
+- [x] The owner reviewed `GAME_FORMAT.md` (2026-10-16: "fine").
+- [x] §13 Q6: clean licences only; towns laid out from the clean sheets.
+- [x] §13 Q1, Q2, Q3, Q5 (2026-10-16): the built file committed under
+  `courses/critters/` and offered by the web flasher; "Critters"; the screen
+  stays on on USB, dims and locks on battery, and the game pauses on lock;
+  built into the current test image now (the yes for G2).
+- [ ] G2, the screens (`GAME_PLAN.md` §12).
+- [ ] The clean region: towns from clean sheets, the player's sheet
+  confirmed, `courses/critters/game.bin` and its credits.
+- [ ] The web flasher's optional install.
 
 ## RESUME HERE — Palm behaviours from the archive review (approved 2026-10-15)
 
