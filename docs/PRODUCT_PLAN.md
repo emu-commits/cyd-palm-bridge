@@ -111,6 +111,31 @@ Not doing this. Wi-Fi only. The analysis, so it isn't relitigated:
   on-device first-run wizard (now specified as **P6, the Assistant onboarding**) plus a
   printed quick-start card.
 
+**Revisited 2026-10-15: Bluetooth with no app on the phone?** Still no. iOS exposes
+only fixed profiles to an app-less accessory, and none carries Calendar or Reminders:
+- **PBAP** (Classic BT, as car kits use) gives **contacts, read-only**, after the user
+  turns on "Sync Contacts". ESP-IDF has a PBAP client, and you can ask for fields
+  without photos. Edits on the device would never reach the phone, so it's only a
+  fallback if CardDAV can't cope with a large address book.
+- **ANCS** (BLE) gives live notifications, calendar alerts among them. That's alerts,
+  not data: a possible extra, never a sync. ESP-IDF ships a `ble_ancs` example.
+- **MAP, HFP, A2DP, AVRCP, CTS**: messages, audio, time. Nothing for the PIM apps.
+- **CarPlay and MFi/iAP2** need Apple's authentication chip, and still give no
+  calendar data: CarPlay's screens are video from the phone.
+- **Posing as an Apple Watch** isn't possible: a proprietary pairing with keys tied
+  to the Apple ID and to secure hardware, never publicly cloned, and any iOS update
+  could break it.
+- **RAM:** Bluedroid with Classic BT costs tens of KB of heap and shares the radio
+  with Wi-Fi. Measure it in QEMU before any Bluetooth feature goes ahead.
+- **Without a custom app, the only option is Apple Shortcuts over local Wi-Fi**
+  (Shortcuts ships with iOS): a personal automation finds events, reminders and
+  contacts and POSTs them to the CYD. It's mostly one-way: writing back is limited to
+  adding items, and stable IDs aren't guaranteed. It's fragile across iOS versions.
+  Keep it as a fallback, should iCloud authentication ever become the blocker.
+
+So CalDAV/CardDAV over Wi-Fi stays the sync path. The hard part is syncing a large
+account both ways in about 100 KB of RAM, and Bluetooth doesn't make that easier.
+
 ---
 
 ## 3) Games — the delight hook

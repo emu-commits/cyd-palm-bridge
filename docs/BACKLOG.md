@@ -716,6 +716,8 @@ follow-ups*.
   channel), co-working over ESP-NOW (needs Wi-Fi resident during a session —
   measure heap and battery first).
 - **BLE + a companion iOS app: dropped, not parked** — see `PRODUCT_PLAN.md` §2.
+  Bluetooth without an app (PBAP, ANCS, posing as a Watch) was looked at on
+  2026-10-15: it can't sync Calendar or To Do. Same section.
 
 ## Decided — kept so the reasoning is not relitigated
 
