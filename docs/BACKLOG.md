@@ -75,7 +75,8 @@ open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
 - [d] Critters' rooms on the bench: walking in at Home's door, out over the
   mat, Wren's Lab, the rest house (Nurse Hale rests the party inside).
 - [d] Auto-play on the bench: switched on from the menu, it walks, talks and
-  battles at a watchable pace (about four steps a second), the title says
+  battles at a watchable pace (it walks without stopping between steps, as
+  a held press does; its creature stands on its ground in battle), the title says
   "Auto-play", a tap on the game takes over, and the lock pauses it (waking
   carries on). How long it runs on battery, and whether it ever stands still
   or walks in circles.

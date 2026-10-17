@@ -16,6 +16,24 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-16 — Critters: backs on their ground, and Auto-play walks on
+
+From the owner, after the first look: Agnite's and Cardiling's backs were cut
+off at the bottom, over their ground strip, and Auto-play walked step, wait,
+step.
+
+- **The backs.** Tuxemon cuts some back sprites flat at the frame's last row
+  (Agnite's ends at row 63 of 64, Cardiling's too; Anoleaf's at 54), and the
+  player's creature was drawn at a fixed y 40, so a flat cut sat across the
+  ground (y 94–101) and under the menu's box. `sprite_load()` now finds the
+  back's lowest drawn row and the creature is drawn with it on the ground's
+  top (`ME_GROUND`): Agnite and Cardiling 10 px higher, Anoleaf 1.
+- **Walking.** Auto-play waited 4 ticks after each 4-tick step; a step's
+  last tick now goes straight on to the next press, for a held press too (it
+  stood still one tick between steps). Auto-play walks a step every 120 ms,
+  as a held press does, and waits only after pressing A (`AUTO_TALK`, 4
+  ticks), on a message and in menus.
+
 ### 2026-10-16 — Critters finished: the rooms, and G4, Auto-play
 
 The owner asked to "finish the critters game - including being able to walk

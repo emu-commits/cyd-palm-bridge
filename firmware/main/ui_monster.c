@@ -26,8 +26,9 @@
  * lock pauses the game rather than ending the battle (§13 Q3).
  *
  * AUTO-PLAY (§8): monster_bot.c decides, and this file presses the same
- * buttons a person would, at a pace one can watch: about four steps a
- * second, a message read in about a second, the menu cursor moving a line
+ * buttons a person would, at a pace one can watch: it walks as a held
+ * press does (a step every 120 ms, one after another with no stop between),
+ * a message read in about a second, the menu cursor moving a line
  * at a time to what it chose. Touching the game turns it off. The bot's
  * memory (about 3 KB, and 6 B a cell of the area it's in) is allocated when
  * it's turned on and freed when it's turned off or the game closes. */
@@ -64,7 +65,7 @@
 #define LINE_H     14               /* lv_font_palm's line height */
 #define MENU_MAX   8
 #define NAME_LEN   24
-#define AUTO_STEP  4                /* Auto-play's pauses, in ticks: after a step (which takes four more), */
+#define AUTO_TALK  4                /* Auto-play's pauses, in ticks (its steps follow each other with none): after pressing A, */
 #define AUTO_TEXT  30               /* on a message, */
 #define AUTO_MENU  10               /* and per line the menu cursor moves */
 
@@ -102,6 +103,7 @@ typedef struct {
     uint16_t sh_hp[MP_PARTY], sh_mon[MP_PARTY], sh_wild_hp;
     uint8_t  sh_active, sh_wild_gone, sh_me_gone, shakes;
     uint16_t spr_mon[2];            /* the sprites loaded: 0 the player's, 1 the wild one */
+    uint8_t  spr_foot;              /* the player's: its back's lowest drawn row */
     uint8_t  learn_pending, last_move, to_moves;    /* to_moves: a note, then the moves again */
     uint8_t  learn_who;
     uint16_t learn_move;
@@ -232,6 +234,15 @@ static void sprite_load(Mon *m, int s, uint16_t mon){
     m->spr_mon[s] = MG_NONE16;
     if(mg_mon(&m->g, mon, &r) || mg_sprite(&m->g, &r, SPR(m, s), MG_SPRITE_MAX) < 0) return;
     m->spr_mon[s] = mon;
+    if(s) return;
+    /* Tuxemon cuts some backs flat at the frame's foot (Agnite, Cardiling),
+     * others end higher: find where this one ends, to stand it on the ground */
+    const uint8_t *rec = SPR(m, 0);
+    int w = rec[0], h = rec[1];
+    const uint8_t *px = rec + 40 + w * h / 2;
+    m->spr_foot = 0;
+    for(int j = h - 1; j > 0 && !m->spr_foot; j--)
+        for(int i = 0; i < w / 2; i++) if(px[j * (w / 2) + i]){ m->spr_foot = (uint8_t)j; break; }
 }
 
 /* ---- composing the view ---- */
@@ -385,7 +396,7 @@ static void card(Mon *m, const Rect *c, int bw, int x, int y, int w, int h, int 
 #define FOE_SPR_X  166
 #define FOE_SPR_Y  0
 #define ME_SPR_X   14
-#define ME_SPR_Y   40
+#define ME_GROUND  94                /* the top of the player's ground: its creature's feet are on it */
 #define FOE_CARD_X 6
 #define FOE_CARD_Y 8
 #define ME_CARD_X  92
@@ -398,11 +409,11 @@ static void compose_battle(Mon *m, const Rect *c, int bw){
      * side's creature top right with its card to its left, the player's
      * bottom left with its card to its right */
     fill(m->band, bw, c, FOE_SPR_X - 8, 54, 80, 8, rgb(0xC9D8A8));     /* the ground they stand on */
-    fill(m->band, bw, c, ME_SPR_X - 6, 94, 80, 8, rgb(0xC9D8A8));
+    fill(m->band, bw, c, ME_SPR_X - 6, ME_GROUND, 80, 8, rgb(0xC9D8A8));
     card(m, c, bw, FOE_CARD_X, FOE_CARD_Y, CARD_W, 36, +1);
     card(m, c, bw, ME_CARD_X, ME_CARD_Y, CARD_W, 46, -1);
     if(!m->sh_wild_gone && m->spr_mon[1] != MG_NONE16) blit_sprite(m->band, bw, c, FOE_SPR_X, FOE_SPR_Y, SPR(m, 1), 0, 1);
-    if(!m->sh_me_gone && m->spr_mon[0] != MG_NONE16) blit_sprite(m->band, bw, c, ME_SPR_X, ME_SPR_Y, SPR(m, 0), 1, 1);
+    if(!m->sh_me_gone && m->spr_mon[0] != MG_NONE16) blit_sprite(m->band, bw, c, ME_SPR_X, ME_GROUND - 1 - m->spr_foot, SPR(m, 0), 1, 1);
     MpCreature *me = &m->w.party[m->sh_active];
     hp_bar(m, c, bw, FOE_CARD_X + 7, FOE_CARD_Y + 22, CARD_W - 14, m->sh_wild_hp, m->sh_wild_max);
     hp_bar(m, c, bw, ME_CARD_X + 7, ME_CARD_Y + 22, CARD_W - 14, m->sh_hp[m->sh_active], me->stat[MG_HP]);
@@ -1249,9 +1260,8 @@ static void bot_tick(Mon *m){
         box_say(m, "Every keeper in the region is beaten. Auto-play hands the game back to you.");
         return;
     }
-    if(k == MB_TALK) press_a(m);
+    if(k == MB_TALK){ press_a(m); m->bot_wait = AUTO_TALK; }
     else walk(m, d);
-    m->bot_wait = AUTO_STEP;
 }
 
 static void tick_cb(lv_timer_t *t){
@@ -1267,11 +1277,14 @@ static void tick_cb(lv_timer_t *t){
         m->anim--;
         if(m->anim == m->anim_len / 2) m->walk_col = 1;
         redraw();
-        if(!m->anim && m->battle_after){
+        if(m->anim) return;
+        if(m->battle_after){
             m->battle_after = 0;
             script_start(m);          /* a keeper's words first; then the card, at the battle */
+            return;
         }
-        return;
+        /* a step just ended: the next one starts this tick, so walking on
+         * (held, or Auto-play) never stands still between steps */
     }
     if(m->autoplay){ bot_tick(m); return; }
     if(m->turn_wait) m->turn_wait--;

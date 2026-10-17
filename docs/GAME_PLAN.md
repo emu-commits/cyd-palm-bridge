@@ -258,7 +258,8 @@ toggles "Show Completed"), not a checkbox; and the title bar reads
 
 - **The menu item** is in the game's menu. While it's on, the title bar
   says so, and the bot presses the same virtual buttons a person would, at a
-  watchable pace (about 4 steps a second; a message stays about a second;
+  watchable pace (it walks as a held press does, one step straight after
+  another; a message stays about a second;
   the menu cursor moves a line at a time to what it chose).
 - **Touching the game** (the picture, the text box or the controls) turns
   Auto-play off and gives control back, and so does choosing Party, New game
