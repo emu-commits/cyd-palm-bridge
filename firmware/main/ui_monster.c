@@ -116,10 +116,12 @@ typedef struct {
     uint16_t lut[256];
     uint16_t tile_id[NCACHE];
     uint32_t tile_age[NCACHE], clock;
-    uint8_t  tiles[NCACHE][MG_TILE * MG_TILE];       /* or the two battle sprites */
-    uint8_t  frames[MG_CHAR_FRAMES][MG_CHAR_W * MG_CHAR_H];
+    /* the three big buffers are blocks of their own: after a sync the heap
+     * has no 61 KB hole left for them all in one, but has room for each */
+    uint8_t  (*tiles)[MG_TILE * MG_TILE];           /* NCACHE of them, or the two battle sprites */
+    uint8_t  (*frames)[MG_CHAR_W * MG_CHAR_H];      /* MG_CHAR_FRAMES of them */
     uint8_t  have_frames;
-    uint16_t band[VW * BAND_ROWS] __attribute__((aligned(64)));   /* LVGL wants a draw buffer aligned */
+    uint16_t *band;                 /* VW x BAND_ROWS; malloc's 8-byte alignment is LVGL's 4 and more */
     lv_image_dsc_t img;
 
     /* a menu's lines, and the text the box shows them as */
@@ -1529,6 +1531,14 @@ void mon_ui_show(lv_obj_t *parent){
         if(!n){ mg_close(&m->g); free(m); no_memory(parent); return; }
         m = n;
     }
+    m->band = malloc(VW * BAND_ROWS * sizeof *m->band);
+    m->tiles = malloc(NCACHE * sizeof *m->tiles);
+    m->frames = malloc(MG_CHAR_FRAMES * sizeof *m->frames);
+    if(!m->band || !m->tiles || !m->frames){
+        free(m->band); free(m->tiles); free(m->frames);
+        if(!r) mg_close(&m->g);
+        free(m); no_memory(parent); return;
+    }
     m->head_cap = cap;
     g_mon = m;
     m->pending = m->held = m->pressed = -1;
@@ -1582,6 +1592,7 @@ void mon_ui_close(void){
     free(m->cred);
     mg_close(&m->g);
     g_mon = NULL;
+    free(m->band); free(m->tiles); free(m->frames);
     free(m);
 }
 

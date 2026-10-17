@@ -16,6 +16,24 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-16 — Critters opens after a sync
+
+From the owner: after a sync, Critters said there wasn't enough memory free,
+and trying again never worked. The game asked for one block of about 61 KB
+(the 96-tile cache 24,576 B, the draw band 19,200 B, the player's frames
+6,144 B, the rest about 11 KB with the area head; sizes from `sizeof` on the
+host and the largest head in `courses/critters/game.bin`, 2,600 B). A sync
+leaves the network stack's allocations (netif, event loop) in the heap after
+`wifi_down()`, so there was never again a hole that size, though the bytes
+were free (before any sync the device's largest block is 110,592 B, from the
+boot log).
+
+- The tile cache, the band and the frames are blocks of their own, allocated
+  when the game opens and freed when it closes; the largest is now 24.5 KB.
+  The total is the same. The smoke tour still ends at 0 B in use after
+  Critters.
+- On the bench (the owner): sync, then Critters, opens.
+
 ### 2026-10-16 — Critters: backs on their ground, and Auto-play walks on
 
 From the owner, after the first look: Agnite's and Cardiling's backs were cut
