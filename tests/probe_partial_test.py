@@ -112,7 +112,8 @@ def live(base, user, pw):
     req = urllib.request.Request(urllib.parse.urljoin(base, book), method="MKCOL", data=(
         '<D:mkcol xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav"><D:set><D:prop>'
         "<D:resourcetype><D:collection/><C:addressbook/></D:resourcetype>"
-        "</D:prop></D:set></D:mkcol>").encode())
+        "<D:displayname>%s</D:displayname>"
+        "</D:prop></D:set></D:mkcol>" % book.strip("/").split("/")[-1]).encode())
     req.add_header("Authorization", "Basic " + base64.b64encode(("%s:%s" % (user, pw)).encode()).decode())
     req.add_header("Content-Type", "application/xml")
     assert urllib.parse.urlsplit(base).hostname in ("localhost", "127.0.0.1")
@@ -142,11 +143,20 @@ def live(base, user, pw):
     ck(r["rows"][0]["full_bytes"] > 30000, "the biggest contact first")
     ck("Jane" not in out.stdout and "555" not in out.stdout, "the report holds no names or numbers")
 
+    # the account may hold other books (the gates before this one leave them,
+    # emptied), listed in no set order: find this one by its name
     out = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "probe_partial_card.py"),
-                          "--user", user, "--base", base], env=env,
+                          "--user", user, "--base", base, "--json"], env=env,
+                         capture_output=True, text=True, timeout=60)
+    found = json.loads(out.stdout).get("books_found") or []
+    name = book.strip("/").split("/")[-1]
+    ck(name in found, "discovery from the server's root finds the address books")
+    idx = found.index(name) + 1 if name in found else 1
+    out = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "probe_partial_card.py"),
+                          "--user", user, "--base", base, "--book-index", str(idx)], env=env,
                          capture_output=True, text=True, timeout=60)
     ck(out.returncode == 0 and "address books found" in out.stdout and "VERDICT" in out.stdout,
-       "discovery from the server's root finds the address books")
+       "the book picked by --book-index is probed")
 
     env["PROBE_PASS"] = "wrong"
     out = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "probe_partial_card.py"),

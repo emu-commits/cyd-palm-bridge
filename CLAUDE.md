@@ -298,8 +298,10 @@ items built, one commit each (`BACKLOG.md`'s "Palm behaviours" RESUME HERE,
   as none).
 - Smoke commands added: `R <back> <ahead>` (reminders over a span). The
   `p1_*`..`p8_*` shots are the screens to look at.
-- `run_gates.sh`'s `probe_partial` fails ("discovery from the server's
-  root") on `5150be6` too, with Radicale 3.8.3; it's the sync branch's.
+- `run_gates.sh`'s `probe_partial` used to fail ("discovery from the
+  server's root"): the earlier gates leave other, emptied address books and
+  the probe took book #1. Fixed 2026-10-16: the test names its book and picks
+  it with `--book-index`.
 
 1. **S6, the bench**, is the owner's (`[d]` items in `BACKLOG.md`). Any
    further work follows `SRS_PLAN.md` §10, keeping to its §7 budgets:
