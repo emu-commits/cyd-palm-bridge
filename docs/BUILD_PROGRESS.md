@@ -16,6 +16,977 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-16 — Critters opens after a sync
+
+From the owner: after a sync, Critters said there wasn't enough memory free,
+and trying again never worked. The game asked for one block of about 61 KB
+(the 96-tile cache 24,576 B, the draw band 19,200 B, the player's frames
+6,144 B, the rest about 11 KB with the area head; sizes from `sizeof` on the
+host and the largest head in `courses/critters/game.bin`, 2,600 B). A sync
+leaves the network stack's allocations (netif, event loop) in the heap after
+`wifi_down()`, so there was never again a hole that size, though the bytes
+were free (before any sync the device's largest block is 110,592 B, from the
+boot log).
+
+- The tile cache, the band and the frames are blocks of their own, allocated
+  when the game opens and freed when it closes; the largest is now 24.5 KB.
+  The total is the same. The smoke tour still ends at 0 B in use after
+  Critters.
+- On the bench (the owner): sync, then Critters, opens.
+
+### 2026-10-16 — Critters: backs on their ground, and Auto-play walks on
+
+From the owner, after the first look: Agnite's and Cardiling's backs were cut
+off at the bottom, over their ground strip, and Auto-play walked step, wait,
+step.
+
+- **The backs.** Tuxemon cuts some back sprites flat at the frame's last row
+  (Agnite's ends at row 63 of 64, Cardiling's too; Anoleaf's at 54), and the
+  player's creature was drawn at a fixed y 40, so a flat cut sat across the
+  ground (y 94–101) and under the menu's box. `sprite_load()` now finds the
+  back's lowest drawn row and the creature is drawn with it on the ground's
+  top (`ME_GROUND`): Agnite and Cardiling 10 px higher, Anoleaf 1.
+- **Walking.** Auto-play waited 4 ticks after each 4-tick step; a step's
+  last tick now goes straight on to the next press, for a held press too (it
+  stood still one tick between steps). Auto-play walks a step every 120 ms,
+  as a held press does, and waits only after pressing A (`AUTO_TALK`, 4
+  ticks), on a message and in menus.
+
+### 2026-10-16 — Critters finished: the rooms, and G4, Auto-play
+
+The owner asked to "finish the critters game - including being able to walk
+into any house with an open door. including the auto-play mode", then flash
+the board and deploy to the web emulator.
+
+- **The rooms.** Tuxemon's indoor sheets are partly XYG (`GAME_PLAN.md`
+  §10), so the rooms have a tileset of our own: `tools/gen_interior_sheet.py`
+  draws `tools/game_art/interior.png` (128 × 128, CC0; `--check` in
+  `tests/mkgame_test.py`), and the allow-list's `ours` now covers tilesets.
+  Home and Wren's Lab in Larkhollow and the Kestrel rest house, 11 × 9 each
+  (`tools/game_maps/`); each house stamp's door cell is walkable, with a
+  warp wanting "up" into the room and the mat inside one wanting "down" out.
+  Nurse Hale moved inside (she stood in the doorway); Rowan, Fern and Hazel
+  are new, with signs on the furniture. The halls have no door and stay
+  shut. **`game.bin` 505,680 → 663,532 B** (each room carries the six looks'
+  and its people's frames, 43–49 KB); the `game` partition is 960 KB.
+- **Auto-play** (`firmware/main/monster_bot.c`, no LVGL; `GAME_PLAN.md`
+  §8). It reads its goals from the file: rest when worn down (or under 75 %
+  before a keeper), else the nearest keeper not yet beaten, kept until
+  beaten, training on the zone whose levels suit it while below that
+  keeper's best, one level more per loss to them. A breadth-first search over
+  the area's cells (6 B a cell while on), warps between areas, keepers'
+  sight avoided while resting or training. In battle the rules' own damage ×
+  accuracy, a heal when low, a stronger creature swapped in, a catch when
+  the wild one is weak, a run when worn down. The screens press the same
+  buttons a person would (about four steps a second; the menu cursor moves
+  to its choice); the menu's "Auto-play" / "Stop Auto-play", the title
+  reading "Auto-play", a touch or a menu choice taking over, the lock
+  pausing it and waking carrying on (`g_mon_wake_auto` in `ui.c`, one byte).
+- **Found on the way** (the gate found each): a warp that wants "up" on a
+  row one can walk along (Route 1's top edge) was first reached sideways, so
+  the search recorded it as a place, not a door: doors are tracked apart
+  now. Training compared a 32-bit score with a 16-bit "none" and never
+  started. Choosing keepers by level sent the bot past the one it had lost
+  to, through his sight, over and over; choosing by distance ping-ponged at
+  the tunnel's mouth: the chosen keeper now sticks.
+- **Measured.** `make -C sim monster`, seed 1: the bot beats all nine
+  keepers with Agnite in 9,731 actions (7 losses), Anoleaf 10,580 (11),
+  Cardiling 9,859 (8). Over 60 runs (20 seeds each) all finished, at most
+  13,199 actions and 15 losses: the gate's limit is 40,000. `monster_fuzz`
+  plays Auto-play on every hostile file that opens (816 of 2,500). Firmware
+  (`espressif/idf:release-v5.5`): image **1,804,651 B** (+12,384 B over G2's
+  1,792,267); static DRAM unchanged, 81.59 %, 33,268 B free. The smoke32
+  tour gives back every byte on leaving (`heap: 0 bytes in use after
+  critters`).
+- Gates: every one in CLAUDE.md's list, all green (`run_gates.sh` not run:
+  nothing in `bridge/` changed).
+
+### 2026-10-16 — Critters' G3: the first region, its people, and the web emulator's card
+
+The owner asked for G3 (`GAME_PLAN.md` §12) and a deploy to the web
+emulator. Along the way they decided three things (§13): the colour variants
+first drawn as townspeople became **six looks the player chooses from**; the
+townspeople are **Tuxemon's own sheets, the Catch Challenger ones taken on
+Tuxemon's CC BY word** (the datapack's own repository states no licence);
+and the battle screen's names and bars go in **cards that point at their
+creature**.
+
+- **The format is 1.1** (`GAME_FORMAT.md`): people in each area's head
+  (48 B each: talk, trainer or healer; a flag to set, one to hide by, one to
+  show by; name, text, after; a trainer's three creatures), `META` `0x11`
+  (the player's looks, every area's first sheets) and `0x12` (the
+  starters). A 1.0 file still reads. **The save is version 2**: the flags,
+  where a loss comes back to, the look; a version 1 save loads.
+- **The rules** (`monster_play.c`): people are in the way; A talks (they
+  turn to the player); a trainer battles when spoken to or when the player
+  steps into their sight, their creatures one after another, no catching or
+  running; a healer rests the party and becomes where a loss comes back to.
+- **The converter**: layouts of our own (`tools/game_maps/`, `OwnArea`:
+  legend, stamps with solid masks, sand paths' edges by autotile), and
+  per-area warps, zones, signs and people in `game_region.json`.
+- **The region**: Larkhollow → Route 1 → Brideswood → Cotton Tunnel →
+  Kestrel. Tuxemon's Route 1 doesn't reach the Brideswood on foot (trees wall
+  off its east half), so its open north edge leads there. 27 creatures (seven
+  added: Nut, Bolt, Arthrobolt, Cateye, Dune Pincher, Djinnbo, Propellercat),
+  17 people, a story and dialogue of our own. 501,056 B.
+- **The screens**: people from the tile cache (a frame is two entries; the
+  cache is 96 tiles, since Kestrel shows 60), the keeper's script ("Keeper
+  Ada spots you!", "...sends out Cardiling!"), the look choice, battle cards,
+  a resting move skipped by the cursor, and each turn's menu at Fight (it
+  used to keep Run, so A A A after a failed run ran again but after a
+  Catch note fought). The smoke tour's `G area x y facing` jumps there.
+- **The web emulator** fetches `critters/game.bin` (copied into the site by
+  `make -C sim wasm`) onto its card before booting, so Critters plays there.
+- **Found by the fuzz gate:** a refused area kept its people count with no
+  list behind it; `mg_area_open` now leaves a refused area empty.
+
+Measured (smoke32, 32-bit as on the device): one heap block of 61,356 B
+while playing (52.5 KB in G2: the cache's 32 more tiles are 8 KB), 64,312 B
+with the credits open, 0 B left after leaving. The LVGL pool at least
+15,248 B free on the game's screens. The image 1,798,179 B; static DRAM
+147,460 B (81.59 %, unchanged). Gates: all of `CLAUDE.md`'s, green
+(`make test`, `make ftest`, every sim gate, smoke and smoke32,
+`mkcourse_test.py`, `mkgame_test.py`, the firmware build, wasm). The walk
+check in `mkgame_test.py` reaches every area and person from the start with
+Foreman Dale gone, and Kestrel is shut while he stands.
+
+### 2026-10-16 — The web flasher installs Critters, if asked
+
+`GAME_PLAN.md` §13 Q1: the committed `courses/critters/game.bin` is an
+optional install from the web flasher.
+
+- `partitions.csv` gains `game` (data, subtype 0x40, 960 KB at 0x310000,
+  after the 3 MB app). Nothing else moves, and the NVS check in
+  `package_firmware.py` still holds.
+- `tools/package_firmware.py` writes `manifest-critters.json` beside
+  `manifest.json`: the same parts plus `critters-game.bin` at the partition's
+  offset (refused if it isn't a game file or doesn't fit).
+- `sim/web/flash.html`: an "Also install Critters" checkbox, shown only when
+  the site has that manifest; it swaps the Install button's manifest.
+- `firmware/main/monster_install.c`, after the card mounts: a game in the
+  partition whose fingerprint isn't the one in `games/monster/installed.txt`
+  is copied to the card through `safefile.h`, opened once to check it, and
+  noted. So a game copied by hand is replaced only by a newer flash, and a
+  flash without the box (or an erased partition) leaves the card alone.
+
+Measured: the image 1,793,163 B; static DRAM 147,460 B (81.59 %). Checked:
+the firmware build and the packaging (both manifests written, the game at
+0x310000), the wasm build. Not checked here: the copy itself, which needs a
+card (QEMU has none): a `[d]` item.
+
+### 2026-10-16 — Critters' G2: the screens, in the Games folder
+
+The owner approved `GAME_FORMAT.md`, answered `GAME_PLAN.md` §13 and said
+yes to G2 (built into the current test image, with the sync and Palm
+behaviour commits). The game is **Critters**, the fifth icon in Games.
+
+- **`firmware/main/ui_monster.c`**, a file of its own (`ui.c` has one entry,
+  one dispatch line, its menu items and `show_critters()`):
+  - **the view without a canvas.** Its draw event composes the band LVGL is
+    drawing (at most the 40-row draw buffer) from a cache of 64 tiles at a
+    byte a pixel and the area's palette into a 240 x 40 RGB565 buffer, and
+    draws that as one image: one draw task per band, not one per tile. A
+    battle composes the two creatures (4-bit, from the tile cache's memory)
+    and the HP bars the same way. Labels and the text box are a handful of
+    LVGL objects over it.
+  - **the controls** are one object that draws its D-pad and A and B; a
+    press acts at once, a tap turns, a held direction walks (after a 150 ms
+    wait when it turned first). A step is four 4 px frames.
+  - the transition cards (an area's name; a dark beat before a battle), the
+    choice of three first creatures (the first three that start an
+    evolution line, of different types), the battle's menus (moves that are
+    resting say so and stay, the cursor remembers the last move), learning
+    a fifth move, Party, Save game, New game (the old save stays until the
+    new game is saved) and Credits, read from the file's `CRED`.
+- **§13 Q3:** `power_on_usb()` (no plausible cell, or 4.15 V and up: the
+  charger's hold) keeps the screen on while the game is open; on battery it
+  dims and locks as usual. **The lock pauses the game:** closing writes the
+  save, and a battle in progress to `pause.dat` (checked against the file's
+  fingerprint and the rules on the way back), and the unlock reopens the
+  game in the same battle (`resume_show()` reopens "Critters").
+- `MpWorld.head_cap`: the head buffer is sized to the file's largest head
+  (2,384 B) instead of `MG_HEAD_MAX` (16 KB); a smaller one is refused, never
+  overrun (`make -C sim monster` checks both).
+
+**Measured:**
+
+| | |
+|---|---|
+| The game's heap block, Route 1 open (sim, 32-bit, `sim_heap` accounting) | 52,508 B; 0 B left after leaving (`B`/`E`) |
+| LVGL pool free at the last game screen (smoke32, the device's pool) | 15,364 B |
+| Static DRAM (`idf.py size`) | 147,468 B, 81.59 %, 33,268 B free (+130 B) |
+| Firmware image | 1,792,267 B |
+
+Not measured yet: the frame rate, an area's load time and the heap during a
+sync on the device (`BACKLOG.md`, the `[d]` items).
+
+**Gates:** the smoke tour plays it from `courses/critters/game.bin` (the
+Makefile puts it on the card): the choice, walking, a battle, the lock and
+the resume mid-battle, Run, Credits, Party, Save, leaving with every byte
+back. Run 64- and 32-bit; all twelve sim gates, `make test`/`ftest`,
+`mkcourse_test`, `mkgame_test` and the firmware build pass.
+
+### 2026-10-16 — The monster game's G1: the reader and the rules, on the host
+
+`GAME_PLAN.md` §12 G1, which the owner asked for after G0. Nothing on the
+device changes: the firmware's `CMakeLists.txt` doesn't list the new files
+yet (G2 will).
+
+- **`firmware/main/monster.c`** reads `game.bin` as `course.c` reads a
+  course: every read bounded, every record's positions and strings checked
+  on open, an area's head, chunks and sprites when read, `mg_verify()` for
+  the rest. Its dump equals `mkgame.py --dump` byte for byte, on the fixture
+  and on the real Tuxemon build.
+- **`firmware/main/monster_play.c`** is the rules (`GAME_FORMAT.md` §2) in
+  integer arithmetic with one xorshift generator; the world's events; and
+  the save (32 B, then 40 B a creature, by stable ids, through `safefile.h`).
+  Each action returns a list of events for the screens to tell.
+- **The fixture**, `tests/data/game/`: `source.py` writes a Tuxemon-shaped
+  tree of our own (CC0): 5 creatures, 10 moves plus one left out, 6 types,
+  two maps (24 × 20 and 18 × 17) with water, a ledge, a fence and a wall as
+  lines, a one-way gate, trees with overlays, warps, zones, signs and an
+  unlisted tileset. `mkgame.py --unpinned` builds it: 44,772 B.
+- `META` gained `0x22` (the IV maximum, the experience multipliers), so the
+  real build is 132,380 B (20 B more).
+
+**Measured** (gcc, `sizeof`, 32-bit as on the device / 64-bit):
+
+| | 32-bit | 64-bit |
+|---|---|---|
+| `MonGame` (the open file, with the type table and shapes) | 1,016 B | 1,024 B |
+| `MpWorld` (party, box of 30, four chunks) | 4,748 B | 4,784 B |
+| `MpBattle` / `MpLog` | 56 / 580 B | 56 / 580 B |
+| An area's head (the caller's; the most accepted) | up to 16 KB; 152-184 B in the fixture, 0.6-2.4 KB in the spike | |
+
+No static data: `size` shows 0 B of `data` and `bss` for both files. In G2's
+heap budget (`GAME_PLAN.md` §9) that's about 6 KB plus the area's head.
+
+**Gates:**
+- `make -C sim monster` (ASan and UBSan): the dump round trip; the formulas
+  against numbers worked by hand (stats, the three experience groups, the
+  multiplier and its clamp, four damage cases, speed, the shake check
+  within 0.01 % of Tuxemon's float); every movement rule; 20,000 steps in the
+  grass for the 11 % rate and the 40/35/25 weights; losing, a level-up that
+  learns with four known, an evolution; 40 seeded battles against
+  `battle.txt` (31,551 B); the save's round trip (832 B: a party of 6 and
+  14 in the box), all 832 truncations and 6,656 flipped bits refused, an
+  unknown creature and a newer version refused, and a finished `.tmp`
+  promoted.
+- `monster_fuzz` (`make ftest`): 44,772 truncations, 41,456 flipped bits
+  (every bit before `ADAT`, 30,000 at random after it), 2,500 hostile files
+  with every CRC fixed, of which 808 opened and were played. 20 s under
+  ASan on this machine.
+- `tests/mkgame_test.py`: the fixture rebuilt twice to the committed bytes,
+  at 4 bits too, `ids.tsv` kept, a missing number given the next one, five
+  bad regions refused.
+- Proved to fail: a byte changed in `battle.txt`, and `mg_verify()` made to
+  pass everything (the fuzzer then reports the first flipped bit it
+  misses).
+
+**Found on the way:**
+- Tuxemon breaks a speed tie at random (`sub_priority`), never applies
+  `speed_offset` in a battle (only its tests do), and gives a new creature
+  the last four moves its level reaches, not the level-1 ones. `GAME_FORMAT.md`
+  §2 had the last two wrong or open.
+- The first `META` duplicate check gave the start (`0x10`) and the rules
+  (`0x20`) the same bit, and refused every file; the round trip caught it
+  on the first run.
+- `tests/nodelete.sh` failed `make test` on the section tag `"MOVE"` in
+  `monster.c` (the format's moves, not the HTTP method). The tags are now one
+  string of 4-byte tags, as the file holds them; the gate wasn't loosened
+  and no `nodelete-ok` was added.
+
+### 2026-10-16 — The monster game's G0: the file format and the converter
+
+`GAME_PLAN.md` §12 G0, which the owner asked for. Nothing on the device
+changes; it's a document and a computer-side tool.
+
+- **`docs/GAME_FORMAT.md`** is `game.bin`'s format, in `course.srs`'s style:
+  a section table with CRCs; creatures, moves, types, shapes, statuses,
+  learnsets and encounter tables as fixed records; areas as blocks of a
+  head (palette, warps, encounter zones, signs, overlays), tiles, the
+  characters' frames, and 16×16-cell chunks with a movement byte per cell
+  (can't enter / can't leave across each side). Its §2 is Tuxemon's rules
+  (stats, damage, hitting, statuses, catching, experience) read from its
+  source at the pinned commit.
+- **`tools/mkgame.py`** builds it from a Tuxemon checkout at commit
+  `9e6258f` (`--fetch` clones it; any other commit, or local changes, is
+  refused), building only what `tools/game_allow.tsv` lists. Its own reader
+  backs `--check`, `--dump` (for G1's C reader to match) and `--preview`
+  (the areas and sprites drawn from the built file, through RGB565).
+  `tools/game_region.json` is the region; `tools/game_ids.tsv` the stable
+  numbers.
+
+**Measured** (Pillow 12.3.0, PyYAML 6.0.2, the spike region: Spyder's
+Route 1 and Brideswood, 20 creatures):
+
+| | 8-bit maps | 4-bit maps |
+|---|---|---|
+| `game.bin` | 132,360 B | 117,376 B |
+| Battle sprites (20 × 4,136 B, always 4-bit) | 82,720 B | 82,720 B |
+| Route 1 (40 × 20): head, tiles, frames, chunks | 596 + 14,080 + 6,144 + 4,608 B | 496 + 7,040 + 3,072 + 4,608 B |
+| Brideswood (40 × 40) | 2,396 + 3,328 + 6,144 + 6,912 B | 2,360 + 1,664 + 3,072 + 6,912 B |
+| Colours used | 65 and 33: exact | 15 each |
+
+- Route 1 composites into 55 distinct tiles, Brideswood into 13 (and 538
+  overlay cells, the tree tops). The most different tiles on one screen,
+  scrolling included: 34 and 13.
+- Two builds compare equal with `cmp`, at both depths. The reader refused
+  all of 1,000 truncations and 3,000 single-bit flips (a scratch script).
+- Moves: the 20 creatures learn 76; 27 have only effects the first version
+  plays, 49 are left out.
+- 4 bits per pixel lost the encounter grass's colour (it looked like the
+  trees) and the flowers' reds and yellows, so maps are 8-bit (Q4). The
+  15-colour battle sprites (9 of the 20 had more) looked the same as the
+  originals. Building the 4-bit palette from distinct colours rather than
+  pixel counts banded Brideswood's ground, so that was dropped.
+- With 8-bit tiles, the heap estimate is 48 KB without a canvas or 74 KB
+  with an 8-bit one (`GAME_PLAN.md` §9); G2 measures.
+
+**Found on the way:**
+- **Tuxemon's towns use XYG-licensed art.** `core_buildings`, `core_set
+  pieces`, `core_indoor_walls` and `core_indoor_floors` are built partly
+  from Kelvin Shadewing's XYG sets (`ATTRIBUTIONS.md`), which the plan
+  excludes. With only the five clean core sheets allowed, 40 of the 263
+  maps lose nothing (routes, caves, tunnels), but every town loses its
+  houses. That's `GAME_PLAN.md` §13 Q6, for the owner.
+- Water is solid through a tile's `surfable: 0`, not through collision
+  objects; a first build let the player walk on Route 1's lake.
+- A short commit id can't be fetched from GitHub (`couldn't find remote ref
+  9e6258f`), so the pin is the full SHA.
+- Tuxemon's `base.po` has a string broken by a raw line break
+  (`spyder_omnichannel_dempsey1`); the reader joins it.
+
+### 2026-10-15 — Tips: the "i" that teaches what the screen can't show
+
+`PALM_ARCHIVE_REVIEW.md` §3.8. Palm's dialogs carried an "i" in the corner
+with a few lines on what each part is for and the shortcuts nothing on the
+screen shows. Address Book's tips were where people learned to tap beside a
+name for its note. The last three items added exactly that kind of shortcut.
+
+`tips_btn()` is a 20 px circled "i" (a 6 px larger click area) that opens
+`alert_titled("Tips", …)`. It sits on:
+
+- **the Details sheet**: for Date Book, what Alarm does (Reminders lists it,
+  even after a dark screen), what Repeat steps through, and that writing on
+  the Day view makes an event. For the other apps, what a category does and
+  that a title opens its menu.
+- **Find**: words that start with the query ("the" finds "Then", not
+  "Lathe"), and a tap on a result opens it. The query field gave up 24 px
+  for it.
+
+The text is three static strings in flash.
+
+Gates: the smoke opens Find for the first time (`p8_find`: "mee" finds
+"Board meeting" and "Meeting notes"), then `p8_find_tips`,
+`p8_details_tips` and `p8_details_back` (OK returns to the sheet). Against
+the baseline, the only other changed shots are `cal_details` (the "i") and
+`cal_event_in_week` (the repeat fix).
+
+### 2026-10-15 — The command stroke, and an Edit menu
+
+`PALM_ARCHIVE_REVIEW.md` §3.7, from the UI Guidelines' chapter on commands.
+
+- **The command stroke.** Palm's menu shortcut is a straight flick up and to
+  the right, then a letter. `graffiti.c` returns `GRAF_COMMAND` for it, the
+  mirror of Enter's flick with the same geometry (18 px each way, nearly
+  straight). The punctuation chip reads "CMD  x" while it waits and leaves
+  the same three ways (run, tapped, lapsed). The letters are Palm's own
+  (Table 4.5): N new record, D delete it (its confirmation still asks), U
+  undo, G Graffiti Help, R preferences. Each one toasts its name, as Palm's
+  command toolbar did; any other letter says there's no such command. The
+  password editor ignores the stroke.
+- **Edit menu**, on a form being written: Undo and Graffiti Help. Undo takes
+  back the last stroke (a character or a backspace). The field's text before
+  each stroke is kept in a buffer taken on the first stroke and freed with
+  the screen, so nothing stays resident. There's no Cut, Copy or Paste,
+  because nothing on the device would paste. The section appears only on
+  edit forms, so the lists' menus, whose rows the smoke taps by position,
+  don't move.
+- **Graffiti Help** is the stroke sheet the trainer already had, so it costs
+  nothing new in the pool. Opened from somewhere, its button reads Done and
+  goes back there through the resume record (P1). A form being written is
+  saved on the way, so Done reopens it on its record, a new one included.
+
+Gates: `make -C sim graf` gains the command stroke (200 flicks, 40-90 px at
+35-55°: 96.5%, and its mirror still Enter at 97.0%; the bar is 95%, which
+Enter has always shipped at). Letters, digits and punctuation are unchanged
+to the decimal, so no glyph was lost to it. Smoke: `p7_cmd_armed`,
+`p7_cmd_new` (N on the memo list), `p7_edit_menu`, `p7_undone` ("Ab" back to
+"A"), `p7_graffiti_help`, `p7_help_done` (the memo, saved), `p7_tidied`.
+
+### 2026-10-15 — Reminders that wait for you
+
+`PALM_ARCHIVE_REVIEW.md` §3.6, Palm OS 4's Attention Manager. Event alarms
+sync both ways and the Details sheet sets them, but nothing ever showed one:
+"alarms that actually fire" (`PRODUCT_PLAN.md` #3) waits on sound. The
+Attention Manager's half doesn't need sound. Every reminder that came due
+while the handheld was off goes in one list, dismissed together.
+
+- **The data**: `data_cal_alarms(from, to, cb)` gives each occurrence whose
+  alarm (the start less the record's advance, in minutes, hours or days)
+  falls in `(from, to]`, repeats expanded. Each comes with its date, and at
+  most the span's last `DATA_ALARM_DAYS` (7) days are looked at, so a
+  month asleep doesn't list four weeks of a weekly event. Untimed events
+  have no moment to ring and are skipped.
+- **The screen**: each wake (the lock is refreshed then) and every 30 s
+  while lit, `rem_check()` looks at what came due since the last look and
+  lists it in one titled "Reminders" box on `lv_layer_top()`, over the lock
+  or the app. A row reads "10:30p  Dentist", with the day added when it
+  isn't today. As on Palm, only OK dismisses it: a stray tap mustn't lose a
+  reminder nobody has read. The first look after boot only sets the mark,
+  a clock not yet set reports nothing, and Coach's session holds them back.
+  Resident cost: one `time_t` and three pointers. The rows live in the
+  box's labels.
+- **The smoke** can't wait for an alarm, so `R <back> <ahead>`
+  (`ui_test_reminders`) looks over an explicit span. It runs from a day back
+  to two ahead, which holds an event made "today" whenever the tour runs.
+
+Gates: `make -C sim data` (due at the start less the advance, the span's end
+included and only once, a weekly from 2030 an hour early on this week's
+Friday, a month asleep cut to a week, an untimed event never);
+`p6_reminders_on_wake` (the tour's daily event: today, Fri and Sat, over the
+lock), `p6_still_there` (a tap beside it changes nothing),
+`p6_after_wake` (OK, the swipe, and the Week view again).
+
+### 2026-10-15 — A repeat set on the device repeats
+
+Found while building reminders (P6): the smoke's `cal_event_in_week`, the
+shot meant to prove an event made on the device was written, has shown an
+empty week since the repeat work (`3839f19`). Its exit code stayed green. The event
+was written. But the Details sheet sets a repeat and no end, so the end
+date packed as zeros, which reads back as 1920-00-00. Once
+`appt_occurs_on()` honoured end dates, as it must for iCloud's `UNTIL`, the
+event occurred on no day: not in the Day view, the week, the month dots or
+the lock's NEXT.
+
+- `edit_commit()` saves a repeat with no end as `repeatForever`.
+- `ApptUnpack()` reads an end with no month or day as no end, so events
+  already saved this way on a device show again, and a sync doesn't send
+  their 1920 end to the account.
+
+Gates: `recur_test` (a device-made repeat packs, reads back with no end,
+and is on its day and each after; both checks fail on the old decoder).
+`cal_event_in_week` now reads "Thu 10/15  1 event".
+
+### 2026-10-15 — Find matches the start of words
+
+`PALM_ARCHIVE_REVIEW.md` §3.5. The UI Guidelines define Find as "a
+prefix-only case-insensitive search on each word": "the" finds "Then" and
+"There", not "Lathe". They also warn against "improving" on it, because
+people know the built-in behaviour. Ours matched anywhere, so a short query
+in a big account filled the 60-row result cap with words that only contained
+it.
+
+`ci_find_n()` (`bridge/find.c`) now accepts a match only at the start of the
+text or after a byte that isn't a letter or digit. Bytes past ASCII count as
+letters (CP1252's é, ü), so "ller" doesn't start a word inside "Müller". A
+digit after "-" does start one, so "1212" still finds "555-1212".
+
+Gate: `find_test` (in `make test`) gains the guide's own example as a memo
+("How to use a lathe": "the" finds two memos, not it), middles of words in
+each app that must not match, and the phone number after a dash. Its old
+"a common letter matches several" check now expects the one word that starts
+with "a". Run against the old matcher, five of the checks fail.
+
+### 2026-10-15 — Palm's alert conventions
+
+`PALM_ARCHIVE_REVIEW.md` §3.4, from the UI Guidelines' chapter on forms:
+
+- **The verb on the left.** Palm's alerts answer the question with its own
+  verb first, then Cancel. Delete, Stop (HotSync) and Remove (a Study course)
+  were on the right; they're on the left now. A tap outside the panel is
+  still Cancel, which matches Palm's least-destructive default.
+- **A title that names the operation**: `dlg_title()` draws Palm's black
+  strip across a dialog's top ("Delete Memo", "HotSync", "Remove Course").
+  `alert_titled()` is a Palm alert: the title, the message, and OK at the
+  bottom left. `alert_show()` without a title is unchanged.
+- **Never dimmed; it says why.** Study's Lessons and Reviews doors were
+  disabled when empty. Now a tap explains: no new lessons yet (or every
+  lesson done), or when the next review is due ("tomorrow at 12:23a").
+  HotSync's button while stopping keeps its disabled look, because it is a
+  progress state, not a command that doesn't apply.
+
+Gates: `p4_delete_confirm` and `p4_deleted` (the left button deletes),
+`p4_reviews_why`, and `p4_remove_course` then `p4_course_kept` (Cancel, now
+on the right, keeps it).
+
+### 2026-10-15 — The title opens the menu, and the menu remembers
+
+`PALM_ARCHIVE_REVIEW.md` §3.3. Since Palm OS 3.5, tapping a form's title has
+opened its menu; the Zen of Palm holds this up as the example of a feature
+that costs a novice nothing and saves the regular a reach. The title label is
+clickable now, with a 6 px larger click area so a short title is still a
+target, and it calls the same `menu_open()` as Menu.
+
+Palm also reopens the menu on the item chosen last, for as long as that form
+is up. `menu_remember_cb` is the first event handler on every menu item: it
+records the action and the screen's identity, which is the resume record's
+app and view, not one drawing of it, because Show Completed redraws the
+To Do list and it's still the same form. The remembered row is drawn
+inverted. Going to another screen forgets it.
+
+Gates: `p3_title_menu` (the To Do list's menu, opened from the title),
+`p3_menu_remembered` (after Hide Completed, the title reopens the menu with
+that row inverted, reading Show Completed). Picking it again puts the list
+back for the rest of the tour.
+
+### 2026-10-15 — Write on the Day view to make an event
+
+`PALM_ARCHIVE_REVIEW.md` §3.2, from the Zen of Palm: "just write a 3 to
+create an event that starts at 3:00". The Day view has no focused field, so a
+stroke there was recognised and dropped. Now the first character written
+there opens New event on the day shown (`day_write_to_new()`):
+
+- **a digit is the start hour**, read inside a waking day: 1 to 7 are 1 to
+  7 pm, 8 and 9 am, and 0 is 10 am. The digit is used up; the description
+  has the focus.
+- **a letter starts the description** and is typed as any letter is, so the
+  field's capitals rule applies.
+
+New event stays on the screen for anyone who doesn't know this. The smoke's
+typing hook (`k`) takes the same path, so the gate drives it as the
+recogniser would.
+
+Gates: `p2_digit_event` ("3" gives a 3:00 pm event on the day shown),
+`p2_letter_event` ("Lunch" in the description), `p2_day_unchanged` (both
+cancelled; the day as it was).
+
+### 2026-10-15 — Waking goes back to where you were, and leaving a form saves it
+
+From `PALM_ARCHIVE_REVIEW.md` §3.1 (Palm's "return to the last form" and
+"save the data before the user exits the form"). The lock frees the open app
+when the screen sleeps, which it must, because the pool can't hold an app and
+the dashboard at once. Unlock then always built the launcher, and an edit
+form open at the time was lost. So was one left by Home, Find or the Menu:
+only Done saved.
+
+- **Leaving saves.** `content_clear()` saves an edit form that nothing has
+  saved or cancelled (`g_edit_live`) if it holds at least one character,
+  Palm's minimum. Done and Cancel clear the flag first; Cancel still
+  discards. The form keeps its own app and field count, because Settings and
+  the launcher reset `cur_app` and `g_nfields` before they clear. A delete
+  from the form's own menu, and Remove demo data, drop the flag so the
+  record isn't written straight back.
+- **Unlock resumes.** A resume record (`g_resume`, 28 bytes) holds the app
+  from `show_app()`, or Find or Settings, and a finer data view: list,
+  detail, edit, or Date Book's day, week or month. Every `content_clear()`
+  marks the view stale, and the screens that can be rebuilt set it again.
+  `resume_show()` rebuilds the view, else the app's entry, else the
+  launcher. A record that went away meanwhile falls back to its app, and so
+  does a contact edit while Address is read-only. An edit form saved by the
+  lock reopens on its record: `data_last_new_uid()` gives a new record's
+  uid once the card has assigned it.
+- **Save reports failure.** Done used to toast "Saved" whatever the write
+  returned; it says "Could not save" now.
+
+Gates: the smoke writes half a memo, raises the lock (`L`) and unlocks
+(`p1_resumed_edit`: the form, with the text), leaves a second memo by Home
+(`p1_home_saved`, the toast), and the Planner lists both, once each
+(`p1_memos_kept`). A lock over the Day view wakes on it (`p1_day_resumed`).
+`make -C sim data` checks `data_last_new_uid()`. The pool's low-water mark
+is unchanged (6,460 B, at `r11_lock_over_calc`).
+
+### 2026-10-14 — A read-only probe: does iCloud honour partial address-data?
+
+Whether the device can stop downloading contact photos depends on iCloud
+honouring a partial `addressbook-multiget` (RFC 6352 §10.4.2), which nobody
+had checked. `tools/probe_partial_card.py` (standard library only) finds
+the account's address books, lists the contacts with their sizes, and
+fetches a sample (the 20 biggest, or `--all`) twice: whole, and asking only
+for `objfile.c`'s `RD_CARD` properties. Per contact it compares the two by
+property name: PHOTO in each, the `item1.` groups, the Palm's lines exact
+or only ungrouped, anything extra or missing. The verdict is HONOURED,
+HONOURED (groups changed), IGNORED, REFUSED or DIFFERENT. It also says how
+many contacts are over 8 KB and over 16 KB, and how long each reply took
+from the computer, which is the size of a full resync.
+
+It sends PROPFIND and REPORT only (`Probe.request` refuses anything else
+before sending), the credentials go only to the host they were given for
+(or another `*.icloud.com`, where iCloud moves an account), and the report
+holds counts, sizes and property names, never values.
+
+Gate: `tests/probe_partial_test.py` in `run_gates.sh`. Offline, every other
+method refused, unfolding, and each verdict from made-up replies; it also
+checks the property list against `objfile.c`. Live against Radicale: a
+contact with a 30 KB photo and one without, discovered from the root,
+measured (one over 8 and 16 KB), and IGNORED, which is what Radicale does;
+no name or number in the report; a wrong password is a clear rc 2. All
+`run_gates.sh` gates green.
+
+### 2026-10-14 — Contacts are read-only on the device while Address syncs
+
+The owner's rule, after reading how photo contacts are sent: "if we can't
+say all contact edits will sync, then we should stop syncing any and all
+contact edits and be clear about the decision." An edit to a contact goes
+back to iCloud whole (CardDAV has no partial update), photo included, and
+the device's PUT holds its body in RAM: a merged contact over 16 KB was kept
+on the device as *unsent*, with a log line and a word on the Done line as
+the only sign. So:
+- **`data_app_readonly()`** (`data.c`): Address, while it syncs (an account
+  and an Address collection). Without an account, Address edits as before.
+- **The screens:** no New on the Address bar (Look Up takes its room), a
+  contact's detail has Done and "Read-only: edit contacts on your phone"
+  where Delete and Edit were, the menu has no Record section; `show_edit()`
+  and `ask_delete()` refuse it too. A device-only delete is refused as
+  well: hiding a contact is also a change that never reaches iCloud.
+- **The engine:** `hotsync.c` runs the Address collection pull-only whatever
+  Settings ▸ Sync ▸ Changes says; a contact changed before this firmware
+  waits on the device. The Changes picker and the README say so.
+- Contact edits come back only when every one can reach iCloud: a PUT
+  streamed from the card, and the other refusals (no master component, a
+  Palm view over 8 KB) settled (`BACKLOG.md`, first RESUME HERE).
+
+Gates: `make -C sim data` checks `data_app_readonly` (editable with no
+collection, read-only with one, a syncing Date Book still editable); every
+gate in `CLAUDE.md`'s list green but wasm (no emsdk here). Scratch smoke
+shots (a `config.ini` with an Address collection) of the list, detail and
+menu were looked at.
+
+**Firmware** (built as below, `git archive` of `03ea728` and this tree): image
+1,752,267 → 1,752,575 B (+308 B); static DRAM unchanged, 147,316 B
+(81.51 %), 33,420 B free.
+
+### 2026-10-14 — To Do keeps the open tasks and those done lately
+
+`BACKLOG.md` §Engine 10. A Reminders list ten years old is thousands of
+finished tasks, and To Do synced the whole list. Now, as Date Book's window
+does, the server lists what the device keeps and anything else leaves the
+device without being touched on the server:
+- `dav_query_todos()` sends two `calendar-query` REPORTs: VTODOs with no
+  `COMPLETED` (open), and those with `COMPLETED` since a date (RFC 4791
+  `prop-filter` with `is-not-defined` / `time-range`; Radicale answers both,
+  probed by hand first). The host and device transports share one
+  members-listing helper with the window query.
+- `sync_set_todo_window()` makes it the listing for `KIND_TODO`, with the
+  window's semantics (`windowed`: not listed is not deleted). A server that
+  doesn't answer is synced whole.
+- A task ticked on the device must stop being listed as open, so the merge
+  adds `COMPLETED:<now, UTC>` when the device's status group says completed
+  (`obj_merge`'s new `stamp`; none if the clock isn't set).
+- Config `todo_done_days` (default 14; 0 = the whole list), Settings ▸ Sync
+  ▸ To Do ("Open, and done in 2 weeks" / "Everything (slow)"), and HotSync
+  sets it per run.
+
+Gates: `todos` (Radicale, in `run_gates.sh`): an open task, one done three
+days ago and one done in 2019; a fresh device takes the first two; ticked on
+the device it goes up done with a COMPLETED time and Apple's properties
+kept; done long ago on the phone it leaves the device; without the window
+everything comes down; the server keeps all three throughout.
+`objfile_test` checks the stamp; `config_test` the key. Smoke shots
+`w9_todo_pick`, `w9_sync_todo`. All 18 sync gates green.
+
+**Firmware, this day's commits** (each built from `git archive` of the commit
+in the IDF v5.5 container, LVGL v9.5.0 local in a scratch copy; static DRAM
+from `idf.py size`):
+
+| commit | image | static DRAM used | free |
+|---|---|---|---|
+| before (`cf7b6e2`) | 1,737,867 B | 160,612 B (88.87 %) | 20,124 B |
+| merge into the server's copy (`81ea2cd`) | 1,744,571 B | 160,612 B | 20,124 B |
+| read-only switch (`97624ef`) | 1,745,295 B | 160,612 B | 20,124 B |
+| three-way merge (`fa09618`) | 1,747,915 B | 160,612 B | 20,124 B |
+| streaming rewrites (`666e71b`) | 1,747,931 B | **147,300 B (81.5 %)** | **33,436 B** |
+| repeating events (`3839f19`) | 1,750,591 B | 147,300 B | 33,436 B |
+| To Do (`48dac7f`) | 1,752,267 B | 147,316 B (81.51 %) | 33,420 B |
+
+The 13,312 B of static DRAM back is the rewrite arena (12 KB) and its table.
+
+### 2026-10-14 — Repeating events show on the days they occur
+
+`BACKLOG.md` §Engine 9. The device drew every event on its start date only:
+the Day view, the week's counts, the month's dots and the lock screen's next
+event all compared the record's date. So the calendar window, which fetches a
+weekly meeting that began in 2019 because it recurs this week, kept it on the
+device and showed it nowhere a window covers. On a ten-year calendar that is
+most recurring meetings.
+
+`appt_occurs_on()` and `appt_next_on()` (`bridge/datebook.c`, so the host
+gates run them) follow Palm's repeat rules: daily; weekly on its days, every
+N weeks counted in weeks that begin on the record's start of week; monthly
+by date (a 31st skips the short months) or by "nth weekday" (Palm's
+`dom1stSun`..`domLastSat`); yearly (a leap day in leap years); the end date;
+the exceptions. Dates are integers (days from 1970) both ways. The four
+callers use them; the lock screen asks for the next occurrence in the year
+ahead, from tomorrow if today's has begun.
+
+The parser now reads `BYDAY=2TU` / `-1FR` as Palm's monthly by day (and the
+emitter writes it back the same way, so a merge sees no change), turns
+`COUNT=n` into the nth occurrence's date (counted before exceptions, as RFC
+5545 does), and gives a weekly without `BYDAY` its start's weekday. A series
+with more than 16 `EXDATE`s keeps the latest 16: the ones a window can show.
+
+A moved occurrence (`RECURRENCE-ID`) still shows at the series' time: a
+Palm record can't hold it, and a second record for it would be pushed as a
+new event.
+
+Gates: `recur_test` (offline, in `make test`): a weekly from 2019, every
+other week on two days, no `BYDAY`, the second Tuesday and the last Friday
+both ways, `COUNT`, forty exceptions, the 31st, a leap day. `make -C sim
+data`: a weekly meeting from 2019 is listed on Monday 12 Oct 2026 and not
+the Tuesday, and every Monday of the month is dotted. All 17 sync gates
+green.
+
+### 2026-10-14 — Every database rewrite streams; a real address book survives an edit
+
+`BACKLOG.md` §Engine 8, the device side, and a bug that predates this work:
+an edit, a delete or a category change on the device rewrote the database
+through a 12 KB, 64-record static arena, and `pdb_read` stopped when it
+filled, so **only the first 64 records (or 12 KB) were written back**.
+Editing one contact in a 2,000-contact book left 64 on the device; an edit
+to a record past the cap wasn't found and was appended as a new record,
+which the next sync would have pushed as a duplicate. (Under the engine
+before 2026-10-13 the missing records would have gone up as deletions.)
+It went unnoticed because every database on the bench was small.
+
+`stream_rewrite()` (`firmware/main/data.c`) walks the database and writes
+each record through the streaming writer (`PdbW`: bytes to a temp file on
+the card), with a per-record fate (keep, change, drop) and an optional
+append. The live file is replaced only if every record the header declares
+was read and written; otherwise it is left as it was. Record edit, delete
+and tombstone, the category editor, the boot-time category backfill,
+removing the demo rows, and the dev test-event cleanup all use it. The 12 KB
+arena and its 64-entry table are gone from static DRAM. An edit costs two
+reads of the database (find, then copy) and one write.
+
+`PdbW`'s per-record index is packed from 16 to 12 bytes (uid and attr in one
+word, a 16-bit length), so a sync's output index for 2,000 contacts is
+24 KB, not 32 KB, in its one contiguous block.
+
+Gate: `make -C sim data` writes 2,000 contacts and edits contact 1600 (past
+the old cap), deletes 1700, renames a category and adds one: 2,000 stay
+(2,001 after the add), the edit lands on 1600, the last contact is
+untouched. The old `data.c` crashes on these cases. All 17 sync gates green
+with the packed writer.
+
+### 2026-10-14 — The merge is three-way, against each record's base
+
+Found while planning the contacts step: the merge decided what the device
+changed by comparing its record with the server's *current* copy as parsed
+today. A record pulled by an older parser differs from today's parse where
+nobody changed anything (before the previous entry `item1.EMAIL` was
+invisible), so editing just the note of such a contact would have rewritten
+its phone slots and dropped that email.
+
+Now every record the merge keeps is also written to a **base** beside the
+map (`<map>.bdat`: the records back to back; `<map>.bidx`: one 28-byte row
+per uid, sorted, binary-searched), published with the map, carried forward
+for a record kept unsent, and removed rather than left stale if it can't be
+written whole. `obj_merge` takes three emitted components: a group is the
+device's edit only where the record now differs from its base; the server's
+copy says which lines are the Palm's. The phone slots are a set: a number
+removed or changed is found among the server's lines by value and only that
+line goes (or takes the new value in place); new numbers go after the last;
+a shift of the Palm's slots rewrites nothing. An address edit when the
+Palm's address is no longer the base's is refused (unsent). An edit with
+**no base** (made before this firmware's first sync) goes the conflict route,
+as a 412 does: never a guessed merge.
+
+Gates: `objfile_test` adds the old-parser contact (its note edited: every
+phone and email line exactly as it was, `item1.EMAIL` included) and a
+cleared number (only that line goes); `fidelity` adds an edit with no base
+(a conflict, the server's copy identical, the base written again). All 17
+gates green. The base costs a second copy of each collection's records on
+the card (Address: about 400 KB for 2,000 contacts) and no RAM beyond a
+transient 4 KB during an edit's merge.
+
+### 2026-10-14 — Read-only: a switch, on for a new account
+
+`BACKLOG.md` §Engine 7. The engine has had a pull-only mode since the memory
+rework (no PUT; local edits wait), but `hotsync.c` forced it off. Now it is
+the owner's: **Settings ▸ Sync ▸ Changes**, "Read-only" or "Send my
+changes", config key `read_only`. It is **on by default**: a `config.ini`
+without the key reads as read-only, so a device updated to this build starts
+read-only, and editing the Apple ID turns it back on ("New account:
+read-only for now"). The log's budget line and the Done line say so.
+
+The engine's pull-only path had no gate. `fidelity` now runs it: two events
+come down read-only; the device edits one and makes a new one while the
+phone edits the other; the sync sends nothing (the server's copy is
+identical, no new object), both changes wait on the device, and the phone's
+edit still comes down; turned off, the edit and the new event go up. Its log
+line says "read-only -- the change waits on the device" instead of "push
+FAILED (HTTP 0)". `config_test` checks the default, the round trip, and a
+file without the key. Smoke shots `w9_changes_pick`, `w9_sync_changes`.
+
+### 2026-10-14 — An edit merges into the server's copy; big objects read through a Palm view
+
+The first of the steps to finish sync (`BACKLOG.md` §Engine 6, and the parse
+side of 9). Until now an edit made on the device was sent as a body rebuilt
+from the Palm record, which *replaced* the iCloud object: editing a 10-year-old
+event dropped its location, attendees, URL, extra alarms and moved
+occurrences; editing a contact dropped its photo, birthday, URLs and every
+number past the fifth.
+
+**`bridge/objfile.c`** reads a server object off the card a physical line at a
+time, never whole (a contact with a photo is tens of KB; the device's fetch
+buffer is 8 KB):
+- `obj_scan` finds the master component (the VEVENT without a RECURRENCE-ID)
+  and counts what the merge needs (ADR, TEL/EMAIL, VTIMEZONE ids).
+- `obj_filter` writes the **Palm view**: only the master's lines the codec
+  reads, unfolded. Every fetch in the engine now goes through it (the cache
+  is read in place, an uncached object is streamed to the card with the new
+  `dav_get_file`), so a 40 KB photo contact parses in a 594 B view, and a
+  moved occurrence can no longer overwrite its series' fields.
+- `obj_merge` writes the server's object back **byte for byte**, with only the
+  Palm-owned groups that the device changed swapped in. A group is replaced
+  only if the emitter's lines for it differ between the server's copy and the
+  device's record, so an untouched field is never rewritten. The phone slots
+  go one by one (an unedited slot keeps its TYPE, PREF and `item1.` label);
+  the Palm's address is the last ADR, so a home address before it is kept;
+  numbers past the fifth are never the Palm's. A changed time in a zone the
+  object has no VTIMEZONE for gets the device's.
+
+**The engine** (`pushLocal` → `mergeEdit`): an edit to an object the server
+has streams the current copy down, merges, and PUTs with If-Match; the
+`local` conflict policy now sends If-Match too (it was unconditional), and
+its 412 takes the server's copy. Refused, and kept on the device as
+**unsent** (a new `SyncStats` count, in the device log and its Done line):
+a copy with no master component, a Palm view too big, a merged body over
+16 KB on the device (`dav_put` holds a PUT body in RAM there), and moving or
+re-repeating a series that has moved occurrences (they're tied to its old
+start).
+
+**Read side fixes found on the way:** Apple's grouped vCard properties
+(`item1.EMAIL`, `item2.ADR`) were invisible to `vcard_parse`, so those emails
+and addresses never reached the device; an event whose end is a `DURATION`
+had no end time.
+
+**Gates:** `objfile_test` (offline, in `make test`): a series with a moved
+occurrence, attendees and two alarms; a 43 KB contact with eight numbers and
+two addresses; a reminder; nothing-changed returns the object identical;
+odd inputs. `fidelity` (in `run_gates.sh`, built with the device's 8 KB
+fetch buffer): the same shapes through Radicale, edited on the "device",
+compared before and after on the server; a both-sides edit under `local`
+keeps the guest the phone just added; the refused series move leaves the
+server's copy identical and the edit on the device. Radicale re-serializes
+vCards (emails first), which the gate allows for. All 17 gates green.
+
+**Firmware** (IDF v5.5 container, LVGL v9.5.0 local in a scratch copy):
+1,744,571 B, +6,704 B over the previous commit's 1,737,867 B; static DRAM
+unchanged at 160,612 B (88.87 %). The merge path's stack is about the pull
+path's (a 4 KB record and the emitter's buffers); the sync task's low-water
+log will show it on the bench.
+
+### 2026-10-13 — Nothing is ever deleted from the cloud
+
+From the owner, before syncing a 10-year-old iCloud account: "remove any sync
+code that deletes from iCloud. We must set a hard rule now to never delete
+anything from the cloud."
+
+**What could delete before:** one function, `dav_delete()` (host curl and
+device `esp_http_client`), called from three places in the merge: a
+tombstone against an unchanged server copy, the `local` conflict policy on a
+tombstone, and a record mapped but missing locally while the mass-delete
+guard was down. All three are gone, and so is the function.
+
+**What happens instead:**
+- *A delete on the device* (a tombstone) takes the record off the device and
+  keeps its map row with hash 0, `HIDDEN_HASH`, so the server's copy isn't
+  pulled back. If the server's copy changes later (edited on the phone), it
+  comes back. Counted as `hidden` in `SyncStats`; `pushDel` no longer exists,
+  so no code can count one.
+- *A record missing from the local database* without a tombstone is the card
+  having lost it, and is restored from the server, whatever the number. That
+  was the mass-delete guard's job above a threshold; with no deletion to
+  hold back, the guard and `MASSDEL_MIN` are gone.
+- *Outside the calendar window*: pruned on the device, as before; a hidden
+  record's row is carried while it's out, so it stays hidden when it's back.
+
+**Belt and braces:** the device's `davreq()` allow-lists GET, PUT, PROPFIND
+and REPORT; the host transport refuses a `-X DELETE` or `-X MOVE` command;
+`tests/nodelete.sh` (first in `make test`, so CI) fails on a DELETE/MOVE
+request or a `dav_delete` in `bridge/`, `firmware/` or `sim/`, checks its own
+pattern on four probes, and caught every line of the old code when run
+against it. The gates empty their Radicale with `tests/radicale_rm.h`, which
+exits on any server not on localhost.
+
+**The delete dialog** says "From this device only. The copy in your account
+is kept." in an app that syncs (`data_app_syncs()`); the panel grows from 96
+to 112 px for it. Looked at in a simulator spike with syncing forced on (the
+smoke has no account, so its walk never shows the note).
+
+**Gates:** `massdel` rewritten around the rule (whole database lost, one
+record lost, a device delete never reaching the server and staying hidden
+until a server edit, both-sides delete, tombstones and losses together);
+`incremental` and `window` now assert the server keeps the deleted record.
+All of `run_gates.sh` green.
+
+**Firmware** (`espressif/idf:release-v5.5`, LVGL v9.5.0 as a local component
+in a scratch copy, the HEAD before this change built the same way alongside):
+1,737,867 B against 1,738,191 B, 324 B smaller; static DRAM unchanged at
+160,612 B (88.87 %, 20,124 B free). `make -C sim wasm` not run (no emsdk
+here).
+
+### 2026-10-01 — Sync for a real account: the sort on the card, a calendar window, batched downloads
+
+From the owner: "start with the external sort, the window and pruning rule,
+batched downloads. Focus on a very tight time window". A real iCloud account
+holds years of events; the first sync enumerated every object, fetched each
+one with its own GET (two for a new one), and refused any collection whose
+index files didn't fit in one block of RAM, a few hundred records.
+
+**The sort** (`sync_sort_file()`, `bridge/sync.c`) works in a bounded buffer,
+4 KB on the device: a file that fits is sorted there; a bigger one is cut
+into sorted runs on the card and merged four at a time, in as many passes as
+it takes. RAM is the same whatever the size: ~5.1 KB building a run, ~5.3 KB
+merging (four 512 B line buffers and five open files), inside HotSync's
+6 KB sort reserve. The only refusal left is a line longer than the budget.
+
+**The window** (`sync_set_window()`): Date Book is listed with a CalDAV
+`calendar-query` and a `time-range` filter, which the server applies to
+recurrences too. Default: yesterday to two weeks ahead (`cal_days_back = 1`,
+`cal_days_ahead = 14`; Settings ▸ Sync ▸ Calendar offers 2 weeks, a month,
+3 months or everything). **The pruning rule:** a mapped object missing from
+the listing is *not listed* (a new state, not a deletion):
+- an unchanged copy is pruned from the device and nothing is sent;
+- a copy the device edited, tombstoned, or lost is checked first with a
+  one-object PROPFIND (`dav_probe`): still there, and the ordinary rules
+  apply (the edit is pushed, the tombstone deletes); gone, and it's a server
+  delete; no answer, and everything is kept for next time;
+- a listing that fails, or an object whose UID can't be read, prunes
+  nothing; a server that doesn't answer the query is synced whole;
+- a record made on the device outside the window is pushed, then pruned at
+  the next sync;
+- a window that empties the device is allowed (it was refused as a glitch).
+HotSync skips Date Book if the clock reads before 2025, since the window
+needs today's date.
+
+**Batched downloads:** the bodies the merge will want (new and changed
+objects) are fetched with `calendar-multiget` / `addressbook-multiget`, 16
+per request, before the fetch buffer is retaken (so the TLS receive buffer
+has the room). The reply is streamed onto the card a character at a time by
+`dav_parse_multiget_stream()` (entities, CDATA), and indexed by name in
+fixed-width rows, so a lookup is a binary search. Anything not cached falls
+back to one GET. A new object now costs no GET at all where it cost two.
+
+**Also fixed:** `dav_strip_quotes` left the quotes on a weak ETag (`W/"x"`),
+because it looked for quotes before removing the `W/`.
+
+**Gates:**
+- `tests/sort_test.c` (offline, `make test`): random files at five budgets,
+  up to ~225 runs and four merge passes, against a plain sort; clean under
+  ASan/UBSan.
+- `tests/mget_test.c` (`make test`; `mget_asan` in `make ftest`): escaped and
+  CDATA data, a 60 KB object, a 404 member, every truncation, hostile input.
+- `tests/window.c` (`run_gates.sh`, Radicale): five events (two near, one two
+  months out, one past, one weekly since a year ago); the window takes three,
+  fetched in one batch with no single GETs; moving the window prunes and
+  pulls without deleting anything on the server; an edit to an event that
+  then left the window reaches the server; a tombstone deletes; a far-future
+  device record goes up and then leaves; an empty window empties the device;
+  no window brings everything back.
+- `bigsync` gains a phase with a 1 KB sort budget: a fresh device pulls 201
+  records with every index sorted in runs, then a no-op resync.
+
+**Measured** (IDF build in `espressif/idf:release-v5.5`, LVGL v9.5.0 vendored
+locally): app 1,738,304 B (+9,904 B since the README work: the sort +1,072,
+the window and multiget +8,832); static DRAM 160,612 B (+32: the two config
+fields and the engine's window and fetch counters).
+
+**Not yet seen on the device:** the window and multiget against real iCloud
+(the bench checks in `BACKLOG.md`).
+
 ### 2026-10-01 — Full screen: a wider Home button
 
 From the owner: "in the fullscreen modes, make the home button as wide as

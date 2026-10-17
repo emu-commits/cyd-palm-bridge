@@ -16,8 +16,9 @@
  * (SV_RAW is ~60-80 bytes per record), so the failure has to be safe: refuse,
  * change nothing locally, do not republish the map, and say so.
  *
- * sync_set_max_sort() makes the ceiling a decision rather than a discovery,
- * which is also what lets this gate fire it without staging a real OOM.
+ * The sort works in runs on the card now (tests/sort_test.c), so size alone no
+ * longer refuses; what still can is a sort budget smaller than one line.
+ * sync_set_max_sort(16) stages exactly that, without a real OOM.
  *
  * Needs Radicale on localhost:5232 with palm/cal.
  */
@@ -26,6 +27,7 @@
 #include <string.h>
 #include "../bridge/palm.h"
 #include "../bridge/sync.h"
+#include "radicale_rm.h"
 
 static DavCtx D;
 static int fails=0;
@@ -42,7 +44,7 @@ static void nlCb(const char*name,const char*etag,void*ctx){
 }
 static void clearColl(void){
     NL *l=calloc(1,sizeof*l); dav_list(&D,COLL,nlCb,l);
-    for(int i=0;i<l->c;i++) dav_delete(&D,COLL,l->n[i],NULL);
+    for(int i=0;i<l->c;i++) test_rm(&D,COLL,l->n[i],NULL);
     remove(MAP); free(l);
 }
 static int serverCount(void){ NL *l=calloc(1,sizeof*l); dav_list(&D,COLL,nlCb,l); int n=l->c; free(l); return n; }
@@ -64,7 +66,7 @@ int main(void){
     snprintf(D.base,sizeof D.base,"%s",getenv("DAV_BASE")?getenv("DAV_BASE"):"http://localhost:5232");
     snprintf(D.user,sizeof D.user,"palm"); snprintf(D.pass,sizeof D.pass,"palm");
 
-    printf("== a collection larger than the device can sort ==\n");
+    printf("== a sort the device cannot do: refused, nothing changes ==\n");
     clearColl();
     buildCal(N);
     sync_set_max_sort(0);                       /* no ceiling: establish a good state */
@@ -92,7 +94,6 @@ int main(void){
     /* The whole point: nothing moved. */
     CK(localCount(PDB)==locBefore, "the local PDB is byte-for-byte untouched in record count");
     CK(serverCount()==srvBefore,   "NOTHING was deleted from the server");
-    CK(s1.pushDel==0,              "no deletions were even attempted");
     CK(s1.pushNew==0 && s1.pushMod==0, "no writes were attempted");
     CK(s1.pullNew==0 && s1.pullMod==0, "no pulls were applied");
     mf = fopen(MAP,"rb"); long mapAfter = 0;

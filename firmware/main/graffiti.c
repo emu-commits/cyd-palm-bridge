@@ -1,4 +1,4 @@
-/* graffiti.c -- $1 unistroke recognizer for Graffiti-style text entry (U6).
+/* graffiti.c -- $1 unistroke recognizer for Graffiti-style text entry.
  *
  * Standard $1 pipeline: resample to N points, rotate to the indicative angle,
  * scale to a reference box, translate to origin, then nearest-template by average
@@ -220,7 +220,7 @@ static char gesture(void){
         if(s_buf[i].y>maxy)maxy=s_buf[i].y;
     }
     float w=maxx-minx, h=maxy-miny;
-    /* R12: a swipe is judged by being STRAIGHT and mostly sideways, not by
+    /* a swipe is judged by being STRAIGHT and mostly sideways, not by
      * being long and very flat. The old rule (wider than 24 px AND 2.5x wider
      * than tall) let through only 77% of the hurried flicks the harness draws
      * (sim/tests/graf_test.c, run_swipes): a short swipe, or one sloped by
@@ -263,6 +263,11 @@ static char gesture(void){
         float dist = sqrtf(dx*dx + dy*dy);
         if(dist > 28.0f && dx < -18.0f && dy > 18.0f && path_len(s_buf,s_n) < 1.4f*dist)
             return '\n';
+        /* ...and its mirror, bottom-left -> top-right, is Palm's command
+         * stroke. No letter or digit is a straight line upward and to the
+         * right (graf_test runs every template through this to keep it so). */
+        if(dist > 28.0f && dx > 18.0f && dy < -18.0f && path_len(s_buf,s_n) < 1.4f*dist)
+            return GRAF_COMMAND;
     }
     return 0;
 }
@@ -370,7 +375,7 @@ char graffiti_recognize(int digits){
      * is what lets '-' (a horizontal stroke) through instead of reading as a space. */
     if(s_punct){
         s_punct = 0;
-        /* R13: the backspace swipe is a way OUT. A stray tap on the pane arms
+        /* the backspace swipe is a way OUT. A stray tap on the pane arms
          * this shift, and before, the only way to disarm it was to write some
          * punctuation you did not want. A right-to-left swipe is what a person
          * reaches for to undo, so while armed it undoes the ARMING and types
@@ -404,7 +409,7 @@ char graffiti_recognize(int digits){
     return c;
 }
 
-/* R13: disarm the punctuation shift without reading a stroke -- the UI's other
+/* disarm the punctuation shift without reading a stroke -- the UI's other
  * two ways out (tapping the PUNC marker, or leaving it alone for a few seconds). */
 void graffiti_punct_cancel(void){ s_punct = 0; }
 int  graffiti_punct_armed(void){ return s_punct; }

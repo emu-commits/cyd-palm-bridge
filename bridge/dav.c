@@ -15,6 +15,8 @@ int dav_last_status = 0;   /* HTTP status of the most recent discovery request *
 
 /* run a command, capture stdout into out (cap). returns bytes or -1. */
 static int run(const char*cmd,char*out,int cap){
+    /* Never a request that removes an object from the server (dav.h). */
+    if(strstr(cmd,"-X DELETE") || strstr(cmd,"-X MOVE")) return -1;   /* nodelete-ok */
     FILE*p=popen(cmd,"r"); if(!p) return -1;
     int n=0; if(out&&cap>0){ n=(int)fread(out,1,cap-1,p); out[n]=0; }
     else { char sink[4096]; while(fread(sink,1,sizeof sink,p)>0){} }
@@ -68,16 +70,6 @@ int dav_put(const DavCtx*d,const char*coll,const char*name,const char*ctype,
     return 0;
 }
 
-int dav_delete(const DavCtx*d,const char*coll,const char*name,const char*ifmatch){
-    char ifhdr[256]="";
-    if(ifmatch&&ifmatch[0]) snprintf(ifhdr,sizeof ifhdr,"-H 'If-Match: \"%s\"' ",ifmatch);
-    char cmd[1024],code[16]={0};
-    snprintf(cmd,sizeof cmd,"curl -s -o /dev/null -w '%%{http_code}' -u %s:%s %s-X DELETE '%s/%s/%s'",
-        d->user,d->pass,ifhdr,d->base,coll,name);
-    if(run(cmd,code,sizeof code)<0) return -1;
-    return atoi(code);
-}
-
 int dav_getetag(const DavCtx*d,const char*coll,const char*name,char*etag,int cap){
     char cmd[1024];
     snprintf(cmd,sizeof cmd,
@@ -96,6 +88,15 @@ int dav_get(const DavCtx*d,const char*coll,const char*name,char*out,int cap){
     char cmd[1024];
     snprintf(cmd,sizeof cmd,"curl -s -u %s:%s '%s/%s/%s'",d->user,d->pass,d->base,coll,name);
     return run(cmd,out,cap);
+}
+
+int dav_get_file(const DavCtx*d,const char*coll,const char*name,const char*path){
+    char cmd[1200],code[16]={0};
+    snprintf(cmd,sizeof cmd,"curl -s -o '%s' -w '%%{http_code}' -u %s:%s '%s/%s/%s'",
+             path,d->user,d->pass,d->base,coll,name);
+    if(run(cmd,code,sizeof code)<0) return -1;
+    int st=atoi(code);
+    return st>0 ? st : -1;
 }
 
 int dav_list(const DavCtx*d,const char*coll,dav_list_cb cb,void*ctx){
@@ -189,4 +190,66 @@ int dav_list_collections(const DavCtx*d,const char*path,dav_coll_cb cb,void*ctx)
     int count=dav_parse_collections(buf,cb,ctx);
     free(buf);
     return count;
+}
+
+/* ---------------- a time window, multiget, a probe ---------------- */
+static int query_members(const DavCtx*d,const char*coll,const char*body,dav_list_cb cb,void*ctx){
+    { FILE*f=fopen("state/.wreq","wb"); if(!f) return -1; fputs(body,f); fclose(f); }
+    char cmd[1024];
+    snprintf(cmd,sizeof cmd,
+        "curl -s -L -o state/.wrep -w '%%{http_code}' -u %s:%s -X REPORT "
+        "-H 'Depth: 1' -H 'Content-Type: application/xml; charset=utf-8' --data-binary @state/.wreq '%s/%s/'",
+        d->user,d->pass,d->base,coll);
+    char code[16]={0}; if(run(cmd,code,sizeof code)<0) return -1;
+    if(atoi(code)!=207) return -1;
+    FILE*f=fopen("state/.wrep","rb"); if(!f) return -1;
+    int n=dav_parse_members_stream(f,cb,ctx);
+    fclose(f);
+    return n;
+}
+int dav_query_window(const DavCtx*d,const char*coll,long long start,long long end,
+                     dav_list_cb cb,void*ctx){
+    char body[1024]; if(dav_body_window(body,sizeof body,start,end)<0) return -1;
+    return query_members(d,coll,body,cb,ctx);
+}
+int dav_query_todos(const DavCtx*d,const char*coll,long long doneSince,dav_list_cb cb,void*ctx){
+    char body[1024];
+    if(dav_body_todos(body,sizeof body,0,0)<0) return -1;
+    int a=query_members(d,coll,body,cb,ctx); if(a<0) return -1;
+    if(dav_body_todos(body,sizeof body,1,doneSince)<0) return -1;
+    int b=query_members(d,coll,body,cb,ctx); if(b<0) return -1;
+    return a+b;
+}
+
+int dav_multiget(const DavCtx*d,const char*coll,int card,const char*const*names,int n,
+                 const char*spool){
+    { size_t cap=1024+(size_t)n*600; char*body=malloc(cap); if(!body) return -1;
+      if(dav_body_multiget(body,(int)cap,d->base,coll,card,names,n)<0){ free(body); return -1; }
+      FILE*f=fopen("state/.mreq","wb"); if(!f){ free(body); return -1; }
+      fputs(body,f); fclose(f); free(body); }
+    char cmd[1280];
+    snprintf(cmd,sizeof cmd,
+        "curl -s -L -o '%s' -w '%%{http_code}' -u %s:%s -X REPORT "
+        "-H 'Depth: 1' -H 'Content-Type: application/xml; charset=utf-8' --data-binary @state/.mreq '%s/%s/'",
+        spool,d->user,d->pass,d->base,coll);
+    char code[16]={0}; if(run(cmd,code,sizeof code)<0) return -1;
+    return atoi(code);
+}
+
+int dav_probe(const DavCtx*d,const char*coll,const char*name,char*etag,int cap){
+    if(etag&&cap) etag[0]=0;
+    char cmd[1024];
+    snprintf(cmd,sizeof cmd,
+        "curl -s -o state/.prep -w '%%{http_code}' -u %s:%s -X PROPFIND -H 'Depth: 0' "
+        "-H 'Content-Type: application/xml' --data '<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\">"
+        "<d:prop><d:getetag/></d:prop></d:propfind>' '%s/%s/%s'",
+        d->user,d->pass,d->base,coll,name);
+    char code[16]={0}; if(run(cmd,code,sizeof code)<0) return -1;
+    int st=atoi(code); if(st<=0) return -1;
+    if(st==207||st==200){
+        char*buf=slurp("state/.prep",NULL);
+        if(!buf || !dav_xml_text(buf,NULL,"getetag",etag,cap) || !etag[0]){ free(buf); return -1; }
+        dav_strip_quotes(etag); free(buf);
+    }
+    return st;
 }

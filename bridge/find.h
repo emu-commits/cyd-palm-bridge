@@ -1,6 +1,7 @@
 /* find.h -- global streaming search across the Palm PIM databases.
  *
- * Palm's "Find" scans every app for a substring and lists the hits. This is the
+ * Palm's "Find" scans every app for words that start with the query and lists
+ * the hits. This is the
  * portable, host-testable core: stream a PDB one record at a time (never fully
  * resident), decode it for the given app, and invoke a callback per match with
  * a short snippet for the results list. The firmware's Find silkscreen button
@@ -21,7 +22,8 @@ typedef struct {
 
 typedef void (*find_hit_cb)(const FindHit *hit, void *ctx);
 
-/* Search one PDB for `query` (case-insensitive, ASCII-folded substring). Calls
+/* Search one PDB for `query` at the start of a word (case-insensitive,
+ * ASCII-folded: "the" finds "Then", not "Lathe"). Calls
  * cb once per matching record. Returns the number of hits, or -1 on read error.
  * An empty/NULL query matches nothing (returns 0). */
 int find_in_pdb(const char *path, int app, const char *query,

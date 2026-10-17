@@ -13,6 +13,7 @@
 #include <string.h>
 #include "../bridge/palm.h"
 #include "../bridge/sync.h"
+#include "radicale_rm.h"
 
 static DavCtx D;
 static const char* COLL="palm/cal";
@@ -78,11 +79,12 @@ static void printSet(const char*tag,const Set*s){
 
 static void clearColl(void){
     Set names={0}; dav_list(&D,COLL,srvName,&names);
-    for(int i=0;i<names.n;i++) dav_delete(&D,COLL,names.s[i],NULL);
+    for(int i=0;i<names.n;i++) test_rm(&D,COLL,names.s[i],NULL);
     remove(MAP);
 }
 
-/* expected converged set per policy (u2 deleted throughout) */
+/* expected set per policy. u2 was deleted on the device: it leaves the device
+ * and is NEVER deleted on the server, so the server's set is this plus "Beta". */
 static void expectSet(Set*e,ConflictPolicy pol){
     e->n=0;
     #define ADD(x) snprintf(e->s[e->n++],256,"%s",x)
@@ -123,11 +125,11 @@ static void runPolicy(ConflictPolicy pol,const char*name){
 
     /* 3. sync with policy */
     SyncStats s1={0}; sync_collection(&D,LPDB,LPDB,COLL,1,MAP,pol,&s1);
-    printf("   stats: push +%d ~%d -%d | pull +%d ~%d -%d | conflict %d | clean %d\n",
-        s1.pushNew,s1.pushMod,s1.pushDel,s1.pullNew,s1.pullMod,s1.pullDel,s1.conflicts,s1.unchanged);
+    printf("   stats: push +%d ~%d | pull +%d ~%d -%d | hidden %d | conflict %d | clean %d\n",
+        s1.pushNew,s1.pushMod,s1.pullNew,s1.pullMod,s1.pullDel,s1.hidden,s1.conflicts,s1.unchanged);
     CK(s1.conflicts==1,"exactly one conflict (u4)");
     CK(s1.pushMod==1,"one push-mod (u1)");
-    CK(s1.pushDel==1,"one push-del (u2)");
+    CK(s1.hidden==1,"one hidden on the device (u2)");
     CK(s1.pullMod==1,"one pull-mod (u3)");
     CK(s1.pullNew==1,"one pull-new (u5)");
     CK(s1.pushNew==1,"one push-new (u6)");
@@ -135,15 +137,19 @@ static void runPolicy(ConflictPolicy pol,const char*name){
     Set ls={0},ss={0},ex={0}; localSet(&ls); serverSet(&ss); expectSet(&ex,pol);
     sortSet(&ls); sortSet(&ss);
     printSet("local ",&ls); printSet("server",&ss); printSet("expect",&ex);
-    CK(eqSet(&ls,&ss),"local and server CONVERGED");
-    CK(eqSet(&ls,&ex),"converged to expected set");
+    CK(eqSet(&ls,&ex),"local is the expected set");
+    Set exs=ex; snprintf(exs.s[exs.n++],256,"%s","Beta"); sortSet(&exs);
+    CK(eqSet(&ss,&exs),"server is the same plus Beta: the device's delete never left it");
 
     /* 4. idempotence: a second sync with no edits does nothing */
     SyncStats s2={0}; sync_collection(&D,LPDB,LPDB,COLL,1,MAP,pol,&s2);
-    int ops=s2.pushNew+s2.pushMod+s2.pushDel+s2.pullNew+s2.pullMod+s2.pullDel+s2.conflicts;
+    int ops=s2.pushNew+s2.pushMod+s2.pullNew+s2.pullMod+s2.pullDel+s2.conflicts;
     printf("   2nd sync ops=%d clean=%d\n",ops,s2.unchanged);
     CK(ops==0,"second sync is a no-op (idempotent)");
     CK(s2.unchanged==ex.n,"all records clean on second sync");
+    CK(s2.hidden==0,"and Beta stays hidden without being counted again");
+    Set ls2={0}; localSet(&ls2); sortSet(&ls2);
+    CK(eqSet(&ls2,&ex),"Beta was not pulled back");
 }
 
 int main(void){

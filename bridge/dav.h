@@ -16,14 +16,20 @@ int dav_put(const DavCtx*d,const char*coll,const char*name,const char*ctype,
             const char*bodyfile,const char*ifmatch,
             char*etag_out,int etagcap,int*status_out);
 
-/* DELETE <base>/<coll>/<name>; ifmatch optional. returns HTTP status or -1. */
-int dav_delete(const DavCtx*d,const char*coll,const char*name,const char*ifmatch);
+/* There is no DELETE, and there must never be one. Nothing on this device or
+ * in this bridge removes an object from the server: a record deleted on the
+ * device leaves the device only (sync.c, "hidden"), and a record leaving the
+ * calendar window is pruned locally. `make nodelete` fails the build if a
+ * DELETE (or MOVE, which removes the source) appears in shipped code. */
 
 /* PROPFIND Depth:0 for a single object's current ETag. returns 0 on success. */
 int dav_getetag(const DavCtx*d,const char*coll,const char*name,char*etag,int cap);
 
 /* GET <base>/<coll>/<name> into out buffer. returns bytes or -1. */
 int dav_get(const DavCtx*d,const char*coll,const char*name,char*out,int cap);
+/* GET <base>/<coll>/<name> streamed into the file `path`, whatever its size (a
+ * contact with a photo is tens of KB). Returns the HTTP status, or -1. */
+int dav_get_file(const DavCtx*d,const char*coll,const char*name,const char*path);
 
 /* Stream a public https URL's body to an SD file (the News reader's feed fetch).
  * Returns the HTTP status, or -1. Device-only: implemented in dav_esp.c; the host
@@ -42,6 +48,30 @@ int dav_list(const DavCtx*d,const char*coll,dav_list_cb cb,void*ctx);
 typedef void (*dav_sync_cb)(const char*name,const char*etag,int deleted,void*ctx);
 int dav_sync_report(const DavCtx*d,const char*coll,const char*token,
                     dav_sync_cb cb,void*ctx,char*newtoken,int tokcap);
+
+/* ---- a time window, and batched fetches (a real account) ------------------
+ * CalDAV calendar-query REPORT, Depth:1: the VEVENTs with an occurrence in
+ * [start,end) (UTC epoch seconds). The server applies the filter, recurrences
+ * included, so a weekly meeting that began years ago is listed and last year's
+ * one-off isn't. cb(name, etag) per member, like dav_list. Returns the member
+ * count, or -1 if the reply wasn't a multistatus (no answer, or no support). */
+int dav_query_window(const DavCtx*d,const char*coll,long long start,long long end,
+                     dav_list_cb cb,void*ctx);
+/* The To Do list's listing: the open VTODOs, then those completed since
+ * `doneSince` (two calendar-query REPORTs). cb(name, etag) per member. The
+ * member count, or -1 if either wasn't a multistatus. */
+int dav_query_todos(const DavCtx*d,const char*coll,long long doneSince,
+                    dav_list_cb cb,void*ctx);
+/* calendar-multiget (card=0) or addressbook-multiget (card=1) for `n` member
+ * names of coll: many objects in one request instead of a GET each. The raw
+ * multistatus reply is written to the file `spool`, to be read by
+ * dav_parse_multiget_stream (dav_xml.h). Returns the HTTP status, or -1. */
+int dav_multiget(const DavCtx*d,const char*coll,int card,const char*const*names,int n,
+                 const char*spool);
+/* PROPFIND Depth:0 for one object's ETag, telling the outcomes apart: returns
+ * the HTTP status (207 or 200: found, etag filled; 404 or 410: gone; anything
+ * else, or <0 when the server wasn't reached: unknown). */
+int dav_probe(const DavCtx*d,const char*coll,const char*name,char*etag,int cap);
 
 /* --- discovery (CalDAV/CardDAV bootstrap, e.g. iCloud) --- */
 /* PROPFIND Depth:0 on `path`; returns the first <href> found inside the element

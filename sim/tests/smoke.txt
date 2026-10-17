@@ -252,6 +252,34 @@ s datebook_week
 c 120 80
 t 400
 s datebook_day2
+# P1: a sleep over the Day view wakes on the Day view (it woke on the launcher).
+L
+t 300
+d 120 275
+t 30
+m 120 210
+t 30
+m 120 140
+t 30
+m 120 90
+t 30
+u
+t 400
+s p1_day_resumed
+# P2: writing on the Day view makes an event, as on a Palm. A digit is the start
+# hour (3 -> 3:00 pm) and a letter starts the description. Both are cancelled
+# (Cancel, bottom right), so the walk below finds the day as it was.
+k 3
+t 300
+s p2_digit_event
+c 204 190
+t 400
+k Lunch
+t 300
+s p2_letter_event
+c 204 190
+t 400
+s p2_day_unchanged
 # C4 event Details: menu -> New -> Details -> toggle Alarm on + cycle Repeat ->
 # close -> Done (persists via ApptPack). Plain buttons only -> pool-safe.
 c 18 300
@@ -289,6 +317,14 @@ t 200
 c 150 140
 t 200
 s cal_details
+# P8: the Details sheet's "i" (top right): what Alarm and Repeat do, and that
+# writing on the Day view makes an event
+c 180 88
+t 300
+s p8_details_tips
+c 60 233
+t 300
+s p8_details_back
 c 210 260
 t 200
 c 40 188
@@ -302,6 +338,33 @@ s cal_event_saved
 c 120 40
 t 400
 s cal_event_in_week
+# P6: reminders. The event above has an alarm; the screen sleeps (`L`), and the
+# wake looks for reminders due over the dark time (`R`: a day back to two
+# ahead, so it holds an event made "today" whenever the tour runs). One list,
+# over the lock, dismissed only by OK; then the unlock comes back to the week.
+L
+t 300
+R 86400 172800
+t 300
+s p6_reminders_on_wake
+# a tap beside the box must not lose it (Palm: dismissed only by OK)...
+c 120 280
+t 300
+s p6_still_there
+# ...OK does; then the swipe, and the week comes back (P1)
+c 45 195
+t 300
+d 120 275
+t 30
+m 120 210
+t 30
+m 120 140
+t 30
+m 120 90
+t 30
+u
+t 400
+s p6_after_wake
 c 18 225
 t 300
 # Address list -> record detail -> edit form (C4 bottom bar) -> Done (I4 toast)
@@ -448,6 +511,20 @@ t 200
 c 215 40
 t 500
 s q7_todo_added
+# P3: tapping the title opens the menu (Palm 3.5 on).
+c 24 12
+t 300
+s p3_title_menu
+# ...and it reopens on the item chosen last, while the same screen is up.
+# "Hide Completed" (y 132) redraws the list, which is still the same screen;
+# picked again from the remembered row, it puts the list back as it was.
+c 80 132
+t 400
+c 24 12
+t 300
+s p3_menu_remembered
+c 80 132
+t 400
 # To Do due-date picker: open the first record -> Edit -> the Due trigger -> pick
 # a day off the calendar. This walk exists because tapping a calendar day used to
 # SEGFAULT here (exit 139, so this gate would have caught it): the calendar's
@@ -540,6 +617,122 @@ s planner_checklist_both
 c 120 78
 t 400
 s planner_checklist_untick
+c 18 225
+t 300
+# P1: the lock used to free the open app, so a wake always landed on the
+# launcher and an edit form open when the screen slept was lost. Write half a
+# memo, sleep (`L`), wake: the form must be back with the words in it, saved.
+# Then a second memo left by Home: saved too, with a "Saved" toast.
+c 195 56
+t 400
+c 215 40
+t 400
+k Half a thought
+t 200
+L
+t 300
+d 120 275
+t 30
+m 120 210
+t 30
+m 120 140
+t 30
+m 120 90
+t 30
+u
+t 400
+s p1_resumed_edit
+c 36 188
+t 1200
+c 215 40
+t 400
+k Left by Home
+t 200
+c 18 225
+t 200
+s p1_home_saved
+t 1200
+c 195 56
+t 400
+s p1_memos_kept
+# P4: Palm's alert order -- the verb on the left, Cancel on its right, and a
+# title naming the operation. Delete "Left by Home" from its own detail.
+c 120 130
+t 400
+c 24 12
+t 300
+s p4_detail_menu
+c 60 86
+t 400
+s p4_delete_confirm
+# Delete is the LEFT button now (it was on the right): the panel is 200 wide,
+# centred, so its left button is at x 30..112.
+c 70 196
+t 1200
+s p4_deleted
+# P7: Palm's command stroke -- a straight flick up and to the right on the
+# letter pad -- arms a command (the chip reads CMD), and the next letter runs
+# it: N is New. Then the Edit menu on the form: Undo, and Graffiti Help.
+d 50 300
+t 20
+m 60 288
+t 20
+m 70 276
+t 20
+m 80 264
+t 20
+m 90 252
+t 20
+m 100 240
+t 20
+u
+t 200
+s p7_cmd_armed
+k n
+t 400
+s p7_cmd_new
+k ab
+t 200
+c 24 12
+t 300
+s p7_edit_menu
+# Undo (y 106) takes back the last stroke: "Ab" reads "A"
+c 60 106
+t 300
+s p7_undone
+# Graffiti Help (y 132): the stroke sheet, whose button reads Done when it was
+# opened from somewhere, and goes back there -- to this memo, saved on the way
+c 24 12
+t 300
+c 60 132
+t 600
+s p7_graffiti_help
+c 32 39
+t 600
+s p7_help_done
+# tidy up: the memo is saved now, so Delete it from its own menu (y 86), and
+# confirm with Delete (on the left)
+c 24 12
+t 300
+c 60 86
+t 400
+c 70 196
+t 1200
+s p7_tidied
+# P8: Find (the silkscreen's magnifier), which no walk opened before: words
+# that START with the query, and the "i" (Tips) that says so.
+c 222 226
+t 400
+k mee
+t 300
+s p8_find
+c 226 44
+t 300
+s p8_find_tips
+c 60 212
+t 300
+c 18 225
+t 300
 c 18 225
 t 300
 # HotSync -- launcher row 2 col 2, back in the middle where it is findable
@@ -793,12 +986,37 @@ t 400
 c 46 160
 t 400
 s w9_sync
+# The first row is how much of the calendar Date Book keeps (a window of days,
+# not the account's history); pick "The next month".
 c 120 37
 t 400
+s w9_calendar_pick
+c 120 59
+t 400
+s w9_sync_calendar
+# The second row is the conflict policy; pick "Keep both copies".
+c 120 63
+t 400
 s w9_policy_pick
-c 120 93
+c 120 81
 t 400
 s w9_sync_set
+# The third row is whether a sync may change the account at all. A new account
+# starts read-only; pick "Send my changes", and the row says so.
+c 120 89
+t 400
+s w9_changes_pick
+c 120 59
+t 400
+s w9_sync_changes
+# The fourth row is which tasks To Do keeps: the open ones and those done in
+# the last two weeks (the default), or the whole list.
+c 120 115
+t 400
+s w9_todo_pick
+c 120 37
+t 400
+s w9_sync_todo
 c 18 225
 t 300
 # Settings > Date & Time (row 2, col 1): the tile that absorbed the old "Lock
@@ -1522,6 +1740,13 @@ t 200
 c 120 130
 t 400
 s study_dash_after_reviews
+# P4: an empty Reviews door isn't dimmed; a tap says when the next one is due.
+# The alert takes the next tap to close, as Palm's do.
+c 180 92
+t 300
+s p4_reviews_why
+c 120 160
+t 300
 # the Week screen, as Coach's and Guru's: today's lesson and reviews in the
 # chart (history.dat), the stage groups, and her advice; a tap goes back
 c 201 185
@@ -1561,6 +1786,16 @@ t 600
 s study_check_course
 c 120 160
 t 300
+# P4: Remove course has a titled dialog with Remove on the left; Cancel (right)
+# keeps the course, which the rest of the tour needs.
+c 226 12
+t 400
+c 60 236
+t 400
+s p4_remove_course
+c 172 200
+t 300
+s p4_course_kept
 c 200 12
 t 300
 E leaving Study
@@ -1599,6 +1834,365 @@ m 120 90
 t 30
 u
 t 400
+# Critters (GAME_PLAN.md G2 and G3), the monster game, from courses/critters/game.bin
+# (the Makefile puts it on the card). Full screen: the view above, the D-pad
+# (up 64,224 down 64,296 left 28,260 right 100,260) and A (204,246) and B
+# (150,280) below. UI_DEVTOOLS seeds a new game with 1, so the same creatures
+# appear on the same steps every run, and `G area x y facing` puts the player
+# somewhere without the walk. The tour: the choice of look and of the first
+# critter; Larkhollow, turning to Mum and resting there (which is also where a
+# loss comes back to); walking; Route 1's grass and a wild Vamporm, a turn,
+# the LOCK in mid-battle (pause.dat) and the unlock to the same battle, then
+# Run; Keeper Ada spotting the player, her two critters, no catching hers; the
+# loss, back at Mum's; Foreman Dale barring the tunnel; Kestrel's nurse; then
+# the menu's Credits (scrolled), Party and Save game, and leaving: every byte
+# of the game's block must come back (B at the Games folder, E after).
+# Indoors: in at Home's open door and out over its mat, Wren's Lab, and the
+# Kestrel rest house, where Nurse Hale is. Auto-play: on from the menu, the
+# title saying so, watched for a while, off from the menu (which says "Stop
+# Auto-play"); on again, and a touch on the game takes it back.
+c 18 225
+t 300
+c 195 110
+t 300
+B
+c 120 115
+t 600
+s critters_look
+c 100 260
+t 200
+s critters_look_next
+c 204 246
+t 300
+s critters_pick
+c 100 260
+t 200
+s critters_pick_next
+c 28 260
+t 200
+c 204 246
+t 300
+s critters_map
+c 204 246
+t 300
+c 28 260
+t 200
+s critters_turned
+c 204 246
+t 300
+s critters_talk
+c 204 246
+t 300
+s critters_rested
+c 204 246
+t 300
+d 100 260
+t 700
+u
+t 300
+s critters_walked
+G 0 6 10 0
+t 200
+c 64 224
+t 900
+s critters_home
+c 64 296
+t 200
+c 64 296
+t 900
+s critters_home_left
+G 0 17 10 0
+t 200
+c 64 224
+t 900
+s critters_lab
+G 1 10 4 1
+t 200
+s critters_route1
+d 100 260
+t 1500
+u
+t 600
+s critters_battle
+c 204 246
+t 300
+s critters_battle_menu
+c 204 246
+t 300
+s critters_moves
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+s critters_turn_done
+L
+t 300
+s critters_locked
+d 120 275
+t 30
+m 120 210
+t 30
+m 120 140
+t 30
+m 120 90
+t 30
+u
+t 600
+s critters_resumed
+c 64 296
+t 150
+c 64 296
+t 150
+c 64 296
+t 150
+s critters_run_sel
+c 204 246
+t 300
+s critters_run1
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+s critters_run_menu
+c 64 296
+t 150
+c 64 296
+t 150
+c 64 296
+t 150
+c 204 246
+t 300
+s critters_run2
+c 204 246
+t 600
+s critters_escaped
+G 1 24 15 0
+t 200
+c 64 224
+t 600
+s critters_spotted
+c 204 246
+t 300
+s critters_keeper
+c 204 246
+t 300
+t 900
+s critters_sends
+c 204 246
+t 300
+s critters_keeper_menu
+c 64 296
+t 150
+c 64 296
+t 150
+c 204 246
+t 300
+s critters_no_catch
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+s critters_after_keeper
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+c 204 246
+t 300
+s critters_after_keeper2
+c 204 246
+t 300
+s critters_lost1
+c 204 246
+t 300
+s critters_lost2
+c 204 246
+t 300
+t 1000
+s critters_home_again
+c 204 246
+t 300
+s critters_home_again2
+G 3 35 5 0
+t 300
+s critters_tunnel
+c 64 224
+t 400
+s critters_tunnel_step
+c 204 246
+t 300
+s critters_dale
+c 204 246
+t 300
+G 4 6 16 0
+t 300
+s critters_kestrel
+c 64 224
+t 900
+s critters_rest_house
+G 7 3 4 0
+t 300
+c 204 246
+t 300
+s critters_nurse
+c 204 246
+t 300
+s critters_nurse2
+c 204 246
+t 300
+c 226 12
+t 300
+s critters_menu
+c 60 132
+t 300
+s critters_auto_on
+t 4000
+s critters_auto_walk
+t 4000
+s critters_auto_later
+c 226 12
+t 300
+s critters_auto_menu
+c 60 132
+t 600
+s critters_auto_stopped
+c 226 12
+t 300
+c 60 132
+t 2000
+c 120 100
+t 600
+s critters_auto_touched
+c 226 12
+t 300
+c 60 236
+t 300
+s critters_credits
+c 64 296
+t 150
+c 64 296
+t 150
+c 64 224
+t 150
+s critters_credits_scrolled
+c 150 280
+t 300
+c 226 12
+t 300
+c 60 158
+t 300
+s critters_party
+c 150 280
+t 300
+c 226 12
+t 300
+c 60 184
+t 300
+s critters_saved
+t 1500
+c 200 12
+t 400
+c 195 110
+t 400
+E critters
 # I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.
 # (CI starts on a fresh /sdcard, so the seed + manifest exist here.)
 c 18 225

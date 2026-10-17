@@ -1,4 +1,4 @@
-/* hotsync.h -- run a sync to iCloud on a background task (U7).
+/* hotsync.h -- run a sync to iCloud on a background task.
  * Isolated + defensive: failures set an error status, never crash the UI. */
 #ifndef HOTSYNC_H
 #define HOTSYNC_H

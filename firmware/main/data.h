@@ -2,13 +2,14 @@
 #ifndef DATA_H
 #define DATA_H
 #include <stdint.h>
+#include <time.h>
 #include "appinfo.h"   /* CatTable */
 
 /* seed demo PDBs on the SD card for any that are missing (so views have content
  * before a HotSync). safe to call every boot. */
 void data_seed_if_empty(void);
 
-/* I2: demo-seed management. data_demo_present() is true while the untouched demo
+/* demo-seed management. data_demo_present() is true while the untouched demo
  * seed is on the card; data_remove_demo() deletes exactly the seeded records
  * (never user-added / synced ones) and returns how many it removed. */
 int  data_demo_present(void);
@@ -45,6 +46,13 @@ void data_datebook(data_row_cb cb, void *ctx);
 void data_cal_day(int y, int m, int d, data_row_cb cb, void *ctx);
 /* PalmOS Month view: marks[1..31]=1 for each day in month y/m that has an event. */
 void data_cal_month_marks(int y, int m, uint8_t marks[32]);
+/* Events whose alarm came due in (from, to], local time: cb(uid, "HH:MM  desc",
+ * "YYYY-MM-DD" of that occurrence) once per occurrence, repeats expanded, at most the last
+ * DATA_ALARM_DAYS days of the span. The alarm is the start less the
+ * record's advance (minutes, hours or days). Returns how many. Ignores the
+ * category filter: a reminder is owed whatever the list is showing. */
+#define DATA_ALARM_DAYS 7
+int data_cal_alarms(time_t from, time_t to, data_row_cb cb, void *ctx);
 void data_address(data_row_cb cb, void *ctx);
 void data_todo(data_row_cb cb, void *ctx);
 void data_memo(data_row_cb cb, void *ctx);
@@ -66,12 +74,24 @@ int data_get_todo(uint32_t uid, Todo *out);
 int data_save_cal(uint32_t uid, int cat, const Appt *in);
 int data_save_addr(uint32_t uid, int cat, const Addr *in);
 int data_save_todo(uint32_t uid, int cat, const Todo *in);
+/* the uid the last save that CREATED a record gave it (0 before any). A form
+ * saved on the way out reopens on its record, and a new one has no uid until
+ * the card has assigned it. */
+uint32_t data_last_new_uid(void);
 /* category index of a record (attr nibble), or -1 if not found */
 int data_record_category(int app, uint32_t uid);
 /* toggle a to-do's completed flag (and save). 1 on success. */
 int data_toggle_todo(uint32_t uid);
-/* delete a record by uid (next sync propagates it). */
+/* delete a record by uid. In an app that syncs, the next sync takes it off the
+ * device only: nothing is ever deleted on the server (bridge/dav.h). */
 int data_delete(int app, uint32_t uid);
+/* 1 if this app's database syncs to an account (so a delete is device-only). */
+int data_app_syncs(int app);
+/* 1 if this app's records can't be changed on the device: Address while it
+ * syncs. A contact edit is merged into iCloud's copy, photo and all, and a
+ * copy bigger than the device can send would stay here unsent; until every
+ * edit can reach the server, none is made (README, "Contacts are read-only"). */
+int data_app_readonly(int app);
 
 /* categories: read the app's category table; get/set the active list filter
  * (-1 = All). List iterators honor the filter. */

@@ -98,6 +98,20 @@ typedef struct {
     int  backlight_sec;        /* idle seconds -> dim backlight, 0=never  */
     int  clock24;              /* 0 = 12-hour clock, 1 = 24-hour          */
     int  policy;               /* CFG_POL_*                              */
+    /* Date Book syncs a window of days, not the whole account (sync_set_window):
+     * from cal_back days before today to cal_ahead days after it. cal_ahead 0
+     * syncs the whole calendar. */
+    int  cal_back;             /* days before today, 0..366 (default 1)  */
+    int  cal_ahead;            /* days after today, 0..730 (default 14)  */
+    /* READ-ONLY: the sync takes from the account and never changes it (no PUT;
+     * nothing is ever deleted either way). Edits and new records wait on the
+     * device. ON by default, and turned back on whenever the Apple ID changes,
+     * so the first syncs of an account can't touch it; Settings > Sync turns
+     * it off. A config.ini without the key reads as on. */
+    int  read_only;
+    /* To Do keeps the open tasks and those completed in the last this-many
+     * days (default 14); the rest stay in iCloud, untouched. 0: the whole list. */
+    int  todo_done_days;
 } Config;
 
 /* populate with safe defaults (empty creds, sensible timers). */

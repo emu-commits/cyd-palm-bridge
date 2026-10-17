@@ -55,7 +55,7 @@ for g in $GATES; do
   rm -rf state; mkdir -p state
   clearcolls
   echo "===== $g ====="
-  if ./"$g"; then echo "  -> PASS"; else echo "  -> FAIL"; rc=1; fi
+  if ./build/"$g"; then echo "  -> PASS"; else echo "  -> FAIL"; rc=1; fi
 done
 echo; [ "$rc" = 0 ] && echo "GREEN" || echo "FAILED"
 exit $rc

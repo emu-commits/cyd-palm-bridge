@@ -678,7 +678,7 @@ static void history(void){
     snprintf(p, sizeof p, "%s/study/hist", root); rmdir(p);
 }
 
-/* ---- at a glance (S5): the week ahead, summary.bin, and the total ---- */
+/* ---- at a glance: the week ahead, summary.bin, and the total ---- */
 
 static void put_due(Srs *s, Course *c, uint32_t n, uint32_t due, uint8_t flags){
     SrsRec r;

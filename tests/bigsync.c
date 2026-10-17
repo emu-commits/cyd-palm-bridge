@@ -15,6 +15,7 @@
 #include <string.h>
 #include "../bridge/palm.h"
 #include "../bridge/sync.h"
+#include "radicale_rm.h"
 
 #define N 200
 static DavCtx D;
@@ -59,7 +60,7 @@ static void collectCb(const char*name,const char*etag,void*ctx){
 static void clearColl(void){
     NL *l=calloc(1,sizeof*l);
     dav_list(&D,COLL,collectCb,l);
-    for(int i=0;i<l->c;i++) dav_delete(&D,COLL,l->n[i],NULL);
+    for(int i=0;i<l->c;i++) test_rm(&D,COLL,l->n[i],NULL);
     remove(MAP);
     free(l);
 }
@@ -85,7 +86,7 @@ int main(void){
     /* 2. idempotence: nothing changed -> no ops, all N clean (lazy re-read path) */
     SyncStats s2={0};
     sync_collection(&D,LPDB,LPDB,COLL,KIND_CAL,MAP,POL_SERVER,&s2);
-    int ops=s2.pushNew+s2.pushMod+s2.pushDel+s2.pullNew+s2.pullMod+s2.pullDel+s2.conflicts;
+    int ops=s2.pushNew+s2.pushMod+s2.pullNew+s2.pullMod+s2.pullDel+s2.conflicts;
     printf("  second sync: ops=%d clean=%d\n",ops,s2.unchanged);
     CK(ops==0,"second sync is a no-op");
     CK(s2.unchanged==N,"all N records clean on second sync");
@@ -102,6 +103,25 @@ int main(void){
     printf("  after server add: pullNew=%d local=%d\n",s3.pullNew,localCount());
     CK(s3.pullNew==1,"pulled the new server object");
     CK(localCount()==N+1,"local PDB grew to N+1");
+
+    /* 4. the same collection with a 1 KB sort budget: every index file is
+     *    sorted in runs on the card and merged. A fresh device (no PDB, no
+     *    map) must pull every record, and a second sync must be a no-op. */
+    printf("== the same, with a 1 KB sort budget (indexes sorted in runs) ==\n");
+    remove(LPDB); remove(MAP);
+    pdb_write(LPDB,"DatebookDB",0x44415441,0x64617465,NULL,0);
+    sync_set_max_sort(1024);
+    SyncStats s4={0};
+    int rc4=sync_collection(&D,LPDB,LPDB,COLL,KIND_CAL,MAP,POL_SERVER,&s4);
+    printf("  fresh pull: rc=%d pullNew=%d local=%d\n",rc4,s4.pullNew,localCount());
+    CK(rc4==N+1,"a fresh device pulls every record with the sort in runs");
+    CK(s4.pullNew==N+1,"all pulled, nothing deleted");
+    SyncStats s5={0};
+    sync_collection(&D,LPDB,LPDB,COLL,KIND_CAL,MAP,POL_SERVER,&s5);
+    int ops5=s5.pushNew+s5.pushMod+s5.pullNew+s5.pullMod+s5.pullDel+s5.conflicts;
+    CK(ops5==0 && s5.unchanged==N+1,"and the next sync is a no-op");
+    CK(serverCount()==N+1,"the server still holds every object");
+    sync_set_max_sort(0);
 
     printf("\n%s (%d failures)\n", fails?"FAILURES":"ALL PASS", fails);
     return fails?1:0;

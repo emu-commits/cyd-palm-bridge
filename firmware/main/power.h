@@ -37,6 +37,13 @@ int  power_battery_pct(void);
  * BAT_TRIM_PERMILLE in power.c if the divider's resistors are off tolerance. */
 int  power_battery_mv(void);
 
+/* 1 when the board is on USB power: no plausible cell reading (USB only), or
+ * a cell held at the charger's voltage. An estimate: a low cell that is
+ * charging reads under the line, and then counts as battery, which is the
+ * safe way to be wrong (the screen dims as usual). Critters keeps the screen
+ * on while this is 1 (docs/GAME_PLAN.md §13 Q3). */
+int  power_on_usb(void);
+
 /* ---- drain log -----------------------------------------------------------
  * The experiment this exists for: how long does the device last on a cell, and
  * where does the charge actually go? That question cannot be answered over

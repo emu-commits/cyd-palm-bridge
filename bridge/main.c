@@ -201,8 +201,8 @@ static int cmd_synccat(DavCtx d,int kind,const char*pdb,ConflictPolicy pol){
     if(!rt.def) printf("  (no default collection; records in unmatched categories are left local)\n");
     SyncStats s={0};
     sync_categorized(&d,pdb,pdb,kind,&rt,"state",pol,&s);
-    printf("synced: +%d ~%d -%d push | +%d ~%d -%d pull | %d conflict | %d clean\n",
-        s.pushNew,s.pushMod,s.pushDel,s.pullNew,s.pullMod,s.pullDel,s.conflicts,s.unchanged);
+    printf("synced: +%d ~%d push | +%d ~%d -%d pull | %d hidden | %d conflict | %d clean\n",
+        s.pushNew,s.pushMod,s.pullNew,s.pullMod,s.pullDel,s.hidden,s.conflicts,s.unchanged);
     return 0;
 }
 
@@ -226,8 +226,8 @@ static int cmd_synccontacts(DavCtx d,const char*pdb,ConflictPolicy pol){
     printf("address book: %s (host: %s)\n",coll,cc.base);
     SyncStats s={0};
     sync_collection(&cc,pdb,pdb,coll,KIND_CARD,"state/contacts.map",pol,&s);
-    printf("synced: +%d ~%d -%d push | +%d ~%d -%d pull | %d conflict | %d clean\n",
-        s.pushNew,s.pushMod,s.pushDel,s.pullNew,s.pullMod,s.pullDel,s.conflicts,s.unchanged);
+    printf("synced: +%d ~%d push | +%d ~%d -%d pull | %d hidden | %d conflict | %d clean\n",
+        s.pushNew,s.pushMod,s.pullNew,s.pullMod,s.pullDel,s.hidden,s.conflicts,s.unchanged);
     return 0;
 }
 
@@ -265,10 +265,10 @@ int main(int argc,char**argv){
         SyncStats sa={0}, sb={0};
         sync_collection(&d,calpdb,calpdb,cal,1,"state/cal.map",pol,&sa);
         sync_collection(&d,addrpdb,addrpdb,card,0,"state/card.map",pol,&sb);
-        printf("cal : +%d ~%d -%d push | +%d ~%d -%d pull | %d conflict | %d clean\n",
-               sa.pushNew,sa.pushMod,sa.pushDel,sa.pullNew,sa.pullMod,sa.pullDel,sa.conflicts,sa.unchanged);
-        printf("card: +%d ~%d -%d push | +%d ~%d -%d pull | %d conflict | %d clean\n",
-               sb.pushNew,sb.pushMod,sb.pushDel,sb.pullNew,sb.pullMod,sb.pullDel,sb.conflicts,sb.unchanged);
+        printf("cal : +%d ~%d push | +%d ~%d -%d pull | %d hidden | %d conflict | %d clean\n",
+               sa.pushNew,sa.pushMod,sa.pullNew,sa.pullMod,sa.pullDel,sa.hidden,sa.conflicts,sa.unchanged);
+        printf("card: +%d ~%d push | +%d ~%d -%d pull | %d hidden | %d conflict | %d clean\n",
+               sb.pushNew,sb.pushMod,sb.pullNew,sb.pullMod,sb.pullDel,sb.hidden,sb.conflicts,sb.unchanged);
         return 0;
     }
     if(!strcmp(argv[1],"discover")){

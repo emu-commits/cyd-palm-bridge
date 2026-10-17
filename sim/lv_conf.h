@@ -56,12 +56,9 @@
     /* Device parity. THIS MUST TRACK firmware/sdkconfig.defaults --
      * CONFIG_LV_MEM_SIZE_KILOBYTES -- and today that is 32.
      *
-     * It said 24 until 2026-09-19, which was the value from BEFORE the device
-     * was raised to 32 (see the long note in sdkconfig.defaults on why 24 KB
-     * live-locks the dashboard). The sim was therefore gating against a
-     * configuration that no longer exists, 8 KB tighter than any real device,
-     * and `make smoke32` had been logging ~42 image-decode failures a run that
-     * hardware never sees. A gate that cries wolf is a gate people stop reading.
+     * `make -C sim poolparity` fails if the two drift: a sim gating against a
+     * tighter pool than any device logs failures hardware never sees, and a
+     * gate that cries wolf is a gate people stop reading.
      *
      * Verified on hardware rather than inferred from the config: the boot log
      * line in lvgl_port.c prints the pool LVGL actually built, and it reads

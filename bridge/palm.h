@@ -49,6 +49,15 @@ typedef struct {
 /* both directions live in datebook.c */
 int  ApptUnpack(const uint8_t *r, int len, Appt *a);        /* bytes -> Appt */
 int  ApptPack(uint8_t *buf, int cap, const Appt *a);        /* Appt -> bytes, returns len or -1 */
+/* Does `a` occur on y/m/d? Its repeat (daily, weekly days, monthly by date or
+ * by "nth weekday", yearly, every N), its end date and its exceptions applied:
+ * a weekly meeting that began years ago occurs today. */
+int  appt_occurs_on(const Appt *a, int y, int m, int d);
+/* the first date on or after y/m/d, within `horizon` days, on which `a` occurs:
+ * 1 and the date in oy, om, od, or 0 */
+int  appt_next_on(const Appt *a, int y, int m, int d, int horizon, int *oy, int *om, int *od);
+int  appt_weekday(int y, int m, int d);     /* 0 = Sunday */
+void appt_add_days(int *y, int *m, int *d, int n);
 
 /* ============================ ToDo ===================================== */
 typedef struct {
@@ -88,6 +97,7 @@ const char *AddrIntern(Addr *a, const char *s);
 /* ============================ iCalendar ================================= */
 void ical_set_tz(const char *tzid);      /* configure device zone; NULL/UTC = floating */
 int  ical_vtimezone(char *out, int cap); /* VTIMEZONE block for current zone, or 0 */
+const char *ical_tzid(void);             /* the device zone's TZID, or "" */
 int  ical_emit(char *out, int cap, const Appt *a, uint32_t uid);  /* Appt->VEVENT */
 int  ical_parse(const char *ics, Appt *a);                        /* VEVENT->Appt, 0 ok */
 

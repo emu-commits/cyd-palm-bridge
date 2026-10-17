@@ -4,6 +4,9 @@
  * matter how big the database is (the no-PSRAM device constraint). Matching is
  * ASCII case-insensitive substring; that covers Find's job without dragging in
  * locale/charset folding (Palm text is CP1252, but Find queries are ASCII).
+ * A match must start a word, as Palm's did ("a prefix-only case-insensitive
+ * search on each word": "the" finds "Then", not "Lathe"), so a short query
+ * finds what it names rather than every word that happens to contain it.
  *
  * RAM: no scratch buffers. Text fields are matched in place -- codec strings are
  * already null-terminated in the (stack) unpacked struct, and memo bodies are
@@ -15,12 +18,18 @@
 #include "palm.h"
 #include "find.h"
 
-/* case-insensitive ASCII substring over [hay, hay+haylen); returns the match
- * offset within hay, or -1. Does not require hay to be null-terminated. */
+/* A word's letters and digits. Bytes past ASCII are letters of the CP1252
+ * text (é, ß), so "ller" doesn't start a word inside "Müller". */
+static int word_byte(unsigned char c){ return isalnum(c) || c >= 0x80; }
+
+/* case-insensitive ASCII match at the start of a word in [hay, hay+haylen);
+ * returns the match offset within hay, or -1. Does not require hay to be
+ * null-terminated. */
 static int ci_find_n(const char *hay, int haylen, const char *needle){
     if(!hay || !needle || !*needle) return -1;
     int nl=(int)strlen(needle);
     for(int i=0; i+nl<=haylen; i++){
+        if(i > 0 && word_byte((unsigned char)hay[i-1])) continue;   /* mid-word */
         int j=0;
         while(j<nl && tolower((unsigned char)hay[i+j])==tolower((unsigned char)needle[j])) j++;
         if(j==nl) return i;

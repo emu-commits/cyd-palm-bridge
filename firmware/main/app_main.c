@@ -32,6 +32,7 @@
 #include "data.h"
 #include "clock.h"
 #include "appcfg.h"
+#include "monster_install.h"
 
 static const char *TAG = "app";
 
@@ -43,20 +44,8 @@ static const char *TAG = "app";
 #define SD_PIN_CS    5
 #define SD_SPI_HOST SPI2_HOST
 
-/* ---- What used to live here, and why it is gone (2026-09-22) -------------
- * The first bring-up did its own Wi-Fi association, its own SNTP, its own
- * iCloud host resolution and its own one-collection sync, all from secrets.h,
- * in a tail below lvgl_port_run(). lvgl_port_run() does not return, so NONE OF
- * IT HAD EXECUTED SINCE THE UI LANDED -- roughly 150 lines that read like the
- * boot path and were not the boot path, including a second copy of the
- * effective-host and absolute-href logic that had drifted from the live one.
- *
- * hotsync.c does all of it now, on a background task, from config.ini rather
- * than compiled-in credentials. (There is no compile-time secrets.h at all any
- * more -- see appcfg.c.) git log -- firmware/main/app_main.c has the old version if the early
- * bring-up sequence is ever wanted for reference. */
-
-
+/* Wi-Fi, the clock and sync live in hotsync.c, on a background task, from
+ * config.ini: lvgl_port_run() below never returns, so nothing after it runs. */
 
 /* ---------------- SD card ---------------- */
 static sdmmc_card_t *s_card;
@@ -98,11 +87,11 @@ void app_main(void){
      * survive a power cycle (a HotSync's SNTP later corrects it exactly). */
     clock_restore();
 
-    /* U1: display bring-up -- draw a diagnostic test pattern first thing. */
+    /* display bring-up -- draw a diagnostic test pattern first thing. */
     display_init();
     display_test_pattern();
 
-    /* U2: touch. Load saved calibration; (re)calibrate only if none is stored or
+    /* touch. Load saved calibration; (re)calibrate only if none is stored or
      * the user is holding the screen at boot (force re-cal). */
     tp_init();
     if(tp_pressed() || !tp_cal_load()){
@@ -114,9 +103,10 @@ void app_main(void){
         ESP_LOGI(TAG,"loaded touch calibration from NVS (hold screen at boot to re-cal)");
     }
 
-    /* U4: mount the SD card and seed demo PDBs so the views have content. */
+    /* mount the SD card and seed demo PDBs so the views have content. */
     if(sd_mount()==ESP_OK){
         data_seed_if_empty();
+        monster_install();   /* the flasher's optional Critters, once per new game */
         /* Two-way sync is live, so anything sitting in the local Date Book gets
          * pushed to the real account. The devtools "Add test events" seed must
          * not be part of that. Clearing it at boot -- before any HotSync can run
@@ -157,10 +147,10 @@ void app_main(void){
     clock_set_tz(appcfg()->timezone);
     clock_start_autosave();
 
-    /* U3: bring up LVGL + the Palm app shell (never returns). */
+    /* bring up LVGL + the Palm app shell (never returns). */
     lvgl_port_init();
     ui_init();
-    /* U8 power: PWM backlight (configured brightness) + automatic light-sleep.
+    /* power: PWM backlight (configured brightness) + automatic light-sleep.
      * After LVGL/config are up so it can read appcfg() and own the backlight. */
     power_init();
     /* The drain experiment (Menu > Options > Power). Started after the SD mount

@@ -15,6 +15,7 @@
 #include <string.h>
 #include "../bridge/palm.h"
 #include "../bridge/sync.h"
+#include "radicale_rm.h"
 
 static DavCtx D;
 static int fails=0;
@@ -27,7 +28,7 @@ static void nlCb(const char*name,const char*etag,void*ctx){
 }
 static void clearColl(const char*coll,const char*map){
     NL *l=calloc(1,sizeof*l); dav_list(&D,coll,nlCb,l);
-    for(int i=0;i<l->c;i++) dav_delete(&D,coll,l->n[i],NULL);
+    for(int i=0;i<l->c;i++) test_rm(&D,coll,l->n[i],NULL);
     remove(map); free(l);
 }
 static int collCount(const char*coll){ NL *l=calloc(1,sizeof*l); dav_list(&D,coll,nlCb,l); int n=l->c; free(l); return n; }
@@ -86,7 +87,7 @@ static void run(const char*label,int kind,const char*coll,const char*pdb,const c
     CK(collCount(coll)==4,"server holds 4 objects");
 
     SyncStats s2={0}; sync_collection(&D,pdb,pdb,coll,kind,map,POL_SERVER,&s2);
-    int ops=s2.pushNew+s2.pushMod+s2.pushDel+s2.pullNew+s2.pullMod+s2.pullDel+s2.conflicts;
+    int ops=s2.pushNew+s2.pushMod+s2.pullNew+s2.pullMod+s2.pullDel+s2.conflicts;
     printf("  idempotent: ops=%d clean=%d\n",ops,s2.unchanged);
     CK(ops==0,"second sync is a no-op");
     CK(s2.unchanged==4,"all 4 clean on second sync");

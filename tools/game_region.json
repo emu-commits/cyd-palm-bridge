@@ -1,0 +1,204 @@
+{
+  "title": "Critters",
+  "note": "The first region (G3, 2026-10-16): Larkhollow, Route 1, Brideswood, Cotton Tunnel and Kestrel. Route 1, Brideswood and the tunnel are Tuxemon's Spyder maps from clean tilesets; the two towns are laid out for this game (tools/game_maps/) from the clean sheets. Route 1's east half doesn't reach Brideswood on foot in Tuxemon's map, so the way on is its open north edge. The story and every line of dialogue are ours.",
+  "player": ["player", "player_green", "player_orange", "player_olive", "player_violet", "player_rose"],
+  "start": {"area": "larkhollow", "x": 6, "y": 10, "facing": "down"},
+  "starters": ["agnite", "anoleaf", "cardiling"],
+  "areas": [
+    {
+      "map": "larkhollow", "name": "Larkhollow", "layout": "game_maps/larkhollow.json",
+      "warps": [
+        {"at": [12, 0, 2, 1], "to": "spyder_route1", "x": 13, "y": 18, "facing": "up"},
+        {"at": [6, 9], "to": "larkhollow_home", "x": 5, "y": 7, "facing": "up"},
+        {"at": [17, 9], "to": "larkhollow_lab", "x": 5, "y": 7, "facing": "up"}
+      ],
+      "signs": [
+        {"at": [15, 3, 2, 2], "facing": "up",
+         "text": "LARKHOLLOW. North: Route 1, then the Brideswood, then the old tunnel to Kestrel."}
+      ],
+      "people": [
+        {"at": [5, 10], "facing": "down", "sheet": "homemaker", "kind": "healer", "name": "Mum",
+         "text": "There you are. Sit a minute and let your critters rest. Come home whenever they're worn out.",
+         "after": ""},
+        {"at": [14, 10], "facing": "down", "sheet": "scientist", "kind": "talk", "name": "Dr Wren",
+         "flag": "met_wren",
+         "text": "So you're a keeper now! Every keeper tries the Kestrel Ring sooner or later. Take the road north, through the Brideswood and the old tunnel.",
+         "after": "Kestrel's past the Brideswood and through the tunnel. Rest at home if your critters are tired."},
+        {"at": [20, 8], "facing": "left", "sheet": "childactor", "kind": "talk", "name": "Pip",
+         "text": "I saw a critter made of FIRE in the tall grass! Well, it was orange. Mostly."},
+        {"at": [9, 16], "facing": "left", "sheet": "florist", "kind": "talk", "name": "Rosa",
+         "text": "Critters love these flowers. Wild ones keep to the tall grass, though. Walk through it and they'll find you.",
+         "after": ""}
+      ]
+    },
+    {
+      "map": "spyder_route1", "name": "Route 1",
+      "warps": [
+        {"at": [13, 19, 2, 1], "to": "larkhollow", "x": 12, "y": 1, "facing": "down"},
+        {"at": [22, 0, 6, 1], "to": "spyder_brideswood", "x": 1, "y": 4, "facing": "up"}
+      ],
+      "people": [
+        {"at": [26, 14], "facing": "left", "sheet": "tennisplayer", "kind": "trainer", "name": "Keeper Ada",
+         "sight": 3, "flag": "beat_ada", "team": [["cardiling", 4], ["anoleaf", 5]],
+         "text": "A new keeper! Let's see what you've got.",
+         "after": "Good match! Your critters will get stronger every battle."},
+        {"at": [16, 9], "facing": "up", "sheet": "picnicker", "kind": "trainer", "name": "Keeper Ben",
+         "sight": 2, "flag": "beat_ben", "team": [["vamporm", 6]],
+         "text": "Hey! You walked right into my picnic. That means a battle.",
+         "after": "Fine, fine. The Brideswood is north of here. Mind you don't get lost."}
+      ]
+    },
+    {
+      "map": "spyder_brideswood", "name": "Brideswood", "tuxemon_events": false,
+      "warps": [
+        {"at": [0, 4, 1, 2], "to": "spyder_route1", "x": 24, "y": 1, "facing": "left"},
+        {"at": [36, 0, 2, 1], "to": "spyder_cotton_tunnel", "x": 3, "y": 15, "facing": "up"}
+      ],
+      "zones": [
+        {"at": [0, 0, 40, 40], "table": "brideswood", "chance": 3}
+      ],
+      "people": [
+        {"at": [6, 22], "facing": "right", "sheet": "catgirl", "kind": "trainer", "name": "Keeper Mira",
+         "sight": 2, "flag": "beat_mira", "team": [["noctula", 6], ["zunna", 7]],
+         "text": "The wood is full of night critters. I've caught the best of them.",
+         "after": "Keep heading south, then east along the bottom of the wood."},
+        {"at": [31, 28], "facing": "left", "sheet": "cooldude", "kind": "trainer", "name": "Keeper Tom",
+         "sight": 1, "flag": "beat_tom", "team": [["eyenemy", 7], ["pigabyte", 8]],
+         "text": "Nobody gets to the tunnel without going through me.",
+         "after": "Go on, then. Tell Dale at the tunnel I said you're all right."}
+      ]
+    },
+    {
+      "map": "spyder_cotton_tunnel", "name": "Cotton Tunnel", "tuxemon_events": false,
+      "warps": [
+        {"at": [3, 16, 1, 1], "to": "spyder_brideswood", "x": 36, "y": 1, "facing": "down"},
+        {"at": [35, 2, 1, 1], "to": "kestrel", "x": 12, "y": 19, "facing": "up"}
+      ],
+      "zones": [
+        {"at": [0, 0, 40, 20], "table": "cotton_tunnel", "chance": 4}
+      ],
+      "signs": [
+        {"at": [31, 2, 1, 1], "facing": "up", "text": "Rocks have fallen across this way. It's shut."}
+      ],
+      "people": [
+        {"at": [35, 3], "facing": "down", "sheet": "miner", "kind": "talk", "name": "Foreman Dale",
+         "hide_if": "beat_tom",
+         "text": "The way to Kestrel's not for beginners. Beat Tom in the Brideswood first, then we'll talk."},
+        {"at": [24, 6], "facing": "down", "sheet": "scientist", "kind": "trainer", "name": "Keeper Iris",
+         "sight": 1, "flag": "beat_iris", "team": [["nut", 8], ["propellercat", 9]],
+         "text": "I'm studying tunnel critters. You'll do as a test.",
+         "after": "Fascinating. Kestrel is up the far ladder."},
+        {"at": [39, 16], "facing": "left", "sheet": "ninja", "kind": "trainer", "name": "Keeper Sly",
+         "sight": 1, "flag": "beat_sly", "team": [["cateye", 9], ["dune_pincher", 9]],
+         "text": "You didn't see me. But I saw you.",
+         "after": "...I was never here."}
+      ]
+    },
+    {
+      "map": "kestrel", "name": "Kestrel", "layout": "game_maps/kestrel.json",
+      "warps": [
+        {"at": [12, 20, 2, 1], "to": "spyder_cotton_tunnel", "x": 35, "y": 3, "facing": "down"},
+        {"at": [6, 15], "to": "kestrel_rest", "x": 5, "y": 7, "facing": "up"}
+      ],
+      "signs": [
+        {"at": [9, 11, 2, 2], "facing": "up",
+         "text": "THE KESTREL RING. Warden Ivy takes on any keeper who reaches her."}
+      ],
+      "people": [
+        {"at": [16, 16], "facing": "down", "sheet": "shopassistant", "kind": "talk", "name": "Sam",
+         "text": "The store opens next season. For now, there's only one thing worth buying in Kestrel: a win in the Ring."},
+        {"at": [10, 7], "facing": "right", "sheet": "monk", "kind": "trainer", "name": "Ringman Pell",
+         "sight": 2, "flag": "beat_pell", "team": [["selket", 10], ["bolt", 10]],
+         "text": "To face the Warden, you face me first.",
+         "after": "The Warden is waiting at the top of the Ring."},
+        {"at": [15, 5], "facing": "left", "sheet": "picnicker", "kind": "trainer", "name": "Ringwoman Juno",
+         "sight": 2, "flag": "beat_juno", "team": [["dracune", 11], ["cardiwing", 11]],
+         "text": "Almost there! Not quite, though.",
+         "after": "Go on. She's watched every move you made."},
+        {"at": [12, 4], "facing": "down", "sheet": "knightlord", "kind": "trainer", "name": "Warden Ivy",
+         "flag": "beat_ivy", "team": [["agnidon", 12], ["cardiwing", 12], ["arthrobolt", 13]],
+         "text": "I'm Ivy, Warden of the Kestrel Ring. You came all the way from Larkhollow? Then show me why.",
+         "after": "You're the best keeper this side of the Brideswood now. Larkhollow will be proud."},
+        {"at": [14, 13], "facing": "down", "sheet": "postboy", "kind": "talk", "name": "Ned the Post",
+         "show_if": "beat_ivy",
+         "text": "Letter for you! It's from your mum: \"Heard the news. Dinner's on when you're home.\""}
+      ]
+    },
+    {
+      "map": "larkhollow_home", "name": "Home", "layout": "game_maps/larkhollow_home.json",
+      "warps": [
+        {"at": [5, 8], "to": "larkhollow", "x": 6, "y": 10, "facing": "down"}
+      ],
+      "signs": [
+        {"at": [9, 1, 2, 1], "facing": "up",
+         "text": "Your old picture books. \"The Little Keeper\" is still on top, its corners chewed."},
+        {"at": [0, 2, 2, 1], "facing": "up",
+         "text": "Something smells good. A note on the pot says: NOT YET."}
+      ],
+      "people": [
+        {"at": [8, 3], "facing": "down", "sheet": "cooldude", "kind": "talk", "name": "Rowan",
+         "text": "Off to be a keeper, then? Talk to Dr Wren in the house across the square first. And mind Mum's flowers on the way out."}
+      ]
+    },
+    {
+      "map": "larkhollow_lab", "name": "Wren's Lab", "layout": "game_maps/larkhollow_lab.json",
+      "warps": [
+        {"at": [5, 8], "to": "larkhollow", "x": 17, "y": 10, "facing": "down"}
+      ],
+      "signs": [
+        {"at": [0, 1, 4, 1], "facing": "up",
+         "text": "Shelves of field notes. One page says: the deeper the wood, the tougher the critters."},
+        {"at": [8, 1, 2, 1], "facing": "up",
+         "text": "The machine hums. A card taped to it says: DON'T TOUCH. -W."},
+        {"at": [7, 4], "facing": "up",
+         "text": "Dr Wren's desk: a flask of something green and a book called \"Types and Their Troubles\"."}
+      ],
+      "people": [
+        {"at": [3, 5], "facing": "down", "sheet": "shopassistant", "kind": "talk", "name": "Fern",
+         "text": "I help Dr Wren. A tip: a move that suits what it hits does twice the damage, and a poor match does half. Watch for \"very effective\"."}
+      ]
+    },
+    {
+      "map": "kestrel_rest", "name": "Rest House", "layout": "game_maps/kestrel_rest.json",
+      "warps": [
+        {"at": [5, 8], "to": "kestrel", "x": 6, "y": 16, "facing": "down"}
+      ],
+      "signs": [
+        {"at": [3, 1, 2, 1], "facing": "up", "text": "The fire crackles. It's warm in here."},
+        {"at": [9, 1, 2, 1], "facing": "up",
+         "text": "Plates from every town in the region, and a gap where Larkhollow's should be."}
+      ],
+      "people": [
+        {"at": [3, 3], "facing": "down", "sheet": "nurse", "kind": "healer", "name": "Nurse Hale",
+         "text": "Welcome to the rest house. Your critters are rested now. If they're all worn out in the Ring, you'll wake up here.",
+         "after": ""},
+        {"at": [8, 5], "facing": "left", "sheet": "florist", "kind": "talk", "name": "Hazel",
+         "text": "I came through the tunnel last spring and never left. Kestrel grows on you."}
+      ]
+    }
+  ],
+  "encounters": {
+    "spyder_route1": [
+      {"creature": "agnite",    "levels": [2, 4], "rate": 10},
+      {"creature": "cardiling", "levels": [2, 4], "rate": 20},
+      {"creature": "vamporm",   "levels": [2, 4], "rate": 20},
+      {"creature": "anoleaf",   "levels": [2, 4], "rate": 15},
+      {"creature": "noctula",   "levels": [3, 5], "rate": 15},
+      {"creature": "zunna",     "levels": [3, 5], "rate": 20}
+    ],
+    "brideswood": [
+      {"creature": "noctula",   "levels": [4, 7], "rate": 25},
+      {"creature": "zunna",     "levels": [4, 7], "rate": 25},
+      {"creature": "eyenemy",   "levels": [5, 7], "rate": 20},
+      {"creature": "selket",    "levels": [5, 7], "rate": 20},
+      {"creature": "pigabyte",  "levels": [6, 8], "rate": 10}
+    ],
+    "cotton_tunnel": [
+      {"creature": "nut",          "levels": [6, 8], "rate": 30},
+      {"creature": "cateye",       "levels": [6, 8], "rate": 20},
+      {"creature": "dune_pincher", "levels": [6, 9], "rate": 20},
+      {"creature": "noctula",      "levels": [6, 8], "rate": 20},
+      {"creature": "djinnbo",      "levels": [7, 9], "rate": 10}
+    ]
+  }
+}

@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include <time.h>
 #include "data.h"
 #include "appcfg.h"
 #include "palm.h"
@@ -89,6 +90,122 @@ int main(void){
     CK(data_save_todo(0, 0, &t), "a new to do of the user's own");
     g_first = 0; data_todo(firstRow, NULL);
     CK(g_first > (uint32_t)dn, "gets a uid ABOVE the demo range, so HotSync will push it");
+    /* an edit form saved on the way out (the lock, Home) reopens on its
+     * record, so a new one's uid has to be known once the card assigned it */
+    CK(data_last_new_uid() == g_first, "data_last_new_uid() names the record just created");
+    CK(data_save_todo(g_first, -1, &t) && data_last_new_uid() == g_first,
+       "saving it again changes nothing there (an edit, not a new record)");
+
+    /* ---- a real account's size: every rewrite streams --------------------
+     * Edits, deletes and category changes used to go through a 12 KB,
+     * 64-record arena and write back what fit. Two thousand contacts: an edit
+     * and a delete past the old cap, and a category change, must keep every
+     * one, change the right one in place, and append nothing. */
+    printf("-- 2000 contacts --\n");
+    /* Address is read-only on the device while it syncs, and only then; a
+     * Date Book that syncs stays editable. The data layer itself still
+     * writes contacts: the rewrites below are what a sync's output uses. */
+    CK(!data_app_readonly(APP_ADDR), "Address with no account collection: editable");
+    snprintf(c->card_coll, sizeof c->card_coll, "card");
+    CK(data_app_readonly(APP_ADDR), "Address that syncs: read-only");
+    CK(!data_app_readonly(APP_CAL) && data_app_syncs(APP_CAL), "a Date Book that syncs: editable");
+    {
+        static uint8_t arena[2000 * 64]; static PdbRec rr[2000]; int used = 0;
+        for(int i = 0; i < 2000; i++){
+            Addr a; memset(&a, 0, sizeof a);
+            char nm[32]; snprintf(nm, sizeof nm, "Person %04d", i);
+            a.fields[F_name] = AddrIntern(&a, nm);
+            a.fields[F_phone1] = AddrIntern(&a, "+1 555 0100");
+            int l = AddrPack(arena + used, 64, &a);
+            rr[i] = (PdbRec){ .attr = 0, .uniqueID = (uint32_t)(100 + i), .data = arena + used, .len = l };
+            used += l;
+        }
+        pdb_write(data_db_path(APP_ADDR), "AddressDB", 0x44415441, 0x61646472, rr, 2000);
+    }
+    Raw b0 = raw(APP_ADDR);
+    CK(b0.all == 2000, "2000 contacts on the card");
+    Addr ea; CK(data_get_addr(1600, &ea), "contact 1600 (past the old 64-record cap) reads");
+    ea.fields[F_phone1] = AddrIntern(&ea, "+1 555 0999");
+    CK(data_save_addr(1600, -1, &ea), "edit it");
+    Raw b1 = raw(APP_ADDR);
+    CK(b1.all == 2000, "still 2000: nothing truncated, nothing appended");
+    Addr a2; data_get_addr(1600, &a2);
+    CK(a2.fields[F_phone1] && !strcmp(a2.fields[F_phone1], "+1 555 0999"), "the edit landed on that contact");
+    Addr a3; data_get_addr(2099, &a3);
+    CK(a3.fields[F_name] && !strcmp(a3.fields[F_name], "Person 1999"), "and the last contact is untouched");
+    CK(data_delete(APP_ADDR, 1700), "delete contact 1700");
+    Raw b2 = raw(APP_ADDR);
+    CK(b2.all == 2000 && b2.tomb == 1, "a tombstone, and every other contact kept");
+    CatTable ct; data_get_categories(APP_ADDR, &ct);
+    snprintf(ct.name[5], sizeof ct.name[5], "Clients");
+    CK(data_set_categories(APP_ADDR, &ct), "rename a category");
+    CK(raw(APP_ADDR).all == 2000, "all 2000 kept through a category change");
+    Addr na; memset(&na, 0, sizeof na); na.fields[F_name] = AddrIntern(&na, "Brand New");
+    CK(data_save_addr(0, 0, &na), "a new contact");
+    CK(raw(APP_ADDR).all == 2001, "appended: 2001");
+
+    /* ---- a repeating event shows on the days it occurs ------------------
+     * It used to show on its start date only: a weekly meeting that began in
+     * 2019 never appeared in the days a sync window keeps. */
+    printf("-- a weekly meeting from 2019 --\n");
+    {
+        Appt w; memset(&w, 0, sizeof w);
+        w.hasTime = 1; w.sH = 9; w.eH = 10; w.year = 2019; w.month = 1; w.day = 7;   /* a Monday */
+        w.hasRepeat = 1; w.repeatType = repeatWeekly; w.repeatFreq = 1; w.repeatForever = 1; w.repeatOn = 1 << 1;
+        snprintf(w.description, sizeof w.description, "Standup");
+        uint8_t pk[512]; int l = ApptPack(pk, sizeof pk, &w);
+        PdbRec one = { .attr = 0, .uniqueID = 500, .data = pk, .len = l };
+        pdb_write(data_db_path(APP_CAL), "DatebookDB", 0x44415441, 0x64617465, &one, 1);
+        int mon = 0, tue = 0;
+        data_cal_day(2026, 10, 12, countRow, &mon);
+        data_cal_day(2026, 10, 13, countRow, &tue);
+        CK(mon == 1 && tue == 0, "on Monday 12 Oct 2026, not Tuesday");
+        uint8_t marks[32]; data_cal_month_marks(2026, 10, marks);
+        CK(marks[5] && marks[12] && marks[19] && marks[26] && !marks[13], "every Monday of the month dotted");
+    }
+
+    printf("-- reminders: alarms that came due in a span --\n");
+    {
+        /* Wed 12 Mar 2031 09:00, five minutes' notice; the Standup above (every
+         * Monday 09:00, no alarm); an hour's notice on a weekly Friday 14:00
+         * from 2030; and an untimed event with an alarm, which can't ring */
+        Appt one; memset(&one, 0, sizeof one);
+        one.hasTime = 1; one.sH = 9; one.eH = 10; one.year = 2031; one.month = 3; one.day = 12;
+        one.hasAlarm = 1; one.alarmAdv = 5; one.alarmUnit = 0;
+        snprintf(one.description, sizeof one.description, "Dentist");
+        CK(data_save_cal(0, 0, &one), "an event with five minutes' notice");
+        Appt wk; memset(&wk, 0, sizeof wk);
+        wk.hasTime = 1; wk.sH = 14; wk.eH = 15; wk.year = 2030; wk.month = 1; wk.day = 4;   /* a Friday */
+        wk.hasRepeat = 1; wk.repeatType = repeatWeekly; wk.repeatFreq = 1; wk.repeatForever = 1; wk.repeatOn = 1 << 5;
+        wk.hasAlarm = 1; wk.alarmAdv = 1; wk.alarmUnit = 1;
+        snprintf(wk.description, sizeof wk.description, "Review");
+        CK(data_save_cal(0, 0, &wk), "a weekly event with an hour's notice");
+        Appt nt; memset(&nt, 0, sizeof nt);
+        nt.year = 2031; nt.month = 3; nt.day = 12; nt.hasAlarm = 1; nt.alarmAdv = 5;
+        snprintf(nt.description, sizeof nt.description, "Untimed");
+        CK(data_save_cal(0, 0, &nt), "an untimed event with an alarm");
+
+        struct tm t = {0}; t.tm_year = 2031 - 1900; t.tm_mon = 2; t.tm_mday = 12; t.tm_isdst = -1;
+        t.tm_hour = 8; t.tm_min = 55; time_t at = mktime(&t);           /* the Dentist's alarm */
+        int n = 0;
+        n = 0; data_cal_alarms(at - 3600, at - 1, countRow, &n);
+        CK(n == 0, "not before its time");
+        n = 0; data_cal_alarms(at - 3600, at, countRow, &n);
+        CK(n == 1, "due at start less five minutes (the span's end counts)");
+        n = 0; data_cal_alarms(at, at + 600, countRow, &n);
+        CK(n == 0, "and only once: a span that starts at it doesn't repeat it");
+        /* Friday 14 Mar 2031 14:00 less an hour is 13:00 */
+        t.tm_mday = 14; t.tm_hour = 13; t.tm_min = 0; time_t fri = mktime(&t);
+        n = 0; data_cal_alarms(fri - 60, fri, countRow, &n);
+        CK(n == 1, "a weekly event from 2030 rings on this week's Friday, an hour early");
+        n = 0; data_cal_alarms(fri, fri + 3599, countRow, &n);
+        CK(n == 0, "nothing in the hour after it");
+        /* a device asleep for a month: only the last DATA_ALARM_DAYS days */
+        n = 0; data_cal_alarms(fri - 30 * 86400L, fri, countRow, &n);
+        CK(n == 2, "a month asleep: the Dentist and this Friday, not four weeks of Fridays");
+        n = 0; data_cal_alarms(at, at - 1, countRow, &n);
+        CK(n == 0, "an empty span is nothing");
+    }
 
     printf(fails ? "== data: %d FAILURE(S) ==\n" : "== data: all passed ==\n", fails);
     return fails ? 1 : 0;

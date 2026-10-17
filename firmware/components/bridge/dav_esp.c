@@ -36,7 +36,7 @@ typedef struct {
 /* --- persistent keep-alive connection ------------------------------------
  * Init/perform/cleanup per request meant a full TLS handshake (~1-3 s against
  * iCloud's cert chain) for EVERY DAV call -- ~2N handshakes to pull N records
- * (one GET per object for its UID, one more for its body, plus each PUT/DELETE).
+ * (one GET per object for its UID, one more for its body, plus each PUT).
  * We now keep ONE client handle alive and reuse its TCP+TLS connection
  * (keep_alive_enable) across calls to the same origin, so the handshake happens
  * about once per network phase instead of once per request.
@@ -119,6 +119,16 @@ static int davreq(const DavCtx*d, esp_http_client_method_t method, const char*ur
                   const char*body, int bodylen,
                   char*resp, int respcap, int*respn,
                   char*etag, int etagcap, char*effurl, int effcap){
+    /* An allow-list, not a deny-list: reads, and PUT to create or edit. No
+     * request that can remove an object from the account leaves this device
+     * (dav.h), so a stray caller fails here rather than on someone's iCloud. */
+    if(method!=HTTP_METHOD_GET && method!=HTTP_METHOD_PUT &&
+       method!=HTTP_METHOD_PROPFIND && method!=HTTP_METHOD_REPORT){
+        if(resp && respcap) resp[0]=0;
+        if(respn) *respn = 0;
+        if(etag && etagcap) etag[0]=0;
+        return -1;
+    }
     /* Breaker first: once the transport is down, spending another 20-second
      * timeout tells us nothing we do not already know, and there is one request
      * per record behind this. */
@@ -241,11 +251,6 @@ int dav_put(const DavCtx*d,const char*coll,const char*name,const char*ctype,
     return 0;
 }
 
-int dav_delete(const DavCtx*d,const char*coll,const char*name,const char*ifmatch){
-    char url[512]; snprintf(url,sizeof url,"%s/%s/%s",d->base,coll,name);
-    return davreq(d,HTTP_METHOD_DELETE,url,-1,NULL,ifmatch,NULL,0, NULL,0,NULL, NULL,0, NULL,0);
-}
-
 int dav_getetag(const DavCtx*d,const char*coll,const char*name,char*etag,int cap){
     char url[512]; snprintf(url,sizeof url,"%s/%s/%s",d->base,coll,name);
     char body[128]; int bl=body_getetag(body,sizeof body);
@@ -264,6 +269,17 @@ int dav_get(const DavCtx*d,const char*coll,const char*name,char*out,int cap){
     int st=davreq(d,HTTP_METHOD_GET,url,-1,NULL,NULL,NULL,0, out,cap,&rn, NULL,0, NULL,0);
     if(st<0 || st>=400) return -1;
     return rn;
+}
+
+/* An object streamed to an SD file, as dav_fetch_url does a feed, with auth. */
+int dav_get_file(const DavCtx*d,const char*coll,const char*name,const char*path){
+    char url[512]; snprintf(url,sizeof url,"%s/%s/%s",d->base,coll,name);
+    FILE *sp = fopen(path,"w+b"); if(!sp) return -1;
+    s_spoolfile = sp;
+    int st = davreq(d,HTTP_METHOD_GET,url,-1,NULL,NULL,NULL,0, NULL,0,NULL, NULL,0, NULL,0);
+    s_spoolfile = NULL;
+    fclose(sp);
+    return st;
 }
 
 /* Stream an arbitrary (public) https URL's body straight to an SD file -- used by
@@ -384,4 +400,68 @@ int dav_list_collections(const DavCtx*d,const char*path,dav_coll_cb cb,void*ctx)
     fclose(sp); remove(ENUM_SPOOL);
     fprintf(stderr,"[dav] PROPFIND collections %s -> st=%d rn=%ld found=%d (stream)\n",path,st,rn,count);
     return count;
+}
+
+/* ---------------- a time window, multiget, a probe ---------------- */
+static int query_members(const DavCtx*d,const char*coll,const char*body,int bl,
+                         dav_list_cb cb,void*ctx,const char*what){
+    char url[512]; snprintf(url,sizeof url,"%s/%s/",d->base,coll);
+    /* spooled and stream-parsed, as the other listings are */
+    FILE*sp=fopen(ENUM_SPOOL,"w+b"); if(!sp){ ESP_LOGW(TAG,"%s %s: spool open failed",what,coll); return -1; }
+    s_spoolfile=sp;
+    int st=davreq(d,HTTP_METHOD_REPORT,url,1,"application/xml; charset=utf-8",NULL,body,bl,
+                  NULL,0,NULL, NULL,0, NULL,0);
+    s_spoolfile=NULL;
+    long rn = ftell(sp); rewind(sp);
+    int count = st==207 ? dav_parse_members_stream(sp,cb,ctx) : -1;
+    fclose(sp); remove(ENUM_SPOOL);
+    fprintf(stderr,"[dav] %s %s -> st=%d rn=%ld members=%d\n",what,coll,st,rn,count);
+    return count;
+}
+int dav_query_window(const DavCtx*d,const char*coll,long long start,long long end,
+                     dav_list_cb cb,void*ctx){
+    char body[640]; int bl=dav_body_window(body,sizeof body,start,end);
+    if(bl<0) return -1;
+    return query_members(d,coll,body,bl,cb,ctx,"window");
+}
+int dav_query_todos(const DavCtx*d,const char*coll,long long doneSince,dav_list_cb cb,void*ctx){
+    char body[640];
+    int bl=dav_body_todos(body,sizeof body,0,0); if(bl<0) return -1;
+    int a=query_members(d,coll,body,bl,cb,ctx,"open to-dos"); if(a<0) return -1;
+    bl=dav_body_todos(body,sizeof body,1,doneSince); if(bl<0) return -1;
+    int b=query_members(d,coll,body,bl,cb,ctx,"recently done"); if(b<0) return -1;
+    return a+b;
+}
+
+int dav_multiget(const DavCtx*d,const char*coll,int card,const char*const*names,int n,
+                 const char*spool){
+    int cap = 512 + n*200;
+    char*body=malloc((size_t)cap); if(!body) return -1;
+    int bl=dav_body_multiget(body,cap,d->base,coll,card,names,n);
+    if(bl<0){ free(body); return -1; }
+    char url[512]; snprintf(url,sizeof url,"%s/%s/",d->base,coll);
+    FILE*sp=fopen(spool,"w+b"); if(!sp){ free(body); return -1; }
+    s_spoolfile=sp;
+    int st=davreq(d,HTTP_METHOD_REPORT,url,1,"application/xml; charset=utf-8",NULL,body,bl,
+                  NULL,0,NULL, NULL,0, NULL,0);
+    s_spoolfile=NULL;
+    long rn = ftell(sp);
+    fclose(sp); free(body);
+    fprintf(stderr,"[dav] multiget %s n=%d -> st=%d rn=%ld\n",coll,n,st,rn);
+    return st;
+}
+
+int dav_probe(const DavCtx*d,const char*coll,const char*name,char*etag,int cap){
+    if(etag&&cap) etag[0]=0;
+    char url[512]; snprintf(url,sizeof url,"%s/%s/%s",d->base,coll,name);
+    char body[128]; int bl=body_getetag(body,sizeof body);
+    char buf[1024]; int rn=0;
+    int st=davreq(d,HTTP_METHOD_PROPFIND,url,0,"application/xml",NULL,body,bl,
+                  buf,sizeof buf,&rn, NULL,0, NULL,0);
+    if(st<0) return -1;
+    if(st==207||st==200){
+        if(!dav_xml_text(buf,NULL,"getetag",etag,cap) || !etag[0]) return -1;
+        dav_strip_quotes(etag);
+    }
+    return st;
 }

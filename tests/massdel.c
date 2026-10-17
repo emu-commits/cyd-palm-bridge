@@ -1,29 +1,22 @@
-/* massdel.c -- prove the MASS-DELETE GUARD actually fires, and that a sync
- * which fires it RESTORES the local database instead of erasing the server.
+/* massdel.c -- nothing on the device can delete anything on the server.
  *
- * Why this gate exists. The guard (sync.c, MASSDEL_MIN) is the last thing
- * standing between "the SD card had a bad read" and "the user's calendar is
- * gone from iCloud". Its POSITIVE path -- it triggers, and deletions are held
- * back -- had no test at all. It was covered only by the other gates staying
- * silent, which is not coverage: every one of them would have stayed exactly as
- * silent if the guard had been deleted outright.
+ * The bridge has no DELETE (bridge/dav.h). What used to be pushed as a
+ * deletion is now handled on the device alone, and this gate pins the two
+ * shapes that matter for a real account:
  *
- * The shape the guard is built for is the one reproduced here: the map still
- * describes N records, and the local PDB no longer does. That is what an
- * unreadable card looks like from inside the engine -- pdb_read hands back
- * fewer records than it did last run, and every missing one presents as
- * "deleted locally since the last sync". With the guard off, this run would
- * issue N DELETEs against a perfectly healthy server.
+ *   A record MISSING from the local database (no tombstone) is the card having
+ *   lost it -- a crash mid-write, a short read. It is RESTORED from the server,
+ *   in the same run, whether one record went or all of them. (This used to be
+ *   the mass-delete guard, which only held back pushing such deletions when
+ *   most of a collection vanished at once.)
  *
- * Three things are asserted, in the order they matter:
- *   1. the server still has all N objects (nothing was erased);
- *   2. no deletion was even counted (pushDel == 0);
- *   3. the NEXT sync repopulates the local database back to N -- the guard
- *      cannot merely decline to delete, it has to leave a state that heals.
+ *   A record the USER deleted on the device (a tombstone, REC_ATTR_DELETE)
+ *   leaves the device and is never deleted on the server. Its map row is kept
+ *   as hidden, so the next sync does not pull it back -- unless the server's
+ *   copy changes, when it comes back.
  *
- * And then the negative control, without which the first three prove nothing:
- * a run BELOW the guard's threshold must still push a real deletion, or a guard
- * wired permanently on would pass every assertion above.
+ * Every scenario checks the server's object count, because that is the
+ * number a bug here would change on someone's iCloud.
  *
  * Needs Radicale with palm/cal (tests/gate.sh).
  */
@@ -32,6 +25,7 @@
 #include <string.h>
 #include "../bridge/palm.h"
 #include "../bridge/sync.h"
+#include "radicale_rm.h"
 
 static DavCtx D;
 static const char* COLL="palm/cal";
@@ -40,9 +34,8 @@ static const char* LPDB="pdb/mass.pdb";
 static int fails=0;
 static void CK(int c,const char*m){ if(!c){ fails++; printf("   FAIL: %s\n",m); } }
 
-/* MASSDEL_MIN is 8 in sync.c: the guard needs at least that many MAPPED records
- * before it will consider a shrink suspicious, and it fires when fewer than half
- * survive. 12 is comfortably over the line, and 12 -> 0 is the worst case. */
+/* Over the old mass-delete guard's line (8 mapped, fewer than half left), so
+ * the worst case, 12 -> 0, is the one it used to handle. */
 #define NREC 12
 
 typedef struct { char s[128][256]; int n; } Set;
@@ -79,157 +72,134 @@ static void writeEmptyDB(void){
 
 static void clearColl(void){
     Set l={0}; dav_list(&D,COLL,srvName,&l);
-    for(int i=0;i<l.n;i++) dav_delete(&D,COLL,l.s[i],NULL);
+    for(int i=0;i<l.n;i++) test_rm(&D,COLL,l.s[i],NULL);
     remove(MAP); remove(LPDB);
 }
 
-/* ---- the guard fires -------------------------------------------------- */
-static void guardFires(void){
-    printf("== the guard fires: %d mapped records, 0 local ==\n",NREC);
+/* write NREC events, the first `nt` as tombstones; with `keep` < NREC, only
+ * the first `keep` are written at all (the rest are "lost by the card"). */
+static void writeMixed(int nt,int keep){
+    static uint8_t arena[128*PALM_REC_MAX]; static PdbRec r[128]; int used=0;
+    for(int i=0;i<keep;i++){
+        Appt a; memset(&a,0,sizeof a);
+        a.hasTime=1; a.sH=9; a.eH=10; a.year=2026; a.month=9; a.day=1+(i%28);
+        snprintf(a.description,sizeof a.description,"Event-%02d",i+1);
+        uint8_t*dst=arena+used; int l=ApptPack(dst,PALM_REC_MAX,&a);
+        r[i]=(PdbRec){ .attr=(uint8_t)(i<nt?REC_ATTR_DELETE:0),
+                       .uniqueID=(uint32_t)(i+1),.data=dst,.len=l }; used+=l;
+    }
+    pdb_write(LPDB,"DatebookDB",0x44415441,0x64617465,r,keep);
+}
+static void seed(void){
     clearColl();
-
     writeDB(NREC);
     SyncStats s0={0}; sync_collection(&D,LPDB,LPDB,COLL,KIND_CAL,MAP,POL_SERVER,&s0);
     CK(s0.pushNew==NREC,"seed pushed every record");
     CK(serverCount()==NREC,"server holds the seed");
+}
+static int opsOf(const SyncStats*s){
+    return s->pushNew+s->pushMod+s->pullNew+s->pullMod+s->pullDel+s->conflicts; }
 
-    /* the card goes bad: the map still describes NREC, the PDB describes none */
+/* the server object holding uid 1 ("1.ics"; 11.ics and 21.ics also end so) */
+static int findOne(char*out,int cap){
+    Set l={0}; dav_list(&D,COLL,srvName,&l);
+    for(int i=0;i<l.n;i++){ const char*b=strrchr(l.s[i],'/'); b=b?b+1:l.s[i];
+        if(!strcmp(b,"1.ics")){ snprintf(out,cap,"%s",l.s[i]); return 1; } }
+    return 0;
+}
+
+/* ---- the whole database lost: restored, server untouched -------------- */
+static void lostDatabase(void){
+    printf("== the card loses the database: %d mapped records, 0 local ==\n",NREC);
+    seed();
     writeEmptyDB();
-    CK(localCount()==0,"local database really is empty before the guarded run");
+    CK(localCount()==0,"local database really is empty before the run");
 
     SyncStats s1={0};
     int n = sync_collection(&D,LPDB,LPDB,COLL,KIND_CAL,MAP,POL_SERVER,&s1);
-    printf("   rc=%d push -%d | pull +%d | server=%d local=%d\n",
-           n,s1.pushDel,s1.pullNew,serverCount(),localCount());
-
-    /* 1. THE POINT OF THE WHOLE GUARD. */
+    printf("   rc=%d pull +%d | server=%d local=%d\n",n,s1.pullNew,serverCount(),localCount());
     CK(serverCount()==NREC,"SERVER UNTOUCHED -- no object was deleted");
-    /* 2. not even attempted */
-    CK(s1.pushDel==0,"no deletion was counted");
-    CK(s1.bothDel==0,"and none was mislabelled as already-gone either");
-
-    /* 3. IT HAS TO HEAL, NOT JUST DECLINE -- and in THIS run, not eventually.
-     * This is the assertion that failed when the gate was first written: the
-     * guard skipped the deletions and wrote nothing for those records, so the
-     * device stayed empty and every later sync reached the same conclusion.
-     * The server kept 12, the device kept 0, forever. */
-    CK(n==NREC,"the guarded run writes a FULL database, not an empty one");
-    CK(localCount()==NREC,"LOCAL DATABASE RESTORED from the server, in the guarded run");
+    CK(s1.hidden==0 && s1.bothDel==0,"nothing counted as a deletion of any kind");
+    CK(n==NREC && localCount()==NREC,"LOCAL DATABASE RESTORED from the server, in this run");
     CK(s1.pullNew==NREC,"and every restored record is counted as a pull");
 
-    /* ...and having healed, it settles: the next sync is an ordinary no-op with
-     * the guard no longer firing. A restore that has to run every time is a
-     * different bug wearing the same clothes. */
     SyncStats s2={0}; sync_collection(&D,LPDB,LPDB,COLL,KIND_CAL,MAP,POL_SERVER,&s2);
-    int ops=s2.pushNew+s2.pushMod+s2.pushDel+s2.pullNew+s2.pullMod+s2.pullDel+s2.conflicts;
-    printf("   next sync: ops=%d clean=%d server=%d local=%d\n",
-           ops,s2.unchanged,serverCount(),localCount());
-    CK(ops==0,"the sync after the restore is a no-op");
-    CK(s2.unchanged==NREC,"all records clean once healed");
-    CK(localCount()==NREC && serverCount()==NREC,"both sides whole and equal");
+    CK(opsOf(&s2)==0 && s2.unchanged==NREC,"the sync after the restore is a no-op");
 }
 
-/* ---- the negative control --------------------------------------------- */
-/* Without this, a guard stuck permanently ON would pass everything above. A
- * deletion small enough not to look like data loss must still go through. */
-static void guardStaysOutOfTheWay(void){
-    printf("== below the threshold: a real deletion still pushes ==\n");
-    clearColl();
-
-    writeDB(NREC);
-    SyncStats s0={0}; sync_collection(&D,LPDB,LPDB,COLL,KIND_CAL,MAP,POL_SERVER,&s0);
-    CK(serverCount()==NREC,"seed is on the server");
-
-    /* Delete ONE record, the way the UI does: keep it in the PDB with the Palm
-     * delete bit set. NREC-1 of NREC survive, which is nowhere near the guard's
-     * "fewer than half" line. */
-    static uint8_t arena[128*PALM_REC_MAX]; static PdbRec r[128]; int used=0;
-    for(int i=0;i<NREC;i++){
-        Appt a; memset(&a,0,sizeof a);
-        a.hasTime=1; a.sH=9; a.eH=10; a.year=2026; a.month=9; a.day=1+(i%28);
-        snprintf(a.description,sizeof a.description,"Event-%02d",i+1);
-        uint8_t*dst=arena+used; int l=ApptPack(dst,PALM_REC_MAX,&a);
-        r[i]=(PdbRec){ .attr=(uint8_t)(i==0?REC_ATTR_DELETE:0),
-                       .uniqueID=(uint32_t)(i+1),.data=dst,.len=l }; used+=l;
-    }
-    pdb_write(LPDB,"DatebookDB",0x44415441,0x64617465,r,NREC);
-
+/* ---- one record lost: restored too (no threshold any more) ------------- */
+static void oneRecordLost(void){
+    printf("== the card loses one record of %d ==\n",NREC);
+    seed();
+    writeMixed(0,NREC-1);                    /* uid NREC simply missing */
     SyncStats s1={0}; sync_collection(&D,LPDB,LPDB,COLL,KIND_CAL,MAP,POL_SERVER,&s1);
-    printf("   push -%d | server=%d\n",s1.pushDel,serverCount());
-    CK(s1.pushDel==1,"the one genuine deletion was pushed");
-    CK(serverCount()==NREC-1,"and the server is one object lighter");
+    printf("   pull +%d | server=%d local=%d\n",s1.pullNew,serverCount(),localCount());
+    CK(serverCount()==NREC,"SERVER UNTOUCHED");
+    CK(s1.pullNew==1 && localCount()==NREC,"the missing record is restored");
 }
 
-/* ---- deleted on both sides is not a push ------------------------------ */
-/* The third of the three correctness items: LDEL+SDEL issues no network call,
- * so it must not be counted as a pushDel. Delete one record locally AND remove
- * its object from the server by hand, then sync. */
+/* ---- a delete on the device stays on the device ------------------------ */
+static void deviceDeleteStaysLocal(void){
+    printf("== a delete on the device never reaches the server ==\n");
+    seed();
+    writeMixed(1,NREC);                      /* uid 1 deleted the way the UI does */
+    SyncStats s1={0}; sync_collection(&D,LPDB,LPDB,COLL,KIND_CAL,MAP,POL_SERVER,&s1);
+    printf("   hidden %d | server=%d local=%d\n",s1.hidden,serverCount(),localCount());
+    CK(s1.hidden==1,"the one deletion is counted as hidden");
+    CK(serverCount()==NREC,"SERVER UNTOUCHED -- it still has the deleted record");
+    CK(localCount()==NREC-1,"the device no longer has it");
+
+    SyncStats s2={0}; sync_collection(&D,LPDB,LPDB,COLL,KIND_CAL,MAP,POL_SERVER,&s2);
+    CK(opsOf(&s2)==0 && s2.hidden==0,"the next sync is a no-op");
+    CK(localCount()==NREC-1,"and does not pull the hidden record back");
+
+    /* edited in the cloud afterwards: it is live again, so it comes back */
+    char nm[256]=""; CK(findOne(nm,sizeof nm),"found uid 1 on the server");
+    static char obj[16384]; int got=dav_get(&D,COLL,nm,obj,sizeof obj);
+    char*at = got>0 ? strstr(obj,"Event-01") : NULL;
+    CK(at!=NULL,"fetched it");
+    if(at){
+        char ed[16400]; snprintf(ed,sizeof ed,"%.*sEvent-01 edited%s",(int)(at-obj),obj,at+8);
+        FILE*f=fopen("state/.mdel","wb"); if(f){ fputs(ed,f); fclose(f); }
+        char etag[160]; int st=0;
+        dav_put(&D,COLL,nm,"text/calendar; charset=utf-8","state/.mdel",NULL,etag,sizeof etag,&st);
+        CK(st>=200 && st<300,"edited on the server");
+    }
+    SyncStats s3={0}; sync_collection(&D,LPDB,LPDB,COLL,KIND_CAL,MAP,POL_SERVER,&s3);
+    printf("   after a server edit: pull +%d | local=%d\n",s3.pullNew,localCount());
+    CK(s3.pullNew==1 && localCount()==NREC,"a server edit brings the hidden record back");
+    CK(serverCount()==NREC,"and the server still has all of them");
+}
+
+/* ---- deleted on both sides --------------------------------------------- */
 static void deletedOnBothSides(void){
-    printf("== deleted on both sides counts as gone, not as a push ==\n");
-    clearColl();
-
-    writeDB(NREC);
-    SyncStats s0={0}; sync_collection(&D,LPDB,LPDB,COLL,KIND_CAL,MAP,POL_SERVER,&s0);
-    CK(serverCount()==NREC,"seed is on the server");
-
-    /* take uid 1 off the server behind the engine's back */
-    Set l={0}; dav_list(&D,COLL,srvName,&l);
-    int removed=0;
-    for(int i=0;i<l.n;i++) if(strstr(l.s[i],"1.ics") && !strstr(l.s[i],"11.ics")
-                              && !strstr(l.s[i],"21.ics")){
-        dav_delete(&D,COLL,l.s[i],NULL); removed=1; break; }
-    CK(removed,"removed one object from the server directly");
-
-    /* ...and delete the same record locally */
-    static uint8_t arena[128*PALM_REC_MAX]; static PdbRec r[128]; int used=0;
-    for(int i=0;i<NREC;i++){
-        Appt a; memset(&a,0,sizeof a);
-        a.hasTime=1; a.sH=9; a.eH=10; a.year=2026; a.month=9; a.day=1+(i%28);
-        snprintf(a.description,sizeof a.description,"Event-%02d",i+1);
-        uint8_t*dst=arena+used; int l2=ApptPack(dst,PALM_REC_MAX,&a);
-        r[i]=(PdbRec){ .attr=(uint8_t)(i==0?REC_ATTR_DELETE:0),
-                       .uniqueID=(uint32_t)(i+1),.data=dst,.len=l2 }; used+=l2;
-    }
-    pdb_write(LPDB,"DatebookDB",0x44415441,0x64617465,r,NREC);
-
+    printf("== deleted on both sides counts as gone ==\n");
+    seed();
+    char nm[256]=""; CK(findOne(nm,sizeof nm),"found uid 1 on the server");
+    test_rm(&D,COLL,nm,NULL);                /* behind the engine's back */
+    writeMixed(1,NREC);
     SyncStats s1={0}; sync_collection(&D,LPDB,LPDB,COLL,KIND_CAL,MAP,POL_SERVER,&s1);
-    printf("   push -%d | already gone %d | server=%d\n",
-           s1.pushDel,s1.bothDel,serverCount());
-    CK(s1.pushDel==0,"nothing was PUSHED -- there was nothing on the server to delete");
-    CK(s1.bothDel==1,"it is counted as already-gone instead");
+    printf("   hidden %d | already gone %d | server=%d\n",s1.hidden,s1.bothDel,serverCount());
+    CK(s1.hidden==0 && s1.bothDel==1,"counted as already gone, not hidden");
+    CK(serverCount()==NREC-1,"the server lost only what was removed by hand");
 }
 
-/* ---- a tombstone is not a bad read ------------------------------------- */
-/* The device keeps a deleted record as a Palm tombstone until it has synced.
- * That is what lets the engine tell the two shapes apart: a record the USER
- * deleted is still in the database, flagged; a record the CARD lost is simply
- * absent. So even while the guard is up -- here 5 tombstones and 7 records
- * missing out of 12 mapped, which is fewer than half -- the five explicit
- * deletions must be pushed and only the seven silent losses restored. */
-static void tombstonesUnderTheGuard(void){
-    printf("== the guard fires, but tombstones are still deletions ==\n");
-    clearColl();
-    writeDB(NREC);
-    SyncStats s0={0}; sync_collection(&D,LPDB,LPDB,COLL,KIND_CAL,MAP,POL_SERVER,&s0);
-    CK(serverCount()==NREC,"seed is on the server");
-    static uint8_t arena[128*PALM_REC_MAX]; static PdbRec r[128]; int used=0;
+/* ---- tombstones and a lost database at once ----------------------------- */
+/* 5 tombstones and 7 records missing out of 12 mapped: the five the user
+ * deleted leave the device, the seven the card lost come back, and the server
+ * keeps all twelve. */
+static void tombstonesAndLosses(void){
+    printf("== tombstones and losses together ==\n");
+    seed();
     const int NT = 5;
-    for(int i=0;i<NT;i++){
-        Appt a; memset(&a,0,sizeof a);
-        a.hasTime=1; a.sH=9; a.eH=10; a.year=2026; a.month=9; a.day=1+(i%28);
-        snprintf(a.description,sizeof a.description,"Event-%02d",i+1);
-        uint8_t*dst=arena+used; int l=ApptPack(dst,PALM_REC_MAX,&a);
-        r[i]=(PdbRec){ .attr=REC_ATTR_DELETE,.uniqueID=(uint32_t)(i+1),.data=dst,.len=l }; used+=l;
-    }
-    pdb_write(LPDB,"DatebookDB",0x44415441,0x64617465,r,NT);
+    writeMixed(NT,NT);
     SyncStats s1={0};
     int n = sync_collection(&D,LPDB,LPDB,COLL,KIND_CAL,MAP,POL_SERVER,&s1);
-    printf("   rc=%d push -%d | pull +%d | server=%d local=%d\n",
-           n,s1.pushDel,s1.pullNew,serverCount(),localCount());
-    CK(s1.pushDel==NT,"every tombstone was pushed as a deletion, guard or no guard");
-    CK(serverCount()==NREC-NT,"so the server lost exactly those");
-    CK(localCount()==NREC-NT,"and the silently missing ones were restored");
-    CK(s1.pullNew==NREC-NT,"counted as pulls");
+    printf("   rc=%d hidden %d | pull +%d | server=%d local=%d\n",
+           n,s1.hidden,s1.pullNew,serverCount(),localCount());
+    CK(s1.hidden==NT,"every tombstone hidden on the device");
+    CK(serverCount()==NREC,"SERVER UNTOUCHED");
+    CK(localCount()==NREC-NT && s1.pullNew==NREC-NT,"the silently missing ones were restored");
 }
 
 /* ---- held records (the demo seed) stay on the device ------------------ */
@@ -258,10 +228,11 @@ int main(void){
     snprintf(D.base,sizeof D.base,"%s",
              getenv("DAV_BASE")?getenv("DAV_BASE"):"http://localhost:5232");
     snprintf(D.user,sizeof D.user,"palm"); snprintf(D.pass,sizeof D.pass,"palm");
-    guardFires();
-    guardStaysOutOfTheWay();
+    lostDatabase();
+    oneRecordLost();
+    deviceDeleteStaysLocal();
     deletedOnBothSides();
-    tombstonesUnderTheGuard();
+    tombstonesAndLosses();
     heldStayLocal();
     printf("\n%s (%d failures)\n", fails?"FAILURES":"ALL PASS", fails);
     return fails?1:0;

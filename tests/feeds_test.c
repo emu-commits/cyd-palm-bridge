@@ -60,7 +60,7 @@ int main(void){
     CHECK(feeds_count()==FEEDS_MAX, "capped at FEEDS_MAX");
     CHECK(added==FEEDS_MAX, "adds past capacity rejected");
 
-    /* W7: restoring the built-ins puts back what was deleted and disturbs
+    /* restoring the built-ins puts back what was deleted and disturbs
      * nothing else -- the URL is the one thing here nobody can retype. */
     feeds_seed_defaults();
     int seeded = feeds_count();

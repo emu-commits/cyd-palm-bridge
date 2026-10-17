@@ -16,6 +16,9 @@ void ui_show_lock(void);
  * The port layer's idle blank and wake-poll stand down for the duration, so a tap
  * during a dark phase is not mistaken for a wake. */
 int  ui_owns_backlight(void);
+/* 1 while a screen asks to stay lit (Critters on USB power): the port layer
+ * doesn't blank it. On battery it dims and locks as usual. */
+int  ui_keep_awake(void);
 /* 1 while a screen of discrete keys (the Calculator, the phone keypad) is up:
  * the input layer may then split a jumping press into two taps (tapsplit.h). */
 int  ui_discrete_taps(void);
@@ -42,6 +45,10 @@ void ui_test_type(const char *text);
  * lesson without waiting for them. */
 #include <stdint.h>
 void ui_test_study_skew(int32_t seconds);
+/* Look for reminders over (now - back, now + ahead] at once, as a wake would
+ * over the time the screen was dark: the tour can't wait for an alarm, and an
+ * event made "today" may be either side of the clock when it runs. */
+void ui_test_reminders(int32_t back, int32_t ahead);
 #endif
 
 #endif

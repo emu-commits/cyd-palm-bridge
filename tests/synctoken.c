@@ -11,6 +11,7 @@
 #include <string.h>
 #include "../bridge/palm.h"
 #include "../bridge/sync.h"
+#include "radicale_rm.h"
 
 static DavCtx D;
 static const char* COLL="palm/synctest";
@@ -64,7 +65,7 @@ static void testReportDeltas(void){
 
     /* one change + one delete -> delta reports exactly those two */
     putEvent("b.ics","B-modified");      /* change */
-    dav_delete(&D,COLL,"c.ics",NULL);    /* delete */
+    test_rm(&D,COLL,"c.ics",NULL);    /* delete */
     const char*tok = t2[0]?t2:t1;
     Rep r3={0}; char t3[1200]="";
     int rc3=dav_sync_report(&D,COLL,tok,repCb,&r3,t3,sizeof t3);
@@ -112,7 +113,7 @@ static void testEngineUsesToken(void){
     CK(mapHasToken(MAP),"sync-token persisted to map header");
 
     SyncStats s2={0}; sync_collection(&D,PDB,PDB,COLL,1,MAP,POL_SERVER,&s2);
-    int ops=s2.pushNew+s2.pushMod+s2.pushDel+s2.pullNew+s2.pullMod+s2.pullDel+s2.conflicts;
+    int ops=s2.pushNew+s2.pushMod+s2.pullNew+s2.pullMod+s2.pullDel+s2.conflicts;
     printf("  2nd sync ops=%d clean=%d\n",ops,s2.unchanged);
     CK(ops==0,"delta-driven second sync is a no-op");
     CK(s2.unchanged==3,"all 3 clean");

@@ -2,8 +2,8 @@
  * Header-only (static inline), so every build that already compiles a writer
  * needs no new source file. SPDX-License-Identifier: MIT
  *
- * THE PROBLEM. Every durable file on the card used to be rewritten in place:
- * fopen(path, "wb") truncates it to nothing, then the new contents stream in.
+ * THE PROBLEM. Rewriting a file in place -- fopen(path, "wb") truncates it to
+ * nothing, then the new contents stream in -- has a window.
  * A power cut, a flat battery or a watchdog reset during that window leaves a
  * short file or an empty one. For the three synced databases the mass-delete
  * guard can pull the server's copy back; Memo has no server copy, and

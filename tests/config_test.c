@@ -17,6 +17,9 @@ int main(void){
     CK(!strcmp(c.world1,"Europe/London"),"default world clock 1");
     CK(!strcmp(c.world2,"Asia/Tokyo"),"default world clock 2");
     CK(c.policy==CFG_POL_SERVER,"default policy server");
+    CK(c.read_only==1,"an account starts read-only");
+    CK(c.todo_done_days==14,"To Do keeps two weeks of done tasks");
+    CK(c.cal_back==1 && c.cal_ahead==14,"default calendar window: yesterday to two weeks ahead");
     CK(strstr(c.dav_base,"caldav.icloud.com")!=NULL,"default caldav host");
     CK(strstr(c.dav_card_base,"contacts.icloud.com")!=NULL,"default contacts host");
 
@@ -35,7 +38,7 @@ int main(void){
     snprintf(c.timezone,sizeof c.timezone,"America/New_York");
     snprintf(c.world1,sizeof c.world1,"America/Los_Angeles");
     snprintf(c.world2,sizeof c.world2,"Australia/Sydney");
-    c.brightness=55; c.backlight_sec=15; c.clock24=1; c.policy=CFG_POL_BOTH;
+    c.brightness=55; c.backlight_sec=15; c.clock24=1; c.policy=CFG_POL_BOTH; c.read_only=0; c.todo_done_days=0;
     CK(config_save(PATH,&c,&cs)==0,"save ok");
 
     Config d; config_defaults(&d);
@@ -72,6 +75,8 @@ int main(void){
     CK(d.brightness==55,"brightness round-trips");
     CK(d.backlight_sec==15,"backlight_sec round-trips");
     CK(d.policy==CFG_POL_BOTH,"policy round-trips");
+    CK(d.read_only==0,"read_only = 0 round-trips");
+    CK(d.todo_done_days==0,"todo_done_days = 0 (the whole list) round-trips");
 
     /* robust parse: comments, whitespace, unknown keys, malformed lines, clamps */
     FILE *f=fopen(PATH,"w");
@@ -96,6 +101,7 @@ int main(void){
     CK(e.brightness==100,"brightness clamped to 100");
     CK(e.backlight_sec==0,"backlight_sec clamped to 0");
     CK(e.policy==CFG_POL_LOCAL,"policy=local parsed");
+    CK(e.read_only==1,"a config.ini without read_only reads as read-only");
     CK(!strcmp(e.timezone,"Europe/London"),"no-space key=value parsed");
 
     /* INLINE COMMENTS -- the shape config.ini.example actually ships. Before the
@@ -163,7 +169,7 @@ int main(void){
     CK(lv.loc_auto == 0, "an unsettled flag is written as pinned, never as -1");
     CK(!strcmp(lb.loc_name,"Washington, D.C."),"a place name with a comma round-trips");
 
-    /* W5: FOUR networks.
+    /* FOUR networks.
      *
      * The back-compat case is the one that matters on a device that is already
      * in the field: a config.ini written when there was only one network has an
@@ -175,7 +181,7 @@ int main(void){
     fclose(f);
     Config o; config_defaults(&o);
     ConfigSecrets os; memset(&os,0,sizeof os);
-    CK(config_load(PATH,&o,&os)==0,"pre-W5 config loads");
+    CK(config_load(PATH,&o,&os)==0,"a one-network config from before the four slots loads");
     CK(!strcmp(o.wifi[0].ssid,"OldCard"),"a one-network card lands in slot 1");
     CK(!strcmp(os.wifi_pass[0],"oldpw"),"...with its password");
     CK(o.wifi[1].ssid[0]==0 && o.wifi[3].ssid[0]==0,"...and the other slots stay empty");
@@ -204,6 +210,15 @@ int main(void){
     Config q; config_defaults(&q);
     CK(config_load(PATH,&q,NULL)==0,"reload after promote");
     CK(!strcmp(q.wifi[0].ssid,"C") && !strcmp(q.wifi[2].ssid,"B"),"promoted order round-trips");
+
+    /* the calendar window round-trips, and a hand-edited value is clamped */
+    { Config w; config_defaults(&w); w.cal_back=7; w.cal_ahead=0;
+      CK(config_save(PATH,&w,NULL)==0,"save the window");
+      Config x; config_defaults(&x);
+      CK(config_load(PATH,&x,NULL)==0 && x.cal_back==7 && x.cal_ahead==0,"the window round-trips (0 = everything)");
+      FILE*f=fopen(PATH,"w"); fputs("cal_days_back = -5\ncal_days_ahead = 99999\n",f); fclose(f);
+      Config y; config_defaults(&y); config_load(PATH,&y,NULL);
+      CK(y.cal_back==0 && y.cal_ahead==730,"out-of-range values are clamped"); }
 
     printf("\n%s (%d failures)\n", fails?"FAILURES":"ALL PASS", fails);
     return fails?1:0;

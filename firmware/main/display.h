@@ -1,4 +1,4 @@
-/* display.h -- minimal SPI TFT driver for the CYD (ILI9341/ST7789), U1 bring-up. */
+/* display.h -- minimal SPI TFT driver for the CYD (ILI9341/ST7789). */
 #ifndef DISPLAY_H
 #define DISPLAY_H
 #include <stdint.h>

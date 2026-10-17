@@ -1,7 +1,7 @@
 /* host_main.c -- native headless frontend for the simulator.
  *
  * Boots the REAL firmware UI (ui_init from firmware/main/ui.c) against the sim
- * port and drives it from a tiny stdin script, dumping screenshots as PPM (P6).
+ * port and drives it from a tiny stdin script, dumping screenshots as PPM.
  * This is both the local development loop (render -> look at the PNG -> choose
  * the next tap) and the CI smoke gate (scripted run must exit 0).
  *
@@ -26,8 +26,13 @@
  *   P <who> <hex>   fail unless the store holds that password for <who>: `a` for
  *                   the account, or a Wi-Fi slot 1..4. Proves the typing landed,
  *                   so an X that finds nothing means "wiped", not "never typed"
+ *   R <back> <ahead>  look for event reminders due over (now-back, now+ahead]
+ *                   (ui_test_reminders), as a wake does over its dark time
  *   A <seconds>     move Study's clock on (ui_test_study_skew): reviews come
  *                   due hours after a lesson, and the tour can't wait for them
+ *   G <area> <x> <y> <facing>  Critters: put the player there (mon_ui_test_place),
+ *                   so the tour can reach the towns and the keepers without
+ *                   a hundred steps of walking
  *   B               remember the heap in use now...
  *   E <what>        ...and fail unless it's the same again: a screen that was
  *                   opened and left must give back every byte it took
@@ -46,6 +51,7 @@
 #include "sim_port.h"
 #include "sim_heap.h"
 #include "ui.h"
+#include "ui_monster.h"
 #include "data.h"
 #include "appcfg.h"
 #include "clock.h"
@@ -271,7 +277,7 @@ int main(int argc, char **argv){
         }
         /* L -- raise the lock screen over whatever is showing, exactly as the
          * port layer does when the screen sleeps. The lock's relationship to
-         * the screens and overlays under it (R11: an open Calculator) was
+         * the screens and overlays under it (an open Calculator, say) was
          * otherwise untestable: the script has no way to let the device sleep. */
         else if(line[0] == 'L' && (line[1] == '\n' || !line[1])){ ui_show_lock(); sim_step(100); }
         /* K <hex>: type a password without the plain text ever being in the
@@ -289,6 +295,15 @@ int main(int argc, char **argv){
             sim_step(60);
         }
         else if(line[0] == 'A' && line[1] == ' '){ ui_test_study_skew((int32_t)atol(line + 2)); sim_step(60); }
+        else if(line[0] == 'G' && line[1] == ' '){
+            int ga, gx, gy, gf;
+            if(sscanf(line + 2, "%d %d %d %d", &ga, &gx, &gy, &gf) != 4){ fprintf(stderr, "script: bad G: %s", line); rc = 1; break; }
+            mon_ui_test_place(ga, gx, gy, gf); sim_step(200);
+        }
+        else if(line[0] == 'R' && line[1] == ' '){
+            char *e; long back = strtol(line + 2, &e, 10), ahead = strtol(e, NULL, 10);
+            ui_test_reminders((int32_t)back, (int32_t)ahead); sim_step(100);
+        }
         else if(line[0] == 'B' && (line[1] == '\n' || !line[1])){
             heap_mark = sim_heap_used();
             fprintf(stderr, "heap: %zu bytes in use (marked)\n", heap_mark);

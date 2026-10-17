@@ -26,6 +26,10 @@ void config_defaults(Config *c){
     c->backlight_sec = 30;     /* dim after 30 s idle */
     c->clock24       = 0;      /* 12-hour by default */
     c->policy        = CFG_POL_SERVER;
+    c->cal_back      = 1;      /* yesterday ...                          */
+    c->cal_ahead     = 14;     /* ... to two weeks ahead (a tight window) */
+    c->read_only     = 1;      /* an account starts read-only (config.h)  */
+    c->todo_done_days= 14;     /* open tasks + those done in two weeks    */
     c->loc_auto      = -1;     /* "the file has not said"; see config.h */
 }
 
@@ -43,11 +47,11 @@ const char *config_policy_to_str(int policy){
 /* Cut an INLINE comment off a value: everything from a '#' that FOLLOWS
  * whitespace to the end of the line. Deliberately NOT any bare '#' -- a password
  * or an SSID may legitimately contain one ("P#ssw0rd" survives; "pass # note"
- * does not, which is the documented cost of the syntax). This exists because
- * config.ini.example ships `timezone = America/New_York   # empty = floating`
- * and the parser used to keep the comment as part of the value: the zone then
- * matched nothing and silently fell back to UTC, and the same line shape on
- * `dav_pass` silently appended a comment to the password. */
+ * does not, which is the documented cost of the syntax). It matters because
+ * config.ini.example ships `timezone = America/New_York   # empty = floating`:
+ * kept as part of the value, the comment makes the zone match nothing (a
+ * silent fall back to UTC), and the same line shape on `dav_pass` would append
+ * a comment to the password. */
 static void cut_comment(char *s){
     for(char *p = s; *p; p++)
         if(*p=='#' && p>s && (p[-1]==' '||p[-1]=='\t')){ *p = 0; return; }
@@ -118,6 +122,10 @@ static void apply(Config *c, ConfigSecrets *sec, const char *key, const char *va
     else if(!strcasecmp(key,"backlight_sec")) c->backlight_sec = clampi(atoi(val),0,3600);
     else if(!strcasecmp(key,"clock24"))       c->clock24       = clampi(atoi(val),0,1);
     else if(!strcasecmp(key,"policy"))        c->policy        = config_policy_from_str(val);
+    else if(!strcasecmp(key,"cal_days_back"))  c->cal_back      = clampi(atoi(val),0,366);
+    else if(!strcasecmp(key,"cal_days_ahead")) c->cal_ahead     = clampi(atoi(val),0,730);
+    else if(!strcasecmp(key,"read_only"))      c->read_only     = clampi(atoi(val),0,1);
+    else if(!strcasecmp(key,"todo_done_days")) c->todo_done_days= clampi(atoi(val),0,3650);
     /* unknown key: ignored */
 }
 
@@ -179,5 +187,9 @@ int config_save(const char *path, const Config *c, const ConfigSecrets *sec){
     fprintf(f,"backlight_sec = %d\n", c->backlight_sec);
     fprintf(f,"clock24 = %d\n",       c->clock24);
     fprintf(f,"policy = %s\n",        config_policy_to_str(c->policy));
+    fprintf(f,"cal_days_back = %d\n",  c->cal_back);
+    fprintf(f,"cal_days_ahead = %d\n", c->cal_ahead);
+    fprintf(f,"read_only = %d\n",      c->read_only ? 1 : 0);
+    fprintf(f,"todo_done_days = %d\n", c->todo_done_days);
     return sf_commit(&sf, !ferror(f));
 }

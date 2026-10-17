@@ -21,6 +21,7 @@
 #include <string.h>
 #include "../bridge/palm.h"
 #include "../bridge/sync.h"
+#include "radicale_rm.h"
 
 static DavCtx D;
 static const char* COLL="palm/cal";
@@ -40,7 +41,7 @@ static void firstName(char*out,int cap){
 }
 static void clearColl(void){
     NL l={0}; dav_list(&D,COLL,nameCb,&l);
-    for(int i=0;i<l.c;i++) dav_delete(&D,COLL,l.n[i],NULL);
+    for(int i=0;i<l.c;i++) test_rm(&D,COLL,l.n[i],NULL);
     remove(MAP); remove(LPDB);              /* start each test from empty state */
 }
 
@@ -103,22 +104,22 @@ static void testRelocation(void){
     char old[256]; firstName(old,sizeof old);
     char body[16384]; CK(dav_get(&D,COLL,old,body,sizeof body)>0,"fetch original body");
     FILE*f=fopen("state/.tb","wb"); fwrite(body,1,strlen(body),f); fclose(f);
-    dav_delete(&D,COLL,old,NULL);
+    test_rm(&D,COLL,old,NULL);
     char etag[160]; int st=0;
     dav_put(&D,COLL,"relocated-A.ics","text/calendar; charset=utf-8","state/.tb",NULL,etag,sizeof etag,&st);
     CK(serverCount()==1,"still 1 object after relocation");
 
     SyncStats s1={0}; sync_collection(&D,LPDB,LPDB,COLL,1,MAP,POL_SERVER,&s1);
-    printf("   after relocation: push +%d -%d | pull +%d ~%d -%d | conflict %d\n",
-        s1.pushNew,s1.pushDel,s1.pullNew,s1.pullMod,s1.pullDel,s1.conflicts);
-    CK(s1.pushDel==0,"no spurious server-delete");
+    printf("   after relocation: push +%d | pull +%d ~%d -%d | conflict %d\n",
+        s1.pushNew,s1.pullNew,s1.pullMod,s1.pullDel,s1.conflicts);
+    CK(s1.pullDel==0,"no spurious delete on the device");
     CK(s1.pullNew==0,"no phantom new record");
     CK(serverCount()==1,"server still holds exactly 1 (no duplicate)");
     CK(localCount()==1,"local still holds exactly 1");
     One o={0}; pdb_read(LPDB,grab,&o); CK(o.has&&!strcmp(o.sum,"Alpha"),"local record intact");
 
     SyncStats s2={0}; sync_collection(&D,LPDB,LPDB,COLL,1,MAP,POL_SERVER,&s2);
-    int ops=s2.pushNew+s2.pushMod+s2.pushDel+s2.pullNew+s2.pullMod+s2.pullDel+s2.conflicts;
+    int ops=s2.pushNew+s2.pushMod+s2.pullNew+s2.pullMod+s2.pullDel+s2.conflicts;
     printf("   idempotent 2nd sync ops=%d clean=%d\n",ops,s2.unchanged);
     CK(ops==0,"relocation converges: 2nd sync is a no-op");
 }
@@ -155,7 +156,7 @@ static void testForeignEdit(void){
     CK(!strcmp(sum,"EditedLocally"),"server object carries the edit");
 
     SyncStats s2={0}; sync_collection(&D,LPDB,LPDB,COLL,1,MAP,POL_SERVER,&s2);
-    int ops=s2.pushNew+s2.pushMod+s2.pushDel+s2.pullNew+s2.pullMod+s2.pullDel+s2.conflicts;
+    int ops=s2.pushNew+s2.pushMod+s2.pullNew+s2.pullMod+s2.pullDel+s2.conflicts;
     printf("   idempotent 2nd sync ops=%d clean=%d\n",ops,s2.unchanged);
     CK(ops==0,"foreign edit converges: 2nd sync is a no-op");
 }

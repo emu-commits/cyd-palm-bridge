@@ -12,22 +12,62 @@ enum { KIND_CARD=0, KIND_CAL=1, KIND_TODO=2 };
 typedef enum { POL_SERVER, POL_LOCAL, POL_BOTH } ConflictPolicy;
 
 typedef struct {
-    int pushNew, pushMod, pushDel;
+    /* There is no pushDel: nothing is ever deleted on the server (dav.h). */
+    int pushNew, pushMod;
     int pullNew, pullMod, pullDel;
     int conflicts, unchanged;
-    /* Deleted on BOTH sides since the last sync: the map entry is simply
-     * dropped and NO NETWORK CALL IS MADE. It used to be counted as a pushDel,
-     * so the status line reported deletions that were never sent -- "-3 push"
-     * for three records the server had already lost. It is its own number
-     * because it is neither a push nor "unchanged": nothing was transmitted,
-     * and the record is gone. Deliberately outside the ops sums the gates use
-     * for idempotency, since no operation happened. */
+    /* Deleted on the device since the last sync: taken off the device, and its
+     * map row kept as hidden so the server's copy, which is NEVER deleted, isn't
+     * pulled back. Outside the ops sums -- nothing was transmitted. */
+    int hidden;
+    /* Deleted on BOTH sides since the last sync (or hidden here and then
+     * deleted on the server): the map entry is simply dropped and NO NETWORK
+     * CALL IS MADE. Deliberately outside the ops sums the gates use for
+     * idempotency, since no operation happened. */
     int bothDel;
+    /* Edits kept on the device and not sent, because the server's copy couldn't
+     * be merged safely (sync.c, mergeEdit): an edit never replaces a server
+     * object, so it waits rather than going up lossy. Retried every sync. */
+    int unsent;
     /* New local records the caller asked to HOLD (sync_set_hold): kept in the
      * local database as they are, never pushed and never mapped. Also outside
      * the ops sums -- nothing was transmitted. */
     int held;
+    /* Calendar records that left the time window (sync_set_window): dropped
+     * from the device, never deleted on the server. Outside the ops sums --
+     * nothing was transmitted. */
+    int pruned;
 } SyncStats;
+
+/* ---- the time window (calendars) -------------------------------------------
+ * When set, a KIND_CAL collection syncs only the events with an occurrence in
+ * [start, end) (UTC epoch seconds): the server lists them with a CalDAV
+ * time-range query, and only those are fetched and kept on the device.
+ *
+ * THE RULE THAT MAKES THIS SAFE: an object that is not in the window's listing
+ * is NOT a deletion. Its unchanged local copy is pruned from the device and
+ * nothing is sent; a copy changed on the device is checked against the server
+ * by itself first (dav_probe), so an edit is pushed only for an object that is
+ * really still there. (Nothing is ever deleted on the server.) A listing that fails prunes
+ * nothing. Records created on the device are pushed wherever their date is,
+ * and leave the device at the next sync if it's outside the window.
+ *
+ * 0,0 (the default) syncs the whole collection. A server that doesn't support
+ * the query is synced whole, as before. */
+void sync_set_window(long long start, long long end);
+
+/* ---- To Do: open tasks, and those done lately --------------------------------
+ * When set (doneSince > 0, UTC epoch seconds), a KIND_TODO collection syncs
+ * only its open VTODOs and those COMPLETED since doneSince, listed by the
+ * server (dav_query_todos). The same rule as the calendar window: a task not
+ * listed leaves the device and is never touched on the server. 0 (the
+ * default) syncs the whole list; a server that doesn't answer the queries is
+ * synced whole too. */
+void sync_set_todo_window(long long doneSince);
+
+/* How the last sync_collection/sync_categorized call got object bodies: in
+ * batches (multiget) and one GET at a time. For the gates and the log. */
+void sync_fetch_counts(int *batched, int *single);
 
 /* Hold back new local records from the push. `fn(uid, ctx)` is asked about each
  * record that exists only on the device; a nonzero answer keeps it local and
@@ -98,13 +138,20 @@ size_t sync_working_set(void);
 /* After a -6, the largest single allocation the collection asked for and did not
  * get. Zero if the limit was the output index rather than a sort. */
 long   sync_too_big_bytes(void);
-/* Ceiling on any single in-RAM sort the engine performs, in bytes. 0 (default)
- * means "whatever the allocator will give". Setting it makes the size limit a
- * decision rather than a discovery, and lets the gates exercise the refusal. */
+/* The RAM one sort may use, in bytes. 0 (default) means the build's own
+ * ceiling (4 KB on the device). A file bigger than this is sorted in runs on
+ * the card and merged, so a collection's size costs card space, not RAM; the
+ * gates set it small to force that path. A budget smaller than one line is
+ * refused (-6), which is what tests/toobig.c exercises. */
 void   sync_set_max_sort(long bytes);
+/* Sort a line file in place by its first field (up to the first TAB), within
+ * the budget above. 1 on success; 0 on refusal, after which the file's
+ * contents are undefined (it is a temp index; the collection is abandoned) and
+ * no run files are left behind. Exposed for the gates. */
+int    sync_sort_file(const char *path);
 
 /* ---- pull-only -------------------------------------------------------------
- * Refuse every write to the server: no PUT, no DELETE. The local PDB is still
+ * Refuse every write to the server: no PUT (there is never a DELETE). The local PDB is still
  * updated from the server, so a sync is still useful; local changes simply wait.
  * Set while the engine's memory handling is being reworked, because a bug on a
  * half-converted path would damage the real account, which no reflash can undo.

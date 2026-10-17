@@ -1,6 +1,6 @@
 /* sim_heap.h -- a device-like ceiling on the general heap (see heap_budget.c).
  *
- * The LVGL object pool is already exact device parity (24 KB, lv_conf.h). This
+ * The LVGL object pool is already exact device parity (32 KB, lv_conf.h). This
  * adds the OTHER half of the device's memory model: general malloc/calloc/
  * realloc -- the record sort buffers, Find results, row-uid arrays, stdio
  * buffers -- is capped at a budget approximating the CYD's interactive-mode

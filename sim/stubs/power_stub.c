@@ -13,6 +13,7 @@ int  power_screen_off(void)        { return 0; }
  * 3.85 V is the matching point on the curve power.c uses on the device. */
 int  power_battery_pct(void)       { return 72; }
 int  power_battery_mv(void)        { return 3850; }
+int  power_on_usb(void)            { return 0; }   /* on its sample battery */
 
 /* The drain log measures a real cell over real hours; there is nothing for the
  * sim to sample. The Power screen still has to RENDER, though -- its layout and

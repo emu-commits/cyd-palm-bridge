@@ -32,7 +32,7 @@ static void indev_cb(lv_indev_t *indev, lv_indev_data_t *data){
 
 /* Device-parity draw buffer: 40 rows of RGB565, PARTIAL render mode -- the same
  * shape as firmware/main/lvgl_port.c (BUF_ROWS 40), so rendering exercises the
- * same partial-flush path and the 24 KB LVGL pool behaves like the device's. */
+ * same partial-flush path and the 32 KB LVGL pool behaves like the device's. */
 #define BUF_ROWS 40
 static uint8_t s_draw_buf[SIM_W * BUF_ROWS * 2];
 

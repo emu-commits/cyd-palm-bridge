@@ -10,7 +10,7 @@ int  tp_read_raw(uint16_t *x, uint16_t *y, uint16_t *z);
 /* read raw then map to screen pixels via the current calibration. 1 if touched. */
 int  tp_read(int *sx, int *sy);
 
-/* unconditional debug read of all four channels (no touch gating) -- U2 tuning. */
+/* unconditional debug read of all four channels (no touch gating), for tuning. */
 void tp_read_debug(uint16_t *x, uint16_t *y, uint16_t *z1, uint16_t *z2);
 
 /* interactive 3-point affine calibration: draws crosshairs, waits for taps,

@@ -1,6 +1,6 @@
 /* display.c -- dependency-free SPI TFT driver for the CYD (ILI9341 default).
  *
- * U1 bring-up: enough to init the panel and blit rectangles. No managed
+ * Enough to init the panel and blit rectangles. No managed
  * components. TFT is on SPI3 (SD is on SPI2 -> no bus contention). If the panel
  * turns out to be an ST7789 (CYD batch variance), set PANEL_ST7789 to 1; if
  * colors look swapped/negative, tweak MADCTL_VAL / INVERT below.

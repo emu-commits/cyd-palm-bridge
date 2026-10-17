@@ -1,9 +1,8 @@
 /* secretstore.h -- the device's passwords, kept OFF the SD card.
  *
- * config.ini used to hold the Wi-Fi passwords and the Apple app-specific
- * password in plain text, on a card that pops out of the device and into any
- * computer. They live in the ESP32's own flash now (NVS), and config.ini holds
- * everything else. A password typed into config.ini on a computer still works:
+ * The Wi-Fi passwords and the Apple app-specific password don't belong in plain
+ * text on a card that pops out of the device and into any computer. They live
+ * in the ESP32's own flash (NVS), and config.ini holds everything else. A password typed into config.ini on a computer still works:
  * appcfg_load() moves it into this store and rewrites the file without it.
  *
  * Keys: "dav" for the account password, "w" + an 8-hex-digit hash of the SSID

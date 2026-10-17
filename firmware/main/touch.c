@@ -5,9 +5,8 @@
  * XPT2046 drives DOUT and idles PENIRQ high, pulling low on touch.
  *
  * Calibration is applied in tp_read(): raw ADC (~200..3900) -> screen px.
- * The constants below are refined from real corner taps during U2 (see
- * docs/BUILD_PROGRESS.md); start as identity-ish and get replaced with measured
- * values. Portrait 240x320.
+ * The constants below are defaults measured from real corner taps; the
+ * calibration a device stores in NVS replaces them. Portrait 240x320.
  */
 #include "touch.h"
 #include "display.h"

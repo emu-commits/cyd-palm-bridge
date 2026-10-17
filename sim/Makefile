@@ -46,6 +46,7 @@ APP_SRCS := \
     $(FW)/ui.c $(FW)/data.c $(FW)/graffiti.c $(FW)/appcfg.c $(FW)/secretstore.c $(FW)/clock.c \
     $(FW)/lv_font_palm.c $(FW)/lv_font_palm_bold.c $(FW)/lv_font_palm_bold_2x.c $(FW)/lv_font_kana.c $(FW)/lv_font_kana_20.c $(FW)/palm_icons.c \
     $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(BR)/dash.c $(FW)/minesweeper.c $(FW)/wordie.c $(FW)/sudoku.c $(FW)/zip.c $(FW)/coach.c $(FW)/guru.c $(FW)/guru_pool.c $(FW)/gurupool.c $(FW)/course.c $(FW)/srs.c $(FW)/study.c $(FW)/study_demo.c \
+    $(FW)/monster.c $(FW)/monster_play.c $(FW)/monster_bot.c $(FW)/ui_monster.c \
     $(BR)/pdb.c $(BR)/datebook.c $(BR)/address.c $(BR)/todo.c $(BR)/appinfo.c \
     $(BR)/ical.c $(BR)/vcard.c $(BR)/tz.c $(BR)/charset.c \
     $(BR)/find.c $(BR)/calc.c $(BR)/config.c $(BR)/rss.c $(BR)/news.c $(BR)/feeds.c \
@@ -58,7 +59,7 @@ WRAP_LD := -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free
 LVGL_SRCS := $(shell find lvgl/src -name '*.c' 2>/dev/null)
 LVGL_OBJS := $(patsubst lvgl/src/%.c,build/lvgl/%.o,$(LVGL_SRCS))
 
-.PHONY: host wasm smoke smoke32 secretscan poolparity data graf mines wordie sudoku zip clock coach guru gurupool dash course srs games clean lvgl-src
+.PHONY: host wasm smoke smoke32 secretscan poolparity data graf mines wordie sudoku zip clock coach guru gurupool dash course srs monster games clean lvgl-src
 
 # LVGL_SRCS is evaluated when make parses this file, so on a clean checkout the
 # source must be fetched BEFORE the build graph is used: the entry points fetch,
@@ -91,8 +92,13 @@ build/sim_host: build/liblvgl.a $(APP_SRCS) host_main.c sim_port.h sim_heap.h lv
 # screen leaves less than POOL_FLOOR free (host_main.c). That is the project's
 # most repeated failure -- a per-row widget where a virtualised table belongs --
 # and until now it was only ever caught by a person tapping the glass. ----
+# Critters' game file goes on the card first (the tour plays it); its save and
+# pause files from an earlier run go, so the tour starts a new game.
+CRITTERS_CARD := mkdir -p /sdcard/games/monster && cp ../courses/critters/game.bin /sdcard/games/monster/ && \
+    rm -f /sdcard/games/monster/save.dat /sdcard/games/monster/pause.dat
 smoke: host
 	rm -rf build/shots && mkdir -p build/shots
+	$(CRITTERS_CARD)
 	./build/sim_host build/shots < tests/smoke.txt
 	@ls build/shots/*.ppm >/dev/null
 	@echo "sim smoke: OK"
@@ -107,12 +113,15 @@ smoke32: lvgl-src
 	$(MAKE) clean
 	$(MAKE) build/sim_host CFLAGS="-O2 -g -Wall -m32 $(SIMDEF) $(INC)"
 	rm -rf build/shots && mkdir -p build/shots
+	$(CRITTERS_CARD)
 	./build/sim_host build/shots < tests/smoke.txt
 	@ls build/shots/*.ppm >/dev/null
 	$(CC) -m32 -O2 -Wall -Wextra -I$(FW) tests/course_test.c $(FW)/course.c -o build/course_test32
 	./build/course_test32
 	$(CC) -m32 -O2 -Wall -Wextra -I$(FW) -I$(BR) tests/srs_test.c $(FW)/srs.c $(FW)/study.c $(FW)/study_demo.c $(FW)/course.c -o build/srs_test32
 	./build/srs_test32
+	$(CC) -m32 -O2 -Wall -Wextra -I$(FW) -I$(BR) $(MONSTER_SRCS) -lm -o build/monster_test32
+	./build/monster_test32
 	@echo "sim smoke32 (true device-sized pool): OK"
 
 # ---- poolparity: assert sim/lv_conf.h still matches the device's configured
@@ -222,6 +231,30 @@ build/srs_test: tests/srs_test.c $(FW)/srs.c $(FW)/srs.h $(FW)/study.c $(FW)/stu
 	$(CC) -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all -I$(FW) -I$(BR) \
 	    tests/srs_test.c $(FW)/srs.c $(FW)/study.c $(FW)/study_demo.c $(FW)/course.c -o $@
 
+# ---- monster: the monster game's file reader and rules (firmware/main/
+# monster.c, monster_play.c), under ASan and UBSan, on the fixture in
+# tests/data/game (ours, built by tools/mkgame.py from source.py). The round
+# trip first: the C reader's dump must equal mkgame.py's (stdlib only), byte
+# for byte, for the fixture and for the game that ships (courses/critters).
+# Then the formulas, walking, encounters, 40 seeded battles against the
+# recorded transcript, and the save. smoke32 runs it again 32-bit; make
+# ftest fuzzes it. ----
+MONSTER_SRCS := tests/monster_test.c $(FW)/monster.c $(FW)/monster_play.c $(FW)/monster_bot.c
+monster: build/monster_test
+	@for g in ../tests/data/game/game.bin ../courses/critters/game.bin; do \
+	    ./build/monster_test dump $$g > build/monster_c.txt && \
+	    python3 ../tools/mkgame.py --dump $$g > build/monster_py.txt && \
+	    cmp build/monster_c.txt build/monster_py.txt || { echo "monster: C and Python read $$g differently"; exit 1; }; \
+	    echo "  round trip: $$g"; \
+	done
+	./build/monster_test
+	@echo "sim monster: OK"
+
+build/monster_test: $(MONSTER_SRCS) $(FW)/monster.h $(FW)/monster_play.h $(FW)/monster_bot.h $(BR)/safefile.h
+	@mkdir -p build
+	$(CC) -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all -I$(FW) -I$(BR) \
+	    $(MONSTER_SRCS) -lm -o $@
+
 # ---- sudoku: host gate for the pure Sudoku logic (generation + rules, no LVGL). ----
 sudoku: build/sudoku_test
 	./build/sudoku_test
@@ -303,14 +336,15 @@ build/dash_test: tests/dash_test.c $(BR)/dash.c $(BR)/dash.h
 	$(CC) -O2 -Wall -I$(BR) tests/dash_test.c $(BR)/dash.c -o $@ -lm
 
 # ---- games: every game's logic gate in one go (what CI runs). ----
-games: poolparity mines wordie sudoku zip clock coach guru gurupool dash course srs
+games: poolparity mines wordie sudoku zip clock coach guru gurupool dash course srs monster
 
 # ---- wasm: everything compiled by emcc in one shot (CI build; no local emcc needed).
 # 32-bit wasm => the TRUE device-sized pool applies (see lv_conf.h). main() boots
 # the Palm at module init; JS drives frames and blits the exported framebuffer. ----
 WASM_CFLAGS := $(filter-out -g,$(CFLAGS)) -g0
 
-build/web/index.html: lvgl/src $(APP_SRCS) wasm_main.c web/index.html web/flash.html lv_conf.h sim_heap.h
+build/web/index.html: lvgl/src $(APP_SRCS) wasm_main.c web/index.html web/flash.html lv_conf.h sim_heap.h \
+                      ../courses/critters/game.bin
 	mkdir -p build/web
 	$(EMCC) $(WASM_CFLAGS) \
 	    $(LVGL_SRCS) $(APP_SRCS) wasm_main.c \
@@ -322,6 +356,8 @@ build/web/index.html: lvgl/src $(APP_SRCS) wasm_main.c web/index.html web/flash.
 	    -sMODULARIZE=1 -sEXPORT_NAME=PalmSim
 	cp web/index.html build/web/index.html
 	cp web/flash.html build/web/flash.html   # the Install page; CI adds build/web/firmware/
+	mkdir -p build/web/critters
+	cp ../courses/critters/game.bin build/web/critters/game.bin   # the page puts it on the card
 	@echo "wasm: build/web/ ready (index.html + flash.html + palm.js + palm.wasm)"
 
 clean:

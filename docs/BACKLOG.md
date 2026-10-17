@@ -22,6 +22,130 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 
 ---
 
+## A monster-catching game: Critters (G4 and the rooms done 2026-10-16 in the simulator; the bench is next)
+
+`GAME_PLAN.md` is the plan: a C engine in the Games menu, with content from
+Tuxemon (GPLv3 data, mostly CC-BY-SA art) converted into one file on the card,
+on-screen controls and an Auto-play checkbox. **G0 and G1 are built** (the
+owner asked for each on 2026-10-16), with nothing on the device yet:
+`GAME_FORMAT.md` and `tools/mkgame.py`, then the reader (`monster.c`) and
+the rules (`monster_play.c`) with their host gates. The owner answered every
+open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
+
+- [x] The renders: the owner looked at Tuxemon's Route 1 as the device would
+  draw it, 8-bit (2026-10-16: "Looks good"). The Spriters Resource was
+  asked about and ruled out: its rips are the games' owners', not free.
+- [x] The owner reviewed `GAME_FORMAT.md` (2026-10-16: "fine").
+- [x] §13 Q6: clean licences only; towns laid out from the clean sheets.
+- [x] §13 Q1, Q2, Q3, Q5 (2026-10-16): the built file committed under
+  `courses/critters/` and offered by the web flasher; "Critters"; the screen
+  stays on on USB, dims and locks on battery, and the game pauses on lock;
+  built into the current test image now (the yes for G2).
+- [s] G2, the screens (`GAME_PLAN.md` §12): the `critters_*` smoke shots,
+  looked at (2026-10-16).
+- [d] Critters on the bench: the D-pad and A/B under a finger (a tap turns,
+  a hold walks), a step's smoothness and the frame rate, how long entering
+  Brideswood takes.
+- [d] Critters on USB power stays lit; unplugged it dims and locks as
+  usual, and waking comes back to the same battle (`power_on_usb()` reads
+  4.15 V and up as USB: a low cell that's charging counts as battery).
+- [x] The clean file: `courses/critters/game.bin` (Route 1 and Brideswood,
+  20 creatures), built `--strict` with a player sheet of our own, its credits
+  in `courses/critters/README.md` and `NOTICE`, round-tripped in `make -C sim
+  monster` and checked in `tests/mkgame_test.py`.
+- [s] G3, the first region (`GAME_PLAN.md` §12): Larkhollow and Kestrel laid
+  out from the clean sheets, Route 1, the Brideswood and the Cotton Tunnel;
+  people, keepers, healers, the foreman who stands aside, Warden Ivy; the
+  player's six looks; the battle cards. The `critters_*` smoke shots looked
+  at (2026-10-16).
+- [d] Critters on the bench after G3: choosing a look and a first critter;
+  talking (A facing someone); a keeper spotting you on Route 1 and their
+  second creature coming out; the battle cards read clearly; losing brings
+  you back to the last healer; walking Larkhollow to Kestrel (Foreman Dale
+  in the tunnel moves once Keeper Tom in the Brideswood is beaten); the
+  frame rate in Kestrel, the busiest screen (60 tiles and six people).
+- [s] The rooms (`GAME_PLAN.md` §12): Home, Wren's Lab and the Kestrel rest
+  house, in at each open door and out over the mat; Nurse Hale inside. The
+  `critters_home`, `critters_home_left`, `critters_lab` and
+  `critters_rest_house` shots looked at (2026-10-16).
+- [s] G4, Auto-play: `monster_bot.c`, the menu item ("Auto-play", then "Stop
+  Auto-play"), the title, a touch taking over; the gate that the bot beats
+  every keeper with each first critter from a fixed seed. The
+  `critters_auto_*` shots looked at (2026-10-16).
+- [d] Critters' rooms on the bench: walking in at Home's door, out over the
+  mat, Wren's Lab, the rest house (Nurse Hale rests the party inside).
+- [d] Auto-play on the bench: switched on from the menu, it walks, talks and
+  battles at a watchable pace (it walks without stopping between steps, as
+  a held press does; its creature stands on its ground in battle), the title says
+  "Auto-play", a tap on the game takes over, and the lock pauses it (waking
+  carries on). How long it runs on battery, and whether it ever stands still
+  or walks in circles.
+- [x] The web flasher's optional install: a `game` partition, a second
+  manifest, a checkbox on the install page, the copy to the card at boot.
+- [d] Install from the web page with "Also install Critters" ticked: the
+  board starts, `games/monster/game.bin` is on the card, and Critters opens.
+  An install without the box leaves the card's game alone.
+
+## RESUME HERE — Palm behaviours from the archive review (approved 2026-10-15)
+
+`PALM_ARCHIVE_REVIEW.md` measured the firmware against Palm's UI Guidelines
+and Zen of Palm (from github.com/ardiri/dev-palmos). The owner: "treat the
+bug and 7 items as backlog work … work through them". Its §3 has the rule,
+the current behaviour and the change for each. On branch
+`claude/palm-behaviours`, which sits on the untested sync work: the owner
+tests the sync separately. One commit each.
+
+- [x] **P1 — come back to where you were, and never lose an edit** (the bug,
+  §3.1). The lock's `content_clear()` threw the open app away, unlock always
+  built the launcher, and an edit form open when the screen slept (or on
+  Home) was discarded. Save an edit with at least one character on the way
+  out (lock and Home; the form's Cancel still discards), remember the screen,
+  and rebuild it on unlock `[s]` (2026-10-15; `p1_resumed_edit`, `p1_home_saved`,
+  `p1_memos_kept`, `p1_day_resumed`)
+- [ ] P1 on glass: write half a memo, let the screen sleep, wake and swipe up:
+  the memo is there, saved; the same for an event; Home from an edit saves it `[d]`
+- [x] **P2 — write in the Day view to make an event** (§3.2): a digit sets the
+  hour, a letter starts the description; New stays `[s]` (2026-10-15;
+  `p2_digit_event`, `p2_letter_event`)
+- [ ] P2 on glass: writing "3" on the day view opens a 3 pm event on that day `[d]`
+- [x] **P3 — tap the title to open the menu; it reopens on the last item**
+  (§3.3) `[s]` (2026-10-15; `p3_title_menu`, `p3_menu_remembered`)
+- [ ] P3 on glass: the title is an easy target and doesn't fight the category
+  pop-up `[d]`
+- [x] **P4 — alert conventions** (§3.4): the verb on the left and Cancel on
+  the right, alert titles that name the operation, no dimmed buttons (a tap
+  says why instead) `[s]` (2026-10-15; `p4_delete_confirm`, `p4_reviews_why`,
+  `p4_remove_course`)
+- [ ] P4 on glass: the delete dialog of a synced event (title, question, the
+  "From this device only" note and the buttons don't touch) `[d]`
+- [x] **P5 — Find matches the start of words** (§3.5): "the" finds "Then",
+  not "Lathe"; `find_test` covers it `[s]` (2026-10-15; host-tested, no screen
+  changed)
+- [ ] An event made on the device with Repeat Daily (Details) shows on its day
+  and the days after, and on the phone after a sync with "Send my changes";
+  one made that way before this fix shows again too `[d]`
+- [x] **P6 — reminders that wait** (§3.6): event alarms that came due while the
+  screen was dark are listed once on wake, dismissed together with OK `[s]`
+  (2026-10-15; `p6_reminders_on_wake`, `p6_still_there`, `p6_after_wake`)
+- [ ] P6 on glass: an event with an alarm five minutes out; leave the device
+  asleep past it; wake: the list names it `[d]`
+- [ ] Is the speaker connector populated (2-pin, beside the SD slot on most
+  ESP32-2432S028R revisions, GPIO26 through an amplifier)? If so, alarm sound
+  is unblocked `[d]`
+- [x] **P7 — an Edit menu and the command stroke** (§3.7): on an edit form the
+  menu has Edit (Undo, Graffiti Help, which opens the stroke reference; no
+  clipboard, as nothing would paste); the Graffiti command stroke (lower left
+  to upper right) then a letter runs a command: N New, D Delete (with its
+  confirmation), U Undo, G Graffiti Help, R Settings `[s]` (2026-10-15;
+  `p7_*`, and the command stroke in `make -C sim graf`)
+- [ ] P7 on glass: the command stroke recognises reliably and never fires by
+  accident while writing `[d]`
+- [x] **P8 — tips** (§3.8): an "i" on the dialogs that hide a gesture (Date
+  Book's Details, Find), with a short text that teaches it `[s]` (2026-10-15;
+  `p8_find_tips`, `p8_details_tips`)
+- [ ] P7/P8 on glass: the "i" is easy to hit and the tips read well; the
+  command stroke on the letter pad, then N, opens New `[d]`
+
 ## RESUME HERE — the SRS app, the Planner, and two firmware items (approved 2026-09-29)
 
 **Done 2026-09-29:** the two firmware items and the Planner (`[s]` below;
@@ -31,11 +155,19 @@ feedback: the 2× answer, the 20 px readings and tidier cards, and full
 screen for lessons and reviews. S4 was replanned: no typed answers
 (`SRS_PLAN.md` §11 decision 9).
 
-**Now (2026-09-30, end of day): the owner is testing on the bench.** The
-next session starts from their report: work through what they found, and
-leave the `[d]` boxes for them to tick. The build under test is `7810d49`
-(CI green; the Pages deploy job fails on a repository setting, not the
-code).
+**Merged to `main` 2026-10-01** (PR #66, `79272fd`). The `[d]` boxes below
+are the owner's bench checklist; leave them for the owner to tick. Still to
+bench besides them: a bigger iCloud sync, and loading a second course into
+Study. (The Pages deploy job fails on a repository setting, Pages source,
+not the code.)
+
+**Now: the owner's test with a 10-year iCloud account.** The hard rule,
+from the owner: **nothing is ever deleted from the cloud** (2026-10-13;
+`CLAUDE.md`'s first rule). §Engine 6 to 10 were built 2026-10-14 (below and
+`BUILD_PROGRESS.md`). The test, in order: flash; check Settings ▸ Sync says
+read-only; sync; compare counts on iCloud.com before and after (they must
+not move); then the `[d]` items below; then "Send my changes" and the edit
+checks.
 
 **The app platform is on hold.** The main goal is one first-class SRS app
 (WaniKani/Anki-style, with a large course on the SD card), and it's being
@@ -75,6 +207,32 @@ root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
 - [ ] The cleaned-up cards on glass: the 20 px kana read well, a kanji's readings on the first screen `[d]`
 - [ ] S5 on glass: the lock's STUDY row and the weather box above it read well, the air quality beside the reading, the badge on the icon, the count going up on its own as reviews come due (the lock repaints each minute) `[d]`
 - [ ] S6 — a full course on the real card: open time, next-card time, heap, battery pull, kanji readability `[d]`
+
+**Sync for a real account** (built 2026-10-01; `BUILD_PROGRESS.md`)
+- [x] The sort in runs on the card, a calendar window (default yesterday to two weeks ahead, Settings ▸ Sync ▸ Calendar), the pruning rule, batched downloads; gated by `sort_test`, `mget_test`, `window` and `bigsync` `[s]`
+- [ ] Against the real iCloud account: Date Book comes down to the window only; the log line shows `pruned=` and `fetched=N batched+0 single`; nothing disappears from iCloud on the phone `[d]`
+- [ ] Settings ▸ Sync ▸ Calendar: widen to a month, sync, the extra events arrive; narrow again, they leave the device and stay on the phone `[d]`
+- [ ] An event edited on the device, then left behind by the window, shows the edit on the phone `[d]`
+- [x] **Never delete from the cloud** (2026-10-13): `dav_delete` removed from both transports, the device allow-lists GET/PUT/PROPFIND/REPORT, a delete on the device leaves the device only (a hidden map row; the server keeps its copy and it isn't pulled back), a record missing locally is always restored; `tests/nodelete.sh` in `make test`, `massdel` rewritten, `incremental` and `window` assert the server keeps everything; the delete dialog says "From this device only" in an app that syncs `[s]`
+- [ ] Delete an event and a contact on the device, sync: both gone from the device, both still on the phone and iCloud.com; sync again, they stay gone from the device `[d]`
+- [ ] Edit the hidden event on the phone, sync: it comes back to the device `[d]`
+- [x] **An edit merges into the server's copy, never replaces it** (2026-10-14): `bridge/objfile.c` streams the copy onto the card and swaps in only the Palm-owned fields that changed, PUT with If-Match (the `local` policy too); a big object is read through its Palm view, so photo contacts come down with the 8 KB buffer; Apple's `item1.` grouped properties and `DURATION` are read; a series with moved occurrences can't be moved from the device (counted *unsent*); gated by `objfile_test` and `fidelity` `[s]`
+- [ ] On glass: edit an iCloud event that has invitees, a location and two alerts; on the phone it shows the edit and still has all of them `[d]`
+- [x] **Contacts are read-only on the device while Address syncs** (2026-10-14, the owner: "if we can't say all contact edits will sync, stop syncing any"): a merged contact over 16 KB (a real photo) was kept unsent, silently. Now Address has no New, Edit or Delete when it syncs (`data_app_readonly`), the detail says "Read-only: edit contacts on your phone", and `hotsync.c` runs the Address collection pull-only whatever Settings ▸ Sync ▸ Changes says; gated in `make -C sim data` `[s]` (scratch shots of the list, detail and menu)
+- [ ] With Address syncing: the list has no New, a contact's detail has Done and the read-only line, the menu has no Record section; the log's budget line says "contacts: never" when Changes is "Send my changes" `[d]`
+- [x] **A read-only probe for partial address-data** (2026-10-14): `tools/probe_partial_card.py`, run on a computer, asks the account's address book for the Palm's properties only and compares that with the whole contacts (PHOTO left out? `item1.` groups kept?), and sizes the book (total, over 8 KB, over 16 KB); PROPFIND and REPORT only, and the report holds no names or numbers; gated by `tests/probe_partial_test.py` (offline verdicts, and live against Radicale in `run_gates.sh`)
+- [ ] Run it against the real iCloud account: `python3 tools/probe_partial_card.py --user <Apple ID>` (an app-specific password), then again with `--all` for the whole book's size and download time; paste the report. HONOURED means building partial downloads is worth it; IGNORED means photos always come down `[d]`
+- [ ] Contact edits come back only when every one can reach iCloud: the PUT streamed from the card (no 16 KB cap), and the other refusals (no master component, a Palm view over 8 KB) settled; see §Engine 8
+- [ ] A contact with a big photo now arrives on the device (it used to be skipped) `[d]`
+- [x] **Read-only switch** (2026-10-14): Settings ▸ Sync ▸ Changes (read-only / send my changes), config `read_only`, on by default and turned back on when the Apple ID changes; the log and the Done line say "(read-only)"; gated by `config_test` and `fidelity` (nothing sent, edits wait, the phone's edits still come down, and turned off they go up) `[s]` (`w9_changes_pick`, `w9_sync_changes`)
+- [x] **Big databases on the device** (2026-10-14): an edit, a delete, a category change, the boot-time category backfill and removing the demo rows all stream through the card (`stream_rewrite` in `data.c`) and refuse, leaving the file as it was, unless every record was read; the 12 KB static arena is gone; the streaming writer's index is 12 bytes a record; gated in `make -C sim data` (2,000 contacts: an edit and a delete past the old cap, a category change, a new contact) `[s]`
+- [x] **Repeating events show on every day they occur** (2026-10-14): Day view, week counts, month dots and the lock screen's next event use `appt_occurs_on`/`appt_next_on`; the parser reads `BYDAY=2TU`/`-1FR` (Palm's monthly by day, written back the same), `COUNT` (an end date) and a weekly without `BYDAY`, and keeps the latest 16 exceptions; gated by `recur_test` (in `make test`) and `make -C sim data` (a weekly meeting from 2019 on a Monday in 2026, and the month's dots) `[s]`
+- [x] **To Do keeps the open tasks and those done lately** (2026-10-14): `sync_set_todo_window` lists the open VTODOs and those COMPLETED in the last `todo_done_days` (default 14) with two calendar-query REPORTs; not listed leaves the device, never the server; a task ticked on the device gets a COMPLETED time; Settings ▸ Sync ▸ To Do; gated by `todos` (Radicale) and `objfile_test` `[s]` (`w9_todo_pick`, `w9_sync_todo`)
+- [ ] With the real account: the To Do list shows only open tasks and those finished in the last two weeks; the log says "open tasks, and those done in the last 14 day(s)", not "wasn't answered"; a task ticked on the device shows done on the phone, and leaves the device two weeks later `[d]`
+- [ ] On glass: a weekly meeting that began years ago shows on this week's day, the month view dots every week, the lock screen names its next one; a "second Tuesday" meeting lands on the right Tuesday `[d]`
+- [ ] With the real address book on the device: edit and delete a contact far down the list; the count in Address doesn't change (bar the delete), the edit is on that contact, and the log shows no "rewrite refused" `[d]`
+- [ ] How many contacts a sync can write: watch the log's `OUTPUT FULL` / heap lines on the first full Address sync `[d]`
+- [ ] After flashing, Settings ▸ Sync shows "Changes: read-only"; a sync's Done line ends "(read-only)", an edit made on the device doesn't reach the phone, and does once "Send my changes" is picked `[d]`
 
 ---
 
@@ -366,7 +524,10 @@ R and the robustness work).
 
 ## §Engine — the sync engine
 
-1. **External merge sort.** The ceiling is a few hundred records per collection:
+1. ~~**External merge sort.**~~ Done 2026-10-01: `sync_sort_file()` sorts in a
+   4 KB buffer on the device, and a bigger file in runs on the card, merged
+   four at a time (`tests/sort_test.c` offline, a 1 KB-budget phase in
+   `bigsync`). What follows is the original note. The ceiling was a few hundred records per collection:
    `SV_RAW` (~60–80 B/record) must be sorted in one contiguous block, and ~30 KB
    is the largest free block during the sort. A too-big collection is refused
    safely today (`-6`, gated by `tests/toobig.c`). Sort fixed-size runs, spill to
@@ -384,7 +545,116 @@ R and the robustness work).
    `post-tls`, on a freshly booted device). The next thread if feed fetches fail
    intermittently.
 4. **iCloud data hygiene** — one-time removal of the seed contacts and duplicate
-   events left in the real account from the broken-sync era.
+   events left in the real account from the broken-sync era. **By hand, on
+   the phone or iCloud.com**: the device never deletes anything on the server
+   (2026-10-13), so it can't do this and won't be made to.
+5. **Sync a window, not the whole account.** The window, the pruning rule
+   and batched downloads were **built 2026-10-01** (the owner asked for them,
+   with "a very tight time window"; `BUILD_PROGRESS.md`). Still open from
+   this plan: To Do (open tasks only) and Address (no photos, or one
+   group). The original proposal: A real account holds years of events and thousands of
+   contacts; today the first sync enumerates every object, GETs each one, and
+   refuses a collection past a few hundred records (item 1). Proposed:
+   - **Date Book: a time window**, e.g. 30 days back and 12 months ahead
+     (Settings ▸ Sync). Enumerate with a CalDAV `calendar-query` REPORT with a
+     `time-range` filter (RFC 4791 §9.9), which the server applies to
+     recurrences too, so a weekly meeting that began in 2019 is still in.
+     `sync-collection` can't filter, so the window replaces the delta token
+     for calendars: each sync lists the window's hrefs and ETags (small), and
+     only new or changed objects are fetched.
+   - **Leaving the window is not a deletion.** An object that drops out of the
+     listing, or a local record that ages out, is pruned locally and marked in
+     the map, never pushed as a delete. This is the one rule that makes a
+     window safe. (Since 2026-10-13 nothing is pushed as a delete at all.)
+   - **To Do: open tasks**, plus those completed in the last couple of weeks
+     (a `prop-filter` on `COMPLETED`; iCloud's support needs checking). Note
+     that reminders upgraded on iOS 13+ may not be reachable over CalDAV at
+     all; check that against the real account first.
+   - **Address: everyone, without photos, or one group.** Contacts have no
+     date to window by. Ask for the fields Palm keeps (CardDAV partial
+     `address-data`, RFC 6352 §10.4.2) so photos never arrive, or sync only
+     the members of a chosen iCloud group. Either way the count needs item 1.
+   - **Fetch in batches.** `calendar-multiget` / `addressbook-multiget`
+     streamed to the card, instead of one GET per object; the first sync of
+     a real account is otherwise minutes of round trips.
+   - **Order:** item 1 (the external sort) first, because it lifts the hard
+     ceiling for every collection; then the window and pruning, tested against
+     Radicale with a generated multi-year calendar; then multiget; then
+     contacts.
+
+
+**Finishing sync for a real account** (outlined 2026-10-13, after the
+no-delete rule; in this order):
+
+6. ~~**An edit on the device must not lose what Palm can't hold.**~~ Done
+   2026-10-14: `bridge/objfile.c` merges an edit into the server's copy
+   (`tests/objfile_test.c` offline, `tests/fidelity.c` against Radicale). The
+   original note: Today a device edit PUTs a body rebuilt from the Palm record, which *replaces*
+   the whole iCloud object. The codec keeps SUMMARY, DESCRIPTION, DTSTART,
+   DTEND, RRULE, EXDATE and one alarm for an event; N, ORG, TITLE, ADR,
+   NOTE and Palm's five phone/email slots for a contact. So editing a
+   10-year-old event drops its location, attendees, URL, extra alarms and
+   the changed occurrences of a series (RECURRENCE-ID overrides), and
+   editing a contact drops its photo, birthday, URLs and every phone or
+   email past the fifth. That is data loss on the server by another route.
+   Fix: merge, don't replace. Fetch the server's current body, swap in only
+   the properties Palm owns, keep everything else byte for byte, PUT with
+   `If-Match` (412: take the server's copy, as now). The conflict policy
+   `local` PUTs without `If-Match` today; give it one too. Gate: an
+   iCloud-shaped event (overrides, attendees, two alarms, X- properties)
+   and vCard (PHOTO, BDAY, eight TELs) edited on the "device" keep every
+   non-Palm line.
+7. ~~**Read-only until 6 is benched.**~~ Done 2026-10-14: config
+   `read_only`, Settings ▸ Sync ▸ Changes. The original note:
+   `sync_set_pull_only()` exists and
+   works (no PUT; local edits wait), but `hotsync.c` forces it off. Make it
+   a Settings ▸ Sync switch, on by default for a newly added account, so
+   the first syncs of a big account can't change it at all.
+8. **Contacts at real size.** Done 2026-10-14, bar the bench: a photo
+   contact comes down through its Palm view (first entry above); every
+   database rewrite on the device streams through the card (an edit used to
+   write back only the first 64 records); the writer's RAM is 12 bytes a
+   record. **Since then (2026-10-14) contacts are read-only on the device
+   while Address syncs** (first RESUME HERE): a merged contact over 16 KB
+   couldn't be sent and was kept unsent, and the owner's rule is all contact
+   edits reach iCloud or none are made. To lift it: a PUT streamed from the
+   card, and no other refusal left. `tools/probe_partial_card.py` checks
+   whether iCloud honours partial `address-data` (a read-only probe the
+   owner runs; below). **Partial `address-data` was not done, on purpose:** the
+   device's records would then be built from a different view than the
+   server's full copy, and whether iCloud's partial reply keeps Apple's
+   `item1.` grouped properties is unknown; it would save bandwidth and card
+   space, not RAM. Left to measure on the bench: the contact count at which
+   a sync's output index (12 bytes a record, one contiguous block) no longer
+   fits. The original note: No window applies. Ask for the Palm fields
+   only (CardDAV partial `address-data`, RFC 6352 §10.4.2) so photos never
+   arrive; check iCloud honours it. Today a vCard over the 8 KB fetch
+   buffer is skipped with a warning and fetched again every sync. Measure
+   how many contacts the device's AddressDB holds before "too large" (`-6`).
+9. **Recurring events from iCloud.** Done 2026-10-14, bar the bench: the
+   device draws a repeating event on every day it occurs (it used to draw
+   it on its start date only, so the window's recurring meetings were
+   invisible); `BYDAY=2TU`, `COUNT` and a weekly without days are read; the
+   latest 16 exceptions are kept. Moved occurrences show at the series'
+   time. Earlier the same day, the parse side: the
+   Palm view reads the series' own VEVENT, not a moved occurrence's; an end
+   given as DURATION is read; moving or re-repeating a series that has moved
+   occurrences from the device is refused (unsent), since they're tied to its
+   old start. Still to check against the real account. The original note:
+   A series with changed occurrences is
+   one object with several VEVENTs (the master and its overrides). Check
+   what the parser keeps against the real account, and show the master
+   with its EXDATEs at least; never PUT such an object back (6).
+10. ~~**To Do.**~~ Done 2026-10-14, bar the bench: the open tasks and
+    those done in the last two weeks (`todo_done_days`, Settings ▸ Sync ▸
+    To Do), the window's rule. Still to check on the real account: whether
+    its Reminders are reachable over CalDAV at all. The original note:
+    Open tasks only, plus recently completed. Check first that
+    the account's Reminders are reachable over CalDAV at all (lists
+    upgraded on iOS 13+ aren't).
+
+Then the owner's test: first sync read-only, compare counts on iCloud.com
+before and after (they must not move), then two-way with 6 in.
 
 ---
 
@@ -441,20 +711,22 @@ follow-ups*.
    Pages build defines `UI_SEED_TESTEVENTS`). Build the showcase without them.
 
 ### Open-source readiness
-1. **README.** Lead with what it is, a photo or GIF, and the "try it in your
-   browser" link; then flashing; then setup through **Settings** (it still
-   says *Preferences → Discover collections*). Move the architecture and build
-   log (half the file) to `docs/ARCHITECTURE.md`. Fix the stale facts: "Status
-   (2026-07-09)", a 24 KB pool (it is 32 KB, `31100` bytes on hardware), and
-   "~$15" in one place and "$12" in another.
+1. ~~**README.**~~ Done 2026-10-01: it leads with what it is, screenshots
+   and the browser link, then installing, setup through Settings, Study
+   courses and the license; the architecture and build notes are in
+   `docs/ARCHITECTURE.md`, with the stale facts fixed. **Still wanted: a
+   photo of the real device** at the top.
 2. **Split `ui.c`** (10.5k lines) into modules behind a private header —
    lock/dashboard, PIM lists and forms, Settings, Coach, Guru, games, Graffiti,
    overlays. It is the single largest barrier to a contributor, and it makes
    every simulator rebuild recompile everything.
-3. **Comments that outsiders can read.** Many comments carry history ("used
-   to", "was tried and rejected") and internal ticket codes (R4, W3, Q5, P10)
-   that mean nothing outside this backlog. Keep the *why* in the code, move
-   the *story* to `BUILD_PROGRESS.md`, and name things instead of numbering them.
+3. ~~**Comments that outsiders can read.**~~ Done 2026-10-01 for the C
+   sources: the internal ticket codes (R4, W3, Q5, P10...) are gone, and the
+   comments that told a history now say why (the story is already in
+   `BUILD_PROGRESS.md`). Coach's and Guru's R0-R5 stay: they are the advice
+   rules, numbered where they are defined. **Left:** the smoke tour
+   (`sim/tests/smoke.txt`) still names its screenshots and steps by code
+   (`r5_locked`, `w6_discover`); renaming means renaming the shots.
 4. **One `make check`.** The rule "every gate, not just the smoke" lives in
    this file and in a maintainer's head. One target that runs the host gates,
    the twelve sim gates, `smoke32` and (when available) the wasm and IDF builds
@@ -463,9 +735,8 @@ follow-ups*.
 5. **Contributor scaffolding.** `CONTRIBUTING.md` (the gates, the design rules,
    the pool budget), issue templates, and tagged releases with a changelog.
    (`SECURITY.md` exists as of the robustness work.)
-6. **Build output out of the root.** The root `Makefile` writes ~20 binaries
-   into the repo root, each needing its own `.gitignore` line (one was committed
-   by accident in September). Build into `build/`.
+6. ~~**Build output out of the root.**~~ Done 2026-10-01: the host programs
+   go into `build/`.
 7. **Static analysis in CI.** `-Wextra`, `cppcheck`, and ASan/UBSan over the
    host gates (today only the RSS parser has an ASan run).
 
@@ -495,6 +766,8 @@ follow-ups*.
   channel), co-working over ESP-NOW (needs Wi-Fi resident during a session —
   measure heap and battery first).
 - **BLE + a companion iOS app: dropped, not parked** — see `PRODUCT_PLAN.md` §2.
+  Bluetooth without an app (PBAP, ANCS, posing as a Watch) was looked at on
+  2026-10-15: it can't sync Calendar or To Do. Same section.
 
 ## Decided — kept so the reasoning is not relitigated
 

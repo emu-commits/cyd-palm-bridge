@@ -1,0 +1,208 @@
+{
+  "title": "Fixture",
+  "note": "The gates' region: tests/data/game/source.py's two maps, village.json (a layout of our own) and five creatures, all ours (CC0); people, flags and two looks for the player.",
+  "areas": [
+    {
+      "map": "fixture_meadow",
+      "name": "Meadow",
+      "warps": [
+        {
+          "at": [
+            3,
+            0,
+            2,
+            1
+          ],
+          "to": "fixture_village",
+          "x": 6,
+          "y": 8,
+          "facing": "up"
+        }
+      ],
+      "people": [
+        {
+          "at": [
+            5,
+            14
+          ],
+          "facing": "left",
+          "sheet": "fixture_keeper",
+          "kind": "trainer",
+          "name": "Keeper Fen",
+          "sight": 2,
+          "flag": "beat_fen",
+          "team": [
+            [
+              "puddlop",
+              3
+            ],
+            [
+              "thornet",
+              4
+            ]
+          ],
+          "text": "Fen wants a battle.",
+          "after": "Fen is beaten."
+        },
+        {
+          "at": [
+            3,
+            16
+          ],
+          "facing": "up",
+          "sheet": "fixture_keeper",
+          "kind": "talk",
+          "name": "Guard",
+          "hide_if": "beat_fen",
+          "text": "Beat Fen first."
+        }
+      ]
+    },
+    {
+      "map": "fixture_burrow",
+      "name": "Burrow"
+    },
+    {
+      "map": "fixture_village",
+      "name": "Village",
+      "layout": "village.json",
+      "warps": [
+        {
+          "at": [
+            5,
+            9,
+            2,
+            1
+          ],
+          "to": "fixture_meadow",
+          "x": 3,
+          "y": 1,
+          "facing": "down"
+        }
+      ],
+      "zones": [
+        {
+          "at": [
+            1,
+            1,
+            3,
+            3
+          ],
+          "table": "fixture_meadow",
+          "chance": 50
+        }
+      ],
+      "signs": [
+        {
+          "at": [
+            9,
+            6,
+            2,
+            2
+          ],
+          "facing": "up",
+          "text": "A pond."
+        }
+      ],
+      "people": [
+        {
+          "at": [
+            2,
+            2
+          ],
+          "facing": "down",
+          "sheet": "fixture_keeper",
+          "kind": "healer",
+          "name": "Nurse",
+          "text": "Rested."
+        },
+        {
+          "at": [
+            5,
+            2
+          ],
+          "facing": "down",
+          "sheet": "fixture_keeper",
+          "kind": "talk",
+          "name": "Elder",
+          "flag": "met_elder",
+          "text": "Hello, keeper.",
+          "after": "Again?"
+        },
+        {
+          "at": [
+            9,
+            2
+          ],
+          "facing": "down",
+          "sheet": "fixture_keeper",
+          "kind": "talk",
+          "name": "Herald",
+          "show_if": "beat_fen",
+          "text": "Fen is beaten!"
+        }
+      ]
+    }
+  ],
+  "start": {
+    "area": "fixture_meadow",
+    "x": 3,
+    "y": 4,
+    "facing": "down"
+  },
+  "player": [
+    "fixture_walker",
+    "fixture_rover"
+  ],
+  "encounters": {
+    "fixture_meadow": [
+      {
+        "creature": "emberkit",
+        "levels": [
+          2,
+          4
+        ],
+        "rate": 40
+      },
+      {
+        "creature": "puddlop",
+        "levels": [
+          2,
+          3
+        ],
+        "rate": 35
+      },
+      {
+        "creature": "thornet",
+        "levels": [
+          3,
+          5
+        ],
+        "rate": 25
+      }
+    ],
+    "fixture_burrow": [
+      {
+        "creature": "rustmole",
+        "levels": [
+          4,
+          6
+        ],
+        "rate": 70
+      },
+      {
+        "creature": "blazecat",
+        "levels": [
+          6,
+          7
+        ],
+        "rate": 30
+      }
+    ]
+  },
+  "starters": [
+    "emberkit",
+    "puddlop",
+    "thornet"
+  ]
+}

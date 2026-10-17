@@ -7,8 +7,11 @@ before touching anything.
 
 ## Where things are
 
-- `firmware/`: ESP-IDF v5.5 app. `firmware/main/ui.c` (about 10.6k lines)
-  is the whole UI.
+- `firmware/`: ESP-IDF v5.5 app. `firmware/main/ui.c` (about 12k lines)
+  is the whole UI. The device's DAV transport is
+  `firmware/components/bridge/dav_esp.c`.
+- `docs/ARCHITECTURE.md`: how the pieces fit, the sync engine, and how to
+  build and test each part.
 - `sim/`: the same UI built for desktop and wasm, with a device-sized LVGL
   pool and heap cap.
 - `bridge/`: the Palm↔CalDAV/CardDAV codec and sync (MIT).
@@ -18,18 +21,51 @@ before touching anything.
 - `docs/BUILD_PROGRESS.md`: changelog, measured RAM/flash numbers, lessons.
 - `docs/SRS_PLAN.md`: the built-in spaced-repetition app. **This is the
   current project; see "Current work" below.**
+- `docs/GAME_PLAN.md`: a monster-catching game from Tuxemon's content.
+  **G0 to G3 done 2026-10-16**: the format (now 1.1: people, looks,
+  starters) and converter, the rules (`monster.c`, `monster_play.c`), the
+  screens (`ui_monster.c`, "Critters" in the Games folder), and the first
+  region: two towns of our own layout (`tools/game_maps/`), three Tuxemon
+  maps, keepers and townspeople (`tools/game_region.json`). No XYG sheets;
+  the player's six looks are our drawing (`tools/gen_player_sheet.py`); the
+  townspeople are Tuxemon's sheets, the Catch Challenger ones used on
+  Tuxemon's CC BY word (the owner's choice). The built file is committed as
+  `courses/critters/game.bin` (`mkgame.py --strict`), the smoke tour plays
+  it (`G area x y facing` jumps), the web flasher can install it, and the
+  web emulator puts it on its card. **Also done 2026-10-16:** rooms behind
+  every open door (our own CC0 tileset, `tools/gen_interior_sheet.py`) and
+  **G4, Auto-play** (`monster_bot.c`; `make -C sim monster` checks it beats
+  every keeper). Next: the owner's bench items (G5). The Tuxemon checkout
+  never enters the repo.
 - `docs/APP_PLATFORM_PLAN.md`: native C apps loaded from the SD card.
   **On hold since 2026-09-29**; don't build any of it without the user's yes.
 
 ## Rules that always apply
 
+- **Never delete anything on the server. No exceptions, ever** (the owner,
+  2026-10-13). There is no `dav_delete`, no `DELETE` or `MOVE` request, and
+  none may be added: a delete on the device leaves the device only (a
+  *hidden* map row, `sync.c`'s `HIDDEN_HASH`), a record missing locally is
+  restored, and a record leaving the calendar window is pruned on the
+  device. `make test` runs `tests/nodelete.sh`, which fails on any of it in
+  `bridge/`, `firmware/` or `sim/`. The gates clear their local Radicale
+  with `tests/radicale_rm.h`, which refuses any server not on localhost.
+- **Contacts are read-only on the device while Address syncs** (the owner,
+  2026-10-14: all contact edits reach iCloud, or none are made). Address
+  has no New, Edit or Delete then (`data_app_readonly()`), and `hotsync.c`
+  syncs it pull-only whatever Settings says. Don't lift it until every
+  contact edit can be sent (`BACKLOG.md`, first RESUME HERE).
 - **Run every gate before a commit, not just the smoke:**
-  - `make test` and `make ftest` (host);
+  - `make test` and `make ftest` (host; the programs build into `build/`);
+  - `./tests/run_gates.sh` (the sync engine against a local Radicale; needs
+    `pip install radicale`) whenever `bridge/` changes;
   - `sudo mkdir -p /sdcard && sudo chmod 777 /sdcard`, then `make -C sim`
     with the targets `poolparity nosecrets secretscan data graf mines wordie
-    sudoku zip clock coach guru gurupool dash course srs smoke smoke32`;
+    sudoku zip clock coach guru gurupool dash course srs monster smoke smoke32`;
   - `python3 tests/mkcourse_test.py` (the course builder; needs the Pillow
     in `tools/requirements-course.txt`, and downloads the pinned font);
+  - `python3 tests/mkgame_test.py` (the game converter, on the fixture; needs
+    `tools/requirements-game.txt`);
   - the firmware build in the `espressif/idf:release-v5.5` container
     (`idf.py set-target esp32 && idf.py build` in `firmware/`);
   - `make -C sim wasm` if emsdk is available.
@@ -43,8 +79,9 @@ before touching anything.
 - **Don't let versions float.** LVGL is pinned at 9.5.0 in
   `firmware/main/idf_component.yml`, and the sim pins v9.2.2 separately.
   The LVGL pool is 32 KB; `make -C sim poolparity` enforces it.
-- **Watch static DRAM.** It is about 89 % used, with about 19.9 KB free. No
-  new large static buffers; allocate when a screen opens and free when it
+- **Watch static DRAM.** It is about 81.5 % used, with about 33.4 KB free
+  (2026-10-14: the 12 KB rewrite arena went; it was 89 % before). No new
+  large static buffers; allocate when a screen opens and free when it
   closes.
 
 ## Cloud-session environment (learned 2026-09)
@@ -209,9 +246,62 @@ and S1**, which the owner asked for together:
   in the title bar was made as wide as fits (`tb_home_x()`: from the
   clock's widest to Menu), outlined.
 
-**Where things stand (2026-10-01):** the owner is bench-testing build
-`7810d49` (CI green), plus Guru full screen since. Start the next session from their report; the open
-`[d]` items in `BACKLOG.md`'s first RESUME HERE are the checklist.
+**Where things stand (2026-10-01):** all of the above is merged to `main`
+(PR #66, `79272fd`). The owner's bench checks are the open `[d]` items in
+`BACKLOG.md`'s first RESUME HERE; still untested there: a bigger iCloud
+sync and loading a second course into Study. Since the merge: the README
+and `docs/ARCHITECTURE.md`, comments without internal ticket codes, and the
+host build in `build/`.
+
+**Now: the sync engine for a real account** (the owner, 2026-10-01: "start
+with the external sort, the window and pruning rule, batched downloads.
+Focus on a very tight time window"). The plan is `BACKLOG.md` §Engine,
+items 1 and 5. The rule that makes a window safe: **an object leaving the
+window is pruned on the device and never deleted on the server.** Built the
+same day: the sort in runs on the card (`sync_sort_file`), the window
+(`sync_set_window`, config `cal_days_back`/`cal_days_ahead`, Settings ▸
+Sync ▸ Calendar), and batched downloads (multiget into a body cache on the
+card); gates `sort_test`, `mget_test` (+`mget_asan`), `window`. Its bench
+checks are `[d]` items in `BACKLOG.md`'s first RESUME HERE. Still open:
+To Do (open tasks only) and Address (no photos, or one group).
+
+**2026-10-13: nothing is deleted from the cloud** (the first rule above).
+**2026-10-14: §Engine 6 to 10 are built** (`BUILD_PROGRESS.md`, newest
+entries): an edit is merged three ways into the server's copy
+(`bridge/objfile.c`, against each record's *base* beside the map, never a
+replacement); big objects are read through a Palm view; a read-only switch,
+on for a new account (Settings ▸ Sync ▸ Changes); every database rewrite on
+the device streams (an edit used to truncate a big database to 64
+records); repeating events show on every day they occur; To Do keeps the
+open tasks and those done in two weeks. Gates: `objfile_test`,
+`recur_test` (make test), `fidelity`, `todos` (run_gates.sh), the sim
+`data` gate. **Next is the owner's test with the 10-year account**: the
+`[d]` items in `BACKLOG.md`'s first RESUME HERE, read-only first.
+
+**2026-10-15: Palm behaviours, on branch `claude/palm-behaviours`** (on top
+of the sync branch, which is still to be tested on the device).
+`docs/PALM_ARCHIVE_REVIEW.md` measured the firmware against Palm's UI
+Guidelines and Zen of Palm (github.com/ardiri/dev-palmos; ideas only, its
+Palm OS source is all rights reserved). The owner had the bug and the seven
+items built, one commit each (`BACKLOG.md`'s "Palm behaviours" RESUME HERE,
+`BUILD_PROGRESS.md`):
+- P1 waking resumes the screen the lock went over (`resume_show()`, the
+  `g_resume` record), and leaving an edit form saves it (`g_edit_live` in
+  `content_clear()`);
+- P2 writing on the Day view makes an event; P3 the title opens the menu,
+  which remembers its last item; P4 Palm's alert order, titles, nothing
+  dimmed; P5 Find matches word starts; P6 reminders (`data_cal_alarms()`,
+  one list on wake, OK only); P7 the command stroke (`GRAF_COMMAND`) and an
+  Edit menu; P8 Tips.
+- Found on the way and fixed: a repeat set on the device packed a 1920 end
+  and showed on no day (`ApptUnpack()` now reads an end with no month or day
+  as none).
+- Smoke commands added: `R <back> <ahead>` (reminders over a span). The
+  `p1_*`..`p8_*` shots are the screens to look at.
+- `run_gates.sh`'s `probe_partial` used to fail ("discovery from the
+  server's root"): the earlier gates leave other, emptied address books and
+  the probe took book #1. Fixed 2026-10-16: the test names its book and picks
+  it with `--book-index`.
 
 1. **S6, the bench**, is the owner's (`[d]` items in `BACKLOG.md`). Any
    further work follows `SRS_PLAN.md` §10, keeping to its §7 budgets:

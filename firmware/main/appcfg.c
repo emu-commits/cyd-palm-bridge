@@ -1,14 +1,11 @@
 /* appcfg.c -- see appcfg.h. Defaults, then config.ini, then the passwords from
  * the device's own flash (secretstore.h).
  *
- * THERE IS NO COMPILE-TIME SEED ANY MORE. A gitignored firmware/main/secrets.h
- * used to be compiled in as the starting config, and it was a liability twice
- * over: it put a developer's real Wi-Fi and Apple passwords into any binary they
- * built -- the simulator's included, for months, because a quoted include
- * resolves beside the including file before any -I path -- and it made it
- * possible to hand someone a firmware image with credentials inside it. Every
- * value it held can be set on the device now (Settings), so it is gone.
- * `make -C sim nosecrets` still guards the property it protected. */
+ * THERE IS NO COMPILE-TIME SEED. A credentials header compiled in as the
+ * starting config would put a developer's real Wi-Fi and Apple passwords into
+ * every binary they build, the simulator's included, and make it possible to
+ * hand someone a firmware image with credentials inside. Every value can be set
+ * on the device (Settings), and `make -C sim nosecrets` guards the property. */
 #include "appcfg.h"
 #include "clock.h"        /* the built-in city table: see resolve_loc_auto */
 #include "secretstore.h"  /* the passwords, off the card                   */

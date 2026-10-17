@@ -1,4 +1,4 @@
-/* kana_data.h -- ordered kana syllabary for the Kana trainer (roadmap #3, Tier 1).
+/* kana_data.h -- ordered kana syllabary for the Kana trainer (Tier 1: recognition).
  *
  * The learning order is the classic gojuon: all basic hiragana first, then all
  * basic katakana. Each entry pairs the kana (UTF-8, rendered with lv_font_kana)
