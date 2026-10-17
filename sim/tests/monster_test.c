@@ -14,9 +14,14 @@
  *        (tests/data/game/battle.txt; MONSTER_RECORD=1 rewrites it), with
  *        the invariants checked after every turn;
  *     6. the save: a round trip, every truncation and every flipped bit
- *        refused, an unknown creature refused, a newer version refused.
+ *        refused, an unknown creature refused, a newer version refused;
+ *     7. Auto-play (monster_bot.c) on the game that ships
+ *        (courses/critters/game.bin): from a new game with each of the
+ *        three first critters, the bot alone beats every keeper in the
+ *        region, within a step limit, from a fixed seed.
  * Run from sim/. */
 #include "monster.h"
+#include "monster_bot.h"
 #include "monster_play.h"
 
 #include <math.h>
@@ -27,6 +32,8 @@
 
 #define GAME   "../tests/data/game/game.bin"
 #define BATTLE "../tests/data/game/battle.txt"
+#define REGION "../courses/critters/game.bin"
+#define BOT_LIMIT 40000L            /* presses and battle turns, all told: about 3x the worst of 60 seeds */
 static const char *SAVE = "build/monster_save.bin";   /* MONSTER_SAVE overrides */
 
 static int fails;
@@ -798,6 +805,95 @@ static void saves(MpWorld *w){
     free(v);
 }
 
+/* ---- 7. Auto-play ---------------------------------------------------------- */
+
+/* The bot plays a new game with first critter `pick` from `seed`, feeding its
+ * choices straight to the rules, as the screens do with presses. 1 if it
+ * beat every keeper within BOT_LIMIT actions. */
+static int bot_plays(MonGame *g, int pick, uint32_t seed){
+    uint32_t cap = 0;
+    for(uint32_t i = 0; i < g->n_areas; i++){
+        MgAreaDir d;
+        if(!mg_area_dir(g, i, &d) && d.head_len > cap) cap = d.head_len;
+    }
+    uint8_t *head = malloc(cap), *scratch = malloc(cap);
+    MpWorld *w = calloc(1, sizeof *w);
+    MbBot *b = malloc(sizeof *b);
+    MpBattle bt;
+    MpLog log;
+    long n, battles = 0, keepers = 0, lost = 0, lost_k = 0, caught = 0, stuck = 0, learnt = 0;
+    int ok = 0;
+    char who[32] = "?";
+    w->head_cap = cap;
+    uint16_t starter = g->n_starters ? g->starters[pick % g->n_starters] : 0;
+    CHECK(!mp_new(w, g, head, seed, starter), "bot: a new game: %s", w->err);
+    CHECK(!mb_init(b, g, seed, scratch, cap), "bot: reading the region: %s", g->err);
+    { MgMon m; if(!mg_mon(g, starter, &m)) mg_text(g, m.name, who, sizeof who); }
+    bt.over = 1;
+    int bad = fails;
+    for(n = 0; n < BOT_LIMIT && fails == bad; n++){
+        int r;
+        if(!bt.over){
+            int act, arg;
+            mb_battle(b, w, &bt, &act, &arg);
+            r = mp_turn(w, &bt, act, arg, &log);
+            CHECK(r == 0, "bot: a battle action (%d, %d) the rules refuse: %d %s", act, arg, r, w->err);
+        }
+        else{
+            int d, k = mb_world(b, w, &d);
+            if(getenv("BOT_VERBOSE") && n > BOT_LIMIT - 12)
+                printf("    %ld: area %u at %u,%u facing %u: %d dir %d (%s)\n", n, w->area.index, w->x, w->y, w->facing, k, d, b->why);
+            if(k == MB_DONE){ ok = 1; break; }
+            CHECK(k >= 0, "bot: the map: %d", k);
+            if(k == MB_STUCK) stuck++;
+            r = k == MB_TALK ? mp_interact(w, &bt, &log) : mp_step(w, d, &bt, &log);
+            CHECK(r >= 0, "bot: %s: %d %s", k == MB_TALK ? "talking" : "a step", r, w->err);
+        }
+        int fought = b->fighting;
+        mb_events(b, &bt, &log);
+        for(int i = 0; i < log.n; i++){
+            const MpEvent *e = &log.ev[i];
+            if(e->kind == MP_EV_ENCOUNTER || e->kind == MP_EV_TRAINER) battles++;
+            if(e->kind == MP_EV_BEATEN) keepers++;
+            if(e->kind == MP_EV_LOSE){ lost++; lost_k += bt.trainer != 0; }
+            if(getenv("BOT_VERBOSE") && (e->kind == MP_EV_LOSE || e->kind == MP_EV_BEATEN)){
+                printf("    %6ld %s keeper %d (top %d margin %d):", n, e->kind == MP_EV_LOSE ? "lost to" : "beat", fought,
+                       fought ? b->people[fought - 1].top : -1, fought ? b->people[fought - 1].margin : -1);
+                for(int j = 0; j < w->n_party; j++) printf(" %u/%u", w->party[j].level, w->party[j].hp);
+                printf("  (%s)\n", b->why);
+            }
+            if(e->kind == MP_EV_CAUGHT) caught++;
+            if(e->kind == MP_EV_LEARN_FULL){
+                int slot = mb_learn(b, w, e->a, e->b);
+                if(slot >= 0){ mp_learn(g, &w->party[e->a], e->b, slot); learnt++; }
+            }
+        }
+    }
+    char party[160] = "";
+    for(int i = 0; i < w->n_party; i++){
+        char t[32];
+        MgMon m;
+        if(mg_mon(g, w->party[i].mon, &m) || mg_text(g, m.name, t, sizeof t) < 0) snprintf(t, sizeof t, "?");
+        size_t l = strlen(party);
+        snprintf(party + l, sizeof party - l, "%s%s %u", i ? ", " : "", t, w->party[i].level);
+    }
+    printf("  bot with %s, seed %u: %s after %ld actions; %ld battles, %ld keepers, %ld lost, "
+           "(%ld to keepers), %ld caught, %ld moves relearnt, %ld stuck; party %s\n", who, (unsigned)seed,
+           ok ? "every keeper beaten" : "NOT finished", n, battles, keepers, lost, lost_k, caught, learnt, stuck, party);
+    if(!ok) printf("  bot: last doing: %s, in area %u at %u,%u\n", b->why, w->area.index, w->x, w->y);
+    mb_free(b);
+    free(b); free(w); free(head); free(scratch);
+    return ok;
+}
+
+static void autoplay(void){
+    MonGame g;
+    if(mg_open(&g, REGION)){ CHECK(0, "%s: %s", REGION, g.err); return; }
+    for(int pick = 0; pick < 3; pick++)
+        CHECK(bot_plays(&g, pick, 1), "bot: didn't finish the region with first critter %d", pick);
+    mg_close(&g);
+}
+
 int main(int argc, char **argv){
     if(argc == 3 && !strcmp(argv[1], "dump")) return dump(argv[2]);
     if(getenv("MONSTER_SAVE")) SAVE = getenv("MONSTER_SAVE");
@@ -815,6 +911,7 @@ int main(int argc, char **argv){
     MpWorld *w = battles();
     saves(w);
     free(w);
+    autoplay();
     free(out);
     mg_close(&G);
     printf("monster: %s (%d failure%s)\n", fails ? "FAILED" : "OK", fails, fails == 1 ? "" : "s");

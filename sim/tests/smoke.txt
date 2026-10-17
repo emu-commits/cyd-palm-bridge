@@ -1847,6 +1847,10 @@ t 400
 # loss, back at Mum's; Foreman Dale barring the tunnel; Kestrel's nurse; then
 # the menu's Credits (scrolled), Party and Save game, and leaving: every byte
 # of the game's block must come back (B at the Games folder, E after).
+# Indoors: in at Home's open door and out over its mat, Wren's Lab, and the
+# Kestrel rest house, where Nurse Hale is. Auto-play: on from the menu, the
+# title saying so, watched for a while, off from the menu (which says "Stop
+# Auto-play"); on again, and a touch on the game takes it back.
 c 18 225
 t 300
 c 195 110
@@ -1887,6 +1891,21 @@ t 700
 u
 t 300
 s critters_walked
+G 0 6 10 0
+t 200
+c 64 224
+t 900
+s critters_home
+c 64 296
+t 200
+c 64 296
+t 900
+s critters_home_left
+G 0 17 10 0
+t 200
+c 64 224
+t 900
+s critters_lab
 G 1 10 4 1
 t 200
 s critters_route1
@@ -2103,9 +2122,14 @@ t 300
 s critters_dale
 c 204 246
 t 300
-G 4 6 17 0
+G 4 6 16 0
 t 300
 s critters_kestrel
+c 64 224
+t 900
+s critters_rest_house
+G 7 3 4 0
+t 300
 c 204 246
 t 300
 s critters_nurse
@@ -2116,7 +2140,30 @@ c 204 246
 t 300
 c 226 12
 t 300
-c 60 210
+s critters_menu
+c 60 132
+t 300
+s critters_auto_on
+t 4000
+s critters_auto_walk
+t 4000
+s critters_auto_later
+c 226 12
+t 300
+s critters_auto_menu
+c 60 132
+t 600
+s critters_auto_stopped
+c 226 12
+t 300
+c 60 132
+t 2000
+c 120 100
+t 600
+s critters_auto_touched
+c 226 12
+t 300
+c 60 236
 t 300
 s critters_credits
 c 64 296
@@ -2130,14 +2177,14 @@ c 150 280
 t 300
 c 226 12
 t 300
-c 60 132
+c 60 158
 t 300
 s critters_party
 c 150 280
 t 300
 c 226 12
 t 300
-c 60 158
+c 60 184
 t 300
 s critters_saved
 t 1500

@@ -28,6 +28,12 @@ const char *mon_ui_error(void);
 void mon_ui_party(void);
 void mon_ui_new_game(void);      /* asks first */
 void mon_ui_credits(void);
+/* Auto-play (GAME_PLAN.md §8): on while a game is under way; a touch on the
+ * game turns it off */
+int  mon_ui_auto(void);
+void mon_ui_set_auto(int on);
+/* ui.c's: the title bar says so while Auto-play is on */
+void ui_mon_auto_changed(int on);
 
 #ifdef UI_DEVTOOLS
 /* The smoke tour: put the player at (x, y) of area i, facing N E S W = 0..3. */

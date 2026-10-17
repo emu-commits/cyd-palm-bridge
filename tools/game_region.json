@@ -8,7 +8,9 @@
     {
       "map": "larkhollow", "name": "Larkhollow", "layout": "game_maps/larkhollow.json",
       "warps": [
-        {"at": [12, 0, 2, 1], "to": "spyder_route1", "x": 13, "y": 18, "facing": "up"}
+        {"at": [12, 0, 2, 1], "to": "spyder_route1", "x": 13, "y": 18, "facing": "up"},
+        {"at": [6, 9], "to": "larkhollow_home", "x": 5, "y": 7, "facing": "up"},
+        {"at": [17, 9], "to": "larkhollow_lab", "x": 5, "y": 7, "facing": "up"}
       ],
       "signs": [
         {"at": [15, 3, 2, 2], "facing": "up",
@@ -95,16 +97,14 @@
     {
       "map": "kestrel", "name": "Kestrel", "layout": "game_maps/kestrel.json",
       "warps": [
-        {"at": [12, 20, 2, 1], "to": "spyder_cotton_tunnel", "x": 35, "y": 3, "facing": "down"}
+        {"at": [12, 20, 2, 1], "to": "spyder_cotton_tunnel", "x": 35, "y": 3, "facing": "down"},
+        {"at": [6, 15], "to": "kestrel_rest", "x": 5, "y": 7, "facing": "up"}
       ],
       "signs": [
         {"at": [9, 11, 2, 2], "facing": "up",
          "text": "THE KESTREL RING. Warden Ivy takes on any keeper who reaches her."}
       ],
       "people": [
-        {"at": [6, 16], "facing": "down", "sheet": "nurse", "kind": "healer", "name": "Nurse Hale",
-         "text": "Welcome to the rest house. Your critters are rested now. If they're all worn out in the Ring, you'll wake up here.",
-         "after": ""},
         {"at": [16, 16], "facing": "down", "sheet": "shopassistant", "kind": "talk", "name": "Sam",
          "text": "The store opens next season. For now, there's only one thing worth buying in Kestrel: a win in the Ring."},
         {"at": [10, 7], "facing": "right", "sheet": "monk", "kind": "trainer", "name": "Ringman Pell",
@@ -122,6 +122,58 @@
         {"at": [14, 13], "facing": "down", "sheet": "postboy", "kind": "talk", "name": "Ned the Post",
          "show_if": "beat_ivy",
          "text": "Letter for you! It's from your mum: \"Heard the news. Dinner's on when you're home.\""}
+      ]
+    },
+    {
+      "map": "larkhollow_home", "name": "Home", "layout": "game_maps/larkhollow_home.json",
+      "warps": [
+        {"at": [5, 8], "to": "larkhollow", "x": 6, "y": 10, "facing": "down"}
+      ],
+      "signs": [
+        {"at": [9, 1, 2, 1], "facing": "up",
+         "text": "Your old picture books. \"The Little Keeper\" is still on top, its corners chewed."},
+        {"at": [0, 2, 2, 1], "facing": "up",
+         "text": "Something smells good. A note on the pot says: NOT YET."}
+      ],
+      "people": [
+        {"at": [8, 3], "facing": "down", "sheet": "cooldude", "kind": "talk", "name": "Rowan",
+         "text": "Off to be a keeper, then? Talk to Dr Wren in the house across the square first. And mind Mum's flowers on the way out."}
+      ]
+    },
+    {
+      "map": "larkhollow_lab", "name": "Wren's Lab", "layout": "game_maps/larkhollow_lab.json",
+      "warps": [
+        {"at": [5, 8], "to": "larkhollow", "x": 17, "y": 10, "facing": "down"}
+      ],
+      "signs": [
+        {"at": [0, 1, 4, 1], "facing": "up",
+         "text": "Shelves of field notes. One page says: the deeper the wood, the tougher the critters."},
+        {"at": [8, 1, 2, 1], "facing": "up",
+         "text": "The machine hums. A card taped to it says: DON'T TOUCH. -W."},
+        {"at": [7, 4], "facing": "up",
+         "text": "Dr Wren's desk: a flask of something green and a book called \"Types and Their Troubles\"."}
+      ],
+      "people": [
+        {"at": [3, 5], "facing": "down", "sheet": "shopassistant", "kind": "talk", "name": "Fern",
+         "text": "I help Dr Wren. A tip: a move that suits what it hits does twice the damage, and a poor match does half. Watch for \"very effective\"."}
+      ]
+    },
+    {
+      "map": "kestrel_rest", "name": "Rest House", "layout": "game_maps/kestrel_rest.json",
+      "warps": [
+        {"at": [5, 8], "to": "kestrel", "x": 6, "y": 16, "facing": "down"}
+      ],
+      "signs": [
+        {"at": [3, 1, 2, 1], "facing": "up", "text": "The fire crackles. It's warm in here."},
+        {"at": [9, 1, 2, 1], "facing": "up",
+         "text": "Plates from every town in the region, and a gap where Larkhollow's should be."}
+      ],
+      "people": [
+        {"at": [3, 3], "facing": "down", "sheet": "nurse", "kind": "healer", "name": "Nurse Hale",
+         "text": "Welcome to the rest house. Your critters are rested now. If they're all worn out in the Ring, you'll wake up here.",
+         "after": ""},
+        {"at": [8, 5], "facing": "left", "sheet": "florist", "kind": "talk", "name": "Hazel",
+         "text": "I came through the tunnel last spring and never left. Kestrel grows on you."}
       ]
     }
   ],

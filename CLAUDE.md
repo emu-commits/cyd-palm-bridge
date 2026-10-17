@@ -32,8 +32,11 @@ before touching anything.
   Tuxemon's CC BY word (the owner's choice). The built file is committed as
   `courses/critters/game.bin` (`mkgame.py --strict`), the smoke tour plays
   it (`G area x y facing` jumps), the web flasher can install it, and the
-  web emulator puts it on its card. Next: the owner's bench items, then G4
-  (Auto-play). The Tuxemon checkout never enters the repo.
+  web emulator puts it on its card. **Also done 2026-10-16:** rooms behind
+  every open door (our own CC0 tileset, `tools/gen_interior_sheet.py`) and
+  **G4, Auto-play** (`monster_bot.c`; `make -C sim monster` checks it beats
+  every keeper). Next: the owner's bench items (G5). The Tuxemon checkout
+  never enters the repo.
 - `docs/APP_PLATFORM_PLAN.md`: native C apps loaded from the SD card.
   **On hold since 2026-09-29**; don't build any of it without the user's yes.
 

@@ -23,7 +23,14 @@
  *
  * Saving: when leaving (the lock included) and from the menu. A battle in
  * progress goes to pause.dat as well and comes back on the next open, so the
- * lock pauses the game rather than ending the battle (§13 Q3). */
+ * lock pauses the game rather than ending the battle (§13 Q3).
+ *
+ * AUTO-PLAY (§8): monster_bot.c decides, and this file presses the same
+ * buttons a person would, at a pace one can watch: about four steps a
+ * second, a message read in about a second, the menu cursor moving a line
+ * at a time to what it chose. Touching the game turns it off. The bot's
+ * memory (about 3 KB, and 6 B a cell of the area it's in) is allocated when
+ * it's turned on and freed when it's turned off or the game closes. */
 #include "ui_monster.h"
 
 #include <stddef.h>
@@ -38,6 +45,7 @@
 #endif
 #include "lv_font_palm.h"
 #include "monster.h"
+#include "monster_bot.h"
 #include "monster_play.h"
 #include "power.h"
 
@@ -56,6 +64,9 @@
 #define LINE_H     14               /* lv_font_palm's line height */
 #define MENU_MAX   8
 #define NAME_LEN   24
+#define AUTO_STEP  4                /* Auto-play's pauses, in ticks: after a step (which takes four more), */
+#define AUTO_TEXT  30               /* on a message, */
+#define AUTO_MENU  10               /* and per line the menu cursor moves */
 
 enum { SC_NONE, SC_ERROR, SC_PICK, SC_MAP, SC_BATTLE, SC_CARD };
 enum { UI_NONE, UI_TEXT, UI_MENU, UI_CREDITS };
@@ -117,6 +128,11 @@ typedef struct {
     lv_obj_t *view, *pad, *box, *text, *cursor, *card, *foe, *me, *mehp, *credits;
     lv_timer_t *timer;
     char     *cred;
+
+    /* Auto-play: the bot, and the battle action it's pressing its way to */
+    MbBot   *bot;
+    uint8_t  autoplay, bot_wait;
+    int8_t   bot_act, bot_arg;      /* bot_act -1: none chosen yet this turn */
 
     uint32_t head_cap;
     uint8_t  head[];                /* the largest area head in the file */
@@ -823,6 +839,7 @@ static void scene_map(Mon *m){
 
 static void scene_battle(Mon *m){
     m->scene = SC_BATTLE;
+    m->bot_act = -1;
     m->sel = 0;                     /* a new battle's menu starts at Fight */
     m->last_move = 0;
     m->to_moves = 0;
@@ -988,6 +1005,8 @@ static void do_turn(Mon *m, int act, int arg){
     shown_now(m);
     box_hide(m);
     int r = mp_turn(&m->w, &m->b, act, arg, &m->log);
+    m->bot_act = -1;
+    if(m->bot) mb_events(m->bot, &m->b, &m->log);
     if(r == MG_ERANGE){ box_say(m, "That can't be done now."); m->log.n = 0; m->pos = 0; return; }
     if(r){ fail(m, "Something went wrong in the battle.", m->w.err); return; }
     script_start(m);
@@ -1079,6 +1098,7 @@ static void press_a(Mon *m){
     }
     if(m->scene == SC_MAP && !m->anim){
         int r = mp_interact(&m->w, &m->b, &m->log);
+        if(m->bot) mb_events(m->bot, &m->b, &m->log);
         if(r < 0){ fail(m, "Something went wrong.", m->w.err); return; }
         if(r > 0) script_start(m);
     }
@@ -1136,6 +1156,7 @@ static void press_dir(Mon *m, int d){
 static void walk(Mon *m, int d){
     int fx = m->w.x, fy = m->w.y, area = m->w.area.index;
     int r = mp_step(&m->w, d, &m->b, &m->log);
+    if(m->bot) mb_events(m->bot, &m->b, &m->log);
     m->pos = 0;
     if(r){ fail(m, "The map couldn't be read.", m->w.err); return; }
     int warp = 0, hop = 0, step = 0;
@@ -1163,6 +1184,76 @@ static void walk(Mon *m, int d){
     redraw();
 }
 
+/* ---- Auto-play ---- */
+
+static void auto_set(Mon *m, int on){
+    if(on && !m->bot && m->started){
+        MbBot *b = malloc(sizeof *b);
+        uint8_t *scratch = malloc(m->head_cap ? m->head_cap : 1);
+        if(b && scratch && !mb_init(b, &m->g, m->w.rng ^ 0x9E3779B9u, scratch, m->head_cap)) m->bot = b;
+        else free(b);
+        free(scratch);
+    }
+    if(!on && m->bot){ mb_free(m->bot); free(m->bot); m->bot = NULL; }
+    m->autoplay = (uint8_t)(m->bot != NULL);
+    m->bot_wait = 0;
+    m->bot_act = -1;
+    ui_mon_auto_changed(m->autoplay);
+}
+
+/* a menu: the cursor a line nearer what the bot chose, or, there, choose it */
+static void bot_menu(Mon *m){
+    int want = 0;
+    switch(m->menu){
+    case MN_BATTLE:
+    case MN_MOVES:
+    case MN_SWAP:
+        if(m->bot_act < 0 || (m->b.need_swap && m->bot_act != MP_ACT_SWAP)){
+            int a, g;
+            mb_battle(m->bot, &m->w, &m->b, &a, &g);
+            m->bot_act = (int8_t)a; m->bot_arg = (int8_t)g;
+        }
+        if(m->menu == MN_BATTLE)
+            want = m->bot_act == MP_ACT_MOVE ? 0 : m->bot_act == MP_ACT_SWAP ? 1 : m->bot_act == MP_ACT_CATCH ? 2 : 3;
+        else if(m->menu == MN_MOVES) want = m->bot_act == MP_ACT_MOVE && m->bot_arg >= 0 ? m->bot_arg : MP_MOVES;
+        else want = m->bot_act == MP_ACT_SWAP ? m->bot_arg : m->w.n_party;
+        break;
+    case MN_FORGET:
+        want = mb_learn(m->bot, &m->w, m->learn_who, m->learn_move);
+        if(want < 0) want = MP_MOVES;
+        break;
+    case MN_NEW:
+        want = 1;                   /* keep playing */
+        break;
+    default:
+        box_hide(m);
+        return;
+    }
+    if(want >= m->nmenu) want = m->nmenu - 1;
+    if(want != m->sel) menu_cursor(m, want > m->sel ? 1 : -1);
+    else choose(m);
+}
+
+/* one of Auto-play's presses, when its pause is over */
+static void bot_tick(Mon *m){
+    if(m->bot_wait){ m->bot_wait--; return; }
+    if(m->scene == SC_ERROR){ auto_set(m, 0); return; }
+    if(m->ui == UI_CREDITS){ credits_close(m); m->bot_wait = AUTO_MENU; return; }
+    if(m->ui == UI_TEXT){ press_a(m); m->bot_wait = AUTO_TEXT; return; }
+    if(m->ui == UI_MENU){ bot_menu(m); m->bot_wait = AUTO_MENU; return; }
+    if(m->scene != SC_MAP) return;
+    int d, k = mb_world(m->bot, &m->w, &d);
+    if(k < 0){ fail(m, "The map couldn't be read.", m->g.err); return; }
+    if(k == MB_DONE){
+        auto_set(m, 0);
+        box_say(m, "Every keeper in the region is beaten. Auto-play hands the game back to you.");
+        return;
+    }
+    if(k == MB_TALK) press_a(m);
+    else walk(m, d);
+    m->bot_wait = AUTO_STEP;
+}
+
 static void tick_cb(lv_timer_t *t){
     (void)t;
     Mon *m = g_mon;
@@ -1182,6 +1273,7 @@ static void tick_cb(lv_timer_t *t){
         }
         return;
     }
+    if(m->autoplay){ bot_tick(m); return; }
     if(m->turn_wait) m->turn_wait--;
     if(m->scene != SC_MAP || m->ui != UI_NONE){ m->pending = -1; return; }
     int d = m->pending;
@@ -1224,6 +1316,7 @@ static void pad_cb(lv_event_t *e){
     if(!m) return;
     lv_event_code_t code = lv_event_get_code(e);
     lv_obj_t *pad = lv_event_get_current_target(e);
+    if(code == LV_EVENT_PRESSED && m->autoplay){ auto_set(m, 0); return; }     /* a touch takes over */
     if(code == LV_EVENT_PRESSED){
         int b = pad_hit(pad);
         m->pressed = (int8_t)b;
@@ -1312,6 +1405,7 @@ static void pad_draw_cb(lv_event_t *e){
 static void box_click_cb(lv_event_t *e){
     Mon *m = g_mon;
     if(!m) return;
+    if(m->autoplay){ auto_set(m, 0); return; }
     if(m->ui == UI_TEXT){ press_a(m); return; }
     if(m->ui != UI_MENU) return;
     lv_point_t p;
@@ -1326,6 +1420,11 @@ static void box_click_cb(lv_event_t *e){
     m->sel = (uint8_t)line;
     lv_obj_set_y(m->cursor, m->sel * LINE_H);
     choose(m);
+}
+
+static void view_press_cb(lv_event_t *e){
+    (void)e;
+    if(g_mon && g_mon->autoplay) auto_set(g_mon, 0);
 }
 
 /* ---- opening and closing ---- */
@@ -1344,6 +1443,8 @@ static void build(Mon *m, lv_obj_t *parent){
     lv_obj_set_pos(m->view, 0, 0);
     lv_obj_clear_flag(m->view, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(m->view, view_draw_cb, LV_EVENT_DRAW_MAIN, NULL);
+    lv_obj_add_flag(m->view, LV_OBJ_FLAG_CLICKABLE);           /* a touch on the picture stops Auto-play */
+    lv_obj_add_event_cb(m->view, view_press_cb, LV_EVENT_PRESSED, NULL);
 
     m->card = label(m->view, &lv_font_palm_bold_2x, lv_color_hex(0xFFFFFF));
     lv_obj_center(m->card);
@@ -1464,6 +1565,7 @@ void mon_ui_close(void){
         else remove(MON_PAUSE);
     }
     if(m->timer) lv_timer_delete(m->timer);
+    if(m->bot){ mb_free(m->bot); free(m->bot); }
     free(m->cred);
     mg_close(&m->g);
     g_mon = NULL;
@@ -1471,6 +1573,12 @@ void mon_ui_close(void){
 }
 
 int mon_ui_open(void){ return g_mon != NULL; }
+int mon_ui_auto(void){ return g_mon && g_mon->autoplay; }
+void mon_ui_set_auto(int on){
+    Mon *m = g_mon;
+    if(!m || (on && (!m->started || m->scene == SC_ERROR))) return;
+    auto_set(m, on);
+}
 int mon_ui_keep_awake(void){ return g_mon && power_on_usb(); }
 int mon_ui_playing(void){ return g_mon && g_mon->started; }
 

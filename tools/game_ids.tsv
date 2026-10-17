@@ -5,6 +5,9 @@ area	spyder_brideswood	2
 area	larkhollow	3
 area	spyder_cotton_tunnel	4
 area	kestrel	5
+area	larkhollow_home	6
+area	larkhollow_lab	7
+area	kestrel_rest	8
 creature	agnite	1
 creature	agnidon	2
 creature	agnigon	3

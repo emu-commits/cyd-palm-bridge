@@ -1,15 +1,18 @@
 # Game plan — a monster-catching RPG built from Tuxemon's open content
 
-> **Status: G3 done (2026-10-16), in the simulator; the bench is next.** G0
-> (the format and the converter), G1 (the rules) and G2 (the screens) were
-> built on 2026-10-16 as the owner asked; then G3, the first region: two towns
-> laid out for this game, Route 1, the Brideswood and the Cotton Tunnel,
-> people and keepers, a Warden to beat, and a choice of six looks for the
-> player. §12 says what each phase found; §13 has the owner's decisions.
+> **Status: G4 done (2026-10-16), in the simulator; the bench (G5) is
+> next.** G0 (the format and the converter), G1 (the rules) and G2 (the
+> screens) were built on 2026-10-16 as the owner asked; then G3, the first
+> region: two towns laid out for this game, Route 1, the Brideswood and the
+> Cotton Tunnel, people and keepers, a Warden to beat, and a choice of six
+> looks for the player. Then, the same day, the owner asked for the game to
+> be finished: every house with an open door can be walked into (three rooms,
+> furnished from a tileset of our own), and G4, Auto-play. §12 says what each
+> phase found; §13 has the owner's decisions.
 
 A small Game Boy-style monster-catching RPG in the Games menu: walk a tile map,
 meet creatures in the grass, battle, catch and train them, beat trainers. An
-**Auto-play** checkbox hands the controls to a simple bot so the owner can
+**Auto-play** item in its menu hands the controls to a simple bot so the owner can
 watch it play, as casual entertainment.
 
 The engine is ours, written in C for this board. The **content** (creatures,
@@ -70,7 +73,10 @@ What was chosen:
 
 - **Overworld:** a 16×16-tile map seen from above.
   - The player steps one tile at a time; walls and water block, doors and
-    stairs lead to other areas.
+    stairs lead to other areas. Every house with an open door can be walked
+    into (a door is a warp that wants "up"; inside, the mat by the door is
+    one that wants "down"). Houses drawn without a door (the towns' halls)
+    stay shut.
   - People can be talked to (a text box) and some battle you.
 - **Encounters:** walking on grass, in caves or on water can start a battle
   with a wild creature, chosen by the area's encounter table.
@@ -90,7 +96,7 @@ What was chosen:
   drawing), then which of three first critters to take.
 - **Saving:** one save slot on the card, written on request and when leaving
   the game.
-- **Auto-play:** a checkbox in the game's menu (§8).
+- **Auto-play:** an item in the game's menu (§8).
 - **No sound** in the first version. The board has a small speaker output;
   sound is a later, separate decision.
 
@@ -100,7 +106,7 @@ What was chosen:
 |---|---|
 | The file reader | `firmware/main/monster.c` (no LVGL; host-testable, like `course.c`) |
 | Rules, battles, the world's events, save and load | `firmware/main/monster_play.c` (no LVGL, like `srs.c`) |
-| The bot | `firmware/main/monster_bot.c` (no LVGL) |
+| The bot | `firmware/main/monster_bot.c` (no LVGL; built in G4) |
 | Screens, drawing and controls | **a new file**, `firmware/main/ui_monster.c`, not another section of `ui.c` (already 12,340 lines) |
 | Entry | `GAMES[]` in `ui.c` (one entry and one dispatch line) |
 | The converter | `tools/mkgame.py`: Tuxemon's YAML, PNG and Tiled files to `game.bin` (Pillow and PyYAML pinned in `tools/requirements-game.txt`) |
@@ -108,6 +114,7 @@ What was chosen:
 | The licence allow-list | `tools/game_allow.tsv`: each creature, tileset and character sheet we use, with its licence and credit line, checked by hand (§10) |
 | The region | `tools/game_region.json`: the maps, the start, the player's looks, the starters, the encounter tables, and each area's warps, zones, signs and people |
 | The towns | `tools/game_maps/*.json`: layouts of our own from the clean tilesets (`GAME_FORMAT.md` §1) |
+| The rooms | `tools/game_maps/larkhollow_home.json`, `larkhollow_lab.json`, `kestrel_rest.json`, from `tools/game_art/interior.png`, a tileset drawn by `tools/gen_interior_sheet.py` (CC0): Tuxemon's indoor sheets are partly XYG (§10) |
 | The player's looks | `tools/gen_player_sheet.py` draws the six sheets in `tools/game_art/` (CC0) |
 | Stable ids | `tools/game_ids.tsv`: creature, move, status and area numbers a save refers to |
 | The data file | `/sdcard/games/monster/game.bin`, built from Tuxemon (clean licences only, `mkgame.py --strict`) and committed as `courses/critters/game.bin` with its credits in `courses/critters/README.md` (§13 Q1) |
@@ -244,22 +251,42 @@ title bar keeps Home and Menu, and the Graffiti strip is hidden. Below the
 
 ## 8) Auto-play
 
-- **The checkbox** is in the game's menu. While it's on, a small "AUTO" label
-  shows in the title bar, and the bot presses the same virtual buttons a
-  person would, at a watchable pace (about 4 steps a second).
-- **Touching the screen** turns Auto-play off and gives control back.
+Built in G4 as written here, with these differences: the menu item is
+"Auto-play" and, while it's on, "Stop Auto-play" (the way the To Do menu
+toggles "Show Completed"), not a checkbox; and the title bar reads
+"Auto-play" instead of "Critters", rather than a separate label.
+
+- **The menu item** is in the game's menu. While it's on, the title bar
+  says so, and the bot presses the same virtual buttons a person would, at a
+  watchable pace (about 4 steps a second; a message stays about a second;
+  the menu cursor moves a line at a time to what it chose).
+- **Touching the game** (the picture, the text box or the controls) turns
+  Auto-play off and gives control back, and so does choosing Party, New game
+  or Credits from the menu. When every keeper is beaten it hands the game
+  back by itself and says so.
+- **The lock** pauses it with the game (§13 Q3), and waking carries on.
 - **The bot** (`monster_bot.c`, no LVGL):
-  - follows a list of goals for the region (reach the route, beat a trainer,
-    heal below a threshold, catch a creature it doesn't have, beat the gym);
-  - finds its way with a breadth-first search over the area's walkable cells,
-    using warps between areas;
-  - in a battle, picks the move with the highest expected damage (power ×
-    accuracy × type multiplier), swaps out a creature at low HP, and heals or
-    runs when the party is weak;
-  - grinds on grass when the party's level is below the next goal's.
+  - reads its goals from the file, not a list written for the region: rest
+    at a healer when the party is worn down (or below 75 % before a keeper);
+    else the nearest keeper not yet beaten, kept as its goal until beaten (so
+    it doesn't turn back at an area's edge where another is nearer);
+  - finds its way with a breadth-first search over the area's cells, using
+    warps between areas; resting and training keep out of unbeaten keepers'
+    sight where there's a way;
+  - in a battle, picks the move with the highest expected damage (the rules'
+    own damage × accuracy, so the type multiplier is in it), heals with a
+    move when low, swaps in a creature two levels stronger, catches a wild
+    creature it hasn't got once it's weak, and runs from wild ones when the
+    party is worn down;
+  - trains on the encounter zone whose levels suit it while its best
+    creature is below the keeper's best, one level more for each loss to
+    that keeper.
 - **The bot is also a test.** The host gate runs the bot from a fixed seed and
   checks that **it finishes the region** within a step limit. A map change that
-  blocks the way, or a fight that can't be won, fails the gate.
+  blocks the way, or a fight that can't be won, fails the gate. Measured
+  (2026-10-16): with each of the three first critters from seed 1, it beats
+  all nine keepers; over 60 runs (20 seeds each) every one finished, in at
+  most 13,199 actions and 15 losses, so the gate's limit is 40,000.
 - **The screen during Auto-play:** see §13 Q3.
 
 ## 9) Memory, flash and time budgets
@@ -279,7 +306,7 @@ had a 4-bit canvas and came to about 45 KB.
 | The area's head (palette, warps, zones, signs, overlays) | up to about 3 KB (2.4 KB for Brideswood) | the same |
 | Game state (party, storage, flags, position) | about 2–4 KB | the same |
 | Battle: two sprites, 4.1 KB each | in the tile cache's space | the same |
-| Bot (BFS over a 64 × 64 area) | about 8.5 KB, only while Auto-play is on | the same |
+| Bot (BFS over a 64 × 64 area) | about 3.5 KB, and 6 B a cell of the area it's in (9.6 KB in the Brideswood), only while Auto-play is on | the same |
 | **Total** | **about 48 KB playing; about 57 KB with Auto-play** | **about 74 KB; about 83 KB** |
 
 The 64-tile cache is twice what the spike needs: the most different tiles on
@@ -483,8 +510,26 @@ screenshots looked at.
     `tests/mkgame_test.py` (refusals for bad people, and the committed region
     walked from the start to every area and person), and the smoke tour (the
     `critters_*` shots, with `G area x y facing` to jump there).
-- **G4 — Auto-play.** `monster_bot.c`, the checkbox, the "bot finishes the
-  region" gate.
+- **The rooms. Built 2026-10-16, in the simulator** (the owner: "being able
+  to walk into any house with an open door").
+  - [x] `tools/gen_interior_sheet.py` draws `tools/game_art/interior.png`
+    (CC0): floors, walls, windows, a clock, beds, tables, shelves, a stove, a
+    fireplace, a machine. `mkgame.py` reads a tileset marked `ours` from
+    `tools/game_art/`.
+  - [x] Three rooms (11 × 9): Home and Wren's Lab in Larkhollow, the rest
+    house in Kestrel, with Rowan, Fern and Hazel, signs on the furniture,
+    and Nurse Hale moved inside (she stood in its doorway). The houses'
+    stamps have a walkable door cell; the halls have no door.
+  - [x] Gates: `tests/mkgame_test.py` (the rooms reached from the start, the
+    tileset's credit, `gen_interior_sheet.py --check`), the smoke tour
+    (`critters_home`, `critters_home_left`, `critters_lab`,
+    `critters_rest_house`).
+- **G4 — Auto-play. Built 2026-10-16, in the simulator.**
+  - [x] `monster_bot.c` (§8), the menu item and the title, the presses at a
+    pace one can watch, a touch taking over, the lock pausing it.
+  - [x] Gates: `make -C sim monster` (the bot beats every keeper with each
+    first critter), `monster_fuzz` (Auto-play on every hostile file that
+    opens), the smoke tour (`critters_auto_*`).
 - **G5 — the bench.** The owner's `[d]` items: playability of the controls,
   the frame rate, the battery with Auto-play, a card swap.
 

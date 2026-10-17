@@ -181,6 +181,10 @@ def main():
     r = subprocess.run([sys.executable, str(ROOT / "tools" / "gen_player_sheet.py"), "--check"],
                        capture_output=True, text=True)
     check(r.returncode == 0, f"tools/game_art/player*.png: {r.stdout}{r.stderr}")
+    check("interior: CYD Palm (CC0 1.0)" in cred, "the committed game's rooms aren't our tileset")
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "gen_interior_sheet.py"), "--check"],
+                       capture_output=True, text=True)
+    check(r.returncode == 0, f"tools/game_art/interior.png: {r.stdout}{r.stderr}")
     check(not [ln for ln in cred.split("\n") if "unverified" in ln], "the credits name something unverified")
 
     # 5. the region can be walked end to end

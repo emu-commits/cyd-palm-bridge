@@ -15,7 +15,8 @@
 #                        build refuses any unverified line)
 #            confirmed:  checked by hand against the source link (G3)
 #            ours:       drawn for this project, CC0, at tools/game_art/<slug>.png
-#                        (characters only; tools/gen_player_sheet.py draws the player)
+#                        (characters and tilesets: tools/gen_player_sheet.py draws the
+#                        player, tools/gen_interior_sheet.py the rooms indoors)
 #
 # Left out on purpose (section 10): anything under the "XYG Open Source
 # License" (Kelvin Shadewing's sets, and core_buildings, core_set pieces,
@@ -27,6 +28,7 @@ tileset	core_outdoor_nature	CC-BY-SA 4.0	rubberduck; Buch; luke83; PastTheFuture
 tileset	core_outdoor_water	CC-BY-SA 4.0	rubberduck; Buch; luke83; PastTheFuture; Midi; George_; ArMM1998; ZaPaper	ATTRIBUTIONS.md "Core Outdoor Water"	credited
 tileset	core_city_and_country	CC-BY-SA 4.0	ArMM1998	ATTRIBUTIONS.md "Core City and Country"	credited
 tileset	core_indoor_stairs	CC-BY-SA 4.0	rubberduck; ArMM1998; Redshrike; Mike Bramson	ATTRIBUTIONS.md "Core Indoor Stairs"	credited
+tileset	interior	CC0 1.0	CYD Palm	tools/game_art/interior.png	ours
 
 creature	agnite	CC-BY-SA 4.0	Leo; Sanglorian; extyrannomon	https://wiki.tuxemon.org/index.php?title=Agnite	credited
 creature	agnidon	CC-BY-SA 4.0	Leo	https://wiki.tuxemon.org/index.php?title=Agnidon	credited

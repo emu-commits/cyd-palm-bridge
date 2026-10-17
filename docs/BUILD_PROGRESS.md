@@ -16,6 +16,55 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-16 — Critters finished: the rooms, and G4, Auto-play
+
+The owner asked to "finish the critters game - including being able to walk
+into any house with an open door. including the auto-play mode", then flash
+the board and deploy to the web emulator.
+
+- **The rooms.** Tuxemon's indoor sheets are partly XYG (`GAME_PLAN.md`
+  §10), so the rooms have a tileset of our own: `tools/gen_interior_sheet.py`
+  draws `tools/game_art/interior.png` (128 × 128, CC0; `--check` in
+  `tests/mkgame_test.py`), and the allow-list's `ours` now covers tilesets.
+  Home and Wren's Lab in Larkhollow and the Kestrel rest house, 11 × 9 each
+  (`tools/game_maps/`); each house stamp's door cell is walkable, with a
+  warp wanting "up" into the room and the mat inside one wanting "down" out.
+  Nurse Hale moved inside (she stood in the doorway); Rowan, Fern and Hazel
+  are new, with signs on the furniture. The halls have no door and stay
+  shut. **`game.bin` 505,680 → 663,532 B** (each room carries the six looks'
+  and its people's frames, 43–49 KB); the `game` partition is 960 KB.
+- **Auto-play** (`firmware/main/monster_bot.c`, no LVGL; `GAME_PLAN.md`
+  §8). It reads its goals from the file: rest when worn down (or under 75 %
+  before a keeper), else the nearest keeper not yet beaten, kept until
+  beaten, training on the zone whose levels suit it while below that
+  keeper's best, one level more per loss to them. A breadth-first search over
+  the area's cells (6 B a cell while on), warps between areas, keepers'
+  sight avoided while resting or training. In battle the rules' own damage ×
+  accuracy, a heal when low, a stronger creature swapped in, a catch when
+  the wild one is weak, a run when worn down. The screens press the same
+  buttons a person would (about four steps a second; the menu cursor moves
+  to its choice); the menu's "Auto-play" / "Stop Auto-play", the title
+  reading "Auto-play", a touch or a menu choice taking over, the lock
+  pausing it and waking carrying on (`g_mon_wake_auto` in `ui.c`, one byte).
+- **Found on the way** (the gate found each): a warp that wants "up" on a
+  row one can walk along (Route 1's top edge) was first reached sideways, so
+  the search recorded it as a place, not a door: doors are tracked apart
+  now. Training compared a 32-bit score with a 16-bit "none" and never
+  started. Choosing keepers by level sent the bot past the one it had lost
+  to, through his sight, over and over; choosing by distance ping-ponged at
+  the tunnel's mouth: the chosen keeper now sticks.
+- **Measured.** `make -C sim monster`, seed 1: the bot beats all nine
+  keepers with Agnite in 9,731 actions (7 losses), Anoleaf 10,580 (11),
+  Cardiling 9,859 (8). Over 60 runs (20 seeds each) all finished, at most
+  13,199 actions and 15 losses: the gate's limit is 40,000. `monster_fuzz`
+  plays Auto-play on every hostile file that opens (816 of 2,500). Firmware
+  (`espressif/idf:release-v5.5`): image **1,804,651 B** (+12,384 B over G2's
+  1,792,267); static DRAM unchanged, 81.59 %, 33,268 B free. The smoke32
+  tour gives back every byte on leaving (`heap: 0 bytes in use after
+  critters`).
+- Gates: every one in CLAUDE.md's list, all green (`run_gates.sh` not run:
+  nothing in `bridge/` changed).
+
 ### 2026-10-16 — Critters' G3: the first region, its people, and the web emulator's card
 
 The owner asked for G3 (`GAME_PLAN.md` §12) and a deploy to the web

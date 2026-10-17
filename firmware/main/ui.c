@@ -292,6 +292,7 @@ static int g_new_hour = -1;     /* a New event's start hour, written on the Day 
 static const AppDef *g_edit_app;  /* the form's app and field count, kept apart: */
 static int g_edit_nf;            /* screens reset cur_app and g_nfields before they clear */
 static int g_locking;           /* ui_show_lock() is clearing the content */
+static uint8_t g_mon_wake_auto; /* Critters' Auto-play was on when the lock went up */
 static void resume_app(const char *name){
     snprintf(g_resume.app, sizeof g_resume.app, "%s", name ? name : "");
     g_resume.view = RV_NONE; g_resume.stale = 1;
@@ -5925,10 +5926,16 @@ static void act_power(lv_event_t *e){ (void)e; menu_close(); show_power(); }
  * screen -- a half-edited record included. The grid has nothing to lose. */
 static void act_lock(lv_event_t *e){ (void)e; menu_close(); ui_show_lock(); }
 
-/* Critters' items (ui_monster.c does the work) */
-static void act_mon_party(lv_event_t *e){ (void)e; menu_close(); mon_ui_party(); }
-static void act_mon_new(lv_event_t *e){ (void)e; menu_close(); mon_ui_new_game(); }
-static void act_mon_credits(lv_event_t *e){ (void)e; menu_close(); mon_ui_credits(); }
+/* Critters' items (ui_monster.c does the work). Choosing one takes the
+ * game back from Auto-play, as a touch on the game does. */
+static void act_mon_party(lv_event_t *e){ (void)e; menu_close(); mon_ui_set_auto(0); mon_ui_party(); }
+static void act_mon_new(lv_event_t *e){ (void)e; menu_close(); mon_ui_set_auto(0); mon_ui_new_game(); }
+static void act_mon_credits(lv_event_t *e){ (void)e; menu_close(); mon_ui_set_auto(0); mon_ui_credits(); }
+static void act_mon_auto(lv_event_t *e){ (void)e; menu_close(); mon_ui_set_auto(!mon_ui_auto()); }
+/* the title bar while Auto-play is on (ui_monster.c calls it) */
+void ui_mon_auto_changed(int on){
+    if(title_lbl && mon_ui_open()) lv_label_set_text(title_lbl, on ? "Auto-play" : "Critters");
+}
 static void act_mon_save(lv_event_t *e){
     (void)e;
     menu_close();
@@ -6008,6 +6015,7 @@ static void menu_open(void){
     if(mon_ui_open()){                                      /* Critters only */
         menu_header(panel, "Critters");
         if(mon_ui_playing()){
+            menu_item(panel, mon_ui_auto() ? "Stop Auto-play" : "Auto-play", act_mon_auto);
             menu_item(panel, "Party", act_mon_party);
             menu_item(panel, "Save game", act_mon_save);
         }
@@ -7781,6 +7789,7 @@ static void lock_release_cb(lv_event_t *e){ (void)e;
          * dashboard never share the pool: the launcher on the first unlock after
          * boot, and afterwards whatever the lock went over (resume_show). */
         if(lv_obj_get_child_count(content) == 0) resume_show();
+        g_mon_wake_auto = 0;        /* Critters took it, or the wake went elsewhere */
     }
 }
 
@@ -8078,6 +8087,7 @@ void ui_show_lock(void){
      * left empty, and unlocking rebuilds what was there (resume_show). An edit
      * form is saved on the way (content_clear). */
     g_locking = 1;
+    g_mon_wake_auto = (uint8_t)mon_ui_auto();   /* the lock pauses Auto-play; waking carries on */
     content_clear();
     g_locking = 0;
     kill_kb();
@@ -9458,6 +9468,7 @@ static void show_critters(void){
     lv_label_set_text(title_lbl, "Critters");
     update_cat_trigger();
     mon_ui_show(content);
+    if(g_mon_wake_auto){ g_mon_wake_auto = 0; mon_ui_set_auto(1); }    /* the lock paused it */
 }
 
 /* ========================= Coach (ritual focus timer) =======================

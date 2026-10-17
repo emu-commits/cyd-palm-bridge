@@ -10,9 +10,11 @@ with the firmware, and the board copies it to the card when it starts
 **What's in it:** the first region (G3): Larkhollow, where you start;
 Route 1, the Brideswood and the Cotton Tunnel from Tuxemon's Spyder maps;
 and Kestrel, with its Ring and Warden Ivy. The two towns are laid out for
-this game (`tools/game_maps/`) from the clean tilesets. 27 creatures in
-whole evolution lines and their moves; 17 townspeople and keepers, each
-with words of our own; and six looks for the player. Every tile, creature
+this game (`tools/game_maps/`) from the clean tilesets, and every house
+with an open door can be walked into: Home and Wren's Lab in Larkhollow,
+the rest house in Kestrel, furnished from a tileset of our own. 27
+creatures in whole evolution lines and their moves; 20 townspeople and
+keepers, each with words of our own; and six looks for the player. Every tile, creature
 sprite and character sheet in it is on the allow-list with its licence
 (`docs/GAME_PLAN.md` §10 and §13): nothing under the XYG licence, nothing
 non-commercial. The townspeople are Tuxemon's own sheets; most of them come
@@ -27,7 +29,7 @@ word (2026-10-16); they're marked "per Tuxemon" below.
     python3 tools/mkgame.py --strict -o courses/critters/game.bin
 
 `tools/game_allow.tsv` says what may go in, `tools/game_region.json` which
-maps and who stands in them, `tools/game_maps/` the towns, and
+maps and who stands in them, `tools/game_maps/` the towns and the rooms, and
 `tools/game_ids.tsv` keeps the numbers a save refers to. The
 Tuxemon checkout itself never enters this repository.
 
@@ -37,12 +39,13 @@ Tuxemon checkout itself never enters this repository.
   the **GPLv3**, like the firmware.
 - **The art** is under **CC BY-SA 4.0**, each piece credited below. The file
   as a whole is shared under the same terms.
-- **The player** (six looks) is drawn for this project
-  (`tools/gen_player_sheet.py`) and is public domain (**CC0 1.0**).
+- **The player** (six looks) and **the rooms' tiles** are drawn for this
+  project (`tools/gen_player_sheet.py`, `tools/gen_interior_sheet.py`) and are
+  public domain (**CC0 1.0**).
 - **The townspeople** are each under the licence listed beside them: CC BY-SA
   4.0, CC0, or CC BY (Catch Challenger's, per Tuxemon's credits).
-- **The towns' layouts, the story and the dialogue** are ours, under the
-  GPLv3 with the rest of this repository.
+- **The towns' and rooms' layouts, the story and the dialogue** are ours,
+  under the GPLv3 with the rest of this repository.
 
 The device shows the same list under Menu ▸ Credits in the game.
 
@@ -88,6 +91,7 @@ The device shows the same list under Menu ▸ Credits in the game.
 - core_outdoor: rubberduck, Buch, luke83, PastTheFuture, Midi, George_, ArMM1998, Redshrike, Isaiah658, Drummyfish, Sanglorian (CC-BY-SA 4.0)
 - core_outdoor_nature: rubberduck, Buch, luke83, PastTheFuture, Midi, George_, ArMM1998, ZaPaper (CC-BY-SA 4.0)
 - core_outdoor_water: rubberduck, Buch, luke83, PastTheFuture, Midi, George_, ArMM1998, ZaPaper (CC-BY-SA 4.0)
+- interior: CYD Palm (CC0 1.0)
 
 **Characters**
 

@@ -151,11 +151,12 @@ $(B)/course_fuzz: tests/course_fuzz.c firmware/main/course.c firmware/main/cours
 
 # the monster game's file comes off the SD card too: every truncation, bit
 # flips, and hostile (CRC-fixed) copies of the fixture, each one that opens
-# then played (steps, battles, a save and a load), under sanitizers
+# then played (steps, battles, a save and a load, and Auto-play), under sanitizers
 $(B)/monster_fuzz: tests/monster_fuzz.c firmware/main/monster.c firmware/main/monster.h \
-                   firmware/main/monster_play.c firmware/main/monster_play.h bridge/safefile.h | dirs
+                   firmware/main/monster_play.c firmware/main/monster_play.h \
+                   firmware/main/monster_bot.c firmware/main/monster_bot.h bridge/safefile.h | dirs
 	$(CC) $(CFLAGS) -Ifirmware/main -Ibridge -fsanitize=address,undefined -fno-sanitize-recover=all -o $@ \
-	    tests/monster_fuzz.c firmware/main/monster.c firmware/main/monster_play.c
+	    tests/monster_fuzz.c firmware/main/monster.c firmware/main/monster_play.c firmware/main/monster_bot.c
 
 # the RSS parser eats untrusted network bytes -> also run its gate under sanitizers
 $(B)/rss_asan: tests/rss_test.c bridge/rss.c | dirs

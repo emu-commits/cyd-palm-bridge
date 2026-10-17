@@ -22,7 +22,7 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 
 ---
 
-## A monster-catching game: Critters (G3 done 2026-10-16 in the simulator; the bench is next)
+## A monster-catching game: Critters (G4 and the rooms done 2026-10-16 in the simulator; the bench is next)
 
 `GAME_PLAN.md` is the plan: a C engine in the Games menu, with content from
 Tuxemon (GPLv3 data, mostly CC-BY-SA art) converted into one file on the card,
@@ -64,8 +64,21 @@ open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
   you back to the last healer; walking Larkhollow to Kestrel (Foreman Dale
   in the tunnel moves once Keeper Tom in the Brideswood is beaten); the
   frame rate in Kestrel, the busiest screen (60 tiles and six people).
-- [ ] G4, Auto-play: `monster_bot.c`, the checkbox, and the gate that the bot
-  finishes the region (beats Warden Ivy) from a fixed seed.
+- [s] The rooms (`GAME_PLAN.md` §12): Home, Wren's Lab and the Kestrel rest
+  house, in at each open door and out over the mat; Nurse Hale inside. The
+  `critters_home`, `critters_home_left`, `critters_lab` and
+  `critters_rest_house` shots looked at (2026-10-16).
+- [s] G4, Auto-play: `monster_bot.c`, the menu item ("Auto-play", then "Stop
+  Auto-play"), the title, a touch taking over; the gate that the bot beats
+  every keeper with each first critter from a fixed seed. The
+  `critters_auto_*` shots looked at (2026-10-16).
+- [d] Critters' rooms on the bench: walking in at Home's door, out over the
+  mat, Wren's Lab, the rest house (Nurse Hale rests the party inside).
+- [d] Auto-play on the bench: switched on from the menu, it walks, talks and
+  battles at a watchable pace (about four steps a second), the title says
+  "Auto-play", a tap on the game takes over, and the lock pauses it (waking
+  carries on). How long it runs on battery, and whether it ever stands still
+  or walks in circles.
 - [x] The web flasher's optional install: a `game` partition, a second
   manifest, a checkbox on the install page, the copy to the card at boot.
 - [d] Install from the web page with "Also install Critters" ticked: the

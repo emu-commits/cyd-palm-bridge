@@ -214,8 +214,8 @@ def load_allow(path=ALLOW):
         f = line.split("\t")
         if len(f) != 6 or f[0] not in allow or f[5] not in ("credited", "unverified", "confirmed", "ours"):
             fail(f"{path}:{n}: want kind, slug, licence, authors, source, status")
-        if f[5] == "ours" and (f[0] != "character" or f[4] != f"tools/game_art/{f[1]}.png"):
-            fail(f"{path}:{n}: a sheet of our own is a character at tools/game_art/{f[1]}.png")
+        if f[5] == "ours" and (f[0] == "creature" or f[4] != f"tools/game_art/{f[1]}.png"):
+            fail(f"{path}:{n}: a sheet of our own is a character or a tileset at tools/game_art/{f[1]}.png")
         allow[f[0]][f[1]] = {"licence": f[2], "authors": f[3], "source": f[4], "status": f[5]}
     return allow
 
@@ -608,9 +608,9 @@ class PngSheet:
     """A tileset read straight from its picture, for a layout of our own: no
     tile properties (the layout says what's solid)."""
 
-    def __init__(self, root, name, cache):
+    def __init__(self, root, name, cache, ours=False):
         from PIL import Image
-        p = root / "mods" / "tuxemon" / "gfx" / "tilesets" / f"{name}.png"
+        p = TOOLS / "game_art" / f"{name}.png" if ours else root / "mods" / "tuxemon" / "gfx" / "tilesets" / f"{name}.png"
         if not p.exists():
             fail(f"tileset {name}: no {p.name} in the tree")
         if str(p) not in cache:
@@ -645,8 +645,9 @@ class OwnArea(Area):
                  "repeat": [nx, ny], "solid": true or ["#.#", ...] (a mask, # solid),
                  "above": n (its top n rows are drawn over the player)}]
 
-    Only tilesets on the allow-list may be named; the layout's own cells are
-    ours (GPLv3 with the rest of the repo)."""
+    Only tilesets on the allow-list may be named (one marked "ours" is read
+    from tools/game_art/, like the rooms' interior.png); the layout's own
+    cells are ours (GPLv3 with the rest of the repo)."""
 
     def __init__(self, root, slug, path, allowed, cache, report):
         self.slug = slug
@@ -661,7 +662,7 @@ class OwnArea(Area):
         for k, name in sorted(L["sheets"].items()):
             if name not in allowed:
                 fail(f"{slug}: tileset {name} isn't on the allow-list")
-            sheets[k] = PngSheet(root, name, cache)
+            sheets[k] = PngSheet(root, name, cache, allowed[name]["status"] == "ours")
 
         def tref(t):
             k, _, n = t.partition(":")
@@ -1081,7 +1082,7 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
     # areas
     region_maps = [a["map"] for a in region["areas"]]
     area_ix = {m: i for i, m in enumerate(region_maps)}
-    allowed = set(allow["tileset"])
+    allowed = allow["tileset"]                  # name: its line (a layout may use our own, from game_art)
     cache = {}
     AREA, ADAT = b"", bytearray()
     region_dir = Path(region_path).resolve().parent

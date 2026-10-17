@@ -13,12 +13,14 @@
  *      header), so the damage reaches the checks behind them. If the file
  *      still opens, everything is read into buffers of exactly the size the
  *      API promises, and then it's PLAYED: a new game, steps, battles with
- *      random actions, a save and a load. Nothing may read outside a buffer
- *      or trip UBSan.
+ *      random actions, a save and a load; then a new game played by
+ *      Auto-play (monster_bot.c), which reads every area of the file. Nothing
+ *      may read outside a buffer or trip UBSan.
  *
  * Deterministic (a fixed-seed LCG), so a failure reproduces. Run from the
  * repo root. */
 #include "monster.h"
+#include "monster_bot.h"
 #include "monster_play.h"
 
 #include <stdio.h>
@@ -125,6 +127,34 @@ static void play(MonGame *g){
         walked += w->x + w->y + w->n_party;
         if(!mp_save(w, save_path)) mp_load(w, g, head, save_path);
     }
+    /* Auto-play: the bot's choices, fed to the rules as the screens do */
+    MbBot *bot = malloc(sizeof *bot);
+    uint8_t *scratch = malloc(MG_HEAD_MAX);
+    if(!mp_new(w, g, head, rnd() | 1, 0) && !mb_init(bot, g, rnd() | 1, scratch, MG_HEAD_MAX)){
+        b.over = 1;
+        for(int i = 0; i < 400; i++){
+            int act, arg, d;
+            if(!b.over){
+                mb_battle(bot, w, &b, &act, &arg);
+                if(mp_turn(w, &b, act, arg, &log)) break;
+            }
+            else{
+                int k = mb_world(bot, w, &d);
+                if(k < 0 || k == MB_DONE) break;
+                if((k == MB_TALK ? mp_interact(w, &b, &log) : mp_step(w, d, &b, &log)) < 0) break;
+            }
+            mb_events(bot, &b, &log);
+            for(int k = 0; k < log.n; k++)
+                if(log.ev[k].kind == MP_EV_LEARN_FULL && log.ev[k].a < w->n_party){
+                    int slot = mb_learn(bot, w, log.ev[k].a, log.ev[k].b);
+                    mp_learn(g, &w->party[log.ev[k].a], log.ev[k].b, slot);
+                }
+        }
+        walked += w->x + w->y;
+        mb_free(bot);
+    }
+    free(scratch);
+    free(bot);
     free(head);
     free(w);
 }
