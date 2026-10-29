@@ -1578,15 +1578,19 @@ void mon_ui_show(lv_obj_t *parent){
     scene_map(m);
 }
 
+void mon_ui_checkpoint(void){
+    Mon *m = g_mon;
+    if(!m || !m->started) return;
+    mp_save(&m->w, MON_SAVE);
+    if(m->scene == SC_BATTLE && !m->b.over) pause_write(m);
+    else if(m->scene == SC_CARD && m->card_next == CARD_BATTLE) pause_write(m);
+    else remove(MON_PAUSE);
+}
+
 void mon_ui_close(void){
     Mon *m = g_mon;
     if(!m) return;
-    if(m->started){
-        mp_save(&m->w, MON_SAVE);
-        if(m->scene == SC_BATTLE && !m->b.over) pause_write(m);
-        else if(m->scene == SC_CARD && m->card_next == CARD_BATTLE) pause_write(m);
-        else remove(MON_PAUSE);
-    }
+    mon_ui_checkpoint();
     if(m->timer) lv_timer_delete(m->timer);
     if(m->bot){ mb_free(m->bot); free(m->bot); }
     free(m->cred);

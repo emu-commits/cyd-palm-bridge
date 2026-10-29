@@ -350,7 +350,7 @@ build/web/index.html: lvgl/src $(APP_SRCS) wasm_main.c web/index.html web/flash.
 	    $(LVGL_SRCS) $(APP_SRCS) wasm_main.c \
 	    -o build/web/palm.js \
 	    -lidbfs.js $(WRAP_LD) \
-	    -sEXPORTED_FUNCTIONS=_main,_sim_boot,_sim_frame,_sim_pointer,_sim_fb,_sim_scrub_config,_sim_heap_used,_sim_heap_freebytes \
+	    -sEXPORTED_FUNCTIONS=_main,_sim_boot,_sim_frame,_sim_pointer,_sim_fb,_sim_flush,_sim_scrub_config,_sim_heap_used,_sim_heap_freebytes \
 	    -sEXPORTED_RUNTIME_METHODS=HEAPU8,FS \
 	    -sALLOW_MEMORY_GROWTH=1 -sASSERTIONS=0 \
 	    -sMODULARIZE=1 -sEXPORT_NAME=PalmSim
