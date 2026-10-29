@@ -16,6 +16,34 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-29 — Critters keeps its progress in the web emulator
+
+From the owner: in the web emulator, Critters' progress didn't save. The game
+writes `save.dat` (and `pause.dat` for a battle) only when it is left: Home,
+another app, or the lock, through `mon_ui_close()`, or the menu's Save game.
+Closing or reloading the browser tab leaves nothing, so the page's IndexedDB
+copy of the card (every 4 s, and when the tab hides) never had a save in it.
+The device has no such gap: it can't stop without the lock or a power cut.
+
+- `mon_ui_checkpoint()` (`ui_monster.c`) is the save half of
+  `mon_ui_close()`, and the close now calls it. The web page calls it
+  through a new export, `sim_flush()`, before each copy to IndexedDB. Like the
+  close, a battle in progress goes to `pause.dat` and comes back on the next
+  open. JS runs between frames, so a save never sees the game halfway
+  through a step.
+- A copy asked for while one is being written used to be dropped. It now runs
+  when that one ends, so the tab hiding mid-write still saves.
+- The 663,532 B `game.bin` was written to the card on every visit, so the
+  first copy after each load sent it to IndexedDB again. It's written now
+  only when the site's copy differs from the card's.
+
+Measured: in headless Chromium against `make -C sim wasm` (emscripten
+3.1.61, as in CI), start a game, walk, wait 5 s, reload the tab and open
+Critters again. Before: "Choose how you look", a new game. After: the player
+on the same tile. A closed and reopened browser profile resumes too. The
+firmware image (IDF v5.5 container, LVGL v9.5.0 vendored in a scratch copy,
+`main` built alongside): 1,804,432 → 1,804,448 B (+16), no new static data.
+
 ### 2026-10-16 — Critters opens after a sync
 
 From the owner: after a sync, Critters said there wasn't enough memory free,

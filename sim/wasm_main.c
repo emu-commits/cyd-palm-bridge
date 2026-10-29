@@ -7,7 +7,8 @@
  *
  * Persistence: /sdcard is an IDBFS mount (IndexedDB -- per-browser, per-user,
  * origin-isolated; other websites cannot read it). JS periodically calls
- * _sim_scrub_config() and then FS.syncfs(false): the scrub blanks the password
+ * _sim_flush(), _sim_scrub_config() and then FS.syncfs(false). The flush
+ * writes an open game to the card; the scrub blanks the password
  * fields in /sdcard/config.ini before every persist, so credentials typed into
  * Preferences work for the session (in RAM) but are NEVER written to browser
  * storage. Records/prefs persist; secrets don't. (Sync is stubbed in the sim,
@@ -26,6 +27,7 @@
 #include "appcfg.h"
 #include "clock.h"
 #include "config.h"
+#include "ui_monster.h"
 
 EMSCRIPTEN_KEEPALIVE void sim_boot(void){
     mkdir("/sdcard", 0777);            /* no-op if the IDBFS mount restored it */
@@ -68,6 +70,13 @@ EMSCRIPTEN_KEEPALIVE void sim_scrub_config(void){
     config_wipe(&sec, sizeof sec);
     if(!dirty) return;                                       /* already clean */
     config_save("/sdcard/config.ini", &c, NULL);             /* no passwords */
+}
+
+/* Put what's only in RAM onto /sdcard. JS calls this before every
+ * FS.syncfs(false): a game is saved on leaving it, and closing the tab never
+ * leaves it, so without this Critters' progress never reached IndexedDB. */
+EMSCRIPTEN_KEEPALIVE void sim_flush(void){
+    mon_ui_checkpoint();
 }
 
 int main(void){

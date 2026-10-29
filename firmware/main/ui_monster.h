@@ -16,6 +16,10 @@ void mon_ui_show(lv_obj_t *parent);
 /* Save and free everything. A battle in progress is kept in pause.dat and
  * comes back on the next open (the lock pauses the game: §13 Q3). */
 void mon_ui_close(void);
+/* Write the game to the card as mon_ui_close() would, and keep playing. The
+ * web emulator calls it before each copy of the card to IndexedDB, because a
+ * closed tab never reaches mon_ui_close(). */
+void mon_ui_checkpoint(void);
 /* 1 while the game is open */
 int  mon_ui_open(void);
 /* 1 while the game is open on USB power: the screen stays on (§13 Q3) */
