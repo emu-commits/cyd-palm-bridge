@@ -1509,7 +1509,8 @@ def dump(g):
             team = " ".join(f"{m}:{lv}" for m, lv in p[12]) or "-"
             out.append(f"  person {p[0]},{p[1]} facing {p[2]} sheet {p[3]} kind {p[4]} sight {p[5]} "
                        f"flags {p[6]}/{p[7]}/{p[8]} team {team}: {p[9]} | {p[10]} | {p[11]}")
-        out.append(f"  cells crc {crc32(struct.pack(f'<{len(a['cells'])}H', *a['cells'])):08x} "
+        cells = struct.pack(f"<{len(a['cells'])}H", *a["cells"])
+        out.append(f"  cells crc {crc32(cells):08x} "
                    f"move crc {crc32(bytes(a['move'])):08x} overlays {len(a['overlays'])}")
     out.append("credits " + f"{crc32(g.sec[b'CRED']):08x}")
     return "\n".join(out) + "\n"
