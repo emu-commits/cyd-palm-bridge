@@ -80,6 +80,11 @@ open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
   "Auto-play", a tap on the game takes over, and the lock pauses it (waking
   carries on). How long it runs on battery, and whether it ever stands still
   or walks in circles.
+- [s] Five first critters (2026-10-30, the owner): Vamporm and Nut join
+  Agnite, Anoleaf and Cardiling (format 1.2, `META` `0x13`). The
+  `critters_pick_nut` and `critters_pick_vamporm` shots looked at.
+- [d] Choosing Vamporm or Nut on the bench: `<` from Agnite wraps round to
+  Nut, then Vamporm; the chosen one is yours in Larkhollow.
 - [x] The web flasher's optional install: a `game` partition, a second
   manifest, a checkbox on the install page, the copy to the card at boot.
 - [d] Install from the web page with "Also install Critters" ticked: the

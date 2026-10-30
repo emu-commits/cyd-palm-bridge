@@ -93,7 +93,8 @@ What was chosen:
   (spotting the player from a few cells off), and flags that open the way
   (a foreman who stands aside once a keeper is beaten) or bring someone out.
 - **A new game** asks how the player looks (six colourings of our own
-  drawing), then which of three first critters to take.
+  drawing), then which of five first critters to take (three until
+  2026-10-30, when the owner added Vamporm and Nut).
 - **Saving:** one save slot on the card, written on request and when leaving
   the game.
 - **Auto-play:** an item in the game's menu (§8).
@@ -287,7 +288,8 @@ toggles "Show Completed"), not a checkbox; and the title bar reads
   blocks the way, or a fight that can't be won, fails the gate. Measured
   (2026-10-16): with each of the three first critters from seed 1, it beats
   all nine keepers; over 60 runs (20 seeds each) every one finished, in at
-  most 13,199 actions and 15 losses, so the gate's limit is 40,000.
+  most 13,199 actions and 15 losses, so the gate's limit is 40,000. Since
+  2026-10-30 the gate plays all five first critters.
 - **The screen during Auto-play:** see §13 Q3.
 
 ## 9) Memory, flash and time budgets

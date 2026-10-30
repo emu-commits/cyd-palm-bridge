@@ -1,12 +1,14 @@
 # Game format — `game.bin`, version 1
 
-> **Status: version 1.1 (G3, 2026-10-16).** `tools/mkgame.py` writes and
+> **Status: version 1.2 (2026-10-30).** `tools/mkgame.py` writes and
 > reads it, and `firmware/main/monster.c` reads it in C (`monster_play.c`
 > plays its rules); the two readers' dumps are compared byte for byte (`make
 > -C sim monster`). G1 added `META` key `0x22`. **G3 made it 1.1**: people in
 > each area's head (§3.11), the player's looks (`META` `0x11`) and the
 > starters (`0x12`). A 1.0 file still reads; a 1.0 reader refuses a 1.1 file
-> with people, since its head's lists no longer fill it exactly.
+> with people, since its head's lists no longer fill it exactly. **1.2** added
+> `META` `0x13`, starters after the first three; a 1.1 reader skips it and
+> offers the three in `0x12`.
 
 `game.bin` holds everything the monster game reads from the card: the
 rules' numbers, the creatures, their moves and battle sprites, the areas
@@ -46,7 +48,7 @@ Four files in `tools/` decide what's built:
 |---|---|
 | `mkgame.py` | The pinned Tuxemon commit (`TUXEMON_COMMIT`, the full SHA). The build refuses a checkout at any other commit, or with local changes under `mods/`. |
 | `game_allow.tsv` | The licence allow-list (`GAME_PLAN.md` §10). **Only what it lists is built**: tilesets, creatures and character sheets, each with licence, authors, source and a status (`credited` from Tuxemon's `ATTRIBUTIONS.md`, `unverified`, `confirmed` by hand, or `ours`: a character sheet or tileset drawn for this project, CC0, at `tools/game_art/<slug>.png`; the rooms' `interior` tileset is one, drawn by `tools/gen_interior_sheet.py`). `--strict` refuses any `unverified` line. A map cell from an unlisted tileset loses that layer's tile, and the build says how many. |
-| `game_region.json` | The region: which maps (Tuxemon's, or a layout of our own in `tools/game_maps/`), their names, where the player starts, the player's looks, the three starters, the encounter tables, and per area the warps, encounter zones, signs and **people** Tuxemon's own events don't give (below). The tables are ours, not Tuxemon's, because Tuxemon's name creatures the allow-list doesn't have. |
+| `game_region.json` | The region: which maps (Tuxemon's, or a layout of our own in `tools/game_maps/`), their names, where the player starts, the player's looks, the three to eight starters, the encounter tables, and per area the warps, encounter zones, signs and **people** Tuxemon's own events don't give (below). The tables are ours, not Tuxemon's, because Tuxemon's name creatures the allow-list doesn't have. |
 | `game_maps/<slug>.json` | A layout of our own (the towns, §13 Q6 in `GAME_PLAN.md`): a grid of legend characters (each a tile or two from an allow-listed tileset, solid or not, a ledge, the sides it can be entered from), a sand path's edges filled in by `autotile`, and stamps (a rectangle of a tileset's tiles, a house or a tree, with a solid mask and rows drawn over the player). `OwnArea` in `mkgame.py` documents every field. |
 | `game_ids.tsv` | Stable numbers for creatures, moves, statuses and areas, as `ids.tsv` is for courses. A save refers to these, so a rebuild that adds content keeps old saves working. `mkgame.py` appends new numbers and never renumbers. **Commit it.** |
 
@@ -281,6 +283,7 @@ Entries one after another: u16 key, u16 length *n*, *n* bytes of value.
 | `0x10` | Start: u16 area (its position in `AREA`), u8 x, u8 y, u8 facing (0 N, 1 E, 2 S, 3 W), 3 B zero |
 | `0x11` | The player's looks: u8 *n* (1-8), 3 B zero. Every area's first *n* character sheets are the looks a new game offers; without the key, *n* is 1. Added in 1.1. |
 | `0x12` | The starters: u16 × 3 (positions in `MONS`), 2 B zero: the three first creatures a new game offers. Without it, the game picks three (the first that begin an evolution line, of different types). Added in 1.1. |
+| `0x13` | More starters: u8 *k* (1-5), 1 B zero, u16 × *k* (positions in `MONS`), zero to a multiple of 4 B: offered after `0x12`'s three, which it needs. Added in 1.2. |
 | `0x20` | Rules, u32 × 8: COEFF_DAMAGE (7), stat coefficient (7), multiplier minimum and maximum in hundredths (25, 400), experience exponent (3), maximum level (100), moves known (4), party size (6) |
 | `0x21` | Catching, u32 × 7: shakes (4), shake constant (524325), shake denominator (8), shake divisor (65536), HP multiplier (3), current-HP multiplier (2), HP divisor (3) |
 | `0x22` | Growth, u32 × 4: the IVs' maximum (15), then the experience groups' multipliers in hundredths: default (100), fast (80), slow (125). Added in G1. |

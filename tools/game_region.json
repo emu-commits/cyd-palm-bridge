@@ -3,7 +3,7 @@
   "note": "The first region (G3, 2026-10-16): Larkhollow, Route 1, Brideswood, Cotton Tunnel and Kestrel. Route 1, Brideswood and the tunnel are Tuxemon's Spyder maps from clean tilesets; the two towns are laid out for this game (tools/game_maps/) from the clean sheets. Route 1's east half doesn't reach Brideswood on foot in Tuxemon's map, so the way on is its open north edge. The story and every line of dialogue are ours.",
   "player": ["player", "player_green", "player_orange", "player_olive", "player_violet", "player_rose"],
   "start": {"area": "larkhollow", "x": 6, "y": 10, "facing": "down"},
-  "starters": ["agnite", "anoleaf", "cardiling"],
+  "starters": ["agnite", "anoleaf", "cardiling", "vamporm", "nut"],
   "areas": [
     {
       "map": "larkhollow", "name": "Larkhollow", "layout": "game_maps/larkhollow.json",

@@ -32,6 +32,7 @@
 #define MG_MAX_TYPES    16
 #define MG_MAX_SHAPES   32
 #define MG_MAX_STATUSES 8
+#define MG_MAX_STARTERS 8                   /* META 0x12's three and 0x13's up to five */
 #define MG_HEAD_MAX     16384
 #define MG_CHUNK        16                  /* cells per chunk side */
 #define MG_CHUNK_BYTES  (MG_CHUNK * MG_CHUNK * 3)
@@ -143,8 +144,8 @@ typedef struct {
     uint16_t start_area;
     uint8_t  start_x, start_y, start_facing;
     uint8_t  looks;         /* the player's looks: every area's first character sheets (1 in a 1.0 file) */
-    uint8_t  n_starters;    /* 3 if the file names the first creatures to choose from, else 0 */
-    uint16_t starters[3];
+    uint8_t  n_starters;    /* 3-8 if the file names the first creatures to choose from, else 0 */
+    uint16_t starters[MG_MAX_STARTERS];
     uint32_t rules[8];      /* COEFF_DAMAGE, stat coefficient, multiplier min, max (1/100),
                                experience exponent, maximum level, moves known, party size */
     uint32_t capture[7];    /* shakes, constant, denominator, divisor, HP mult, current-HP mult, HP divisor */

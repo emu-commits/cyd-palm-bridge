@@ -142,6 +142,9 @@ def main():
         refused(lambda r: r["areas"][0]["people"][1].update(sheet="fixture_rover"), "player's looks",
                 "a person wearing one of the player's looks")
         refused(lambda r: r["areas"][0]["people"][1].update(at=[5, 14]), "shares a cell", "two people in one cell")
+        refused(lambda r: r.update(starters=r["starters"][:2]), "starters", "only two starters")
+        refused(lambda r: r["starters"].append("emberkit"), "starters", "a starter offered twice")
+        refused(lambda r: r["starters"].append("ghostling"), "starters", "a starter not on the allow-list")
         refused(lambda r: r["areas"][0]["warps"][0].update(to="fixture_elsewhere"), "not in the region",
                 "a warp to an area outside the region")
         refused(lambda r: r["areas"][0]["people"][0].update(team=[["ghostling", 3]]), "isn't in the allow-list",

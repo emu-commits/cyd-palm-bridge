@@ -1840,8 +1840,9 @@ t 400
 # (150,280) below. UI_DEVTOOLS seeds a new game with 1, so the same creatures
 # appear on the same steps every run, and `G area x y facing` puts the player
 # somewhere without the walk. The tour: the choice of look and of the first
-# critter; Larkhollow, turning to Mum and resting there (which is also where a
-# loss comes back to); walking; Route 1's grass and a wild Vamporm, a turn,
+# critter (five: left from the first wraps round to Nut, then Vamporm);
+# Larkhollow, turning to Mum and resting there (which is also where a loss
+# comes back to); walking; Route 1's grass and a wild Vamporm, a turn,
 # the LOCK in mid-battle (pause.dat) and the unlock to the same battle, then
 # Run; Keeper Ada spotting the player, her two critters, no catching hers; the
 # loss, back at Mum's; Foreman Dale barring the tunnel; Kestrel's nurse; then
@@ -1869,6 +1870,16 @@ c 100 260
 t 200
 s critters_pick_next
 c 28 260
+t 200
+c 28 260
+t 200
+s critters_pick_nut
+c 28 260
+t 200
+s critters_pick_vamporm
+c 100 260
+t 200
+c 100 260
 t 200
 c 204 246
 t 300

@@ -32,7 +32,7 @@ static const char TAGS[] = "METATYPESHAPSTATMOVEMONSLRNSENCTAREAADATSPRTTEXTCRED
 /* checked on open: everything small (section 6) */
 #define CRC_ON_OPEN(i) ((i) != MG_ADAT && (i) != MG_SPRT && (i) != MG_CRED)
 
-enum { K_TITLE = 0x01, K_SOURCE, K_BUILD, K_START = 0x10, K_LOOKS, K_STARTERS, K_RULES = 0x20, K_CAPTURE, K_GROWTH };
+enum { K_TITLE = 0x01, K_SOURCE, K_BUILD, K_START = 0x10, K_LOOKS, K_STARTERS, K_MORE_STARTERS, K_RULES = 0x20, K_CAPTURE, K_GROWTH };
 
 static uint16_t le16(const uint8_t *p){ return (uint16_t)(p[0] | p[1] << 8); }
 static uint32_t le32(const uint8_t *p){
@@ -177,7 +177,7 @@ int mg_text(MonGame *g, MgStr s, char *buf, uint32_t cap){
 /* ---- META ---------------------------------------------------------------- */
 
 static int parse_meta(MonGame *g, const uint8_t *m, uint32_t len){
-    uint32_t seen = 0, p = 0;
+    uint32_t seen = 0, p = 0, more = 0;
     while(p < len){
         if(len - p < 4) return bad(g, "META ends mid-entry");
         uint16_t k = le16(m + p), n = le16(m + p + 2);
@@ -222,6 +222,17 @@ static int parse_meta(MonGame *g, const uint8_t *m, uint32_t len){
             }
             g->n_starters = 3;
             break;
+        case K_MORE_STARTERS:   /* minor version 2: the starters after the first three */
+            if(n < 4) return bad(g, "the starters are out of range");
+            more = v[0];
+            if(!more || more > MG_MAX_STARTERS - 3 || v[1] || n != ((2 + 2 * more + 3) & ~3u))
+                return bad(g, "the starters are out of range");
+            for(uint32_t i = 0; i < more; i++){
+                g->starters[3 + i] = le16(v + 2 + 2 * i);
+                if(g->starters[3 + i] >= g->n_mons) return bad(g, "the starters are out of range");
+            }
+            for(uint32_t i = 2 + 2 * more; i < n; i++) if(v[i]) return bad(g, "the starters have a non-zero pad");
+            break;
         case K_RULES:
             if(n != 32) return bad(g, "the rules are %u bytes", n);
             for(int i = 0; i < 8; i++) g->rules[i] = le32(v + 4 * i);
@@ -239,6 +250,10 @@ static int parse_meta(MonGame *g, const uint8_t *m, uint32_t len){
         }
     }
     if(!(seen & (1u << K_START))) return bad(g, "META has no start");
+    if(more){
+        if(!g->n_starters) return bad(g, "more starters, but not the first three");
+        g->n_starters = (uint8_t)(3 + more);
+    }
     if(!(seen & (1u << K_LOOKS))) g->looks = 1;          /* a 1.0 file: one player sheet */
     if(!(seen & (1u << 24)) || !(seen & (1u << 25)) || !(seen & (1u << 26))) return bad(g, "META has no rules");
     const uint32_t *R = g->rules, *C = g->capture, *G = g->growth;

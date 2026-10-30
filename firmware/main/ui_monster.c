@@ -95,7 +95,7 @@ typedef struct {
     uint8_t  battle_after;          /* a wild creature met on this step */
 
     /* the look, then the starter */
-    uint16_t pick[3];
+    uint16_t pick[MG_MAX_STARTERS];
     uint8_t  npick, pick_note;      /* a note is showing before the choice */
     uint8_t  picking_look, look;    /* choosing how the player looks first (a file with more than one) */
 
@@ -872,9 +872,9 @@ static void card_end(Mon *m){
     else scene_map(m);
 }
 
-/* the starters: the three the file names (META 0x12); or, in a file without
- * them, the first three creatures that begin an evolution line, each of a
- * different first type, then any creature at its first stage */
+/* the starters: the three to eight the file names (META 0x12 and 0x13); or,
+ * in a file without them, the first three creatures that begin an evolution
+ * line, each of a different first type, then any creature at its first stage */
 static void pick_candidates(Mon *m){
     m->npick = 0;
     if(m->g.n_starters){                    /* the file names them */

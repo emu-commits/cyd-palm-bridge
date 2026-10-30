@@ -68,7 +68,11 @@ static int dump(const char *path){
     }
     printf("start area %u at %u,%u facing %u\n", g.start_area, g.start_x, g.start_y, g.start_facing);
     printf("looks %u\n", g.looks);
-    if(g.n_starters) printf("starters %u %u %u\n", g.starters[0], g.starters[1], g.starters[2]);
+    if(g.n_starters){
+        printf("starters");
+        for(int i = 0; i < g.n_starters; i++) printf(" %u", g.starters[i]);
+        printf("\n");
+    }
     printf("rules");   for(int i = 0; i < 8; i++) printf(" %u", (unsigned)g.rules[i]);   printf("\n");
     printf("capture"); for(int i = 0; i < 7; i++) printf(" %u", (unsigned)g.capture[i]); printf("\n");
     printf("growth");  for(int i = 0; i < 4; i++) printf(" %u", (unsigned)g.growth[i]);  printf("\n");
@@ -889,7 +893,7 @@ static int bot_plays(MonGame *g, int pick, uint32_t seed){
 static void autoplay(void){
     MonGame g;
     if(mg_open(&g, REGION)){ CHECK(0, "%s: %s", REGION, g.err); return; }
-    for(int pick = 0; pick < 3; pick++)
+    for(int pick = 0; pick < (g.n_starters ? g.n_starters : 3); pick++)
         CHECK(bot_plays(&g, pick, 1), "bot: didn't finish the region with first critter %d", pick);
     mg_close(&g);
 }

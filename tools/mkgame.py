@@ -38,7 +38,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mkcourse import fold, latin_fallback  # noqa: E402  (one set of text rules)
 
-FORMAT_MAJOR, FORMAT_MINOR = 1, 1      # 1.1 added people to the areas
+FORMAT_MAJOR, FORMAT_MINOR = 1, 2      # 1.1 added people to the areas, 1.2 more starters
 MAGIC = b"CYDG"
 
 TUXEMON_URL = "https://github.com/Tuxemon/Tuxemon.git"
@@ -69,7 +69,8 @@ CRC_ON_OPEN = {b"META", b"TYPE", b"SHAP", b"STAT", b"MOVE", b"MONS", b"LRNS",
 
 # META keys (GAME_FORMAT.md 3.2)
 K_TITLE, K_SOURCE, K_BUILD = 0x01, 0x02, 0x03
-K_START, K_LOOKS, K_STARTERS = 0x10, 0x11, 0x12
+K_START, K_LOOKS, K_STARTERS, K_MORE_STARTERS = 0x10, 0x11, 0x12, 0x13
+MAX_STARTERS = 8
 K_RULES, K_CAPTURE, K_GROWTH = 0x20, 0x21, 0x22
 
 RANGES = ["melee", "touch", "ranged", "reach", "reliable", "special"]
@@ -1239,9 +1240,13 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
         META += meta_entry(K_LOOKS, struct.pack("<B3x", len(looks)))
     if "starters" in region:
         sts = region["starters"]
-        if len(sts) != 3 or any(c not in mon_ix for c in sts):
-            fail("game_region.json: starters: three creatures from the allow-list")
-        META += meta_entry(K_STARTERS, struct.pack("<3H2x", *(mon_ix[c] for c in sts)))
+        if not 3 <= len(sts) <= MAX_STARTERS or len(set(sts)) != len(sts) or any(c not in mon_ix for c in sts):
+            fail(f"game_region.json: starters: three to {MAX_STARTERS} different creatures from the allow-list")
+        META += meta_entry(K_STARTERS, struct.pack("<3H2x", *(mon_ix[c] for c in sts[:3])))
+        more = sts[3:]
+        if more:            # 1.2: a 1.1 reader skips the key and offers the first three
+            META += meta_entry(K_MORE_STARTERS, pad4(struct.pack(f"<BB{len(more)}H", len(more), 0,
+                                                                 *(mon_ix[c] for c in more))))
     mc, cc, cb = rules.monster_cfg, rules.capture, rules.combat
     lo, hi = cb["multiplier_range"]
     META += meta_entry(K_RULES, struct.pack("<8I", 7, int(mc["coeff_stats"]), round(lo * 100), round(hi * 100),
@@ -1465,7 +1470,10 @@ def dump(g):
     out.append(f"start area {a} at {x},{y} facing {f}")
     out.append(f"looks {m[K_LOOKS][0] if K_LOOKS in m else 1}")
     if K_STARTERS in m:
-        out.append("starters " + " ".join(map(str, struct.unpack_from("<3H", m[K_STARTERS]))))
+        sts = list(struct.unpack_from("<3H", m[K_STARTERS]))
+        if K_MORE_STARTERS in m:
+            sts += struct.unpack_from(f"<{m[K_MORE_STARTERS][0]}H", m[K_MORE_STARTERS], 2)
+        out.append("starters " + " ".join(map(str, sts)))
     out.append("rules " + " ".join(map(str, struct.unpack("<8I", m[K_RULES]))))
     out.append("capture " + " ".join(map(str, struct.unpack("<7I", m[K_CAPTURE]))))
     out.append("growth " + " ".join(map(str, struct.unpack("<4I", m[K_GROWTH]))))

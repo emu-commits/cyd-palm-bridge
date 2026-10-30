@@ -16,6 +16,46 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-30 — Critters offers five first critters
+
+From the owner: add Vamporm and Nut to the starters. `META` `0x12` holds
+exactly three, and an older reader refuses any other length, so the two
+extra critters go in a new key instead. That's format **1.2**
+(`GAME_FORMAT.md` §3.2):
+
+- `0x13` holds up to five more creatures, as a count, then the positions
+  padded to 4 B. It is offered after `0x12`'s three, and needs them.
+- A 1.1 reader skips the key and still offers Agnite, Anoleaf and Cardiling.
+- `game_region.json` lists Agnite, Anoleaf, Cardiling, Vamporm and Nut. The
+  pick screen's `<` `>` wraps round, so Nut is one press left of Agnite.
+- The fixture takes a fourth starter (Rustmole) so `0x13` is round-tripped
+  in `make -C sim monster`.
+- `mkgame_test.py` refuses two starters, a repeated one, and one that isn't
+  on the allow-list.
+- The bot gate plays every starter the file offers, not the first three.
+
+Measured:
+
+- **`game.bin` 663,532 → 663,544 B** (+12: the key). Rebuilt from the pinned
+  Tuxemon with `--strict`; before the change, the same build gave the
+  committed file to the byte.
+- `MonGame` grows by 10 B (it's on the heap while the game is open).
+- The bot from seed 1 beats every keeper with each of the five:
+
+  | Starter | Battles | Lost | Main critter at the end |
+  |---|---|---|---|
+  | Agnite | 244 | 7 | 15 |
+  | Anoleaf | 291 | 11 | 16 |
+  | Cardiling | 236 | 8 | 15 |
+  | Vamporm | 65 | 0 | Fluttaflap 13 |
+  | Nut | 294 | 7 | Arthrobolt 18 |
+
+  Vamporm's and Nut's lines evolve at 9 and 12, so they win Act 1 easily.
+  None of the other three evolves before the end.
+- The smoke tour shows both new starters (`critters_pick_nut`,
+  `critters_pick_vamporm`), then goes back to Agnite, so the rest of the tour
+  is unchanged.
+
 ### 2026-10-29 — Critters keeps its progress in the web emulator
 
 From the owner: in the web emulator, Critters' progress didn't save. The game
