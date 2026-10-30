@@ -15,7 +15,9 @@
  *
  * THE CONTROLS (240 x 120) are one object that draws its own D-pad and A and
  * B buttons. A press acts at once; holding a direction keeps walking. The
- * panel registers one touch at a time, so there are no combinations.
+ * panel registers one touch at a time, so there are no combinations. While
+ * Auto-play is on, the same object shows the party instead: each critter's
+ * name, level and HP, as the battle shows them.
  *
  * MEMORY: one block, allocated when the game opens and freed when it closes
  * (about 60 KB, plus the largest area head in the file). If it can't be had,
@@ -137,6 +139,10 @@ typedef struct {
     MbBot   *bot;
     uint8_t  autoplay, bot_wait;
     int8_t   bot_act, bot_arg;      /* bot_act -1: none chosen yet this turn */
+    /* its party panel, as last drawn (names read from the card when they change) */
+    uint8_t  pp_n, pp_active, pp_lv[MP_PARTY];
+    uint16_t pp_mon[MP_PARTY], pp_hp[MP_PARTY], pp_max[MP_PARTY];
+    char     pp_name[MP_PARTY][NAME_LEN];
 
     uint32_t head_cap;
     uint8_t  head[];                /* the largest area head in the file */
@@ -1211,7 +1217,25 @@ static void auto_set(Mon *m, int on){
     m->autoplay = (uint8_t)(m->bot != NULL);
     m->bot_wait = 0;
     m->bot_act = -1;
+    m->pp_n = 0xFF;                 /* the panel or the pad: draw it again */
+    if(m->pad) lv_obj_invalidate(m->pad);
     ui_mon_auto_changed(m->autoplay);
+}
+
+/* the party panel's values now: in a battle, the HP its script has shown so
+ * far (the rules are ahead of it); else the party's. Redrawn when they change. */
+static void party_watch(Mon *m){
+    int bt = m->scene == SC_BATTLE, changed = m->pp_n != m->w.n_party || m->pp_active != (bt ? m->sh_active : 0xFF);
+    m->pp_n = m->w.n_party;
+    m->pp_active = bt ? m->sh_active : 0xFF;
+    for(int i = 0; i < m->w.n_party; i++){
+        const MpCreature *c = &m->w.party[i];
+        uint16_t mon = bt ? m->sh_mon[i] : c->mon, hp = bt ? m->sh_hp[i] : c->hp;
+        if(mon != m->pp_mon[i] || !m->pp_name[i][0]){ mon_name(m, mon, m->pp_name[i]); changed = 1; }
+        if(mon != m->pp_mon[i] || hp != m->pp_hp[i] || c->level != m->pp_lv[i] || c->stat[MG_HP] != m->pp_max[i]) changed = 1;
+        m->pp_mon[i] = mon; m->pp_hp[i] = hp; m->pp_lv[i] = c->level; m->pp_max[i] = c->stat[MG_HP];
+    }
+    if(changed) lv_obj_invalidate(m->pad);
 }
 
 /* a menu: the cursor a line nearer what the bot chose, or, there, choose it */
@@ -1288,7 +1312,7 @@ static void tick_cb(lv_timer_t *t){
         /* a step just ended: the next one starts this tick, so walking on
          * (held, or Auto-play) never stands still between steps */
     }
-    if(m->autoplay){ bot_tick(m); return; }
+    if(m->autoplay){ bot_tick(m); if(m->autoplay) party_watch(m); return; }
     if(m->turn_wait) m->turn_wait--;
     if(m->scene != SC_MAP || m->ui != UI_NONE){ m->pending = -1; return; }
     int d = m->pending;
@@ -1298,6 +1322,58 @@ static void tick_cb(lv_timer_t *t){
 }
 
 /* ---- the controls ---- */
+
+#define PP_TOP  20                  /* the party panel: a title, then a row a critter */
+#define PP_ROW  16
+
+static void pp_text(lv_layer_t *layer, const lv_font_t *f, uint32_t col, lv_text_align_t al,
+                    int x1, int y1, int x2, const char *s){
+    lv_draw_label_dsc_t l;
+    lv_draw_label_dsc_init(&l);
+    l.color = lv_color_hex(col);
+    l.font = f;
+    l.text = s;
+    l.align = al;
+    lv_area_t k = { x1, y1, x2, y1 + f->line_height - 1 };
+    lv_draw_label(layer, &l, &k);
+}
+
+static void party_draw(Mon *m, lv_layer_t *layer, int ox, int oy){
+    pp_text(layer, &lv_font_palm_bold, 0x000000, LV_TEXT_ALIGN_LEFT, ox + 6, oy + 3, ox + VW - 7, "Auto-play");
+    pp_text(layer, &lv_font_palm, 0x404040, LV_TEXT_ALIGN_RIGHT, ox + 6, oy + 3, ox + VW - 7, "Touch to take over");
+    lv_draw_rect_dsc_t r;
+    lv_area_t k;
+    for(int i = 0; i < m->pp_n && i < MP_PARTY; i++){
+        int y = oy + PP_TOP + i * PP_ROW, out = !m->pp_hp[i];
+        uint32_t col = out ? 0x808080 : 0x000000;
+        char t[16];
+        if(i == m->pp_active){      /* in battle now */
+            lv_draw_rect_dsc_init(&r);
+            r.bg_color = lv_color_hex(0xF4F1E4);
+            r.radius = 3;
+            k.x1 = ox + 2; k.x2 = ox + VW - 3; k.y1 = y - 1; k.y2 = y + PP_ROW - 2;
+            lv_draw_rect(layer, &r, &k);
+        }
+        pp_text(layer, i == m->pp_active ? &lv_font_palm_bold : &lv_font_palm, col, LV_TEXT_ALIGN_LEFT,
+                ox + 6, y, ox + 99, m->pp_name[i]);
+        snprintf(t, sizeof t, "Lv %u", m->pp_lv[i]);
+        pp_text(layer, &lv_font_palm, col, LV_TEXT_ALIGN_LEFT, ox + 102, y, ox + 137, t);
+        /* the bar: dark, then green, amber or red as it empties */
+        uint32_t max = m->pp_max[i] ? m->pp_max[i] : 1, hp = m->pp_hp[i] < max ? m->pp_hp[i] : max;
+        int bw = 40, fw = (int)((hp * (uint32_t)bw + max - 1) / max);
+        lv_draw_rect_dsc_init(&r);
+        r.bg_color = lv_color_hex(0x404040);
+        k.x1 = ox + 140; k.x2 = k.x1 + bw + 1; k.y1 = y + 4; k.y2 = k.y1 + 5;
+        lv_draw_rect(layer, &r, &k);
+        if(fw){
+            r.bg_color = lv_color_hex(hp * 2 > max ? 0x2E8B3A : hp * 5 > max ? 0xD08A00 : 0xC0282D);
+            k.x1++; k.x2 = k.x1 + fw - 1; k.y1++; k.y2--;
+            lv_draw_rect(layer, &r, &k);
+        }
+        snprintf(t, sizeof t, "%u/%u", m->pp_hp[i], m->pp_max[i]);
+        pp_text(layer, &lv_font_palm, col, LV_TEXT_ALIGN_RIGHT, ox + 184, y, ox + VW - 7, t);
+    }
+}
 
 #define DPAD_X 64
 #define DPAD_Y 60
@@ -1359,6 +1435,7 @@ static void pad_draw_cb(lv_event_t *e){
     lv_area_t a;
     lv_obj_get_coords(pad, &a);
     int ox = a.x1, oy = a.y1;
+    if(m && m->autoplay){ party_draw(m, layer, ox, oy); return; }
     int pressed = m ? m->pressed : BT_NONE;
 
     lv_draw_rect_dsc_t r;

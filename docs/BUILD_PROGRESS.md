@@ -16,6 +16,36 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-30 — Auto-play shows the party instead of the controls
+
+From the owner: while Auto-play is on, show the party in the controls' place.
+The pad object (240 × 120) draws a panel instead of the D-pad and A/B:
+
+- a title line, "Auto-play" and "Touch to take over";
+- a row for each critter: its name, level, an HP bar (green, amber below
+  half, red below a fifth) and HP as current/max;
+- in a battle, the critter fighting is in bold on a light band, and a fainted
+  one is grey. The HP is what the battle has shown so far, not the rules'
+  newer numbers, so the panel agrees with the battle card.
+
+The names are read from the card, so the draw never reads them.
+`party_watch()` runs on Auto-play's tick: it keeps the values last drawn
+(188 B in the game's heap block), reads a name only when a critter changes,
+and redraws the pad only when something shown has changed. A touch on the
+panel still takes over, and the pad comes back.
+
+Measured: the firmware image (IDF v5.5 container, LVGL v9.5.0 vendored in a
+scratch copy, the branch's previous head built alongside to the byte of the
+last entry) 1,804,448 → 1,805,744 B (+1,296, this and the five starters
+together), static DRAM unchanged at 147,468 B. The shots looked at:
+
+- `critters_auto_walk`: one critter;
+- a scratch tour left on Auto-play for 20 simulated minutes: five critters
+  in a battle, with the band, a grey fainted one, and the amber and red
+  bars.
+
+`make -C sim wasm` wasn't run: emsdk isn't in this container.
+
 ### 2026-10-30 — Critters offers five first critters
 
 From the owner: add Vamporm and Nut to the starters. `META` `0x12` holds

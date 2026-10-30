@@ -83,6 +83,11 @@ open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
 - [s] Five first critters (2026-10-30, the owner): Vamporm and Nut join
   Agnite, Anoleaf and Cardiling (format 1.2, `META` `0x13`). The
   `critters_pick_nut` and `critters_pick_vamporm` shots looked at.
+- [s] Auto-play's party panel (2026-10-30, the owner): in the controls'
+  place, each critter's name, level, HP bar and HP; the one fighting
+  marked. The `critters_auto_*` shots looked at, and a long Auto-play run's.
+- [d] The party panel on the bench: readable at arm's length, it keeps up
+  with the battle, and a touch on it takes over.
 - [d] Choosing Vamporm or Nut on the bench: `<` from Agnite wraps round to
   Nut, then Vamporm; the chosen one is yours in Larkhollow.
 - [x] The web flasher's optional install: a `game` partition, a second
