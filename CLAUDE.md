@@ -35,7 +35,9 @@ before touching anything.
   web emulator puts it on its card. **Also done 2026-10-16:** rooms behind
   every open door (our own CC0 tileset, `tools/gen_interior_sheet.py`) and
   **G4, Auto-play** (`monster_bot.c`; `make -C sim monster` checks it beats
-  every keeper). Next: the owner's bench items (G5). The Tuxemon checkout
+  every keeper). Next: the owner's bench items (G5). **Proposed
+  2026-10-30, not approved yet:** `docs/GAME_LENGTH_PLAN.md`, two more acts
+  on the same maps so the main critter ends past level 36. The Tuxemon checkout
   never enters the repo.
 - `docs/APP_PLATFORM_PLAN.md`: native C apps loaded from the SD card.
   **On hold since 2026-09-29**; don't build any of it without the user's yes.
