@@ -2133,6 +2133,15 @@ t 300
 s critters_dale
 c 204 246
 t 300
+G 8 18 2 3
+t 300
+s critters_route2
+G 9 7 21 0
+t 300
+s critters_keep
+G 10 12 37 0
+t 300
+s critters_cave
 G 4 6 16 0
 t 300
 s critters_kestrel

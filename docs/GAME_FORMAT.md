@@ -93,7 +93,9 @@ it byte for byte; `--unpinned` is for that and nothing else.
 events aren't taken either: the people are `game_region.json`'s, each with
 our own words, and their sheets are allow-listed one by one. An area can
 drop Tuxemon's events altogether (`"tuxemon_events": false`) and give its
-own. The build lists every event verb it skipped, per area.
+own. An area may also mark cells solid that the map's own data leaves open
+(`"solid"`: one string a row, `#` solid, `.` as the map says): the Old
+Keep's hedges, moats and walls have no collision data in Tuxemon's file. The build lists every event verb it skipped, per area.
 
 **People, in `game_region.json`:** `{"at": [x, y], "facing", "sheet", "kind":
 "talk" | "trainer" | "healer", "name", "text", "after", "flag", "hide_if",

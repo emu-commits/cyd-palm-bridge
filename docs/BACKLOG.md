@@ -90,6 +90,9 @@ open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
   with the battle, and a touch on it takes over.
 - [s] Format 2.0 (2026-10-31): the player's looks stored once; `game.bin`
   663,544 → 404,984 B. The `critters_look*` and map shots looked at.
+- [s] New areas (2026-10-31): Route 2, the Old Keep and Dragon's Cave,
+  past the tunnel's north mouth once Ivy is beaten. The `critters_route2`,
+  `critters_keep` and `critters_cave` shots looked at.
 - [d] After flashing with Critters: the 2.0 game replaces the card's old
   one at boot, and the look and the player draw as before.
 - [d] Choosing Vamporm or Nut on the bench: `<` from Agnite wraps round to

@@ -16,6 +16,35 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-31 — Critters: Route 2, the Old Keep and Dragon's Cave
+
+`GAME_LENGTH_PLAN.md` §5, approved: new areas, paid for by format 2.0. Of
+Tuxemon's Spyder maps, only six use clean tilesets alone (Route 4, 6, A, C,
+D and Dragon's Cave); Route 6 and C use flipped tiles, which the builder
+doesn't draw, and Route D is a bare meadow. The three taken:
+
+- **Route 2** (Spyder Route 4), through the Cotton Tunnel's north mouth,
+  where Digger Bram stands until Warden Ivy is beaten. It has grass on
+  both sides, levels 14–20.
+- **The Old Keep** (Spyder Route A): a hedged maze below a keep, grass
+  18–24. Tuxemon's file has almost no collision data for it, so
+  `game_region.json` gains `"solid"`, a grid of `#` (solid) and `.` (as
+  the map says). It was made from the map's ground tiles: each distinct
+  tile classed as hedge, wall, water, rock, log or floor, then checked by
+  drawing it over the map and walking it from the south entrance (the gate
+  and all 54 grass cells reachable).
+- **Dragon's Cave**, through the keep's gate: grass levels 24–30.
+
+The areas take only their maps' grass zones (`"tuxemon_events": false`):
+Tuxemon's events there are NPC lines and item pick-ups without the NPCs.
+Two signs of our own name the way. The keepers come with the acts.
+
+Measured: **`game.bin` 404,984 → 460,812 B** (+55,828: Route 2 9.4 KB, the
+Old Keep 32.0 KB, the cave 14.2 KB, all with no character sheets yet).
+`mkgame_test` walks the region through them. The bot's results are as
+before (it stops at Ivy). The `critters_route2`, `critters_keep` and
+`critters_cave` shots looked at. Firmware unchanged.
+
 ### 2026-10-31 — Critters' format 2.0: the player's looks stored once
 
 `GAME_LENGTH_PLAN.md` §5, approved: every area carried its own copy of the

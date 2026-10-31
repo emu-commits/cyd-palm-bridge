@@ -8,6 +8,9 @@ area	kestrel	5
 area	larkhollow_home	6
 area	larkhollow_lab	7
 area	kestrel_rest	8
+area	spyder_route4	9
+area	spyder_routea	10
+area	spyder_dragonscave	11
 creature	agnite	1
 creature	agnidon	2
 creature	agnigon	3

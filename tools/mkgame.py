@@ -1120,6 +1120,14 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
         else:
             ar = Area(root, a["map"], allowed, cache, report)
         mv, hop = ar.movement()
+        if "solid" in a:        # cells the map's own data leaves open but shouldn't be (GAME_FORMAT.md 1)
+            rows = a["solid"]
+            if len(rows) != ar.h or any(len(r) != ar.w or set(r) - {"#", "."} for r in rows):
+                fail(f"game_region.json: {ar.slug}: solid needs {ar.h} rows of {ar.w} '#' or '.'")
+            for y, r in enumerate(rows):
+                for x, ch in enumerate(r):
+                    if ch == "#":
+                        mv[y * ar.w + x] = 0x0F
         below, above = ar.composite()
         tiles, tix = [], {}
 

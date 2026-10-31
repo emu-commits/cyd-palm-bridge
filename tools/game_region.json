@@ -72,15 +72,16 @@
       "map": "spyder_cotton_tunnel", "name": "Cotton Tunnel", "tuxemon_events": false,
       "warps": [
         {"at": [3, 16, 1, 1], "to": "spyder_brideswood", "x": 36, "y": 1, "facing": "down"},
-        {"at": [35, 2, 1, 1], "to": "kestrel", "x": 12, "y": 19, "facing": "up"}
+        {"at": [35, 2, 1, 1], "to": "kestrel", "x": 12, "y": 19, "facing": "up"},
+        {"at": [31, 2, 1, 1], "to": "spyder_route4", "x": 18, "y": 2, "facing": "up"}
       ],
       "zones": [
         {"at": [0, 0, 40, 20], "table": "cotton_tunnel", "chance": 4}
       ],
-      "signs": [
-        {"at": [31, 2, 1, 1], "facing": "up", "text": "Rocks have fallen across this way. It's shut."}
-      ],
       "people": [
+        {"at": [31, 3], "facing": "down", "sheet": "miner", "kind": "talk", "name": "Digger Bram",
+         "hide_if": "beat_ivy",
+         "text": "Rocks came down across the north passage years back. We're clearing them, but the Warden says nobody goes through till they've beaten her."},
         {"at": [35, 3], "facing": "down", "sheet": "miner", "kind": "talk", "name": "Foreman Dale",
          "hide_if": "beat_tom",
          "text": "The way to Kestrel's not for beginners. Beat Tom in the Brideswood first, then we'll talk."},
@@ -175,6 +176,111 @@
         {"at": [8, 5], "facing": "left", "sheet": "florist", "kind": "talk", "name": "Hazel",
          "text": "I came through the tunnel last spring and never left. Kestrel grows on you."}
       ]
+    },
+    {
+      "map": "spyder_route4", "name": "Route 2", "tuxemon_events": false,
+      "warps": [
+        {"at": [19, 2, 1, 2], "to": "spyder_cotton_tunnel", "x": 31, "y": 3, "facing": "right"},
+        {"at": [0, 4, 1, 2], "to": "spyder_routea", "x": 7, "y": 37, "facing": "left"}
+      ],
+      "signs": [
+        {"at": [17, 3, 1, 1], "facing": "any",
+         "text": "ROUTE 2. West: the Old Keep. East: the north passage, back to the Cotton Tunnel."}
+      ],
+      "zones": [
+        {"at": [8, 3, 2, 11], "table": "spyder_route4", "chance": 11},
+        {"at": [8, 14, 1, 1], "table": "spyder_route4", "chance": 11},
+        {"at": [16, 14, 1, 1], "table": "spyder_route4", "chance": 11},
+        {"at": [7, 2, 1, 1], "table": "spyder_route4", "chance": 11},
+        {"at": [7, 3, 1, 1], "table": "spyder_route4", "chance": 11},
+        {"at": [8, 2, 1, 1], "table": "spyder_route4", "chance": 11},
+        {"at": [15, 15, 2, 7], "table": "spyder_route4", "chance": 11},
+        {"at": [16, 22, 1, 1], "table": "spyder_route4", "chance": 11},
+        {"at": [9, 21, 1, 1], "table": "spyder_route4", "chance": 11},
+        {"at": [16, 25, 1, 1], "table": "spyder_route4", "chance": 11},
+        {"at": [16, 29, 1, 1], "table": "spyder_route4", "chance": 11},
+        {"at": [15, 31, 1, 1], "table": "spyder_route4", "chance": 11},
+        {"at": [9, 31, 1, 1], "table": "spyder_route4", "chance": 11},
+        {"at": [8, 27, 1, 1], "table": "spyder_route4", "chance": 11},
+        {"at": [8, 22, 2, 5], "table": "spyder_route4", "chance": 11},
+        {"at": [15, 26, 2, 3], "table": "spyder_route4", "chance": 11},
+        {"at": [5, 31, 2, 4], "table": "spyder_route4", "chance": 11},
+        {"at": [6, 35, 1, 1], "table": "spyder_route4", "chance": 11},
+        {"at": [7, 32, 1, 2], "table": "spyder_route4", "chance": 11},
+        {"at": [4, 32, 1, 2], "table": "spyder_route4", "chance": 11},
+        {"at": [10, 30, 5, 2], "table": "spyder_route4", "chance": 11}
+      ]
+    },
+    {
+      "map": "spyder_routea", "name": "Old Keep", "tuxemon_events": false,
+      "zones": [
+        {"at": [14, 4, 4, 5], "table": "spyder_routea", "chance": 11},
+        {"at": [5, 23, 7, 4], "table": "spyder_routea", "chance": 11},
+        {"at": [4, 31, 5, 5], "table": "spyder_routea", "chance": 11},
+        {"at": [2, 28, 2, 1], "table": "spyder_routea", "chance": 11},
+        {"at": [10, 30, 1, 2], "table": "spyder_routea", "chance": 11},
+        {"at": [16, 33, 2, 3], "table": "spyder_routea", "chance": 11},
+        {"at": [16, 21, 2, 2], "table": "spyder_routea", "chance": 11}
+      ],
+      "warps": [
+        {"at": [7, 39, 2, 1], "to": "spyder_route4", "x": 1, "y": 4, "facing": "down"},
+        {"at": [6, 12, 2, 1], "to": "spyder_dragonscave", "x": 12, "y": 38, "facing": "up"}
+      ],
+      "signs": [
+        {"at": [6, 18, 2, 1], "facing": "up",
+         "text": "THE OLD KEEP. No one has lived here for a hundred years. Its gate opens on the caves beneath."}
+      ],
+      "solid": [
+        "####################",
+        "#...######.#########",
+        "#...######.###....##",
+        "#...######...#....##",
+        "#...######...#....##",
+        "#...######...#....##",
+        "#...######...#....##",
+        "#.....##.....#.#..##",
+        "#.....##.....#.#..##",
+        "#............#.#..##",
+        "##############.#..##",
+        "######..######.#..##",
+        "######..######.#..##",
+        "######..######.#..##",
+        "######..######.#..##",
+        "######..######.#..##",
+        "######..######.#..##",
+        "######..##..##.#..##",
+        "######..##.....#..##",
+        "####...........#..##",
+        "################..##",
+        "####..............##",
+        "##.........#...##.##",
+        "##...###..#.##.##.##",
+        "##.########.##.##.##",
+        "##.##.......#..##.##",
+        "##.##..#####...##.##",
+        "##.##..........##.##",
+        "##......#....#.##.##",
+        "######..######.##.##",
+        "##...#..##.....##.##",
+        "##..##..##.....##.##",
+        "##..##..#..####.#.##",
+        "##.##...#########.##",
+        "##.##.#...........##",
+        "##....##..........##",
+        "##....########....##",
+        "##................##",
+        "#######..###########",
+        "#######..###########"
+      ]
+    },
+    {
+      "map": "spyder_dragonscave", "name": "Dragon's Cave", "tuxemon_events": false,
+      "warps": [
+        {"at": [12, 39, 2, 1], "to": "spyder_routea", "x": 6, "y": 13, "facing": "down"}
+      ],
+      "zones": [
+        {"at": [0, 0, 20, 40], "table": "dragons_cave", "chance": 4}
+      ]
     }
   ],
   "encounters": {
@@ -199,6 +305,33 @@
       {"creature": "dune_pincher", "levels": [6, 9], "rate": 20},
       {"creature": "noctula",      "levels": [6, 8], "rate": 20},
       {"creature": "djinnbo",      "levels": [7, 9], "rate": 10}
+    ],
+    "spyder_route4": [
+      {"creature": "noctula",      "levels": [14, 17], "rate": 20},
+      {"creature": "selket",       "levels": [14, 17], "rate": 20},
+      {"creature": "propellercat", "levels": [14, 18], "rate": 15},
+      {"creature": "pigabyte",     "levels": [15, 18], "rate": 15},
+      {"creature": "noctalo",      "levels": [18, 20], "rate": 10},
+      {"creature": "selmatek",     "levels": [18, 20], "rate": 10},
+      {"creature": "djinnbo",      "levels": [16, 19], "rate": 10}
+    ],
+    "spyder_routea": [
+      {"creature": "eyesore",      "levels": [18, 22], "rate": 20},
+      {"creature": "cardiwing",    "levels": [18, 22], "rate": 15},
+      {"creature": "gectile",      "levels": [18, 22], "rate": 15},
+      {"creature": "noctalo",      "levels": [19, 23], "rate": 15},
+      {"creature": "selmatek",     "levels": [19, 23], "rate": 15},
+      {"creature": "cateye",       "levels": [20, 24], "rate": 10},
+      {"creature": "dune_pincher", "levels": [20, 24], "rate": 10}
+    ],
+    "dragons_cave": [
+      {"creature": "agnidon",      "levels": [24, 28], "rate": 15},
+      {"creature": "fluttaflap",   "levels": [24, 28], "rate": 15},
+      {"creature": "arthrobolt",   "levels": [24, 28], "rate": 15},
+      {"creature": "noctalo",      "levels": [24, 28], "rate": 15},
+      {"creature": "eyesore",      "levels": [25, 29], "rate": 15},
+      {"creature": "djinnbo",      "levels": [26, 30], "rate": 15},
+      {"creature": "selmatek",     "levels": [25, 29], "rate": 10}
     ]
   }
 }

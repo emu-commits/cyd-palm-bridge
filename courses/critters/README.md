@@ -9,7 +9,9 @@ with the firmware, and the board copies it to the card when it starts
 
 **What's in it:** the first region (G3): Larkhollow, where you start;
 Route 1, the Brideswood and the Cotton Tunnel from Tuxemon's Spyder maps;
-and Kestrel, with its Ring and Warden Ivy. The two towns are laid out for
+and Kestrel, with its Ring and Warden Ivy. Past the tunnel's fallen rocks,
+once Ivy is beaten: Route 2, the Old Keep and Dragon's Cave (Tuxemon's
+Spyder Route 4, Route A and Dragon's Cave). The two towns are laid out for
 this game (`tools/game_maps/`) from the clean tilesets, and every house
 with an open door can be walked into: Home and Wren's Lab in Larkhollow,
 the rest house in Kestrel, furnished from a tileset of our own. 27
