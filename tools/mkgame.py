@@ -38,7 +38,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mkcourse import fold, latin_fallback  # noqa: E402  (one set of text rules)
 
-FORMAT_MAJOR, FORMAT_MINOR = 1, 3      # 1.1 people, 1.2 more starters, 1.3 encounter steps and keeper bonus
+FORMAT_MAJOR, FORMAT_MINOR = 2, 0      # 2.0: the player's looks once, in LOOK, not in every area
 MAGIC = b"CYDG"
 
 TUXEMON_URL = "https://github.com/Tuxemon/Tuxemon.git"
@@ -63,7 +63,7 @@ TEAM = 3                      # a trainer's creatures
 PERSON_KINDS = {"talk": 0, "trainer": 1, "healer": 2}
 
 SECTIONS = [b"META", b"TYPE", b"SHAP", b"STAT", b"MOVE", b"MONS", b"LRNS",
-            b"ENCT", b"AREA", b"ADAT", b"SPRT", b"TEXT", b"CRED"]
+            b"ENCT", b"AREA", b"ADAT", b"SPRT", b"TEXT", b"CRED", b"LOOK"]
 CRC_ON_OPEN = {b"META", b"TYPE", b"SHAP", b"STAT", b"MOVE", b"MONS", b"LRNS",
                b"ENCT", b"AREA", b"TEXT"}
 
@@ -1102,8 +1102,17 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
     looks = region["player"] if isinstance(region["player"], list) else [region["player"]]
     if not 1 <= len(looks) <= 8 or len(set(looks)) != len(looks):
         fail("game_region.json: the player: 1 to 8 different sheets")
+    look_frames = []
     for c in looks:
-        sheet_img(c, "the player")
+        im = sheet_img(c, "the player")
+        for f in range(CHAR_FRAMES):
+            x, y = f % 3 * CHAR_W, f // 3 * CHAR_H
+            look_frames.append(im.crop((x, y, x + CHAR_W, y + CHAR_H)))
+    look_pal = make_palette(look_frames, 255)
+    memo = {}
+    LOOK = struct.pack("<BBH", len(looks), 8, len(look_pal))
+    LOOK += pad4(struct.pack(f"<{1 + len(look_pal)}H", 0, *(rgb565(c) for c in look_pal)))
+    LOOK += b"".join(pack_pixels(index_image(f, look_pal, memo), 8) for f in look_frames)
     flag_names = set()
     for a in region["areas"]:
         if a.get("layout"):
@@ -1127,7 +1136,7 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
         people = a.get("people", [])
         if len(people) > MAX_PEOPLE:
             fail(f"{ar.slug}: {len(people)} people; the limit is {MAX_PEOPLE}")
-        chars = list(looks)
+        chars = []                              # the people's sheets; the looks are LOOK's (2.0)
         for pe in people:
             if pe.get("sheet") in looks:
                 fail(f"{ar.slug}: {pe.get('name')} wears one of the player's looks")
@@ -1239,8 +1248,6 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
     META += meta_entry(K_BUILD, f"mkgame {FORMAT_MAJOR}.{FORMAT_MINOR}".encode())
     META += meta_entry(K_START, struct.pack("<HBBB3x", area_ix[st["area"]], st["x"], st["y"],
                                             DIRS[st.get("facing", "down")]))
-    if len(looks) > 1:
-        META += meta_entry(K_LOOKS, struct.pack("<B3x", len(looks)))
     if "starters" in region:
         sts = region["starters"]
         if not 3 <= len(sts) <= MAX_STARTERS or len(set(sts)) != len(sts) or any(c not in mon_ix for c in sts):
@@ -1303,7 +1310,7 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
 
     secs = {b"META": META, b"TYPE": TYPE, b"SHAP": SHAP, b"STAT": STAT, b"MOVE": MOVE, b"MONS": MONS,
             b"LRNS": LRNS, b"ENCT": ENCT, b"AREA": AREA, b"ADAT": bytes(ADAT), b"SPRT": bytes(SPRT),
-            b"TEXT": bytes(text.b), b"CRED": CRED}
+            b"TEXT": bytes(text.b), b"CRED": CRED, b"LOOK": LOOK}
     off = 32 + 16 * len(SECTIONS)
     table, body = b"", b""
     for tag in SECTIONS:
@@ -1466,6 +1473,20 @@ class Game:
         a["sizes"] = {"head": head_len, "tiles": tlen, "characters": clen, "chunks": len(cdir) * csz}
         return a
 
+    def looks(self):
+        """(n, palette as RGB triples with index 0 first, frames as index lists)"""
+        b = self.sec[b"LOOK"]
+        n, bpp, ncol = struct.unpack_from("<BBH", b)
+        if not 1 <= n <= 8 or bpp != 8 or not 1 <= ncol <= 255:
+            fail("LOOK: out of range")
+        o = 4 + ((2 * (1 + ncol) + 3) & ~3)
+        fsz = CHAR_W * CHAR_H
+        if len(b) != o + n * CHAR_FRAMES * fsz:
+            fail("LOOK: the wrong size")
+        pal = [rgb888(v) for v in struct.unpack_from(f"<{1 + ncol}H", b, 4)]
+        frames = [list(b[o + i * fsz:o + (i + 1) * fsz]) for i in range(n * CHAR_FRAMES)]
+        return n, pal, frames
+
     def sprites(self):
         out = []
         for r in self.records(b"MONS", 48):
@@ -1492,7 +1513,8 @@ def dump(g):
     out.append(f"source {m[K_SOURCE].decode()}")
     a, x, y, f = struct.unpack_from("<HBBB", m[K_START])
     out.append(f"start area {a} at {x},{y} facing {f}")
-    out.append(f"looks {m[K_LOOKS][0] if K_LOOKS in m else 1}")
+    nl, lpal, _ = g.looks()
+    out.append(f"looks {nl} colours {len(lpal) - 1} crc {crc32(g.sec[b'LOOK']):08x}")
     if K_STARTERS in m:
         sts = list(struct.unpack_from("<3H", m[K_STARTERS]))
         if K_MORE_STARTERS in m:
@@ -1593,16 +1615,17 @@ def preview(g, outdir, tag, start=None):
         px = im.load()
         # the people standing, the player at the start (facing down), then the overlays
         stand = [10, 7, 1, 4]                 # N E S W: the middle frame of rows back, right, front, left
-        figs = [(p[0], p[1], p[3] * CHAR_FRAMES + stand[p[2]]) for p in a["people"]]
+        figs = [(p[0], p[1], a["frames"], a["palette"], p[3] * CHAR_FRAMES + stand[p[2]]) for p in a["people"]]
         if ai == sa:
-            figs.append((sx, sy, 1))
-        for x, y, f in sorted(figs, key=lambda t: t[1]):
-            if f >= len(a["frames"]):
+            _, lpal, lframes = g.looks()
+            figs.append((sx, sy, lframes, lpal, 1))
+        for x, y, frames, pal, f in sorted(figs, key=lambda t: t[1]):
+            if f >= len(frames):
                 continue
             ox, oy = x * TILE, y * TILE - (CHAR_H - TILE)
-            for j, v in enumerate(a["frames"][f]):
+            for j, v in enumerate(frames[f]):
                 if v and 0 <= oy + j // CHAR_W:
-                    px[ox + j % CHAR_W, oy + j // CHAR_W] = a["palette"][v]
+                    px[ox + j % CHAR_W, oy + j // CHAR_W] = pal[v]
         for i, t in a["overlays"].items():
             put(a["tiles"][t], i % a["w"] * TILE, i // a["w"] * TILE, True)
         p = outdir / f"{tag}_{ai}_{a['name'].replace(' ', '_').lower()}.png"

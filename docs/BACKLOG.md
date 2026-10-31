@@ -88,6 +88,10 @@ open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
   marked. The `critters_auto_*` shots looked at, and a long Auto-play run's.
 - [d] The party panel on the bench: readable at arm's length, it keeps up
   with the battle, and a touch on it takes over.
+- [s] Format 2.0 (2026-10-31): the player's looks stored once; `game.bin`
+  663,544 → 404,984 B. The `critters_look*` and map shots looked at.
+- [d] After flashing with Critters: the 2.0 game replaces the card's old
+  one at boot, and the look and the player draw as before.
 - [d] Choosing Vamporm or Nut on the bench: `<` from Agnite wraps round to
   Nut, then Vamporm; the chosen one is yours in Larkhollow.
 - [x] The web flasher's optional install: a `game` partition, a second

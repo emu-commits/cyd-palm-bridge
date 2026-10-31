@@ -67,7 +67,7 @@ static int dump(const char *path){
         }
     }
     printf("start area %u at %u,%u facing %u\n", g.start_area, g.start_x, g.start_y, g.start_facing);
-    printf("looks %u\n", g.looks);
+    printf("looks %u colours %u crc %08x\n", g.looks, g.look_colours, (unsigned)g.s[MG_LOOK].crc);
     if(g.n_starters){
         printf("starters");
         for(int i = 0; i < g.n_starters; i++) printf(" %u", g.starters[i]);

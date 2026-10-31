@@ -28,7 +28,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#define MG_FORMAT_MAJOR 1
+#define MG_FORMAT_MAJOR 2                   /* 2.0: the player's looks once, in LOOK */
 #define MG_MAX_TYPES    16
 #define MG_MAX_SHAPES   32
 #define MG_MAX_STATUSES 8
@@ -55,7 +55,7 @@
 #define MG_ERANGE   (-5)    /* the caller asked for something out of range */
 
 enum { MG_META, MG_TYPE, MG_SHAP, MG_STAT, MG_MOVE, MG_MONS, MG_LRNS, MG_ENCT, MG_AREA,
-       MG_ADAT, MG_SPRT, MG_TEXT, MG_CRED, MG_NSECT };
+       MG_ADAT, MG_SPRT, MG_TEXT, MG_CRED, MG_LOOK, MG_NSECT };
 
 /* move ranges (GAME_FORMAT.md 3.6) */
 enum { MG_MELEE, MG_TOUCH, MG_RANGED, MG_REACH, MG_RELIABLE, MG_SPECIAL };
@@ -144,7 +144,9 @@ typedef struct {
     char     title[40];
     uint16_t start_area;
     uint8_t  start_x, start_y, start_facing;
-    uint8_t  looks;         /* the player's looks: every area's first character sheets (1 in a 1.0 file) */
+    uint8_t  looks;         /* the player's looks, in LOOK: 12 frames each, 8 bits, LOOK's own palette */
+    uint8_t  look_colours;
+    uint32_t look_frames;   /* the frames' offset in LOOK */
     uint8_t  n_starters;    /* 3-8 if the file names the first creatures to choose from, else 0 */
     uint16_t starters[MG_MAX_STARTERS];
     uint32_t rules[8];      /* COEFF_DAMAGE, stat coefficient, multiplier min, max (1/100),
@@ -205,6 +207,10 @@ int  mg_chunk(MonGame *g, const MgArea *a, uint32_t ci, uint8_t *buf);
  * (512 or 256 B). Not CRC checked one by one: see section 6. */
 int  mg_tile(MonGame *g, const MgArea *a, uint32_t t, uint8_t *buf, uint32_t cap);
 int  mg_frame(MonGame *g, const MgArea *a, uint32_t k, uint8_t *buf, uint32_t cap);
+/* The player's looks: frame k (look * MG_CHAR_FRAMES + f) into buf (512 B, 8 bits),
+ * and their palette as RGB565 into lut[256] (0 for index 0 and past the colours). */
+int  mg_look_frame(MonGame *g, uint32_t k, uint8_t *buf, uint32_t cap);
+int  mg_look_palette(MonGame *g, uint16_t *lut);
 /* Creature m's battle sprite record (header, palette, frames), CRC checked.
  * Returns its length. buf needs MG_SPRITE_MAX. */
 int  mg_sprite(MonGame *g, const MgMon *m, uint8_t *buf, uint32_t cap);

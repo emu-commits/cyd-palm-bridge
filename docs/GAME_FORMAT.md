@@ -1,6 +1,6 @@
-# Game format — `game.bin`, version 1
+# Game format — `game.bin`, version 2
 
-> **Status: version 1.3 (2026-10-31).** `tools/mkgame.py` writes and
+> **Status: version 2.0 (2026-10-31).** `tools/mkgame.py` writes and
 > reads it, and `firmware/main/monster.c` reads it in C (`monster_play.c`
 > plays its rules); the two readers' dumps are compared byte for byte (`make
 > -C sim monster`). G1 added `META` key `0x22`. **G3 made it 1.1**: people in
@@ -13,6 +13,10 @@
 > rematch share their cell. A 1.2 reader skips both keys, so its zones keep
 > their first tables and keepers give plain experience; it refuses an area
 > where two people share a cell.
+> **2.0** keeps the player's looks once, in a section of their own (`LOOK`,
+> §3.15), instead of copying them into every area's sheets. That saved
+> 258,560 B of the 663,544 B file. A 1.x reader refuses a 2.0 file, and a
+> 2.0 reader a 1.x one; the save doesn't change.
 
 `game.bin` holds everything the monster game reads from the card: the
 rules' numbers, the creatures, their moves and battle sprites, the areas
@@ -260,8 +264,8 @@ folded with the course builder's rules (curly quotes to straight, dashes to
 
 ```
 header         32 B
-section table  16 B x 13
-META TYPE SHAP STAT MOVE MONS LRNS ENCT AREA ADAT SPRT TEXT CRED   (in this order)
+section table  16 B x 14
+META TYPE SHAP STAT MOVE MONS LRNS ENCT AREA ADAT SPRT TEXT CRED LOOK   (in this order)
 ```
 
 **Header (32 B, at 0):**
@@ -269,7 +273,7 @@ META TYPE SHAP STAT MOVE MONS LRNS ENCT AREA ADAT SPRT TEXT CRED   (in this orde
 | Offset | Size | Field |
 |---|---|---|
 | 0 | 4 | Magic `CYDG` |
-| 4 | 2 | Format major version: `1`. A reader refuses any other. |
+| 4 | 2 | Format major version: `2`. A reader refuses any other. |
 | 6 | 2 | Format minor version: `0` |
 | 8 | 4 | File size in bytes |
 | 12 | 2 | Section count |
@@ -280,7 +284,7 @@ META TYPE SHAP STAT MOVE MONS LRNS ENCT AREA ADAT SPRT TEXT CRED   (in this orde
 | 28 | 4 | CRC-32 of bytes 0–27 |
 
 **Section table (16 B per section):** tag, u32 offset, u32 length, u32
-CRC-32 of the section's bytes. All 13 are required. A reader skips a tag
+CRC-32 of the section's bytes. All 14 are required. A reader skips a tag
 it doesn't know.
 
 ### 3.2 `META`
@@ -293,7 +297,7 @@ Entries one after another: u16 key, u16 length *n*, *n* bytes of value.
 | `0x02` | Source: `Tuxemon <full commit SHA>` |
 | `0x03` | Builder: `mkgame <major>.<minor>` |
 | `0x10` | Start: u16 area (its position in `AREA`), u8 x, u8 y, u8 facing (0 N, 1 E, 2 S, 3 W), 3 B zero |
-| `0x11` | The player's looks: u8 *n* (1-8), 3 B zero. Every area's first *n* character sheets are the looks a new game offers; without the key, *n* is 1. Added in 1.1. |
+| `0x11` | 1.x only: the number of the player's looks, which were every area's first sheets. 2.0 keeps them in `LOOK` (§3.15) and doesn't write the key. |
 | `0x12` | The starters: u16 × 3 (positions in `MONS`), 2 B zero: the three first creatures a new game offers. Without it, the game picks three (the first that begin an evolution line, of different types). Added in 1.1. |
 | `0x13` | More starters: u8 *k* (1-5), 1 B zero, u16 × *k* (positions in `MONS`), zero to a multiple of 4 B: offered after `0x12`'s three, which it needs. Added in 1.2. |
 | `0x14` | Encounter steps, 8 B each (1-32): u16 flag (1-255), u16 table, u16 to (positions in `ENCT`, different), u16 0. Once the flag is set, a zone naming `table` uses `to`; the steps apply in order, so a table may step more than once. Added in 1.3. |
@@ -434,7 +438,7 @@ chunks      16 x 16 cells each, read as the player nears them
 | 14 | 2 | Encounter zones |
 | 16 | 2 | Signs |
 | 18 | 2 | Overlays |
-| 20 | 2 | Character sheets (at least the player's looks, at most 16) |
+| 20 | 2 | Character sheets (the people's: 0 to 16) |
 | 22 | 2 | People, at most 32 (0 in a 1.0 file) |
 | 24 | 4 | Offset of the tiles, from the block's start |
 | 28 | 4 | Length of the tiles |
@@ -474,7 +478,7 @@ Then, in order, each list right after the one before:
    | 0 | 1 | x |
    | 1 | 1 | y (one person to a cell, unless one's hide-if flag is the other's show-if) |
    | 2 | 1 | Facing, 0-3 |
-   | 3 | 1 | Character sheet: an index into the area's sheets, past the player's looks |
+   | 3 | 1 | Character sheet: an index into the area's sheets |
    | 4 | 1 | Kind: 0 talk, 1 trainer, 2 healer |
    | 5 | 1 | Sight in cells, 0-15 (trainers only) |
    | 6 | 2 | Flag set when spoken to (talk) or beaten (trainer); 0 none, a trainer needs one |
@@ -500,8 +504,8 @@ tile is transparent wherever nothing is drawn.
 
 **Character sheets:** for each, 12 frames of 16 × 32 pixels in the area's
 palette and depth, in Tuxemon's order (rows of three: walking frames for
-each direction). The first sheets are the player's looks (`META` `0x11`;
-one in a 1.0 file), then the people's, each once.
+each direction). The people's, each once; the player's looks are `LOOK`'s
+(§3.15).
 
 **Chunks** (768 B each): 16 × 16 cells, row by row, as 256 u16 tiles
 (below the player) followed by 256 movement bytes. A chunk past the
@@ -557,6 +561,16 @@ will make it a few KB).
 The credits screen's lines, separated by `\n`, built from the allow-list
 lines actually used: the Tuxemon commit, then each creature, tileset and
 character sheet with its authors and licence.
+
+### 3.15 `LOOK`: the player's looks (2.0)
+
+u8 *n* (1-8), u8 bits a pixel (8), u16 colours *c* (1-255); then the
+palette, *c* + 1 entries of RGB565 (entry 0 unused: transparent), padded to
+4 B; then *n* × 12 frames of 16 × 32 pixels, a byte a pixel, in the
+character sheets' order. Look *k*'s frames are *k* × 12 to *k* × 12 + 11.
+The game draws the player with this palette, so the frames are read once,
+not again in every area. Its CRC is checked by the whole-file check, like
+`ADAT`'s and `SPRT`'s.
 
 ## 4) Colour: 8 bits for maps, 4 for creatures
 
@@ -616,14 +630,14 @@ and picture checks.
 - **On open:** the magic, major version, header CRC and file size; the
   section table's CRC, every section inside the file, 4-aligned, in order,
   not overlapping, with zero padding between; the CRCs of every section
-  except `ADAT` and `SPRT` (all small: 4.5 KB in the spike); record sizes
+  except `ADAT`, `SPRT`, `CRED` and `LOOK` (the rest are small: 4.5 KB in the spike); record sizes
   whole; every position (types, shapes, moves, creatures, statuses, tables,
   areas) in range; every string reference inside `TEXT` with only
   U+0020–U+00FF in it.
 - **On entering an area:** the head's CRC, and that its lists exactly fill
   it; each chunk's CRC when it's read; each cell's tile at most *t*; each
   warp's destination in range; each person inside the area, alone in their
-  cell, on a sheet past the looks, with flags under 256, strings that read,
+  cell (or sharing it with their rematch), on one of the area's sheets, with flags under 256, strings that read,
   and creatures (a trainer's only, from the first slot on) in range. An area
   that fails is left empty, so nothing reads a list it didn't check.
 - **On each picture:** the tiles' and the character sheets' CRCs are checked

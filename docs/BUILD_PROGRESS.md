@@ -16,6 +16,35 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-31 — Critters' format 2.0: the player's looks stored once
+
+`GAME_LENGTH_PLAN.md` §5, approved: every area carried its own copy of the
+player's six looks (6 sheets × 12 frames × 512 B = 36 KB), in the area's
+palette. They are now one section, `LOOK` (§3.15 of `GAME_FORMAT.md`), at 8
+bits with a palette of their own:
+
+- An area's sheets are its people's only (0 to 16). A person's sheet is an
+  index into them.
+- `ui_monster.c` reads the look's frames and the looks' palette once
+  (`look_load()`, a second 512 B lookup table in the game's block), not
+  again on every area change, and draws the player through it. The look
+  picker draws from the same frames.
+- Major version 2: a 1.x reader refuses the file, and this reader a 1.x
+  one ("a game file for an older version"). The save is unchanged. The
+  firmware and the game file go onto the board together (the flasher's
+  "with Critters" install; `monster_install.c` copies a game whose
+  fingerprint is new).
+
+Measured:
+
+- **`game.bin` 663,544 → 404,984 B** (−258,560: the eight areas' copies,
+  less `LOOK`'s 36,948 B). The fixture is 85,252 → 60,684 B.
+- Each area's palette has the room the looks took: Larkhollow's sheets went
+  from 61,440 to 24,576 B.
+- Firmware 1,806,480 → 1,806,576 B (+96), static DRAM unchanged.
+- The `critters_look*`, `critters_map` and `critters_kestrel` shots looked
+  at: the six looks and the player on the map are drawn as before.
+
 ### 2026-10-31 — Critters: the engine for a longer game (format 1.3)
 
 The owner approved `GAME_LENGTH_PLAN.md` (all four decisions). First, the

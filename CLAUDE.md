@@ -22,7 +22,7 @@ before touching anything.
 - `docs/SRS_PLAN.md`: the built-in spaced-repetition app. **This is the
   current project; see "Current work" below.**
 - `docs/GAME_PLAN.md`: a monster-catching game from Tuxemon's content.
-  **G0 to G3 done 2026-10-16**: the format (now 1.1: people, looks,
+  **G0 to G3 done 2026-10-16**: the format (now 2.0: the looks in their own section; 1.1 added people, looks,
   starters) and converter, the rules (`monster.c`, `monster_play.c`), the
   screens (`ui_monster.c`, "Critters" in the Games folder), and the first
   region: two towns of our own layout (`tools/game_maps/`), three Tuxemon

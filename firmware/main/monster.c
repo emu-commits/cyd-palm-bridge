@@ -27,10 +27,10 @@
 /* the section tags, 4 bytes each in MG_* order, as the section table holds
  * them (one string: tests/nodelete.sh rightly flags a quoted HTTP method name,
  * and one of these tags is spelt like one) */
-static const char TAGS[] = "METATYPESHAPSTATMOVEMONSLRNSENCTAREAADATSPRTTEXTCRED";
+static const char TAGS[] = "METATYPESHAPSTATMOVEMONSLRNSENCTAREAADATSPRTTEXTCREDLOOK";
 #define TAG(k) (TAGS + 4 * (k))
 /* checked on open: everything small (section 6) */
-#define CRC_ON_OPEN(i) ((i) != MG_ADAT && (i) != MG_SPRT && (i) != MG_CRED)
+#define CRC_ON_OPEN(i) ((i) != MG_ADAT && (i) != MG_SPRT && (i) != MG_CRED && (i) != MG_LOOK)
 
 enum { K_TITLE = 0x01, K_SOURCE, K_BUILD, K_START = 0x10, K_LOOKS, K_STARTERS, K_MORE_STARTERS, K_STEPS,
        K_RULES = 0x20, K_CAPTURE, K_GROWTH, K_KEEPER };
@@ -211,10 +211,6 @@ static int parse_meta(MonGame *g, const uint8_t *m, uint32_t len){
             g->start_x = v[2]; g->start_y = v[3]; g->start_facing = v[4];
             if(v[5] | v[6] | v[7]) return bad(g, "the start has a non-zero pad");
             break;
-        case K_LOOKS:       /* minor version 1: the player's looks, the first sheets of every area */
-            if(n != 4 || !v[0] || v[0] > 8 || v[1] | v[2] | v[3]) return bad(g, "the player's looks are out of range");
-            g->looks = v[0];
-            break;
         case K_STARTERS:    /* minor version 1: the three first creatures offered */
             if(n != 8 || le16(v + 6)) return bad(g, "the starters are out of range");
             for(int i = 0; i < 3; i++){
@@ -269,7 +265,6 @@ static int parse_meta(MonGame *g, const uint8_t *m, uint32_t len){
         if(!g->n_starters) return bad(g, "more starters, but not the first three");
         g->n_starters = (uint8_t)(3 + more);
     }
-    if(!(seen & (1u << K_LOOKS))) g->looks = 1;          /* a 1.0 file: one player sheet */
     if(!(seen & (1u << (K_KEEPER - K_RULES + 24)))) g->keeper_bonus = 100;
     if(!(seen & (1u << 24)) || !(seen & (1u << 25)) || !(seen & (1u << 26))) return bad(g, "META has no rules");
     const uint32_t *R = g->rules, *C = g->capture, *G = g->growth;
@@ -557,6 +552,15 @@ static int check_records(MonGame *g){
     for(uint32_t i = 0; i < g->n_steps; i++)
         if(g->steps[i].table >= g->n_tables || g->steps[i].to >= g->n_tables)
             return bad(g, "encounter step %u names no table", (unsigned)i);
+    /* LOOK: u8 looks (1-8), u8 bits (8), u16 colours, the palette padded to 4, the frames */
+    if(g->s[MG_LOOK].len < 4) return bad(g, "LOOK is too short");
+    if((r = rds(g, MG_LOOK, 0, b, 4))) return r;
+    g->looks = b[0];
+    g->look_colours = (uint8_t)le16(b + 2);
+    g->look_frames = 4 + ((2u * (1 + le16(b + 2)) + 3) & ~3u);
+    if(!g->looks || g->looks > 8 || b[1] != 8 || !le16(b + 2) || le16(b + 2) > 255 ||
+       g->s[MG_LOOK].len != g->look_frames + (uint32_t)g->looks * MG_CHAR_FRAMES * MG_CHAR_W * MG_CHAR_H)
+        return bad(g, "LOOK is out of range");
     /* AREA */
     if(g->s[MG_AREA].len % AREA_SIZE || g->s[MG_AREA].len / AREA_SIZE != g->n_areas || !g->n_areas || g->n_areas > 65535)
         return bad(g, "AREA doesn't hold the header's %u areas", (unsigned)g->n_areas);
@@ -589,7 +593,8 @@ int mg_open_fp(MonGame *g, FILE *f){
     if(memcmp(h, "CYDG", 4)){ r = bad(g, "not a game file"); goto fail; }
     if(mg_crc32(0, h, 28) != le32(h + 28)){ r = bad(g, "the header is damaged"); goto fail; }
     if(le16(h + 4) != MG_FORMAT_MAJOR){
-        snprintf(g->err, sizeof g->err, "a game file for a newer version (format %u)", (unsigned)le16(h + 4));
+        snprintf(g->err, sizeof g->err, "a game file for %s version (format %u)",
+                 le16(h + 4) > MG_FORMAT_MAJOR ? "a newer" : "an older", (unsigned)le16(h + 4));
         r = MG_EVERSION; goto fail;
     }
     g->minor = le16(h + 6);
@@ -679,7 +684,7 @@ static int area_open(MonGame *g, uint32_t i, MgArea *a, uint8_t *buf, uint32_t c
     unsigned id = (unsigned)d->id;
     if(a->w != d->w || a->h != d->h || (a->bpp != 4 && a->bpp != 8) || !a->colours || a->colours >= 1u << a->bpp ||
        a->n_tiles > 4095 || a->ccols != (a->w + MG_CHUNK - 1) / MG_CHUNK || a->crows != (a->h + MG_CHUNK - 1) / MG_CHUNK ||
-       a->n_chars < g->looks || a->n_chars > 16 || a->n_people > MG_MAX_PEOPLE)
+       a->n_chars > 16 || a->n_people > MG_MAX_PEOPLE)
         return bad(g, "area %u: a value out of range", id);
     for(int k = 52; k < HEAD_FIXED; k++) if(buf[k]) return bad(g, "area %u: a non-zero pad", id);
     uint32_t tsz = MG_TILE * MG_TILE * a->bpp / 8, fsz = MG_CHAR_W * MG_CHAR_H * a->bpp / 8;
@@ -735,7 +740,7 @@ static int area_open(MonGame *g, uint32_t i, MgArea *a, uint8_t *buf, uint32_t c
     for(uint32_t k = 0; k < a->n_people; k++){
         const uint8_t *p = a->people + 48 * k;
         MgStr s;
-        int team = 0, ok = p[0] < a->w && p[1] < a->h && p[2] <= 3 && p[3] >= g->looks && p[3] < a->n_chars &&
+        int team = 0, ok = p[0] < a->w && p[1] < a->h && p[2] <= 3 && p[3] < a->n_chars &&
                            p[4] <= MG_P_HEALER && p[5] <= 15 && le16(p + 6) < MG_FLAGS &&
                            le16(p + 8) < MG_FLAGS && le16(p + 10) < MG_FLAGS;
         for(int j = 0; ok && j < MG_TEAM; j++){
@@ -826,6 +831,22 @@ int mg_frame(MonGame *g, const MgArea *a, uint32_t k, uint8_t *buf, uint32_t cap
     uint32_t fsz = MG_CHAR_W * MG_CHAR_H * a->bpp / 8;
     if(k >= (uint32_t)a->n_chars * MG_CHAR_FRAMES || cap < fsz) return MG_ERANGE;
     return rds(g, MG_ADAT, a->dir.off + a->chars_off + k * fsz, buf, fsz);
+}
+
+int mg_look_frame(MonGame *g, uint32_t k, uint8_t *buf, uint32_t cap){
+    uint32_t fsz = MG_CHAR_W * MG_CHAR_H;
+    if(k >= (uint32_t)g->looks * MG_CHAR_FRAMES || cap < fsz) return MG_ERANGE;
+    return rds(g, MG_LOOK, g->look_frames + k * fsz, buf, fsz);
+}
+
+int mg_look_palette(MonGame *g, uint16_t *lut){
+    uint8_t b[2 * 256];
+    uint32_t n = 1u + g->look_colours;
+    memset(lut, 0, 256 * sizeof *lut);
+    int r = rds(g, MG_LOOK, 4, b, 2 * n);
+    if(r) return r;
+    for(uint32_t i = 1; i < n; i++) lut[i] = le16(b + 2 * i);
+    return 0;
 }
 
 int mg_sprite(MonGame *g, const MgMon *m, uint8_t *buf, uint32_t cap){

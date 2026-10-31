@@ -121,8 +121,9 @@ typedef struct {
     /* the three big buffers are blocks of their own: after a sync the heap
      * has no 61 KB hole left for them all in one, but has room for each */
     uint8_t  (*tiles)[MG_TILE * MG_TILE];           /* NCACHE of them, or the two battle sprites */
-    uint8_t  (*frames)[MG_CHAR_W * MG_CHAR_H];      /* MG_CHAR_FRAMES of them */
-    uint8_t  have_frames;
+    uint8_t  (*frames)[MG_CHAR_W * MG_CHAR_H];      /* MG_CHAR_FRAMES of them: the player's look */
+    uint8_t  have_frames, frames_look;              /* frames_look: the look they are (0xFF none) */
+    uint16_t plut[256];                             /* the looks' palette (LOOK's own) */
     uint16_t *band;                 /* VW x BAND_ROWS; malloc's 8-byte alignment is LVGL's 4 and more */
     lv_image_dsc_t img;
 
@@ -219,20 +220,21 @@ static const uint8_t *tile(Mon *m, uint16_t t){
     return m->tiles[old];
 }
 
-/* the area just entered: its palette, the player's frames (their look's), a fresh cache */
+/* the player's frames for look `look`, and the looks' palette: read once,
+ * not again for every area (they're LOOK's, not the area's) */
+static void look_load(Mon *m, uint8_t look){
+    int ok = !mg_look_palette(&m->g, m->plut);
+    for(int k = 0; ok && k < MG_CHAR_FRAMES; k++)
+        ok = !mg_look_frame(&m->g, (uint32_t)(look * MG_CHAR_FRAMES + k), m->frames[k], sizeof m->frames[k]);
+    m->have_frames = (uint8_t)ok;
+    m->frames_look = ok ? look : 0xFF;
+}
+
+/* the area just entered: its palette, a fresh cache, and the player's look if it changed */
 static void area_pictures(Mon *m){
     for(int i = 0; i < 256; i++) m->lut[i] = mg_palette(&m->w.area, (uint32_t)i);
     cache_clear(m);
-    m->have_frames = 0;
-    if(m->w.area.n_chars > m->w.look){
-        uint8_t raw[MG_CHAR_W * MG_CHAR_H];
-        int ok = 1;
-        for(int k = 0; ok && k < MG_CHAR_FRAMES; k++){
-            ok = !mg_frame(&m->g, &m->w.area, (uint32_t)(m->w.look * MG_CHAR_FRAMES + k), raw, sizeof raw);
-            if(ok) unpack(raw, m->frames[k], MG_CHAR_W * MG_CHAR_H, m->w.area.bpp);
-        }
-        m->have_frames = (uint8_t)ok;
-    }
+    if(m->frames_look != m->w.look) look_load(m, m->w.look);
 }
 
 /* a battle sprite into slot s (0 the player's, 1 the wild one's) */
@@ -357,7 +359,7 @@ static void compose_map(Mon *m, const Rect *c, int bw){
         drawn = 1;
         if(m->have_frames){
             int f = ROW[m->w.facing & 3] * 3 + (m->anim ? m->walk_col : 1);
-            blit8(m->band, bw, c, sx, sy, MG_CHAR_W, MG_CHAR_H, m->frames[f], m->lut, 1);
+            blit8(m->band, bw, c, sx, sy, MG_CHAR_W, MG_CHAR_H, m->frames[f], m->plut, 1);
         }
         else fill(m->band, bw, c, sx + 3, sy + 18, 10, 12, 0xF800);
     }
@@ -430,17 +432,15 @@ static void compose_battle(Mon *m, const Rect *c, int bw){
 static void compose_pick(Mon *m, const Rect *c, int bw){
     fill(m->band, bw, c, 0, 0, VW, VH, rgb(0xF4F1E4));
     if(m->picking_look){
-        /* the look, standing, at 3x: its two halves from the start area's sheets */
+        /* the look, standing (frame 1), at 3x */
         const int k = 3, x0 = (VW - MG_CHAR_W * k) / 2, y0 = 4;
-        for(int h = 0; h < 2; h++){
-            const uint8_t *p = tile(m, (uint16_t)(HALF_KEY + 2 * (m->look * MG_CHAR_FRAMES + 1) + h));
-            if(!p) continue;
-            for(int j = imax(c->y1, y0 + h * MG_TILE * k); j <= imin(c->y2, y0 + (h + 1) * MG_TILE * k - 1); j++)
-                for(int i = imax(c->x1, x0); i <= imin(c->x2, x0 + MG_TILE * k - 1); i++){
-                    uint8_t v = p[((j - y0) / k - h * MG_TILE) * MG_TILE + (i - x0) / k];
-                    if(v) m->band[(j - c->y1) * bw + (i - c->x1)] = m->lut[v];
-                }
-        }
+        if(!m->have_frames || m->frames_look != m->look) return;
+        const uint8_t *p = m->frames[1];
+        for(int j = imax(c->y1, y0); j <= imin(c->y2, y0 + MG_CHAR_H * k - 1); j++)
+            for(int i = imax(c->x1, x0); i <= imin(c->x2, x0 + MG_CHAR_W * k - 1); i++){
+                uint8_t v = p[(j - y0) / k * MG_CHAR_W + (i - x0) / k];
+                if(v) m->band[(j - c->y1) * bw + (i - c->x1)] = m->plut[v];
+            }
         return;
     }
     if(m->spr_mon[1] != MG_NONE16) blit_sprite(m->band, bw, c, (VW - 128) / 2, 0, SPR(m, 1), 0, 2);
@@ -934,11 +934,10 @@ static void scene_pick(Mon *m){
     battle_labels(m);
     cache_clear(m);
     m->picking_look = 0;
-    if(m->g.looks > 1 && !mg_area_open(&m->g, m->g.start_area, &m->w.area, m->head, m->head_cap)){
-        /* the looks are every area's first sheets: the start area's will do */
-        for(int i = 0; i < 256; i++) m->lut[i] = mg_palette(&m->w.area, (uint32_t)i);
+    if(m->g.looks > 1){
         m->picking_look = 1;
         if(m->look >= m->g.looks) m->look = 0;
+        look_load(m, m->look);
         look_show(m);
         return;
     }
@@ -1159,6 +1158,7 @@ static void press_dir(Mon *m, int d){
     if(m->scene == SC_PICK && m->ui == UI_TEXT && m->picking_look && !m->pick_note){
         int n = m->g.looks;
         m->look = (uint8_t)((m->look + (d == BT_E || d == BT_S ? 1 : n - 1)) % n);
+        look_load(m, m->look);
         look_show(m);
         return;
     }
@@ -1617,6 +1617,7 @@ void mon_ui_show(lv_obj_t *parent){
         free(m); no_memory(parent); return;
     }
     m->head_cap = cap;
+    m->frames_look = 0xFF;
     g_mon = m;
     m->pending = m->held = m->pressed = -1;
     cache_clear(m);
