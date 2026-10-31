@@ -227,6 +227,13 @@ int mp_present(const MpWorld *w, const MgPerson *p){
 }
 
 /* the person standing at (x, y), or -1 */
+uint16_t mp_table(const MpWorld *w, uint16_t table){
+    const MonGame *g = w->g;
+    for(uint32_t i = 0; i < g->n_steps; i++)
+        if(g->steps[i].table == table && mp_flag(w, g->steps[i].flag)) table = g->steps[i].to;
+    return table;
+}
+
 static int person_at(const MpWorld *w, int x, int y, MgPerson *p){
     for(uint32_t k = 0; k < w->area.n_people; k++){
         mg_person(&w->area, k, p);
@@ -380,7 +387,7 @@ int mp_step(MpWorld *w, int dir, MpBattle *b, MpLog *log){
         MgZone z;
         mg_zone(&w->area, k, &z);
         if(!in_rect(w->x, w->y, z.x, z.y, z.w, z.h)) continue;
-        if(alive(w) && b && mp_below(&w->rng, 10000) < z.chance) return encounter(w, z.table, b, log);
+        if(alive(w) && b && mp_below(&w->rng, 10000) < z.chance) return encounter(w, mp_table(w, z.table), b, log);
         break;
     }
     return 0;
@@ -633,6 +640,7 @@ static int resolve(MpWorld *w, MpBattle *b, MpLog *log){
     }
     if(!b->wild.hp){
         uint32_t gain = mp_exp_for(g, b->wild.mon, b->wild.level) / b->wild.level, n = 0;
+        if(b->trainer) gain = (uint32_t)((uint64_t)gain * g->keeper_bonus / 100);
         for(int i = 0; i < w->n_party; i++) if((b->fought >> i & 1) && w->party[i].hp) n++;
         if(n){
             uint32_t each = gain / n;

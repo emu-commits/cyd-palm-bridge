@@ -32,7 +32,8 @@ static const char TAGS[] = "METATYPESHAPSTATMOVEMONSLRNSENCTAREAADATSPRTTEXTCRED
 /* checked on open: everything small (section 6) */
 #define CRC_ON_OPEN(i) ((i) != MG_ADAT && (i) != MG_SPRT && (i) != MG_CRED)
 
-enum { K_TITLE = 0x01, K_SOURCE, K_BUILD, K_START = 0x10, K_LOOKS, K_STARTERS, K_MORE_STARTERS, K_RULES = 0x20, K_CAPTURE, K_GROWTH };
+enum { K_TITLE = 0x01, K_SOURCE, K_BUILD, K_START = 0x10, K_LOOKS, K_STARTERS, K_MORE_STARTERS, K_STEPS,
+       K_RULES = 0x20, K_CAPTURE, K_GROWTH, K_KEEPER };
 
 static uint16_t le16(const uint8_t *p){ return (uint16_t)(p[0] | p[1] << 8); }
 static uint32_t le32(const uint8_t *p){
@@ -188,7 +189,7 @@ static int parse_meta(MonGame *g, const uint8_t *m, uint32_t len){
             if(seen & (1u << k)) return bad(g, "META key %02x twice", k);
             seen |= 1u << k;
         }
-        else if(k >= K_RULES && k <= K_GROWTH){
+        else if(k >= K_RULES && k <= K_KEEPER){
             uint32_t b = 1u << (k - K_RULES + 24);
             if(seen & b) return bad(g, "META key %02x twice", k);
             seen |= b;
@@ -233,6 +234,20 @@ static int parse_meta(MonGame *g, const uint8_t *m, uint32_t len){
             }
             for(uint32_t i = 2 + 2 * more; i < n; i++) if(v[i]) return bad(g, "the starters have a non-zero pad");
             break;
+        case K_STEPS:       /* minor version 3: 8 B each, u16 flag, table, to, 0 (tables checked with ENCT) */
+            if(!n || n % 8 || n / 8 > MG_MAX_STEPS) return bad(g, "the encounter steps are out of range");
+            for(uint32_t i = 0; i < n / 8u; i++){
+                const uint8_t *e = v + 8 * i;
+                if(!le16(e) || le16(e) >= MG_FLAGS || le16(e + 2) == le16(e + 4) || le16(e + 6))
+                    return bad(g, "the encounter steps are out of range");
+                g->steps[i].flag = le16(e); g->steps[i].table = le16(e + 2); g->steps[i].to = le16(e + 4);
+            }
+            g->n_steps = (uint8_t)(n / 8);
+            break;
+        case K_KEEPER:      /* minor version 3: u32 percent */
+            if(n != 4 || le32(v) < 100 || le32(v) > 1000) return bad(g, "the keeper bonus is out of range");
+            g->keeper_bonus = le32(v);
+            break;
         case K_RULES:
             if(n != 32) return bad(g, "the rules are %u bytes", n);
             for(int i = 0; i < 8; i++) g->rules[i] = le32(v + 4 * i);
@@ -255,6 +270,7 @@ static int parse_meta(MonGame *g, const uint8_t *m, uint32_t len){
         g->n_starters = (uint8_t)(3 + more);
     }
     if(!(seen & (1u << K_LOOKS))) g->looks = 1;          /* a 1.0 file: one player sheet */
+    if(!(seen & (1u << (K_KEEPER - K_RULES + 24)))) g->keeper_bonus = 100;
     if(!(seen & (1u << 24)) || !(seen & (1u << 25)) || !(seen & (1u << 26))) return bad(g, "META has no rules");
     const uint32_t *R = g->rules, *C = g->capture, *G = g->growth;
     /* bounds that keep every sum in monster_play.c inside 64 bits */
@@ -538,6 +554,9 @@ static int check_records(MonGame *g){
         }
         if(!total) return bad(g, "encounter table %u: every rate is 0", (unsigned)t);
     }
+    for(uint32_t i = 0; i < g->n_steps; i++)
+        if(g->steps[i].table >= g->n_tables || g->steps[i].to >= g->n_tables)
+            return bad(g, "encounter step %u names no table", (unsigned)i);
     /* AREA */
     if(g->s[MG_AREA].len % AREA_SIZE || g->s[MG_AREA].len / AREA_SIZE != g->n_areas || !g->n_areas || g->n_areas > 65535)
         return bad(g, "AREA doesn't hold the header's %u areas", (unsigned)g->n_areas);
@@ -728,8 +747,12 @@ static int area_open(MonGame *g, uint32_t i, MgArea *a, uint8_t *buf, uint32_t c
         }
         /* a trainer has creatures and a flag to remember the win by; no one else has creatures */
         if(ok) ok = p[4] == MG_P_TRAINER ? team && le16(p + 6) : !team && !p[5];
-        for(uint32_t j = 0; ok && j < k; j++)
-            if(a->people[48 * j] == p[0] && a->people[48 * j + 1] == p[1]) ok = 0;   /* one to a cell */
+        /* one to a cell, unless one's going is the other's coming (a keeper and their rematch) */
+        for(uint32_t j = 0; ok && j < k; j++){
+            const uint8_t *q = a->people + 48 * j;
+            if(q[0] == p[0] && q[1] == p[1] &&
+               !(le16(q + 8) && le16(q + 8) == le16(p + 10)) && !(le16(p + 8) && le16(p + 8) == le16(q + 10))) ok = 0;
+        }
         if(!ok) return bad(g, "area %u: person %u is out of range", id, (unsigned)k);
         for(int j = 0; j < 3; j++) if((r = str_check(g, p + 12 + 8 * j, &s))) return r;
     }

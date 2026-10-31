@@ -1,6 +1,8 @@
 # A longer Critters: plan (proposal, 2026-10-30)
 
-> **Status: proposed, waiting for the owner's yes.** Nothing here is built.
+> **Status: approved 2026-10-31, being built.** The owner said yes to all
+> four decisions in §6, with one addition: Auto-play must find the store,
+> buy, and use items. The engine for the acts (§4, items 1–3) is built.
 > The ask (2026-10-30): make the game much longer and deeper without
 > making the game file much bigger, so that the player's main critter is
 > **above level 36** when the game ends.
@@ -147,9 +149,10 @@ The phases, one commit each, every gate run:
 - **More creature lines**, about 4 KB a creature, from the allow-list's
   verified licences.
 
-## 6) Decisions for the owner
+## 6) Decisions (the owner, 2026-10-31)
 
-1. Build the three acts (§3–4) as the next game phase?
-2. Items and the store: in, later, or never?
-3. Format 2.0 (shared looks) and new areas: later, or never?
-4. A bonus for beating keepers: allowed as a balance knob?
+1. Build the three acts (§3–4): **yes**.
+2. Items and the store: **yes**, and Auto-play must know how to go to the
+   store, find its way round it, and use the items.
+3. Format 2.0 (shared looks) and new areas: **yes**.
+4. A bonus for beating keepers: **yes**.

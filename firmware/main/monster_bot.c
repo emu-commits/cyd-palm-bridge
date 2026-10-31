@@ -24,6 +24,16 @@ int mb_init(MbBot *b, MonGame *g, uint32_t seed, uint8_t *scratch, uint32_t cap)
     b->rng = seed ? seed : 0x2545F491u;
     b->grid_area = -1;
     b->n_areas = (uint16_t)(g->n_areas < MB_MAX_AREAS ? g->n_areas : MB_MAX_AREAS);
+    for(uint32_t t = 0; t < g->n_tables && t < MB_MAX_TABLES; t++){
+        uint16_t n;
+        if(mg_enc_rows(g, t, &n)) continue;
+        for(uint32_t j = 0; j < n; j++){
+            MgEncRow row;
+            int r = mg_enc_row(g, t, j, &row);
+            if(r) return r;
+            if(row.hi > b->table_hi[t]) b->table_hi[t] = row.hi;
+        }
+    }
     for(uint32_t i = 0; i < b->n_areas; i++){
         MgArea a;
         int r = mg_area_open(g, i, &a, scratch, cap);
@@ -51,14 +61,7 @@ int mb_init(MbBot *b, MonGame *g, uint32_t seed, uint8_t *scratch, uint32_t cap)
             mg_zone(&a, k, &z);
             if(!z.chance || mg_enc_rows(g, z.table, &n) || !n) continue;
             MbZone *o = &b->zones[b->n_zones++];
-            o->area = (uint8_t)i; o->x = z.x; o->y = z.y; o->w = z.w; o->h = z.h;
-            o->lo = 0xFF; o->hi = 0;
-            for(uint32_t j = 0; j < n; j++){
-                MgEncRow row;
-                if((r = mg_enc_row(g, z.table, j, &row))) return r;
-                if(row.lo < o->lo) o->lo = row.lo;
-                if(row.hi > o->hi) o->hi = row.hi;
-            }
+            o->area = (uint8_t)i; o->x = z.x; o->y = z.y; o->w = z.w; o->h = z.h; o->table = z.table;
         }
     }
     return 0;
@@ -333,7 +336,8 @@ static int grind(MbBot *b, const MpWorld *w, int *dir){
     int bd = 0;
     for(int k = 0; k < b->n_zones; k++){
         const MbZone *z = &b->zones[k];
-        uint32_t fit = (uint32_t)abs(z->hi - want);
+        uint16_t t = mp_table(w, z->table);
+        uint32_t fit = (uint32_t)abs((t < MB_MAX_TABLES ? b->table_hi[t] : 0) - want);
         if(z->area != w->area.index){
             int d = 0;
             uint32_t s = toward(b, w, z->area, &d);
@@ -379,9 +383,12 @@ static int rest(MbBot *b, const MpWorld *w, int *what, int *dir){
     return near != FAR;
 }
 
+/* every keeper beaten, or gone for good (a rematch's first match, say) */
 int mb_done(const MbBot *b, const MpWorld *w){
-    for(int k = 0; k < b->n_people; k++)
-        if(b->people[k].kind == MG_P_TRAINER && !mp_flag(w, b->people[k].flag)) return 0;
+    for(int k = 0; k < b->n_people; k++){
+        const MbPerson *p = &b->people[k];
+        if(p->kind == MG_P_TRAINER && !mp_flag(w, p->flag) && !(p->hide_if && mp_flag(w, p->hide_if))) return 0;
+    }
     return 1;
 }
 

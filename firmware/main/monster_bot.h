@@ -46,6 +46,7 @@
 #define MB_MAX_WARPS  128
 #define MB_MAX_PEOPLE 96            /* keepers and healers, region-wide */
 #define MB_MAX_ZONES  64
+#define MB_MAX_TABLES 64            /* encounter tables whose levels it knows */
 #define MB_MAX_CELLS  (64 * 64)
 
 /* what mb_world says to do on the map */
@@ -58,7 +59,7 @@ typedef struct {
     uint8_t  margin;                     /* levels over top to train to: one more per loss to them */
     uint16_t flag, hide_if, show_if;
 } MbPerson;
-typedef struct { uint8_t area, x, y, w, h, lo, hi; } MbZone;    /* an encounter zone and its levels */
+typedef struct { uint8_t area, x, y, w, h; uint16_t table; } MbZone;    /* an encounter zone and its table */
 
 typedef struct {
     MonGame *g;
@@ -67,6 +68,7 @@ typedef struct {
     MbWarp   warps[MB_MAX_WARPS];
     MbPerson people[MB_MAX_PEOPLE];
     MbZone   zones[MB_MAX_ZONES];
+    uint8_t  table_hi[MB_MAX_TABLES];   /* each table's highest level (the steps choose the table) */
     /* the current area's cells, read when it's entered */
     int32_t  grid_area;             /* -1 none */
     uint16_t gw, gh;

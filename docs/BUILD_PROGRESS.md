@@ -16,6 +16,32 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-31 — Critters: the engine for a longer game (format 1.3)
+
+The owner approved `GAME_LENGTH_PLAN.md` (all four decisions). First, the
+engine the acts need (§4, items 1–3), with no change to the game yet:
+
+- **Encounter steps** (`META` `0x14`): once a flag is set, a zone that names
+  a table uses another (`mp_table()`). The steps apply in order, so a table
+  can step twice. `game_region.json`'s `"steps"`; the builder refuses a step
+  on a flag no one sets, to an unknown table, or to itself.
+- **Keeper bonus** (`META` `0x23`): a keeper's creatures give that
+  percentage of a wild one's experience. `"keeper_bonus"`, 100 to 1000.
+- **Rematches:** two people may share a cell when one's `hide_if` is the
+  other's `show_if` (the reader and the builder both check).
+- **The bot** reads each zone's levels through the steps (it keeps every
+  table's top level, 64 B), and counts a keeper hidden for good as done.
+
+A 1.2 reader skips both keys. The fixture now has Fen's rematch in her cell,
+a step on the elder's flag and a 150 % bonus; `monster_test` checks each,
+including the experience (Puddlop 3: 11 × 1.5 = 16; Thornet 4: 16 × 1.5 =
+24). `mkgame_test` has five new refusals.
+
+Measured: `game.bin` 663,544 B (unchanged in size; the header says 1.3).
+The bot's results are as before. Firmware (IDF v5.5 container, LVGL v9.5.0
+vendored in a scratch copy) 1,805,744 → 1,806,480 B (+736); static DRAM
+unchanged at 147,468 B.
+
 ### 2026-10-30 — Auto-play shows the party instead of the controls
 
 From the owner: while Auto-play is on, show the party in the controls' place.

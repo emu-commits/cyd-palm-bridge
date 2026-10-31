@@ -170,6 +170,8 @@ int  mp_interact(MpWorld *w, MpBattle *b, MpLog *log);
 int  mp_place(MpWorld *w, uint16_t area, uint8_t x, uint8_t y, uint8_t facing);
 /* flags */
 int  mp_flag(const MpWorld *w, uint16_t f);
+/* the encounter table a zone naming `table` uses now (META 0x14's steps) */
+uint16_t mp_table(const MpWorld *w, uint16_t table);
 void mp_set_flag(MpWorld *w, uint16_t f);
 /* is person p of the current area standing there now? */
 int  mp_present(const MpWorld *w, const MgPerson *p);

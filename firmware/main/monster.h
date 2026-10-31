@@ -33,6 +33,7 @@
 #define MG_MAX_SHAPES   32
 #define MG_MAX_STATUSES 8
 #define MG_MAX_STARTERS 8                   /* META 0x12's three and 0x13's up to five */
+#define MG_MAX_STEPS    32                  /* META 0x14: encounter tables that change with a flag */
 #define MG_HEAD_MAX     16384
 #define MG_CHUNK        16                  /* cells per chunk side */
 #define MG_CHUNK_BYTES  (MG_CHUNK * MG_CHUNK * 3)
@@ -150,6 +151,9 @@ typedef struct {
                                experience exponent, maximum level, moves known, party size */
     uint32_t capture[7];    /* shakes, constant, denominator, divisor, HP mult, current-HP mult, HP divisor */
     uint32_t growth[4];     /* IV maximum; experience multipliers (1/100): default, fast, slow */
+    uint32_t keeper_bonus;  /* experience from a keeper's creatures, percent (100 in a file without 0x23) */
+    uint8_t  n_steps;       /* once flag is set, a zone naming table uses to (in order: a table may step twice) */
+    struct { uint16_t flag, table, to; } steps[MG_MAX_STEPS];
 
     uint8_t  n_types, n_shapes, n_statuses;
     uint8_t  types[MG_MAX_TYPES][MG_MAX_TYPES];     /* attacker by row, quarters */

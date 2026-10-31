@@ -76,6 +76,12 @@ static int dump(const char *path){
     printf("rules");   for(int i = 0; i < 8; i++) printf(" %u", (unsigned)g.rules[i]);   printf("\n");
     printf("capture"); for(int i = 0; i < 7; i++) printf(" %u", (unsigned)g.capture[i]); printf("\n");
     printf("growth");  for(int i = 0; i < 4; i++) printf(" %u", (unsigned)g.growth[i]);  printf("\n");
+    printf("keeper bonus %u\n", (unsigned)g.keeper_bonus);
+    if(g.n_steps){
+        printf("steps");
+        for(int i = 0; i < g.n_steps; i++) printf(" %u:%u>%u", g.steps[i].flag, g.steps[i].table, g.steps[i].to);
+        printf("\n");
+    }
     for(uint32_t i = 0; i < g.n_types; i++){
         MgStr s;
         mg_type_name(&g, i, &s);
@@ -396,10 +402,14 @@ static void people(void){
     MpWorld *w = calloc(1, sizeof *w);
     MpLog log;
     MpBattle b;
-    MgPerson fen;
+    MgPerson fen, fen2;
     CHECK(mp_new(w, &G, HEAD, 3, mon_named("Emberkit")) == 0, "a new game: %s", w->err);
-    CHECK(G.looks == 2 && w->area.n_people == 2, "two looks, and two people in the meadow");
+    CHECK(G.looks == 2 && w->area.n_people == 3, "two looks, and three people in the meadow");
     mg_person(&w->area, 0, &fen);
+    mg_person(&w->area, 2, &fen2);
+    /* her rematch shares her cell: it comes when she goes */
+    CHECK(fen2.x == fen.x && fen2.y == fen.y && fen2.kind == MG_P_TRAINER && fen.hide_if && fen2.show_if == fen.hide_if &&
+          fen2.level[0] == 8 && mp_present(w, &fen) && !mp_present(w, &fen2), "Keeper Fen's rematch, not there yet");
     CHECK(fen.kind == MG_P_TRAINER && fen.sight == 2 && fen.mon[1] == mon_named("Thornet") && fen.level[1] == 4 &&
           fen.mon[2] == MG_NONE16, "Keeper Fen's record");
     /* the guard is in the way */
@@ -421,14 +431,19 @@ static void people(void){
     uint32_t rng = 9;
     mp_make(&G, &rng, mon_named("Blazecat"), 40, &w->party[0]);
     b.active = 0;
-    int sends = 0, turns = 0;
+    int sends = 0, turns = 0, nexp = 0;
+    uint32_t exp[4] = { 0 };
     while(!b.over && turns++ < 40){
         int slot = 0;
         while(slot < MP_MOVES && (w->party[0].moves[slot] == MP_NO_MOVE || b.recharge[0][slot])) slot++;
         mp_turn(w, &b, MP_ACT_MOVE, slot < MP_MOVES ? slot : -1, &log);
         if(has_ev(&log, MP_EV_SENDS)) sends++;
+        for(int i = 0; i < log.n; i++) if(log.ev[i].kind == MP_EV_EXP && nexp < 4) exp[nexp++] = log.ev[i].n;
     }
     CHECK(b.over && sends == 1 && has_ev(&log, MP_EV_WIN) && has_ev(&log, MP_EV_BEATEN), "beating Fen (%d turns)", turns);
+    /* the keeper bonus, 150 %: Puddlop 3 (slow) is 3^3 x 1.25 / 3 = 11, so 16; Thornet 4 is 4^3 / 4 = 16, so 24 */
+    CHECK(G.keeper_bonus == 150 && nexp == 2 && exp[0] == 16 && exp[1] == 24, "a keeper's experience: %u %u",
+          (unsigned)exp[0], (unsigned)exp[1]);
     said(&log, "Fen is beaten.", "Fen after the battle");
     CHECK(mp_flag(w, fen.flag), "Fen's flag is set");
     /* beaten: she says her piece and doesn't battle again */
@@ -444,9 +459,16 @@ static void people(void){
     w->x = 3; w->y = 1; w->facing = MG_N;
     mp_step(w, MG_N, &b, &log);
     CHECK(w->area.index == 2 && w->x == 6 && w->y == 8, "into the village");
+    MgZone vz;
+    mg_zone(&w->area, 0, &vz);
+    CHECK(G.n_steps == 1 && G.steps[0].table == vz.table && mp_table(w, vz.table) == vz.table,
+          "the village grass, before the elder");
     w->x = 5; w->y = 3; w->facing = MG_N;
     mp_interact(w, &b, &log);
     said(&log, "Hello, keeper.", "the elder, first");
+    /* the elder's flag: the grass steps up a table, and Fen gives way to her rematch */
+    CHECK(mp_table(w, vz.table) == G.steps[0].to, "the village grass, after the elder");
+    CHECK(!mp_present(w, &fen) && mp_present(w, &fen2), "Fen gone, her rematch there");
     mp_interact(w, &b, &log);
     said(&log, "Again?", "the elder, again");
     w->x = 9; w->y = 3; w->facing = MG_N;

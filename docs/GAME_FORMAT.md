@@ -1,6 +1,6 @@
 # Game format — `game.bin`, version 1
 
-> **Status: version 1.2 (2026-10-30).** `tools/mkgame.py` writes and
+> **Status: version 1.3 (2026-10-31).** `tools/mkgame.py` writes and
 > reads it, and `firmware/main/monster.c` reads it in C (`monster_play.c`
 > plays its rules); the two readers' dumps are compared byte for byte (`make
 > -C sim monster`). G1 added `META` key `0x22`. **G3 made it 1.1**: people in
@@ -8,7 +8,11 @@
 > starters (`0x12`). A 1.0 file still reads; a 1.0 reader refuses a 1.1 file
 > with people, since its head's lists no longer fill it exactly. **1.2** added
 > `META` `0x13`, starters after the first three; a 1.1 reader skips it and
-> offers the three in `0x12`.
+> offers the three in `0x12`. **1.3** added `0x14`, encounter tables that
+> change with a flag, and `0x23`, the keeper bonus, and lets a keeper's
+> rematch share their cell. A 1.2 reader skips both keys, so its zones keep
+> their first tables and keepers give plain experience; it refuses an area
+> where two people share a cell.
 
 `game.bin` holds everything the monster game reads from the card: the
 rules' numbers, the creatures, their moves and battle sprites, the areas
@@ -93,6 +97,14 @@ own. The build lists every event verb it skipped, per area.
 (`beat_ada`), numbered through `game_ids.tsv` like everything a save keeps.
 A trainer needs a flag (set when beaten) and one to three creatures; only a
 trainer has creatures or sight. Nobody may wear one of the player's looks.
+Two people may share a cell only when one's `hide_if` is the other's
+`show_if`: a keeper and their rematch, never there together.
+
+**Acts, in `game_region.json`** (1.3): `"steps": [{"flag", "table", "to"},
+...]`. Once the flag is set, a zone that names `table` uses `to`. Steps are
+applied in order, so a table may step twice. The flag must be one someone
+sets. `"keeper_bonus": 150` gives a keeper's creatures that percentage of
+the experience a wild one gives (100 to 1000; 100 without it).
 
 ## 2) The rules, as Tuxemon has them
 
@@ -219,7 +231,7 @@ when spoken to, or when the player steps into their line of sight (straight
 ahead of them, up to `sight` cells, stopped by walls and people). Their
 creatures are made at the battle's start from the same generator (so a
 battle replays), come out one after another, and give experience as wild
-ones do; there's no catching them and no running. Beating the last sets the
+ones do (times the keeper bonus, `META` `0x23`); there's no catching them and no running. Beating the last sets the
 trainer's flag, and they say their `after` text. A person with `hide_if` is
 gone once that flag is set (a guard who steps aside); one with `show_if`
 appears only once it is.
@@ -284,9 +296,11 @@ Entries one after another: u16 key, u16 length *n*, *n* bytes of value.
 | `0x11` | The player's looks: u8 *n* (1-8), 3 B zero. Every area's first *n* character sheets are the looks a new game offers; without the key, *n* is 1. Added in 1.1. |
 | `0x12` | The starters: u16 × 3 (positions in `MONS`), 2 B zero: the three first creatures a new game offers. Without it, the game picks three (the first that begin an evolution line, of different types). Added in 1.1. |
 | `0x13` | More starters: u8 *k* (1-5), 1 B zero, u16 × *k* (positions in `MONS`), zero to a multiple of 4 B: offered after `0x12`'s three, which it needs. Added in 1.2. |
+| `0x14` | Encounter steps, 8 B each (1-32): u16 flag (1-255), u16 table, u16 to (positions in `ENCT`, different), u16 0. Once the flag is set, a zone naming `table` uses `to`; the steps apply in order, so a table may step more than once. Added in 1.3. |
 | `0x20` | Rules, u32 × 8: COEFF_DAMAGE (7), stat coefficient (7), multiplier minimum and maximum in hundredths (25, 400), experience exponent (3), maximum level (100), moves known (4), party size (6) |
 | `0x21` | Catching, u32 × 7: shakes (4), shake constant (524325), shake denominator (8), shake divisor (65536), HP multiplier (3), current-HP multiplier (2), HP divisor (3) |
 | `0x22` | Growth, u32 × 4: the IVs' maximum (15), then the experience groups' multipliers in hundredths: default (100), fast (80), slow (125). Added in G1. |
+| `0x23` | Keeper bonus, u32: the experience a keeper's creature gives, in percent of a wild one's (100-1000). Without it, 100. Added in 1.3. |
 
 `0x10`, `0x20`, `0x21` and `0x22` are required, and each may appear once. The
 reader refuses values that would overflow its arithmetic (`monster.c`,
@@ -458,7 +472,7 @@ Then, in order, each list right after the one before:
    | Offset | Size | Field |
    |---|---|---|
    | 0 | 1 | x |
-   | 1 | 1 | y (one person to a cell) |
+   | 1 | 1 | y (one person to a cell, unless one's hide-if flag is the other's show-if) |
    | 2 | 1 | Facing, 0-3 |
    | 3 | 1 | Character sheet: an index into the area's sheets, past the player's looks |
    | 4 | 1 | Kind: 0 talk, 1 trainer, 2 healer |

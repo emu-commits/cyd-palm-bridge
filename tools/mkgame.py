@@ -38,7 +38,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mkcourse import fold, latin_fallback  # noqa: E402  (one set of text rules)
 
-FORMAT_MAJOR, FORMAT_MINOR = 1, 2      # 1.1 added people to the areas, 1.2 more starters
+FORMAT_MAJOR, FORMAT_MINOR = 1, 3      # 1.1 people, 1.2 more starters, 1.3 encounter steps and keeper bonus
 MAGIC = b"CYDG"
 
 TUXEMON_URL = "https://github.com/Tuxemon/Tuxemon.git"
@@ -69,9 +69,9 @@ CRC_ON_OPEN = {b"META", b"TYPE", b"SHAP", b"STAT", b"MOVE", b"MONS", b"LRNS",
 
 # META keys (GAME_FORMAT.md 3.2)
 K_TITLE, K_SOURCE, K_BUILD = 0x01, 0x02, 0x03
-K_START, K_LOOKS, K_STARTERS, K_MORE_STARTERS = 0x10, 0x11, 0x12, 0x13
-MAX_STARTERS = 8
-K_RULES, K_CAPTURE, K_GROWTH = 0x20, 0x21, 0x22
+K_START, K_LOOKS, K_STARTERS, K_MORE_STARTERS, K_STEPS = 0x10, 0x11, 0x12, 0x13, 0x14
+MAX_STARTERS, MAX_STEPS = 8, 32
+K_RULES, K_CAPTURE, K_GROWTH, K_KEEPER = 0x20, 0x21, 0x22, 0x23
 
 RANGES = ["melee", "touch", "ranged", "reach", "reliable", "special"]
 SPEEDS = ["extremely_slow", "very_slow", "slow", "normal", "fast", "very_fast", "extremely_fast"]
@@ -905,15 +905,18 @@ def region_events(a, ar, mv, area_ix, rules, ids, flag_names):
         zones.append((rect(z["at"], "a zone"), z["table"], round(chance * 100)))
     for sg in a.get("signs", []):
         talks.append((rect(sg["at"], "a sign"), facing(sg.get("facing"), "a sign"), text_ok(sg["text"], f"{where} sign")))
-    cells = set()
+    cells = {}
     for k, pe in enumerate(a.get("people", [])):
         what = f"person {k} ({pe.get('name', '?')})"
         x, y = pe["at"]
         if not (0 <= x < ar.w and 0 <= y < ar.h):
             fail(f"{where}: {what} stands outside the area")
-        if (x, y) in cells:
-            fail(f"{where}: {what} shares a cell")
-        cells.add((x, y))
+        # one to a cell, unless one's going is the other's coming (a keeper and their rematch)
+        for q in cells.get((x, y), []):
+            if not ((q.get("hide_if") and q.get("hide_if") == pe.get("show_if")) or
+                    (pe.get("hide_if") and pe.get("hide_if") == q.get("show_if"))):
+                fail(f"{where}: {what} shares a cell")
+        cells.setdefault((x, y), []).append(pe)
         kind = pe.get("kind", "talk")
         if kind not in PERSON_KINDS:
             fail(f"{where}: {what}: kind {kind!r}")
@@ -1247,6 +1250,22 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
         if more:            # 1.2: a 1.1 reader skips the key and offers the first three
             META += meta_entry(K_MORE_STARTERS, pad4(struct.pack(f"<BB{len(more)}H", len(more), 0,
                                                                  *(mon_ix[c] for c in more))))
+    steps = region.get("steps", [])
+    if steps:               # 1.3: a 1.2 reader skips the key, and its zones keep their first tables
+        set_flags = {pe["flag"] for a in region["areas"] for pe in a.get("people", []) if pe.get("flag")}
+        if len(steps) > MAX_STEPS:
+            fail(f"game_region.json: steps: at most {MAX_STEPS}")
+        ent = b""
+        for s in steps:
+            if s["flag"] not in set_flags:
+                fail(f"game_region.json: a step's flag {s['flag']} is never set")
+            for t in (s["table"], s["to"]):
+                if t not in enc_ix:
+                    fail(f"game_region.json: a step names table {t}, which the encounters don't have")
+            if s["table"] == s["to"]:
+                fail(f"game_region.json: a step from {s['table']} to itself")
+            ent += struct.pack("<HHHH", assign_id(ids, "flag", s["flag"]), enc_ix[s["table"]], enc_ix[s["to"]], 0)
+        META += meta_entry(K_STEPS, ent)
     mc, cc, cb = rules.monster_cfg, rules.capture, rules.combat
     lo, hi = cb["multiplier_range"]
     META += meta_entry(K_RULES, struct.pack("<8I", 7, int(mc["coeff_stats"]), round(lo * 100), round(hi * 100),
@@ -1259,6 +1278,11 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
     eg = mc["experience_groups"]
     META += meta_entry(K_GROWTH, struct.pack("<4I", int(mc["iv_range"][1]),
                                              *(round(float(eg[g]["multiplier"]) * 100) for g in EXP_GROUPS)))
+    if "keeper_bonus" in region:
+        kb = region["keeper_bonus"]
+        if not isinstance(kb, int) or not 100 <= kb <= 1000:
+            fail("game_region.json: keeper_bonus: a percent, 100 to 1000")
+        META += meta_entry(K_KEEPER, struct.pack("<I", kb))
 
     # credits
     if source.startswith("Tuxemon "):
@@ -1477,6 +1501,10 @@ def dump(g):
     out.append("rules " + " ".join(map(str, struct.unpack("<8I", m[K_RULES]))))
     out.append("capture " + " ".join(map(str, struct.unpack("<7I", m[K_CAPTURE]))))
     out.append("growth " + " ".join(map(str, struct.unpack("<4I", m[K_GROWTH]))))
+    out.append(f"keeper bonus {struct.unpack('<I', m[K_KEEPER])[0] if K_KEEPER in m else 100}")
+    if K_STEPS in m:
+        st = [struct.unpack_from("<HHH", m[K_STEPS], 8 * i) for i in range(len(m[K_STEPS]) // 8)]
+        out.append("steps " + " ".join(f"{f}:{t}>{to}" for f, t, to in st))
     names, table = g.types()
     for n, row in zip(names, table):
         out.append(f"type {n} " + " ".join(map(str, row)))

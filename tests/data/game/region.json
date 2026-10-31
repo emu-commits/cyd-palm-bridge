@@ -42,7 +42,8 @@
             ]
           ],
           "text": "Fen wants a battle.",
-          "after": "Fen is beaten."
+          "after": "Fen is beaten.",
+          "hide_if": "met_elder"
         },
         {
           "at": [
@@ -55,6 +56,31 @@
           "name": "Guard",
           "hide_if": "beat_fen",
           "text": "Beat Fen first."
+        },
+        {
+          "at": [
+            5,
+            14
+          ],
+          "facing": "left",
+          "sheet": "fixture_keeper",
+          "kind": "trainer",
+          "name": "Keeper Fen",
+          "sight": 2,
+          "flag": "beat_fen2",
+          "show_if": "met_elder",
+          "team": [
+            [
+              "blazecat",
+              8
+            ],
+            [
+              "rustmole",
+              8
+            ]
+          ],
+          "text": "Fen wants a rematch.",
+          "after": "Fen is beaten again."
         }
       ]
     },
@@ -205,5 +231,13 @@
     "puddlop",
     "thornet",
     "rustmole"
-  ]
+  ],
+  "steps": [
+    {
+      "flag": "met_elder",
+      "table": "fixture_meadow",
+      "to": "fixture_burrow"
+    }
+  ],
+  "keeper_bonus": 150
 }
