@@ -93,6 +93,13 @@ open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
 - [s] New areas (2026-10-31): Route 2, the Old Keep and Dragon's Cave,
   past the tunnel's north mouth once Ivy is beaten. The `critters_route2`,
   `critters_keep` and `critters_cave` shots looked at.
+- [s] Items and the store (2026-10-31): the Kestrel store after Ivy, the
+  Item menu (Catch it in a wild battle), the Bag, coins from keepers,
+  Auto-play shopping and healing. The `critters_shop*`, `critters_bag`,
+  `critters_battle_menu` and `critters_keeper_items` shots looked at.
+- [d] The store on the bench: Sam in the doorway before Ivy, behind the
+  counter after; buying with A; the Bag from the menu; a potion in a
+  battle; Auto-play walking into the store and buying.
 - [d] After flashing with Critters: the 2.0 game replaces the card's old
   one at boot, and the look and the player draw as before.
 - [d] Choosing Vamporm or Nut on the bench: `<` from Agnite wraps round to

@@ -34,6 +34,7 @@
 #define MG_MAX_STATUSES 8
 #define MG_MAX_STARTERS 8                   /* META 0x12's three and 0x13's up to five */
 #define MG_MAX_STEPS    32                  /* META 0x14: encounter tables that change with a flag */
+#define MG_MAX_ITEMS    9                   /* ITEM (2.1): what a shop sells and the bag holds */
 #define MG_HEAD_MAX     16384
 #define MG_CHUNK        16                  /* cells per chunk side */
 #define MG_CHUNK_BYTES  (MG_CHUNK * MG_CHUNK * 3)
@@ -55,7 +56,7 @@
 #define MG_ERANGE   (-5)    /* the caller asked for something out of range */
 
 enum { MG_META, MG_TYPE, MG_SHAP, MG_STAT, MG_MOVE, MG_MONS, MG_LRNS, MG_ENCT, MG_AREA,
-       MG_ADAT, MG_SPRT, MG_TEXT, MG_CRED, MG_LOOK, MG_NSECT };
+       MG_ADAT, MG_SPRT, MG_TEXT, MG_CRED, MG_LOOK, MG_ITEM, MG_NSECT };   /* ITEM may be missing */
 
 /* move ranges (GAME_FORMAT.md 3.6) */
 enum { MG_MELEE, MG_TOUCH, MG_RANGED, MG_REACH, MG_RELIABLE, MG_SPECIAL };
@@ -69,7 +70,11 @@ enum { MG_HP, MG_ARMOUR, MG_DODGE, MG_MELEE_ST, MG_RANGED_ST, MG_SPEED, MG_NSTAT
 /* facing: N E S W */
 enum { MG_N, MG_E, MG_S, MG_W };
 /* what a person does when spoken to (GAME_FORMAT.md 3.11, minor version 1) */
-enum { MG_P_TALK, MG_P_TRAINER, MG_P_HEALER };
+enum { MG_P_TALK, MG_P_TRAINER, MG_P_HEALER, MG_P_SHOP };     /* a shop: 2.1 */
+/* what an item does (GAME_FORMAT.md 3.16): it may heal a number of HP or a
+ * percentage of the whole, cure a negative status, and/or bring back a
+ * fainted creature (then only a fainted one) */
+enum { MG_I_HEAL = 1, MG_I_HEAL_PCT = 2, MG_I_CURE = 4, MG_I_REVIVE = 8 };
 
 typedef struct { uint32_t off, len, crc; } MgSect;
 typedef struct { uint32_t off; uint16_t len; } MgStr;      /* a string reference into TEXT */
@@ -102,6 +107,13 @@ typedef struct {
 } MgMon;
 
 typedef struct { uint16_t mon; uint8_t lo, hi; uint16_t rate; } MgEncRow;
+
+typedef struct {
+    uint32_t id, price;                     /* price 0: not sold */
+    uint8_t  effects;                       /* MG_I_* */
+    uint16_t amount;                        /* HP, or percent */
+    MgStr    name;
+} MgItem;
 
 typedef struct {
     uint32_t id;
@@ -154,6 +166,8 @@ typedef struct {
     uint32_t capture[7];    /* shakes, constant, denominator, divisor, HP mult, current-HP mult, HP divisor */
     uint32_t growth[4];     /* IV maximum; experience multipliers (1/100): default, fast, slow */
     uint32_t keeper_bonus;  /* experience from a keeper's creatures, percent (100 in a file without 0x23) */
+    uint32_t money_start, money_per_level;  /* META 0x24: coins to start with; a keeper's prize per level */
+    uint8_t  n_items;       /* ITEM's records (0 without the section) */
     uint8_t  n_steps;       /* once flag is set, a zone naming table uses to (in order: a table may step twice) */
     struct { uint16_t flag, table, to; } steps[MG_MAX_STEPS];
 
@@ -189,6 +203,8 @@ int  mg_type_name(MonGame *g, uint32_t t, MgStr *s);
 int  mg_find_mon(MonGame *g, uint32_t id, uint16_t *pos);
 int  mg_find_move(MonGame *g, uint32_t id, uint16_t *pos);
 int  mg_find_area(MonGame *g, uint32_t id, uint16_t *pos);
+int  mg_find_item(MonGame *g, uint32_t id, uint16_t *pos);
+int  mg_item(MonGame *g, uint32_t i, MgItem *it);
 
 /* Enter area i: read and check its head into buf (head_len bytes; MG_HEAD_MAX
  * is always enough), and fill a. The pointers in a point into buf. */

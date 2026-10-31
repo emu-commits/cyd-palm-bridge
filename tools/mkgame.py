@@ -38,7 +38,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mkcourse import fold, latin_fallback  # noqa: E402  (one set of text rules)
 
-FORMAT_MAJOR, FORMAT_MINOR = 2, 0      # 2.0: the player's looks once, in LOOK, not in every area
+FORMAT_MAJOR, FORMAT_MINOR = 2, 1      # 2.0: the player's looks once, in LOOK; 2.1 items, money and shops
 MAGIC = b"CYDG"
 
 TUXEMON_URL = "https://github.com/Tuxemon/Tuxemon.git"
@@ -60,18 +60,20 @@ MAX_AREA_CELLS = 255          # width and height each
 MAX_PEOPLE = 32               # in one area (monster.h MG_MAX_PEOPLE)
 MAX_FLAGS = 256               # flags are numbered 1 .. 255
 TEAM = 3                      # a trainer's creatures
-PERSON_KINDS = {"talk": 0, "trainer": 1, "healer": 2}
+PERSON_KINDS = {"talk": 0, "trainer": 1, "healer": 2, "shop": 3}
+I_HEAL, I_HEAL_PCT, I_CURE, I_REVIVE = 1, 2, 4, 8
+MAX_ITEMS = 9
 
 SECTIONS = [b"META", b"TYPE", b"SHAP", b"STAT", b"MOVE", b"MONS", b"LRNS",
-            b"ENCT", b"AREA", b"ADAT", b"SPRT", b"TEXT", b"CRED", b"LOOK"]
+            b"ENCT", b"AREA", b"ADAT", b"SPRT", b"TEXT", b"CRED", b"LOOK", b"ITEM"]
 CRC_ON_OPEN = {b"META", b"TYPE", b"SHAP", b"STAT", b"MOVE", b"MONS", b"LRNS",
-               b"ENCT", b"AREA", b"TEXT"}
+               b"ENCT", b"AREA", b"TEXT", b"ITEM"}
 
 # META keys (GAME_FORMAT.md 3.2)
 K_TITLE, K_SOURCE, K_BUILD = 0x01, 0x02, 0x03
 K_START, K_LOOKS, K_STARTERS, K_MORE_STARTERS, K_STEPS = 0x10, 0x11, 0x12, 0x13, 0x14
 MAX_STARTERS, MAX_STEPS = 8, 32
-K_RULES, K_CAPTURE, K_GROWTH, K_KEEPER = 0x20, 0x21, 0x22, 0x23
+K_RULES, K_CAPTURE, K_GROWTH, K_KEEPER, K_MONEY = 0x20, 0x21, 0x22, 0x23, 0x24
 
 RANGES = ["melee", "touch", "ranged", "reach", "reliable", "special"]
 SPEEDS = ["extremely_slow", "very_slow", "slow", "normal", "fast", "very_fast", "extremely_fast"]
@@ -306,6 +308,15 @@ class Rules:
         for t, why in sorted(unsupported.items()):
             report.append(f"  left out {t}: {why}")
 
+        self.items = {}         # slug: (effects, amount, price), in the region's order
+        if len(region.get("items", [])) > MAX_ITEMS:
+            fail(f"game_region.json: items: at most {MAX_ITEMS}")
+        for slug in region.get("items", []):
+            p = db / "item" / f"{slug}.yaml"
+            if not p.exists() or slug in self.items:
+                fail(f"game_region.json: item {slug} isn't in Tuxemon, or is listed twice")
+            self.items[slug] = self._item(slug, y(p))
+
         self.encounters = {}
         for slug, rows in sorted(region.get("encounters", {}).items()):
             for r in rows:
@@ -339,6 +350,27 @@ class Rules:
         if not d.get("effects"):
             return "no effects"
         return None
+
+    @staticmethod
+    def _item(slug, d):
+        """An item as GAME_FORMAT.md 3.16 keeps it: heal a fixed number or a
+        percentage, restore (cure; with a condition of 0 HP, revive)."""
+        eff, amount = 0, 0
+        for e in d.get("effects") or []:
+            p = e.get("parameters") or []
+            if e["type"] == "heal" and len(p) == 2 and p[1] in ("fixed", "percentage") and not eff & 3:
+                eff |= I_HEAL if p[1] == "fixed" else I_HEAL_PCT
+                amount = int(p[0]) if p[1] == "fixed" else round(float(p[0]) * 100)
+            elif e["type"] == "restore" and not p:
+                eff |= I_CURE
+            else:
+                fail(f"item {slug}: effect {e['type']} {' '.join(map(str, p))} isn't played")
+        if any(c.get("type") == "current_hp" and (c.get("parameters") or []) == ["==", "0"]
+               for c in d.get("conditions") or []):
+            eff |= I_REVIVE
+        if not eff or (eff & 3 and not 0 < amount <= (100 if eff & I_HEAL_PCT else 1000)):
+            fail(f"item {slug}: nothing it does is played, or an amount out of range")
+        return eff, amount, int(d.get("cost", 0))
 
     def name(self, slug):
         return self.po.get(slug, slug.replace("_", " ").title())
@@ -1293,6 +1325,11 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
     eg = mc["experience_groups"]
     META += meta_entry(K_GROWTH, struct.pack("<4I", int(mc["iv_range"][1]),
                                              *(round(float(eg[g]["multiplier"]) * 100) for g in EXP_GROUPS)))
+    if "money" in region:
+        mo = region["money"]
+        if not (0 <= mo.get("start", 0) <= 999999 and 0 <= mo.get("per_level", 0) <= 10000):
+            fail("game_region.json: money: start 0-999999, per_level 0-10000")
+        META += meta_entry(K_MONEY, struct.pack("<II", mo.get("start", 0), mo.get("per_level", 0)))
     if "keeper_bonus" in region:
         kb = region["keeper_bonus"]
         if not isinstance(kb, int) or not 100 <= kb <= 1000:
@@ -1316,9 +1353,18 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
         cred.append("")
     CRED = "\n".join(text_ok(c, "credits") if c else "" for c in cred).encode("utf-8")
 
+    ITEM = struct.pack("<HH", len(rules.items), 0)
+    for s, (eff, amount, price) in rules.items.items():
+        if price > 999999:
+            fail(f"item {s}: price {price}")
+        ITEM += struct.pack("<IBxHI", assign_id(ids, "item", s), eff, amount, price) + \
+            text.ref(text_ok(rules.name(s), f"item {s}")) + b"\0" * 4
+    shops = sum(1 for a in region["areas"] for pe in a.get("people", []) if pe.get("kind") == "shop")
+    if shops and not any(price for _, _, price in rules.items.values()):
+        fail("game_region.json: a shop, but no item with a price")
     secs = {b"META": META, b"TYPE": TYPE, b"SHAP": SHAP, b"STAT": STAT, b"MOVE": MOVE, b"MONS": MONS,
             b"LRNS": LRNS, b"ENCT": ENCT, b"AREA": AREA, b"ADAT": bytes(ADAT), b"SPRT": bytes(SPRT),
-            b"TEXT": bytes(text.b), b"CRED": CRED, b"LOOK": LOOK}
+            b"TEXT": bytes(text.b), b"CRED": CRED, b"LOOK": LOOK, b"ITEM": ITEM}
     off = 32 + 16 * len(SECTIONS)
     table, body = b"", b""
     for tag in SECTIONS:
@@ -1366,8 +1412,9 @@ class Game:
                 fail(f"section {tag.decode()} CRC")
             self.sec[tag] = b
         for t in SECTIONS:
-            if t not in self.sec:
+            if t not in self.sec and t != b"ITEM":          # ITEM (2.1) may be missing
                 fail(f"no {t.decode()} section")
+        self.sec.setdefault(b"ITEM", struct.pack("<HH", 0, 0))
         self.text = self.sec[b"TEXT"]
 
     def s(self, b, o):
@@ -1394,8 +1441,8 @@ class Game:
         t0 = 4 + 8 * n
         return names, [list(b[t0 + n * i:t0 + n * i + n]) for i in range(n)]
 
-    def records(self, tag, size):
-        b = self.sec[tag]
+    def records(self, tag, size, skip=0):
+        b = self.sec[tag][skip:]
         if len(b) % size:
             fail(f"{tag.decode()} isn't whole {size}-byte records")
         return [b[i:i + size] for i in range(0, len(b), size)]
@@ -1532,6 +1579,10 @@ def dump(g):
     out.append("capture " + " ".join(map(str, struct.unpack("<7I", m[K_CAPTURE]))))
     out.append("growth " + " ".join(map(str, struct.unpack("<4I", m[K_GROWTH]))))
     out.append(f"keeper bonus {struct.unpack('<I', m[K_KEEPER])[0] if K_KEEPER in m else 100}")
+    out.append("money " + " ".join(map(str, struct.unpack("<II", m[K_MONEY]) if K_MONEY in m else (0, 0))))
+    for r in g.records(b"ITEM", 24, skip=4):
+        iid, eff, amount, price = struct.unpack_from("<IBxHI", r)
+        out.append(f"item {iid} {g.s(r, 12)} effects {eff} amount {amount} price {price}")
     if K_STEPS in m:
         st = [struct.unpack_from("<HHH", m[K_STEPS], 8 * i) for i in range(len(m[K_STEPS]) // 8)]
         out.append("steps " + " ".join(f"{f}:{t}>{to}" for f, t, to in st))

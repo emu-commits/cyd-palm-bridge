@@ -4,6 +4,8 @@
   "player": ["player", "player_green", "player_orange", "player_olive", "player_violet", "player_rose"],
   "start": {"area": "larkhollow", "x": 6, "y": 10, "facing": "down"},
   "starters": ["agnite", "anoleaf", "cardiling", "vamporm", "nut"],
+  "items": ["potion", "super_potion", "mega_potion", "revive", "cureall"],
+  "money": {"start": 300, "per_level": 15},
   "areas": [
     {
       "map": "larkhollow", "name": "Larkhollow", "layout": "game_maps/larkhollow.json",
@@ -99,14 +101,16 @@
       "map": "kestrel", "name": "Kestrel", "layout": "game_maps/kestrel.json",
       "warps": [
         {"at": [12, 20, 2, 1], "to": "spyder_cotton_tunnel", "x": 35, "y": 3, "facing": "down"},
-        {"at": [6, 15], "to": "kestrel_rest", "x": 5, "y": 7, "facing": "up"}
+        {"at": [6, 15], "to": "kestrel_rest", "x": 5, "y": 7, "facing": "up"},
+        {"at": [19, 15], "to": "kestrel_store", "x": 5, "y": 7, "facing": "up"}
       ],
       "signs": [
         {"at": [9, 11, 2, 2], "facing": "up",
          "text": "THE KESTREL RING. Warden Ivy takes on any keeper who reaches her."}
       ],
       "people": [
-        {"at": [16, 16], "facing": "down", "sheet": "shopassistant", "kind": "talk", "name": "Sam",
+        {"at": [19, 16], "facing": "down", "sheet": "shopassistant", "kind": "talk", "name": "Sam",
+         "hide_if": "beat_ivy",
          "text": "The store opens next season. For now, there's only one thing worth buying in Kestrel: a win in the Ring."},
         {"at": [10, 7], "facing": "right", "sheet": "monk", "kind": "trainer", "name": "Ringman Pell",
          "sight": 2, "flag": "beat_pell", "team": [["selket", 10], ["bolt", 10]],
@@ -280,6 +284,20 @@
       ],
       "zones": [
         {"at": [0, 0, 20, 40], "table": "dragons_cave", "chance": 4}
+      ]
+    },
+    {
+      "map": "kestrel_store", "name": "Kestrel Store", "layout": "game_maps/kestrel_store.json",
+      "warps": [
+        {"at": [5, 8], "to": "kestrel", "x": 19, "y": 16, "facing": "down"}
+      ],
+      "signs": [
+        {"at": [0, 2, 2, 2], "facing": "up", "text": "Jars and tins, each with a label in Sam's writing: TONIC, STRONGER TONIC, DON'T."}
+      ],
+      "people": [
+        {"at": [5, 3], "facing": "down", "sheet": "shopassistant", "kind": "shop", "name": "Sam",
+         "show_if": "beat_ivy",
+         "text": "Open at last! Potions for the road, and a revive or two for the worst of it."}
       ]
     }
   ],

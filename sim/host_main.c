@@ -33,6 +33,8 @@
  *   G <area> <x> <y> <facing>  Critters: put the player there (mon_ui_test_place),
  *                   so the tour can reach the towns and the keepers without
  *                   a hundred steps of walking
+ *   F <flag> <coins>  Critters: set a story flag and the purse (mon_ui_test_give),
+ *                   so the tour can open what a win opens (the store)
  *   B               remember the heap in use now...
  *   E <what>        ...and fail unless it's the same again: a screen that was
  *                   opened and left must give back every byte it took
@@ -299,6 +301,11 @@ int main(int argc, char **argv){
             int ga, gx, gy, gf;
             if(sscanf(line + 2, "%d %d %d %d", &ga, &gx, &gy, &gf) != 4){ fprintf(stderr, "script: bad G: %s", line); rc = 1; break; }
             mon_ui_test_place(ga, gx, gy, gf); sim_step(200);
+        }
+        else if(line[0] == 'F' && line[1] == ' '){
+            int fl, coins;
+            if(sscanf(line + 2, "%d %d", &fl, &coins) != 2){ fprintf(stderr, "script: bad F: %s", line); rc = 1; break; }
+            mon_ui_test_give(fl, coins); sim_step(60);
         }
         else if(line[0] == 'R' && line[1] == ' '){
             char *e; long back = strtol(line + 2, &e, 10), ahead = strtol(e, NULL, 10);

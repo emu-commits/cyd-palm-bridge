@@ -44,7 +44,8 @@
 
 #define MB_MAX_AREAS  32
 #define MB_MAX_WARPS  128
-#define MB_MAX_PEOPLE 96            /* keepers and healers, region-wide */
+#define MB_MAX_PEOPLE 96            /* keepers, healers and shops, region-wide */
+#define MB_HEALS      6             /* healing items it keeps in the bag */
 #define MB_MAX_ZONES  64
 #define MB_MAX_TABLES 64            /* encounter tables whose levels it knows */
 #define MB_MAX_CELLS  (64 * 64)
@@ -83,6 +84,7 @@ typedef struct {
     uint8_t  fighting;              /* the keeper in this battle: people[] + 1, or 0 */
     uint8_t  goal;                  /* the keeper it's after: people[] + 1, or 0 */
     uint32_t foe_mon;               /* the wild creature the tries are at */
+    uint32_t no_shop;               /* the story's flags (a checksum) when no shop could be reached; 0 none */
     char     why[48];               /* what it's doing now, in words */
 } MbBot;
 
@@ -102,5 +104,8 @@ int  mb_learn(MbBot *b, MpWorld *w, int who, uint16_t move);
 void mb_events(MbBot *b, const MpBattle *bt, const MpLog *log);
 /* every keeper in the region beaten */
 int  mb_done(const MbBot *b, const MpWorld *w);
+/* In a shop: the item to buy next (a position in ITEM), or -1 to leave. It
+ * keeps MB_HEALS healing items, the strongest that cost at most half its money. */
+int  mb_shop(const MbBot *b, MpWorld *w);
 
 #endif

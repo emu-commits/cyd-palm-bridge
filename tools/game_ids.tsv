@@ -11,6 +11,7 @@ area	kestrel_rest	8
 area	spyder_route4	9
 area	spyder_routea	10
 area	spyder_dragonscave	11
+area	kestrel_store	12
 creature	agnite	1
 creature	agnidon	2
 creature	agnigon	3
@@ -48,6 +49,11 @@ flag	beat_sly	7
 flag	beat_pell	8
 flag	beat_juno	9
 flag	beat_ivy	10
+item	potion	1
+item	super_potion	2
+item	mega_potion	3
+item	revive	4
+item	cureall	5
 move	all_in	1
 move	assault	2
 move	battery_acid	3

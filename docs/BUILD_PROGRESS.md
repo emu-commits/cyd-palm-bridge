@@ -16,6 +16,64 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-31 — Critters: items, money and the Kestrel store (format 2.1)
+
+`GAME_LENGTH_PLAN.md` §5, approved with one addition from the owner:
+Auto-play must go to the store, find its way round it, and use the items.
+
+- **Items** (`ITEM`, `GAME_FORMAT.md` §3.16): five of Tuxemon's, as its
+  data has them:
+
+  | Item | Effect | Price |
+  |---|---|---|
+  | Potion | 50 HP | 100 |
+  | Super Potion | 100 HP | 300 |
+  | Mega Potion | 200 HP | 500 |
+  | Revive | half HP, only when fainted | 1,000 |
+  | Cureall | full HP and cures | 1,500 |
+
+  The builder takes `heal` (fixed or percentage), `restore` and the "0 HP"
+  condition, and refuses any other effect.
+- **Money** (`META` `0x24`): 300 coins to start with, and a keeper pays 15
+  a level of their critters (Ada's 4 + 5: 135).
+- **The rules** (`monster_play.c`): `mp_buy()`, `mp_use()`, and
+  `MP_ACT_ITEM` in a battle (it takes the turn, then the other side acts).
+  An item that wouldn't help is refused. The save is version 3: 80 B of
+  coins and bag, by item id; a version 2 save loads with the starting
+  coins.
+- **The store:** Kestrel's barn has a door now, and a room of our own
+  (`kestrel_store.json`, the CC0 interior tileset) with two counters. Sam
+  stands in the doorway until Warden Ivy is beaten ("the store opens next
+  season"), then serves behind the counter.
+- **The screens:** the battle menu is Fight, Swap, Item, Run. Catching
+  became the Item menu's first line in a wild battle ("Catch it"), as in
+  Tuxemon, because a fifth line covered the player's HP. The shop lists
+  the prices, what's in the bag and the coins. **Bag** is in the menu.
+- **Auto-play** (`monster_bot.c`) knows the shops. With money and fewer
+  than six healing items, it walks to the nearest shop and buys the
+  strongest potion that costs at most half its coins (`mb_shop()`). In a
+  keeper's battle, under a third of its HP and with no knockout ready, it
+  uses the potion that best makes up what it has lost. A shop it can't
+  reach isn't tried again until the story's flags change.
+- Smoke: `F <flag> <coins>` sets a flag and the purse (devtools), so the
+  tour opens the store: `critters_store_talk`, `critters_shop`,
+  `critters_shop_bought`, `critters_bag`. The menu's Save game and Credits
+  taps moved down a line for Bag.
+
+Measured:
+
+- `game.bin` 460,812 → 474,568 B (the store room, Sam's sheet in it, the
+  door, `ITEM`).
+- `monster_test`: the fixture's Tonic and Revival (buy, use, refuse, a
+  battle turn), Fen's prize (70), the clerk's shop, and the version 3
+  save: 952 B, every truncation and flipped bit refused, an unknown item
+  refused, and a version 2 save loading.
+- The bot finishes Act 1 with all five starters, buying 6–8 potions once
+  the store opens and using up to 5.
+- Firmware 1,806,576 → 1,811,024 B (+4,448), static DRAM unchanged.
+- A 20-minute Auto-play run in the simulator caught four critters through
+  the new Item menu.
+
 ### 2026-10-31 — Critters: Route 2, the Old Keep and Dragon's Cave
 
 `GAME_LENGTH_PLAN.md` §5, approved: new areas, paid for by format 2.0. Of

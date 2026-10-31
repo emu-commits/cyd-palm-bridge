@@ -73,7 +73,8 @@
 
 enum { SC_NONE, SC_ERROR, SC_PICK, SC_MAP, SC_BATTLE, SC_CARD };
 enum { UI_NONE, UI_TEXT, UI_MENU, UI_CREDITS };
-enum { MN_BATTLE, MN_MOVES, MN_SWAP, MN_PARTY, MN_FORGET, MN_NEW };
+enum { MN_BATTLE, MN_MOVES, MN_SWAP, MN_PARTY, MN_FORGET, MN_NEW,
+       MN_ITEM, MN_ITEM_WHO, MN_SHOP, MN_BAG, MN_BAG_WHO };          /* the items' menus: 2.1 */
 enum { BT_NONE = -1, BT_N = 0, BT_E, BT_S, BT_W, BT_A, BT_B };
 /* after the transition card: */
 enum { CARD_MAP, CARD_BATTLE };
@@ -110,6 +111,9 @@ typedef struct {
     uint8_t  learn_who;
     uint16_t learn_move;
     uint8_t  to_menu;               /* a note, then the battle menu again */
+    uint8_t  to_back;               /* a note, then this menu again (MN_ITEM, MN_SHOP, MN_BAG) */
+    uint8_t  item_of[MENU_MAX];     /* an items menu's lines: their items */
+    uint8_t  use_item;              /* the item a party menu is choosing a creature for */
     uint16_t sh_wild_mon, sh_wild_max;
     uint8_t  sh_wild_lv;
     char     keeper[NAME_LEN];      /* the trainer in this battle */
@@ -139,7 +143,8 @@ typedef struct {
     /* Auto-play: the bot, and the battle action it's pressing its way to */
     MbBot   *bot;
     uint8_t  autoplay, bot_wait;
-    int8_t   bot_act, bot_arg;      /* bot_act -1: none chosen yet this turn */
+    int8_t   bot_act;               /* -1: none chosen yet this turn */
+    int16_t  bot_arg;
     /* its party panel, as last drawn (names read from the card when they change) */
     uint8_t  pp_n, pp_active, pp_lv[MP_PARTY];
     uint16_t pp_mon[MP_PARTY], pp_hp[MP_PARTY], pp_max[MP_PARTY];
@@ -589,8 +594,59 @@ static const char *person_name(Mon *m, uint32_t k, char *buf){
 }
 
 static void battle_menu(Mon *m){
-    static const char *const L[] = { "Fight", "Swap", "Catch", "Run" };
+    static const char *const L[] = { "Fight", "Swap", "Item", "Run" };   /* Catch is the Item menu's, in a wild battle */
     menu_show(m, MN_BATTLE, L, 4, 0);
+}
+
+static const char *item_name(Mon *m, uint16_t i, char *buf){
+    MgItem it;
+    if(mg_item(&m->g, i, &it) || mtext(&m->g, it.name, buf, NAME_LEN)) snprintf(buf, NAME_LEN, "?");
+    return buf;
+}
+
+#define CATCH_LINE 0xFF          /* item_of[]: the wild battle's "Catch it" */
+
+/* MN_ITEM (in a battle: first "Catch it" if it's a wild one) or MN_BAG: the
+ * items in the bag, then Back */
+static void items_menu(Mon *m, int kind){
+    char (*lines)[48] = m->lines;
+    const char *ptr[MENU_MAX];
+    char a[NAME_LEN];
+    int n = 0;
+    if(kind == MN_ITEM && !m->b.trainer){
+        snprintf(lines[n], 48, "Catch it");
+        m->item_of[n] = CATCH_LINE;
+        ptr[n] = lines[n]; n++;
+    }
+    for(uint32_t i = 0; i < m->g.n_items && i < MP_BAG && n < MENU_MAX - 1; i++){
+        if(!m->w.bag[i]) continue;
+        snprintf(lines[n], 48, "%s  x%u", item_name(m, (uint16_t)i, a), m->w.bag[i]);
+        m->item_of[n] = (uint8_t)i;
+        ptr[n] = lines[n]; n++;
+    }
+    if(kind == MN_BAG) snprintf(lines[n], 48, "Back  (%u coins)", (unsigned)m->w.money);
+    else snprintf(lines[n], 48, "Back");
+    ptr[n] = lines[n]; n++;
+    if(m->sel >= n) m->sel = 0;
+    menu_show(m, kind, ptr, n, 1);
+}
+
+/* the shop: every item with a price, then Leave with the money */
+static void shop_menu(Mon *m){
+    char (*lines)[48] = m->lines;
+    const char *ptr[MENU_MAX];
+    char a[NAME_LEN];
+    int n = 0;
+    for(uint32_t i = 0; i < m->g.n_items && n < MENU_MAX - 1; i++){
+        MgItem it;
+        if(mg_item(&m->g, i, &it) || !it.price) continue;
+        snprintf(lines[n], 48, "%s  %u  (%u)", item_name(m, (uint16_t)i, a), (unsigned)it.price, m->w.bag[i]);
+        m->item_of[n] = (uint8_t)i;
+        ptr[n] = lines[n]; n++;
+    }
+    snprintf(lines[n], 48, "Leave  (%u coins)", (unsigned)m->w.money);
+    ptr[n] = lines[n]; n++;
+    menu_show(m, MN_SHOP, ptr, n, 1);
 }
 
 static void party_menu(Mon *m, int kind, int back){
@@ -691,6 +747,24 @@ static int ev_text(Mon *m, const MpEvent *e, char *t, size_t cap){
         snprintf(t, cap, "You beat %s!", person_name(m, e->a, a)); return 1;
     case MP_EV_HEALED:
         snprintf(t, cap, "Your critters are rested."); return 1;
+    case MP_EV_PRIZE:
+        snprintf(t, cap, "%s pays you %u coins.", person_name(m, e->a, a), (unsigned)e->n); return 1;
+    case MP_EV_ITEM: {
+        MgItem it;
+        int fainted = !mg_item(&m->g, e->a, &it) && (it.effects & MG_I_REVIVE);
+        uint16_t mon = m->scene == SC_BATTLE ? m->sh_mon[e->b] : m->w.party[e->b].mon;
+        if(m->scene == SC_BATTLE){
+            m->sh_hp[e->b] = (uint16_t)(m->sh_hp[e->b] + e->n);
+            if(e->b == m->sh_active) m->sh_me_gone = 0;
+            battle_labels(m); redraw();
+        }
+        int k = snprintf(t, cap, "You use a %s on %s. ", item_name(m, e->a, b), mon_name(m, mon, a));
+        if(k < 0 || (size_t)k >= cap) return 1;
+        if(fainted) snprintf(t + k, cap - (size_t)k, "It's back on its feet!");
+        else if(e->n) snprintf(t + k, cap - (size_t)k, "It gains %u HP.", (unsigned)e->n);
+        else snprintf(t + k, cap - (size_t)k, "It feels better.");
+        return 1;
+    }
     case MP_EV_USE:
         snprintf(t, cap, "%s%s uses %s.", who, nm, move_name(m, e->a, b)); return 1;
     case MP_EV_MISS:
@@ -812,6 +886,7 @@ static void script_next(Mon *m){
             return;
         }
         m->pos++;
+        if(e->kind == MP_EV_SHOP){ m->sel = 0; shop_menu(m); return; }   /* the script goes on when it's left */
         if(ev_text(m, e, t, sizeof t)){ box_say(m, t); return; }
     }
     script_done(m);
@@ -1041,13 +1116,62 @@ static void choose(Mon *m){
             if(any) moves_menu(m); else do_turn(m, MP_ACT_MOVE, -1);
         }
         else if(s == 1) party_menu(m, MN_SWAP, 1);
-        else if(m->b.trainer){
-            m->to_menu = 1;
-            box_say(m, s == 2 ? "You can't catch another keeper's critter." : "There's no running from a keeper's battle.");
-        }
-        else if(s == 2) do_turn(m, MP_ACT_CATCH, 0);
+        else if(s == 2){ m->sel = 0; items_menu(m, MN_ITEM); }
+        else if(m->b.trainer){ m->to_menu = 1; box_say(m, "There's no running from a keeper's battle."); }
         else do_turn(m, MP_ACT_RUN, 0);
         break;
+    case MN_ITEM:
+    case MN_BAG: {
+        if(s >= m->nmenu - 1){
+            if(m->menu == MN_ITEM){ m->sel = 2; battle_menu(m); } else box_hide(m);
+            break;
+        }
+        MgItem it;
+        if(m->item_of[s] == CATCH_LINE){ do_turn(m, MP_ACT_CATCH, 0); break; }
+        m->use_item = m->item_of[s];
+        if(m->menu == MN_ITEM && !mg_item(&m->g, m->use_item, &it) && !(it.effects & MG_I_REVIVE)){
+            /* in a battle, it's for the creature out now */
+            int who = m->b.active;
+            if(mp_item_helps(&m->w, m->use_item, who, NULL)) do_turn(m, MP_ACT_ITEM, m->use_item | who << 8);
+            else { char a[NAME_LEN], t[96]; m->to_back = 1;
+                   snprintf(t, sizeof t, "It wouldn't help %s now.", mon_name(m, m->w.party[who].mon, a)); box_say(m, t); }
+            break;
+        }
+        party_menu(m, m->menu == MN_ITEM ? MN_ITEM_WHO : MN_BAG_WHO, 1);
+        break;
+    }
+    case MN_ITEM_WHO:
+    case MN_BAG_WHO: {
+        int bag = m->menu == MN_BAG_WHO;
+        if(s >= m->w.n_party){ m->sel = 0; items_menu(m, bag ? MN_BAG : MN_ITEM); break; }
+        if(!mp_item_helps(&m->w, m->use_item, s, NULL)){
+            char a[NAME_LEN], t[96];
+            m->to_back = 1;
+            m->menu = (uint8_t)(bag ? MN_BAG : MN_ITEM);
+            snprintf(t, sizeof t, "It wouldn't help %s now.", mon_name(m, m->w.party[s].mon, a));
+            box_say(m, t);
+            break;
+        }
+        if(!bag){ do_turn(m, MP_ACT_ITEM, m->use_item | s << 8); break; }
+        if(mp_use(&m->w, m->use_item, s, &m->log)){ box_say(m, "That can't be done now."); break; }
+        script_start(m);
+        break;
+    }
+    case MN_SHOP: {
+        if(s >= m->nmenu - 1){ box_hide(m); script_next(m); break; }   /* Leave: the rest of the script */
+        if(mp_buy(&m->w, m->item_of[s])){
+            MgItem it;
+            char t[96];
+            mg_item(&m->g, m->item_of[s], &it);
+            m->to_back = 1;
+            if(it.price > m->w.money) snprintf(t, sizeof t, "That's %u coins; you have %u.", (unsigned)it.price, (unsigned)m->w.money);
+            else snprintf(t, sizeof t, "Your bag can't hold any more of those.");
+            box_say(m, t);
+            break;
+        }
+        shop_menu(m);
+        break;
+    }
     case MN_MOVES: {
         if(s >= MP_MOVES){ m->sel = 0; battle_menu(m); break; }
         MpCreature *c = &m->w.party[m->b.active];
@@ -1100,6 +1224,11 @@ static void press_a(Mon *m){
         if(m->learn_pending){ forget_menu(m); return; }
         if(m->to_moves){ m->to_moves = 0; moves_menu(m); return; }
         if(m->to_menu){ m->to_menu = 0; m->sel = 0; battle_menu(m); return; }
+        if(m->to_back){
+            m->to_back = 0;
+            if(m->menu == MN_SHOP) shop_menu(m); else items_menu(m, m->menu == MN_BAG ? MN_BAG : MN_ITEM);
+            return;
+        }
         if(m->scene == SC_PICK){
             if(m->pick_note){ m->pick_note = 0; if(m->picking_look) look_show(m); else pick_show(m); }
             else if(m->picking_look){ m->picking_look = 0; cache_clear(m); pick_show(m); }
@@ -1136,6 +1265,9 @@ static void press_b(Mon *m){
     case UI_MENU:
         if(m->menu_back){
             if(m->menu == MN_MOVES || m->menu == MN_SWAP){ m->sel = m->menu == MN_SWAP; battle_menu(m); }
+            else if(m->menu == MN_ITEM){ m->sel = 2; battle_menu(m); }
+            else if(m->menu == MN_ITEM_WHO || m->menu == MN_BAG_WHO){ m->sel = 0; items_menu(m, m->menu == MN_BAG_WHO ? MN_BAG : MN_ITEM); }
+            else if(m->menu == MN_SHOP){ box_hide(m); script_next(m); }
             else box_hide(m);
         }
         return;
@@ -1245,16 +1377,32 @@ static void bot_menu(Mon *m){
     case MN_BATTLE:
     case MN_MOVES:
     case MN_SWAP:
+    case MN_ITEM:
+    case MN_ITEM_WHO:
         if(m->bot_act < 0 || (m->b.need_swap && m->bot_act != MP_ACT_SWAP)){
             int a, g;
             mb_battle(m->bot, &m->w, &m->b, &a, &g);
-            m->bot_act = (int8_t)a; m->bot_arg = (int8_t)g;
+            m->bot_act = (int8_t)a; m->bot_arg = (int16_t)g;
         }
         if(m->menu == MN_BATTLE)
-            want = m->bot_act == MP_ACT_MOVE ? 0 : m->bot_act == MP_ACT_SWAP ? 1 : m->bot_act == MP_ACT_CATCH ? 2 : 3;
+            want = m->bot_act == MP_ACT_MOVE ? 0 : m->bot_act == MP_ACT_SWAP ? 1 :
+                   m->bot_act == MP_ACT_ITEM || m->bot_act == MP_ACT_CATCH ? 2 : 3;
         else if(m->menu == MN_MOVES) want = m->bot_act == MP_ACT_MOVE && m->bot_arg >= 0 ? m->bot_arg : MP_MOVES;
-        else want = m->bot_act == MP_ACT_SWAP ? m->bot_arg : m->w.n_party;
+        else if(m->menu == MN_SWAP) want = m->bot_act == MP_ACT_SWAP ? m->bot_arg : m->w.n_party;
+        else if(m->menu == MN_ITEM_WHO) want = m->bot_act == MP_ACT_ITEM ? m->bot_arg >> 8 : m->w.n_party;
+        else{
+            want = m->nmenu - 1;                    /* Back, unless its item (or Catch it) is there */
+            for(int k = 0; k < m->nmenu - 1; k++)
+                if((m->bot_act == MP_ACT_ITEM && m->item_of[k] == (m->bot_arg & 0xFF)) ||
+                   (m->bot_act == MP_ACT_CATCH && m->item_of[k] == CATCH_LINE)) want = k;
+        }
         break;
+    case MN_SHOP: {
+        int it = mb_shop(m->bot, &m->w);
+        want = m->nmenu - 1;                        /* Leave, unless there's something to buy */
+        for(int k = 0; k < m->nmenu - 1; k++) if(it >= 0 && m->item_of[k] == it) want = k;
+        break;
+    }
     case MN_FORGET:
         want = mb_learn(m->bot, &m->w, m->learn_who, m->learn_move);
         if(want < 0) want = MP_MOVES;
@@ -1706,6 +1854,15 @@ void mon_ui_party(void){
     m->menu_back = 1;
 }
 
+void mon_ui_bag(void){
+    Mon *m = g_mon;
+    if(!m || !m->started || m->anim) return;
+    m->sel = 0;
+    if(m->scene == SC_BATTLE){ if(m->ui == UI_MENU && m->menu == MN_BATTLE) items_menu(m, MN_ITEM); return; }
+    if(m->scene != SC_MAP || m->ui != UI_NONE) return;
+    items_menu(m, MN_BAG);
+}
+
 void mon_ui_new_game(void){
     /* the old save stays until the new game is saved (on leaving, or Save) */
     static const char *const L[] = { "Start a new game", "Keep playing" };
@@ -1726,6 +1883,14 @@ void mon_ui_test_place(int area, int x, int y, int facing){
         return;
     }
     scene_map(m);
+}
+
+void mon_ui_test_give(int flag, int coins){
+    Mon *m = g_mon;
+    if(!m || !m->started || flag <= 0 || flag >= MG_FLAGS || coins < 0 || coins > MP_MONEY_MAX) return;
+    mp_set_flag(&m->w, (uint16_t)flag);
+    m->w.money = (uint32_t)coins;
+    redraw();
 }
 #endif
 

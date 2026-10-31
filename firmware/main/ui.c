@@ -5929,6 +5929,7 @@ static void act_lock(lv_event_t *e){ (void)e; menu_close(); ui_show_lock(); }
 /* Critters' items (ui_monster.c does the work). Choosing one takes the
  * game back from Auto-play, as a touch on the game does. */
 static void act_mon_party(lv_event_t *e){ (void)e; menu_close(); mon_ui_set_auto(0); mon_ui_party(); }
+static void act_mon_bag(lv_event_t *e){ (void)e; menu_close(); mon_ui_set_auto(0); mon_ui_bag(); }
 static void act_mon_new(lv_event_t *e){ (void)e; menu_close(); mon_ui_set_auto(0); mon_ui_new_game(); }
 static void act_mon_credits(lv_event_t *e){ (void)e; menu_close(); mon_ui_set_auto(0); mon_ui_credits(); }
 static void act_mon_auto(lv_event_t *e){ (void)e; menu_close(); mon_ui_set_auto(!mon_ui_auto()); }
@@ -6017,6 +6018,7 @@ static void menu_open(void){
         if(mon_ui_playing()){
             menu_item(panel, mon_ui_auto() ? "Stop Auto-play" : "Auto-play", act_mon_auto);
             menu_item(panel, "Party", act_mon_party);
+            menu_item(panel, "Bag", act_mon_bag);
             menu_item(panel, "Save game", act_mon_save);
         }
         menu_item(panel, "New game", act_mon_new);

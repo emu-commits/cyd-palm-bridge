@@ -22,18 +22,19 @@
 #define LRNS_SIZE  4
 #define AREA_SIZE  32
 #define ENC_ROW    8
+#define ITEM_SIZE  24
 #define HEAD_FIXED 64
 
 /* the section tags, 4 bytes each in MG_* order, as the section table holds
  * them (one string: tests/nodelete.sh rightly flags a quoted HTTP method name,
  * and one of these tags is spelt like one) */
-static const char TAGS[] = "METATYPESHAPSTATMOVEMONSLRNSENCTAREAADATSPRTTEXTCREDLOOK";
+static const char TAGS[] = "METATYPESHAPSTATMOVEMONSLRNSENCTAREAADATSPRTTEXTCREDLOOKITEM";
 #define TAG(k) (TAGS + 4 * (k))
 /* checked on open: everything small (section 6) */
 #define CRC_ON_OPEN(i) ((i) != MG_ADAT && (i) != MG_SPRT && (i) != MG_CRED && (i) != MG_LOOK)
 
 enum { K_TITLE = 0x01, K_SOURCE, K_BUILD, K_START = 0x10, K_LOOKS, K_STARTERS, K_MORE_STARTERS, K_STEPS,
-       K_RULES = 0x20, K_CAPTURE, K_GROWTH, K_KEEPER };
+       K_RULES = 0x20, K_CAPTURE, K_GROWTH, K_KEEPER, K_MONEY };
 
 static uint16_t le16(const uint8_t *p){ return (uint16_t)(p[0] | p[1] << 8); }
 static uint32_t le32(const uint8_t *p){
@@ -189,7 +190,7 @@ static int parse_meta(MonGame *g, const uint8_t *m, uint32_t len){
             if(seen & (1u << k)) return bad(g, "META key %02x twice", k);
             seen |= 1u << k;
         }
-        else if(k >= K_RULES && k <= K_KEEPER){
+        else if(k >= K_RULES && k <= K_MONEY){
             uint32_t b = 1u << (k - K_RULES + 24);
             if(seen & b) return bad(g, "META key %02x twice", k);
             seen |= b;
@@ -243,6 +244,11 @@ static int parse_meta(MonGame *g, const uint8_t *m, uint32_t len){
         case K_KEEPER:      /* minor version 3: u32 percent */
             if(n != 4 || le32(v) < 100 || le32(v) > 1000) return bad(g, "the keeper bonus is out of range");
             g->keeper_bonus = le32(v);
+            break;
+        case K_MONEY:       /* 2.1: u32 coins to start with, u32 a keeper's prize per level */
+            if(n != 8 || le32(v) > 999999 || le32(v + 4) > 10000) return bad(g, "the money rules are out of range");
+            g->money_start = le32(v);
+            g->money_per_level = le32(v + 4);
             break;
         case K_RULES:
             if(n != 32) return bad(g, "the rules are %u bytes", n);
@@ -399,6 +405,25 @@ int mg_find_mon(MonGame *g, uint32_t id, uint16_t *pos){
         int r = rds(g, MG_MONS, i * MONS_SIZE, b, 4);
         if(r) return r;
         if(le32(b) == id){ *pos = (uint16_t)i; return 0; }
+    }
+    return MG_ERANGE;
+}
+
+int mg_item(MonGame *g, uint32_t i, MgItem *it){
+    uint8_t b[ITEM_SIZE];
+    if(i >= g->n_items) return MG_ERANGE;
+    int r = rds(g, MG_ITEM, 4 + i * ITEM_SIZE, b, ITEM_SIZE);
+    if(r) return r;
+    it->id = le32(b); it->effects = b[4]; it->amount = le16(b + 6); it->price = le32(b + 8);
+    return str_ref(g, b + 12, &it->name);
+}
+
+int mg_find_item(MonGame *g, uint32_t id, uint16_t *pos){
+    for(uint32_t i = 0; i < g->n_items; i++){
+        MgItem it;
+        int r = mg_item(g, i, &it);
+        if(r) return r;
+        if(it.id == id){ *pos = (uint16_t)i; return 0; }
     }
     return MG_ERANGE;
 }
@@ -561,6 +586,29 @@ static int check_records(MonGame *g){
     if(!g->looks || g->looks > 8 || b[1] != 8 || !le16(b + 2) || le16(b + 2) > 255 ||
        g->s[MG_LOOK].len != g->look_frames + (uint32_t)g->looks * MG_CHAR_FRAMES * MG_CHAR_W * MG_CHAR_H)
         return bad(g, "LOOK is out of range");
+    /* ITEM (2.1, may be missing): u16 items, u16 0, then 24 B each */
+    if(g->s[MG_ITEM].len){
+        if(g->s[MG_ITEM].len < 4) return bad(g, "ITEM is too short");
+        if((r = rds(g, MG_ITEM, 0, b, 4))) return r;
+        if(le16(b) > MG_MAX_ITEMS || le16(b + 2) || g->s[MG_ITEM].len != 4u + ITEM_SIZE * le16(b))
+            return bad(g, "ITEM is the wrong size");
+        g->n_items = (uint8_t)le16(b);
+        for(uint32_t i = 0; i < g->n_items; i++){
+            uint8_t e[ITEM_SIZE];
+            MgItem it;
+            MgStr s;
+            uint16_t at;
+            if((r = rds(g, MG_ITEM, 4 + i * ITEM_SIZE, e, ITEM_SIZE))) return r;
+            it.effects = e[4]; it.amount = le16(e + 6);
+            int heal = it.effects & (MG_I_HEAL | MG_I_HEAL_PCT);
+            if(!le32(e) || !it.effects || it.effects > 15 || heal == (MG_I_HEAL | MG_I_HEAL_PCT) || e[5] ||
+               (heal ? !it.amount || it.amount > (it.effects & MG_I_HEAL_PCT ? 100 : 1000) : it.amount) ||
+               le32(e + 8) > 999999 || le32(e + 20))
+                return bad(g, "item %u is out of range", (unsigned)i);
+            if((r = str_check(g, e + 12, &s))) return r;
+            if(!mg_find_item(g, le32(e), &at) && at < i) return bad(g, "item %u: its id twice", (unsigned)i);
+        }
+    }
     /* AREA */
     if(g->s[MG_AREA].len % AREA_SIZE || g->s[MG_AREA].len / AREA_SIZE != g->n_areas || !g->n_areas || g->n_areas > 65535)
         return bad(g, "AREA doesn't hold the header's %u areas", (unsigned)g->n_areas);
@@ -626,7 +674,7 @@ int mg_open_fp(MonGame *g, FILE *f){
     if((r = zero_range(g, prev, g->size - prev))) goto fail;
     if(g->size - prev > 3){ r = bad(g, "bytes after the last section"); goto fail; }
     for(int k = 0; k < MG_NSECT; k++){
-        if(!(have & (1u << k))){ r = bad(g, "no %.4s section", TAG(k)); goto fail; }
+        if(!(have & (1u << k)) && k != MG_ITEM){ r = bad(g, "no %.4s section", TAG(k)); goto fail; }
         if(!CRC_ON_OPEN(k)) continue;
         uint32_t c;
         if((r = crc_range(g, g->s[k].off, g->s[k].len, &c))) goto fail;
@@ -741,7 +789,7 @@ static int area_open(MonGame *g, uint32_t i, MgArea *a, uint8_t *buf, uint32_t c
         const uint8_t *p = a->people + 48 * k;
         MgStr s;
         int team = 0, ok = p[0] < a->w && p[1] < a->h && p[2] <= 3 && p[3] < a->n_chars &&
-                           p[4] <= MG_P_HEALER && p[5] <= 15 && le16(p + 6) < MG_FLAGS &&
+                           p[4] <= MG_P_SHOP && p[5] <= 15 && le16(p + 6) < MG_FLAGS &&
                            le16(p + 8) < MG_FLAGS && le16(p + 10) < MG_FLAGS;
         for(int j = 0; ok && j < MG_TEAM; j++){
             uint16_t mon = le16(p + 36 + 4 * j);

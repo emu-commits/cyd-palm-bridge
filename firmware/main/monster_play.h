@@ -27,6 +27,9 @@
 #define MP_CHUNKS    4          /* chunks kept: a screen spans at most 2 x 2 */
 #define MP_EVENTS    48         /* the most one action can say */
 #define MP_NO_MOVE   0xFFFF
+#define MP_BAG       MG_MAX_ITEMS
+#define MP_BAG_MAX   99         /* of one item */
+#define MP_MONEY_MAX 999999
 
 /* a creature, as the rules hold it (positions in the file, not ids) */
 typedef struct {
@@ -85,6 +88,10 @@ enum {
     MP_EV_SENDS,        /* the trainer sends out creature a at level b */
     MP_EV_BEATEN,       /* trainer a is beaten (their flag is set) */
     MP_EV_HEALED,       /* the party is rested, and this is where a loss comes back to */
+    /* items and money (2.1) */
+    MP_EV_ITEM,         /* item a is used on party member b: n HP gained */
+    MP_EV_PRIZE,        /* the keeper beaten pays n coins */
+    MP_EV_SHOP,         /* person a keeps a shop: the screens offer ITEM's priced items (mp_buy) */
 };
 
 typedef struct {
@@ -96,7 +103,7 @@ typedef struct {
 typedef struct { MpEvent ev[MP_EVENTS]; uint8_t n, overflow; } MpLog;
 
 /* battle actions */
-enum { MP_ACT_MOVE, MP_ACT_CATCH, MP_ACT_RUN, MP_ACT_SWAP };
+enum { MP_ACT_MOVE, MP_ACT_CATCH, MP_ACT_RUN, MP_ACT_SWAP, MP_ACT_ITEM };   /* ITEM's arg: item | who << 8 */
 
 typedef struct {
     uint8_t    active;          /* the player's creature in battle (party position) */
@@ -130,6 +137,8 @@ typedef struct {
     uint8_t    flags[MG_FLAGS / 8];
     uint8_t    has_respawn, respawn_x, respawn_y, respawn_facing;
     uint8_t    look;                         /* which of the player's looks (below g->looks) */
+    uint32_t   money;
+    uint8_t    bag[MP_BAG];                  /* how many of each of ITEM's items */
     uint16_t   respawn_area;
     uint8_t    pface[MG_MAX_PEOPLE];         /* the area's people's facing now (they turn to talk) */
     char       err[80];
@@ -177,6 +186,15 @@ void mp_set_flag(MpWorld *w, uint16_t f);
 int  mp_present(const MpWorld *w, const MgPerson *p);
 /* heal the party: full HP, no status */
 void mp_heal_party(MpWorld *w);
+/* Items (2.1). Would item i do anything for party member who (heal HP, cure a
+ * negative status, or bring back a fainted creature)? What it would give, in HP. */
+int  mp_item_helps(MpWorld *w, uint16_t item, int who, uint32_t *gain);
+/* buy one of item i: MG_ERANGE if it isn't sold, costs more than the money,
+ * or the bag holds MP_BAG_MAX */
+int  mp_buy(MpWorld *w, uint16_t item);
+/* use one of item i on party member who, out of a battle (in one, it's
+ * MP_ACT_ITEM): MG_ERANGE if there's none or it wouldn't help */
+int  mp_use(MpWorld *w, uint16_t item, int who, MpLog *log);
 
 /* ---- battles ---- */
 int  mp_battle_start(MpWorld *w, MpBattle *b, const MpCreature *wild);
@@ -190,7 +208,7 @@ int  mp_wild_choice(MpWorld *w, MpBattle *b);
 /* ---- the save ---- */
 #define MP_SAVE_HEADER 32
 #define MP_SAVE_REC    40
-#define MP_SAVE_VERSION 2       /* 2 added the story's flags and the respawn; 1 still loads */
+#define MP_SAVE_VERSION 3       /* 2 added the story's flags and the respawn, 3 the money and the bag */
 int  mp_save(MpWorld *w, const char *path);
 /* Load into a world made with mp_new's arguments' game; refuses a damaged
  * file, and one naming creatures, moves or areas this game file doesn't have. */

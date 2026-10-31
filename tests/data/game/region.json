@@ -166,6 +166,17 @@
           "name": "Herald",
           "show_if": "beat_fen",
           "text": "Fen is beaten!"
+        },
+        {
+          "at": [
+            7,
+            2
+          ],
+          "facing": "down",
+          "sheet": "fixture_keeper",
+          "kind": "shop",
+          "name": "Clerk",
+          "text": "Tonics and revivals."
         }
       ]
     }
@@ -239,5 +250,13 @@
       "to": "fixture_burrow"
     }
   ],
-  "keeper_bonus": 150
+  "keeper_bonus": 150,
+  "items": [
+    "tonic",
+    "revival"
+  ],
+  "money": {
+    "start": 100,
+    "per_level": 10
+  }
 }
