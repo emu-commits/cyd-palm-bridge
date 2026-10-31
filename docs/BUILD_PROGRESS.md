@@ -16,6 +16,62 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-31 — Critters: Acts 2 and 3, and the finale
+
+The content of `GAME_LENGTH_PLAN.md`, on the engine, areas and store built
+today. Everything is in `tools/game_region.json`: no new art and no new
+format.
+
+- **Act 2 opens when Warden Ivy is beaten.**
+  - The first region's six road keepers come back in their own cells, with
+    three critters each, levels 17–24.
+  - Route 2 has four keepers (19–23).
+  - The Old Keep has three squires (23–25), Captain Rook (26–27) and Hermit
+    Ola, who heals.
+  - Beating the captain brings Pell, Juno and Ivy back (26–30).
+- **Act 3 opens when Ivy is beaten a second time.**
+  - The Gatewarden steps out of the keep's gate.
+  - Dragon's Cave has four delvers (32–35) and no healer.
+  - Wyrmkeeper Ashe (38–40) waits at the top.
+  - Then Dr Wren leaves the square for his lab, and battles for the
+    Larkhollow plate (41–43).
+  - 32 keepers in all.
+- **The grass steps up with the story:** after Ivy, Route 1, the
+  Brideswood and the tunnel go to 12–20. After her rematch, every road goes
+  to 22–34. After Ashe, the keep and the cave go to 30–38, with stage-2
+  critters in the cave. There are ten steps and ten new tables.
+- **Keeper bonus 150 %.**
+- **Auto-play's resting** chose its healer from a search that avoids
+  keepers' sight. Captain Rook's line covers the only way to Hermit Ola,
+  so inside the keep the nearest healer it could reach unseen was Kestrel's,
+  back the way it came, and on Route 2 the keep's looked nearer again: it
+  went back and forth for ever. It now compares both searches and takes the
+  unseen route only if it isn't more areas away.
+- **The gate:** `BOT_LIMIT` 40,000 → 400,000 actions, and a new check that
+  the best critter ends at 36 or more (`BOT_MAIN_MIN`, the owner's ask).
+
+Measured: `game.bin` 474,568 → 572,000 B (the people's sheets in the new
+areas: 6 KB a sheet an area). Firmware 1,811,024 → 1,811,056 B (+32: the
+bot's resting), static DRAM unchanged. Auto-play from seed 1:
+
+| Starter | Actions | Battles | Lost | Ivy | Ivy again | Ashe | Wren, the end |
+|---|---|---|---|---|---|---|---|
+| Agnite | 14,834 | 368 | 22 | 14 | 37 | 50 | Agnigon 54 |
+| Anoleaf | 29,061 | 640 | 42 | 14 | 34 | 51 | Velocitile 53 |
+| Cardiling | 20,037 | 467 | 23 | 15 | 42 | 49 | Cardinale 52 |
+| Vamporm | 14,466 | 191 | 4 | 14 | 35 | 46 | Fluttaflap 52 |
+| Nut | 39,806 | 790 | 113 | 14 | 43 | 56 | Arthrobolt 59 |
+
+The level columns are the best critter's when each keeper is beaten.
+Before, the game ended at Ivy after 9,700–10,900 actions and 65–294
+battles, the best critter at 13–18. Over eight seeds per starter (40 runs,
+in a scratch copy of the gate) every run finished. The best critter ended
+at 40–64 (median 54), in at most 59,931 actions and 159–872 battles. The
+bot carries one critter and so out-levels a person with a mixed party; the
+finale's levels were raised by 2–3 after the first runs, so it still asks
+for a level-40 critter. The `critters_keep` shot shows Ola, the captain and
+a squire.
+
 ### 2026-10-31 — Critters: items, money and the Kestrel store (format 2.1)
 
 `GAME_LENGTH_PLAN.md` §5, approved with one addition from the owner:

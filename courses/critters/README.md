@@ -14,9 +14,14 @@ once Ivy is beaten: Route 2, the Old Keep and Dragon's Cave (Tuxemon's
 Spyder Route 4, Route A and Dragon's Cave). The two towns are laid out for
 this game (`tools/game_maps/`) from the clean tilesets, and every house
 with an open door can be walked into: Home and Wren's Lab in Larkhollow,
-the rest house in Kestrel, furnished from a tileset of our own. 27
-creatures in whole evolution lines and their moves; 20 townspeople and
-keepers, each with words of our own; and six looks for the player. Every tile, creature
+the rest house in Kestrel, furnished from a tileset of our own, and the
+Kestrel store, which opens once Ivy is beaten. Three acts: the first
+region's nine keepers; their rematches, Route 2 and the Old Keep's squires
+and captain, then the Ring again; and Dragon's Cave, its Wyrmkeeper, and
+Dr Wren for the Larkhollow plate (32 keepers in all, the last at level 43).
+27 creatures in whole evolution lines and their moves; five items; 47
+townspeople and keepers, each with words of our own; and six looks for the
+player. Every tile, creature
 sprite and character sheet in it is on the allow-list with its licence
 (`docs/GAME_PLAN.md` §10 and §13): nothing under the XYG licence, nothing
 non-commercial. The townspeople are Tuxemon's own sheets; most of them come

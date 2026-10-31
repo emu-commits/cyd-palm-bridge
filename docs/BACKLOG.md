@@ -97,6 +97,12 @@ open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
   Item menu (Catch it in a wild battle), the Bag, coins from keepers,
   Auto-play shopping and healing. The `critters_shop*`, `critters_bag`,
   `critters_battle_menu` and `critters_keeper_items` shots looked at.
+- [s] Acts 2 and 3 (2026-10-31): 32 keepers, rematches, the Old Keep's
+  captain, Dragon's Cave, Dr Wren's finale; the gate plays all five
+  starters to the end, the best critter at 36 or more.
+- [d] The longer game on the bench: an Auto-play run from a new game to Dr
+  Wren (it takes hours: the lock pauses it); a person's game into Act 2
+  (the rematches, Route 2, the keep), and whether its pace feels right.
 - [d] The store on the bench: Sam in the doorway before Ivy, behind the
   counter after; buying with A; the Bag from the menu; a potion in a
   battle; Auto-play walking into the store and buying.

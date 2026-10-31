@@ -33,7 +33,8 @@
 #define GAME   "../tests/data/game/game.bin"
 #define BATTLE "../tests/data/game/battle.txt"
 #define REGION "../courses/critters/game.bin"
-#define BOT_LIMIT 40000L            /* presses and battle turns, all told: about 3x the worst of 60 seeds */
+#define BOT_LIMIT 400000L           /* presses and battle turns, all told (GAME_LENGTH_PLAN.md) */
+#define BOT_MAIN_MIN 36             /* the first critter's level when every keeper is beaten, at least (the owner's ask) */
 static const char *SAVE = "build/monster_save.bin";   /* MONSTER_SAVE overrides */
 
 static int fails;
@@ -991,6 +992,9 @@ static int bot_plays(MonGame *g, int pick, uint32_t seed){
         size_t l = strlen(party);
         snprintf(party + l, sizeof party - l, "%s%s %u", i ? ", " : "", t, w->party[i].level);
     }
+    int main_lv = w->party[0].level;
+    for(int i = 1; i < w->n_party; i++) if(w->party[i].level > main_lv) main_lv = w->party[i].level;
+    CHECK(!ok || main_lv >= BOT_MAIN_MIN, "bot: the best critter ends at level %d, under %d", main_lv, BOT_MAIN_MIN);
     printf("  bot with %s, seed %u: %s after %ld actions; %ld battles, %ld keepers, %ld lost, "
            "(%ld to keepers), %ld caught, %ld moves relearnt, %ld stuck, %ld bought, %ld used, %u coins; party %s\n",
            who, (unsigned)seed, ok ? "every keeper beaten" : "NOT finished", n, battles, keepers, lost, lost_k, caught,

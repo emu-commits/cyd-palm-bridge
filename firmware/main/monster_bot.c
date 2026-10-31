@@ -370,8 +370,9 @@ static int grind(MbBot *b, const MpWorld *w, int *dir){
     return 1;
 }
 
-/* to the nearest healer (or shop): 1 and the press, or 0 if none can be reached */
-static int to_nearest(MbBot *b, const MpWorld *w, int kind, int *what, int *dir){
+/* to the nearest healer (or shop): its score (fewer areas away first, then
+ * fewer steps) and the press, or FAR if none can be reached */
+static uint32_t to_nearest(MbBot *b, const MpWorld *w, int kind, int *what, int *dir){
     uint32_t near = FAR;
     for(int k = 0; k < b->n_people; k++){
         const MbPerson *p = &b->people[k];
@@ -380,10 +381,8 @@ static int to_nearest(MbBot *b, const MpWorld *w, int kind, int *what, int *dir)
         uint32_t s = to_person(b, w, p, &wh, &dd);
         if(s < near){ near = s; *what = wh; *dir = dd; }
     }
-    return near != FAR;
+    return near;
 }
-
-static int rest(MbBot *b, const MpWorld *w, int *what, int *dir){ return to_nearest(b, w, MG_P_HEALER, what, dir); }
 
 /* a healing item (not a revive): its HP for a creature of max HP `max`, or 0 */
 static uint32_t heals(const MgItem *it, uint32_t max){
@@ -476,23 +475,33 @@ int mb_world(MbBot *b, MpWorld *w, int *dir){
     for(uint32_t i = 0; i < sizeof w->flags; i++) story = story * 31u + w->flags[i];
     if(!worn(w) && b->no_shop != story && mb_shop(b, w) >= 0){
         int wh = MB_STEP, dd = 0;
-        if(to_nearest(b, w, MG_P_SHOP, &wh, &dd)){
+        if(to_nearest(b, w, MG_P_SHOP, &wh, &dd) != FAR){
             snprintf(b->why, sizeof b->why, "going shopping");
             *dir = dd;
             return wh;
         }
         b->no_shop = story;
     }
-    /* resting and training keep out of keepers' sight if there's a way */
-    for(int unseen = 1; (tired || train) && unseen >= 0; unseen--){
-        int wh = MB_STEP, dd = 0;
-        search(b, w, unseen);
-        if(tired && rest(b, w, &wh, &dd)){
+    /* resting keeps out of keepers' sight if that isn't further: a healer
+     * past a keeper's line in this area beats one two areas back, or it
+     * would turn round at the area's edge and come back for ever */
+    if(tired){
+        int wh1 = MB_STEP, d1 = 0, wh0 = MB_STEP, d0 = 0;
+        search(b, w, 1);
+        uint32_t s1 = to_nearest(b, w, MG_P_HEALER, &wh1, &d1);
+        search(b, w, 0);
+        uint32_t s0 = to_nearest(b, w, MG_P_HEALER, &wh0, &d0);
+        if(s1 != FAR || s0 != FAR){
+            int seen = s1 == FAR || (s0 != FAR && s0 / 4096 < s1 / 4096);
             snprintf(b->why, sizeof b->why, "going to rest");
-            *dir = dd;
-            return wh;
+            *dir = seen ? d0 : d1;
+            return seen ? wh0 : wh1;
         }
-        if(train && grind(b, w, dir)){
+    }
+    /* training keeps out of keepers' sight if there's a way */
+    for(int unseen = 1; train && unseen >= 0; unseen--){
+        search(b, w, unseen);
+        if(grind(b, w, dir)){
             if(best == FAR) snprintf(b->why, sizeof b->why, "training: no keeper in reach");
             else snprintf(b->why, sizeof b->why, "training for a level %d keeper", top);
             return MB_STEP;

@@ -1,8 +1,14 @@
 # A longer Critters: plan (proposal, 2026-10-30)
 
-> **Status: approved 2026-10-31, being built.** The owner said yes to all
-> four decisions in §6, with one addition: Auto-play must find the store,
-> buy, and use items. The engine for the acts (§4, items 1–3) is built.
+> **Status: built 2026-10-31, in the simulator; the bench is next.** The
+> owner said yes to all four decisions in §6, with one addition: Auto-play
+> must find the store, buy, and use items. Built, one commit each: the
+> engine (format 1.3), the looks stored once (2.0), three new areas, items
+> and the store (2.1), and the acts. What was built differs from §3 in
+> places: Act 2 also runs through the new areas, and the gauntlet is
+> Dragon's Cave rather than Kestrel's Ring. `BUILD_PROGRESS.md` (2026-10-31)
+> has the measurements: Auto-play finishes the game with every starter,
+> its first critter at level 40–64.
 > The ask (2026-10-30): make the game much longer and deeper without
 > making the game file much bigger, so that the player's main critter is
 > **above level 36** when the game ends.
