@@ -1,12 +1,27 @@
-# Game format — `game.bin`, version 1
+# Game format — `game.bin`, version 2
 
-> **Status: version 1.1 (G3, 2026-10-16).** `tools/mkgame.py` writes and
+> **Status: version 2.1 (2026-10-31).** `tools/mkgame.py` writes and
 > reads it, and `firmware/main/monster.c` reads it in C (`monster_play.c`
 > plays its rules); the two readers' dumps are compared byte for byte (`make
 > -C sim monster`). G1 added `META` key `0x22`. **G3 made it 1.1**: people in
 > each area's head (§3.11), the player's looks (`META` `0x11`) and the
 > starters (`0x12`). A 1.0 file still reads; a 1.0 reader refuses a 1.1 file
-> with people, since its head's lists no longer fill it exactly.
+> with people, since its head's lists no longer fill it exactly. **1.2** added
+> `META` `0x13`, starters after the first three; a 1.1 reader skips it and
+> offers the three in `0x12`. **1.3** added `0x14`, encounter tables that
+> change with a flag, and `0x23`, the keeper bonus, and lets a keeper's
+> rematch share their cell. A 1.2 reader skips both keys, so its zones keep
+> their first tables and keepers give plain experience; it refuses an area
+> where two people share a cell.
+> **2.0** keeps the player's looks once, in a section of their own (`LOOK`,
+> §3.15), instead of copying them into every area's sheets. That saved
+> 258,560 B of the 663,544 B file. A 1.x reader refuses a 2.0 file, and a
+> 2.0 reader a 1.x one; the save doesn't change. **2.1** added items, money
+> and shops: an `ITEM` section (§3.16), `META` `0x24` (the coins to start
+> with and a keeper's prize) and a shopkeeper kind of person. A 2.0 reader
+> skips the section and the key but refuses an area with a shopkeeper; a 2.1
+> reader takes a file without `ITEM` as one with no items. Saves are version
+> 3 from here (§7).
 
 `game.bin` holds everything the monster game reads from the card: the
 rules' numbers, the creatures, their moves and battle sprites, the areas
@@ -46,7 +61,7 @@ Four files in `tools/` decide what's built:
 |---|---|
 | `mkgame.py` | The pinned Tuxemon commit (`TUXEMON_COMMIT`, the full SHA). The build refuses a checkout at any other commit, or with local changes under `mods/`. |
 | `game_allow.tsv` | The licence allow-list (`GAME_PLAN.md` §10). **Only what it lists is built**: tilesets, creatures and character sheets, each with licence, authors, source and a status (`credited` from Tuxemon's `ATTRIBUTIONS.md`, `unverified`, `confirmed` by hand, or `ours`: a character sheet or tileset drawn for this project, CC0, at `tools/game_art/<slug>.png`; the rooms' `interior` tileset is one, drawn by `tools/gen_interior_sheet.py`). `--strict` refuses any `unverified` line. A map cell from an unlisted tileset loses that layer's tile, and the build says how many. |
-| `game_region.json` | The region: which maps (Tuxemon's, or a layout of our own in `tools/game_maps/`), their names, where the player starts, the player's looks, the three starters, the encounter tables, and per area the warps, encounter zones, signs and **people** Tuxemon's own events don't give (below). The tables are ours, not Tuxemon's, because Tuxemon's name creatures the allow-list doesn't have. |
+| `game_region.json` | The region: which maps (Tuxemon's, or a layout of our own in `tools/game_maps/`), their names, where the player starts, the player's looks, the three to eight starters, the encounter tables, and per area the warps, encounter zones, signs and **people** Tuxemon's own events don't give (below). The tables are ours, not Tuxemon's, because Tuxemon's name creatures the allow-list doesn't have. |
 | `game_maps/<slug>.json` | A layout of our own (the towns, §13 Q6 in `GAME_PLAN.md`): a grid of legend characters (each a tile or two from an allow-listed tileset, solid or not, a ledge, the sides it can be entered from), a sand path's edges filled in by `autotile`, and stamps (a rectangle of a tileset's tiles, a house or a tree, with a solid mask and rows drawn over the player). `OwnArea` in `mkgame.py` documents every field. |
 | `game_ids.tsv` | Stable numbers for creatures, moves, statuses and areas, as `ids.tsv` is for courses. A save refers to these, so a rebuild that adds content keeps old saves working. `mkgame.py` appends new numbers and never renumbers. **Commit it.** |
 
@@ -83,14 +98,33 @@ it byte for byte; `--unpinned` is for that and nothing else.
 events aren't taken either: the people are `game_region.json`'s, each with
 our own words, and their sheets are allow-listed one by one. An area can
 drop Tuxemon's events altogether (`"tuxemon_events": false`) and give its
-own. The build lists every event verb it skipped, per area.
+own. An area may also mark cells solid that the map's own data leaves open
+(`"solid"`: one string a row, `#` solid, `.` as the map says): the Old
+Keep's hedges, moats and walls have no collision data in Tuxemon's file. The build lists every event verb it skipped, per area.
 
 **People, in `game_region.json`:** `{"at": [x, y], "facing", "sheet", "kind":
-"talk" | "trainer" | "healer", "name", "text", "after", "flag", "hide_if",
+"talk" | "trainer" | "healer" | "shop", "name", "text", "after", "flag", "hide_if",
 "show_if", "sight", "team": [[creature, level], ...]}`. Flags are names
 (`beat_ada`), numbered through `game_ids.tsv` like everything a save keeps.
 A trainer needs a flag (set when beaten) and one to three creatures; only a
 trainer has creatures or sight. Nobody may wear one of the player's looks.
+Two people may share a cell only when one's `hide_if` is the other's
+`show_if`: a keeper and their rematch, never there together.
+
+**Items and money, in `game_region.json`** (2.1): `"items": [slug, ...]`
+names up to nine of Tuxemon's items (`db/item/<slug>.yaml`), and their
+order is the shop's. The builder takes the effects the game plays: `heal`
+by a fixed number or a percentage, `restore` (cures a negative status), and
+a condition of 0 HP (it revives a fainted creature, and only one); an item
+with any other effect is refused. Its price is Tuxemon's `cost`.
+`"money": {"start": 300, "per_level": 15}`: the coins a new game starts
+with, and what a keeper pays when beaten, per level of their critters.
+
+**Acts, in `game_region.json`** (1.3): `"steps": [{"flag", "table", "to"},
+...]`. Once the flag is set, a zone that names `table` uses `to`. Steps are
+applied in order, so a table may step twice. The flag must be one someone
+sets. `"keeper_bonus": 150` gives a keeper's creatures that percentage of
+the experience a wild one gives (100 to 1000; 100 without it).
 
 ## 2) The rules, as Tuxemon has them
 
@@ -212,12 +246,14 @@ if there's been none.
 the way like a wall. A pressed A on one turns them to the player and they
 say their text; once their flag is set, their `after` text (if they have
 one). A **talk** sets their flag. A **healer** rests the party and makes
-this the place a loss comes back to. A **trainer** not yet beaten battles:
+this the place a loss comes back to. A **shopkeeper** (2.1) opens the shop:
+every item with a price, one at a time while the coins last. A **trainer** not yet beaten battles:
 when spoken to, or when the player steps into their line of sight (straight
 ahead of them, up to `sight` cells, stopped by walls and people). Their
 creatures are made at the battle's start from the same generator (so a
 battle replays), come out one after another, and give experience as wild
-ones do; there's no catching them and no running. Beating the last sets the
+ones do (times the keeper bonus, `META` `0x23`); there's no catching them and no running. Beating the last pays
+the prize (`META` `0x24`: so many coins a level of their critters) and sets the
 trainer's flag, and they say their `after` text. A person with `hide_if` is
 gone once that flag is set (a guard who steps aside); one with `show_if`
 appears only once it is.
@@ -246,8 +282,8 @@ folded with the course builder's rules (curly quotes to straight, dashes to
 
 ```
 header         32 B
-section table  16 B x 13
-META TYPE SHAP STAT MOVE MONS LRNS ENCT AREA ADAT SPRT TEXT CRED   (in this order)
+section table  16 B x 15
+META TYPE SHAP STAT MOVE MONS LRNS ENCT AREA ADAT SPRT TEXT CRED LOOK ITEM   (in this order)
 ```
 
 **Header (32 B, at 0):**
@@ -255,7 +291,7 @@ META TYPE SHAP STAT MOVE MONS LRNS ENCT AREA ADAT SPRT TEXT CRED   (in this orde
 | Offset | Size | Field |
 |---|---|---|
 | 0 | 4 | Magic `CYDG` |
-| 4 | 2 | Format major version: `1`. A reader refuses any other. |
+| 4 | 2 | Format major version: `2`. A reader refuses any other. |
 | 6 | 2 | Format minor version: `0` |
 | 8 | 4 | File size in bytes |
 | 12 | 2 | Section count |
@@ -266,7 +302,7 @@ META TYPE SHAP STAT MOVE MONS LRNS ENCT AREA ADAT SPRT TEXT CRED   (in this orde
 | 28 | 4 | CRC-32 of bytes 0–27 |
 
 **Section table (16 B per section):** tag, u32 offset, u32 length, u32
-CRC-32 of the section's bytes. All 13 are required. A reader skips a tag
+CRC-32 of the section's bytes. All are required but `ITEM` (2.1). A reader skips a tag
 it doesn't know.
 
 ### 3.2 `META`
@@ -279,11 +315,15 @@ Entries one after another: u16 key, u16 length *n*, *n* bytes of value.
 | `0x02` | Source: `Tuxemon <full commit SHA>` |
 | `0x03` | Builder: `mkgame <major>.<minor>` |
 | `0x10` | Start: u16 area (its position in `AREA`), u8 x, u8 y, u8 facing (0 N, 1 E, 2 S, 3 W), 3 B zero |
-| `0x11` | The player's looks: u8 *n* (1-8), 3 B zero. Every area's first *n* character sheets are the looks a new game offers; without the key, *n* is 1. Added in 1.1. |
+| `0x11` | 1.x only: the number of the player's looks, which were every area's first sheets. 2.0 keeps them in `LOOK` (§3.15) and doesn't write the key. |
 | `0x12` | The starters: u16 × 3 (positions in `MONS`), 2 B zero: the three first creatures a new game offers. Without it, the game picks three (the first that begin an evolution line, of different types). Added in 1.1. |
+| `0x13` | More starters: u8 *k* (1-5), 1 B zero, u16 × *k* (positions in `MONS`), zero to a multiple of 4 B: offered after `0x12`'s three, which it needs. Added in 1.2. |
+| `0x14` | Encounter steps, 8 B each (1-32): u16 flag (1-255), u16 table, u16 to (positions in `ENCT`, different), u16 0. Once the flag is set, a zone naming `table` uses `to`; the steps apply in order, so a table may step more than once. Added in 1.3. |
 | `0x20` | Rules, u32 × 8: COEFF_DAMAGE (7), stat coefficient (7), multiplier minimum and maximum in hundredths (25, 400), experience exponent (3), maximum level (100), moves known (4), party size (6) |
 | `0x21` | Catching, u32 × 7: shakes (4), shake constant (524325), shake denominator (8), shake divisor (65536), HP multiplier (3), current-HP multiplier (2), HP divisor (3) |
 | `0x22` | Growth, u32 × 4: the IVs' maximum (15), then the experience groups' multipliers in hundredths: default (100), fast (80), slow (125). Added in G1. |
+| `0x23` | Keeper bonus, u32: the experience a keeper's creature gives, in percent of a wild one's (100-1000). Without it, 100. Added in 1.3. |
+| `0x24` | Money, u32 × 2: the coins a new game starts with (0-999,999), and a keeper's prize per level of their critters (0-10,000). Without it, both 0. Added in 2.1. |
 
 `0x10`, `0x20`, `0x21` and `0x22` are required, and each may appear once. The
 reader refuses values that would overflow its arithmetic (`monster.c`,
@@ -417,7 +457,7 @@ chunks      16 x 16 cells each, read as the player nears them
 | 14 | 2 | Encounter zones |
 | 16 | 2 | Signs |
 | 18 | 2 | Overlays |
-| 20 | 2 | Character sheets (at least the player's looks, at most 16) |
+| 20 | 2 | Character sheets (the people's: 0 to 16) |
 | 22 | 2 | People, at most 32 (0 in a 1.0 file) |
 | 24 | 4 | Offset of the tiles, from the block's start |
 | 28 | 4 | Length of the tiles |
@@ -455,10 +495,10 @@ Then, in order, each list right after the one before:
    | Offset | Size | Field |
    |---|---|---|
    | 0 | 1 | x |
-   | 1 | 1 | y (one person to a cell) |
+   | 1 | 1 | y (one person to a cell, unless one's hide-if flag is the other's show-if) |
    | 2 | 1 | Facing, 0-3 |
-   | 3 | 1 | Character sheet: an index into the area's sheets, past the player's looks |
-   | 4 | 1 | Kind: 0 talk, 1 trainer, 2 healer |
+   | 3 | 1 | Character sheet: an index into the area's sheets |
+   | 4 | 1 | Kind: 0 talk, 1 trainer, 2 healer, 3 shopkeeper (2.1) |
    | 5 | 1 | Sight in cells, 0-15 (trainers only) |
    | 6 | 2 | Flag set when spoken to (talk) or beaten (trainer); 0 none, a trainer needs one |
    | 8 | 2 | Hide if: gone while this flag is set (0 never) |
@@ -483,8 +523,8 @@ tile is transparent wherever nothing is drawn.
 
 **Character sheets:** for each, 12 frames of 16 × 32 pixels in the area's
 palette and depth, in Tuxemon's order (rows of three: walking frames for
-each direction). The first sheets are the player's looks (`META` `0x11`;
-one in a 1.0 file), then the people's, each once.
+each direction). The people's, each once; the player's looks are `LOOK`'s
+(§3.15).
 
 **Chunks** (768 B each): 16 × 16 cells, row by row, as 256 u16 tiles
 (below the player) followed by 256 movement bytes. A chunk past the
@@ -540,6 +580,34 @@ will make it a few KB).
 The credits screen's lines, separated by `\n`, built from the allow-list
 lines actually used: the Tuxemon commit, then each creature, tileset and
 character sheet with its authors and licence.
+
+### 3.15 `LOOK`: the player's looks (2.0)
+
+u8 *n* (1-8), u8 bits a pixel (8), u16 colours *c* (1-255); then the
+palette, *c* + 1 entries of RGB565 (entry 0 unused: transparent), padded to
+4 B; then *n* × 12 frames of 16 × 32 pixels, a byte a pixel, in the
+character sheets' order. Look *k*'s frames are *k* × 12 to *k* × 12 + 11.
+The game draws the player with this palette, so the frames are read once,
+not again in every area. Its CRC is checked by the whole-file check, like
+`ADAT`'s and `SPRT`'s.
+
+### 3.16 `ITEM`: items (2.1, 24 B each)
+
+u16 count (0-9), u16 0, then:
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 4 | Id (`game_ids.tsv`, kind `item`) |
+| 4 | 1 | Effects: 1 heals a number of HP, 2 heals a percentage of the whole (not both), 4 cures a negative status, 8 revives (a fainted creature only) |
+| 5 | 1 | 0 |
+| 6 | 2 | Amount: HP (1-1000) or percent (1-100); 0 if it doesn't heal |
+| 8 | 4 | Price in coins (0: not sold) |
+| 12 | 8 | Name |
+| 20 | 4 | 0 |
+
+An item is used on one creature, in a battle (it takes the turn, and the
+other side still acts) or from the bag. It can't be used where it would do
+nothing: no healing at full HP, no revive for a creature still standing.
 
 ## 4) Colour: 8 bits for maps, 4 for creatures
 
@@ -599,14 +667,14 @@ and picture checks.
 - **On open:** the magic, major version, header CRC and file size; the
   section table's CRC, every section inside the file, 4-aligned, in order,
   not overlapping, with zero padding between; the CRCs of every section
-  except `ADAT` and `SPRT` (all small: 4.5 KB in the spike); record sizes
+  except `ADAT`, `SPRT`, `CRED` and `LOOK` (the rest are small: 4.5 KB in the spike); record sizes
   whole; every position (types, shapes, moves, creatures, statuses, tables,
   areas) in range; every string reference inside `TEXT` with only
   U+0020–U+00FF in it.
 - **On entering an area:** the head's CRC, and that its lists exactly fill
   it; each chunk's CRC when it's read; each cell's tile at most *t*; each
   warp's destination in range; each person inside the area, alone in their
-  cell, on a sheet past the looks, with flags under 256, strings that read,
+  cell (or sharing it with their rematch), on one of the area's sheets, with flags under 256, strings that read,
   and creatures (a trainer's only, from the first slot on) in range. An area
   that fails is left empty, so nothing reads a list it didn't check.
 - **On each picture:** the tiles' and the character sheets' CRCs are checked
@@ -620,13 +688,16 @@ and picture checks.
 
 ## 7) The save
 
-`save.dat` (`monster_play.c`, through `safefile.h`), **version 2**: a
+`save.dat` (`monster_play.c`, through `safefile.h`), **version 3**: a
 32-byte header (`CYDS`, the version, the box count, the game file's
 fingerprint, the generator, the area id, x, y, facing, the party count, the
 records' CRC, the header's CRC); then a 40-byte record of the story (the
 flags, 32 B; the area id, x, y and facing a loss comes back to, 0 for the
-start; the player's look); then 40 bytes per creature, by stable ids. A
-version 1 save, from before G3, loads with no flags set and the first look.
+start; the player's look); then 80 bytes of money and bag (the coins, then
+up to nine items by id with their counts); then 40 bytes per creature, by
+stable ids. A version 1 save, from before G3, loads with no flags set and
+the first look; a version 1 or 2 save starts with the file's starting coins
+and an empty bag.
 
 ## 8) Changing the format
 

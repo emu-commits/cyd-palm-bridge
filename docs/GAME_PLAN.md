@@ -8,7 +8,9 @@
 > looks for the player. Then, the same day, the owner asked for the game to
 > be finished: every house with an open door can be walked into (three rooms,
 > furnished from a tileset of our own), and G4, Auto-play. §12 says what each
-> phase found; §13 has the owner's decisions.
+> phase found; §13 has the owner's decisions. **A proposal to make the game
+> longer** (two more acts on the same maps, the main critter past 36) is
+> `GAME_LENGTH_PLAN.md`, waiting for the owner's yes.
 
 A small Game Boy-style monster-catching RPG in the Games menu: walk a tile map,
 meet creatures in the grass, battle, catch and train them, beat trainers. An
@@ -93,7 +95,8 @@ What was chosen:
   (spotting the player from a few cells off), and flags that open the way
   (a foreman who stands aside once a keeper is beaten) or bring someone out.
 - **A new game** asks how the player looks (six colourings of our own
-  drawing), then which of three first critters to take.
+  drawing), then which of five first critters to take (three until
+  2026-10-30, when the owner added Vamporm and Nut).
 - **Saving:** one save slot on the card, written on request and when leaving
   the game.
 - **Auto-play:** an item in the game's menu (§8).
@@ -287,7 +290,8 @@ toggles "Show Completed"), not a checkbox; and the title bar reads
   blocks the way, or a fight that can't be won, fails the gate. Measured
   (2026-10-16): with each of the three first critters from seed 1, it beats
   all nine keepers; over 60 runs (20 seeds each) every one finished, in at
-  most 13,199 actions and 15 losses, so the gate's limit is 40,000.
+  most 13,199 actions and 15 losses, so the gate's limit is 40,000. Since
+  2026-10-30 the gate plays all five first critters.
 - **The screen during Auto-play:** see §13 Q3.
 
 ## 9) Memory, flash and time budgets

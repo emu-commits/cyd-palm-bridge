@@ -80,6 +80,36 @@ open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
   "Auto-play", a tap on the game takes over, and the lock pauses it (waking
   carries on). How long it runs on battery, and whether it ever stands still
   or walks in circles.
+- [s] Five first critters (2026-10-30, the owner): Vamporm and Nut join
+  Agnite, Anoleaf and Cardiling (format 1.2, `META` `0x13`). The
+  `critters_pick_nut` and `critters_pick_vamporm` shots looked at.
+- [s] Auto-play's party panel (2026-10-30, the owner): in the controls'
+  place, each critter's name, level, HP bar and HP; the one fighting
+  marked. The `critters_auto_*` shots looked at, and a long Auto-play run's.
+- [d] The party panel on the bench: readable at arm's length, it keeps up
+  with the battle, and a touch on it takes over.
+- [s] Format 2.0 (2026-10-31): the player's looks stored once; `game.bin`
+  663,544 → 404,984 B. The `critters_look*` and map shots looked at.
+- [s] New areas (2026-10-31): Route 2, the Old Keep and Dragon's Cave,
+  past the tunnel's north mouth once Ivy is beaten. The `critters_route2`,
+  `critters_keep` and `critters_cave` shots looked at.
+- [s] Items and the store (2026-10-31): the Kestrel store after Ivy, the
+  Item menu (Catch it in a wild battle), the Bag, coins from keepers,
+  Auto-play shopping and healing. The `critters_shop*`, `critters_bag`,
+  `critters_battle_menu` and `critters_keeper_items` shots looked at.
+- [s] Acts 2 and 3 (2026-10-31): 32 keepers, rematches, the Old Keep's
+  captain, Dragon's Cave, Dr Wren's finale; the gate plays all five
+  starters to the end, the best critter at 36 or more.
+- [d] The longer game on the bench: an Auto-play run from a new game to Dr
+  Wren (it takes hours: the lock pauses it); a person's game into Act 2
+  (the rematches, Route 2, the keep), and whether its pace feels right.
+- [d] The store on the bench: Sam in the doorway before Ivy, behind the
+  counter after; buying with A; the Bag from the menu; a potion in a
+  battle; Auto-play walking into the store and buying.
+- [d] After flashing with Critters: the 2.0 game replaces the card's old
+  one at boot, and the look and the player draw as before.
+- [d] Choosing Vamporm or Nut on the bench: `<` from Agnite wraps round to
+  Nut, then Vamporm; the chosen one is yours in Larkhollow.
 - [x] The web flasher's optional install: a `game` partition, a second
   manifest, a checkbox on the install page, the copy to the card at boot.
 - [d] Install from the web page with "Also install Critters" ticked: the

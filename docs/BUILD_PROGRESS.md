@@ -16,6 +16,274 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-10-31 — Critters: Acts 2 and 3, and the finale
+
+The content of `GAME_LENGTH_PLAN.md`, on the engine, areas and store built
+today. Everything is in `tools/game_region.json`: no new art and no new
+format.
+
+- **Act 2 opens when Warden Ivy is beaten.**
+  - The first region's six road keepers come back in their own cells, with
+    three critters each, levels 17–24.
+  - Route 2 has four keepers (19–23).
+  - The Old Keep has three squires (23–25), Captain Rook (26–27) and Hermit
+    Ola, who heals.
+  - Beating the captain brings Pell, Juno and Ivy back (26–30).
+- **Act 3 opens when Ivy is beaten a second time.**
+  - The Gatewarden steps out of the keep's gate.
+  - Dragon's Cave has four delvers (32–35) and no healer.
+  - Wyrmkeeper Ashe (38–40) waits at the top.
+  - Then Dr Wren leaves the square for his lab, and battles for the
+    Larkhollow plate (41–43).
+  - 32 keepers in all.
+- **The grass steps up with the story:** after Ivy, Route 1, the
+  Brideswood and the tunnel go to 12–20. After her rematch, every road goes
+  to 22–34. After Ashe, the keep and the cave go to 30–38, with stage-2
+  critters in the cave. There are ten steps and ten new tables.
+- **Keeper bonus 150 %.**
+- **Auto-play's resting** chose its healer from a search that avoids
+  keepers' sight. Captain Rook's line covers the only way to Hermit Ola,
+  so inside the keep the nearest healer it could reach unseen was Kestrel's,
+  back the way it came, and on Route 2 the keep's looked nearer again: it
+  went back and forth for ever. It now compares both searches and takes the
+  unseen route only if it isn't more areas away.
+- **The gate:** `BOT_LIMIT` 40,000 → 400,000 actions, and a new check that
+  the best critter ends at 36 or more (`BOT_MAIN_MIN`, the owner's ask).
+
+Measured: `game.bin` 474,568 → 572,000 B (the people's sheets in the new
+areas: 6 KB a sheet an area). Firmware 1,811,024 → 1,811,056 B (+32: the
+bot's resting), static DRAM unchanged. Auto-play from seed 1:
+
+| Starter | Actions | Battles | Lost | Ivy | Ivy again | Ashe | Wren, the end |
+|---|---|---|---|---|---|---|---|
+| Agnite | 14,834 | 368 | 22 | 14 | 37 | 50 | Agnigon 54 |
+| Anoleaf | 29,061 | 640 | 42 | 14 | 34 | 51 | Velocitile 53 |
+| Cardiling | 20,037 | 467 | 23 | 15 | 42 | 49 | Cardinale 52 |
+| Vamporm | 14,466 | 191 | 4 | 14 | 35 | 46 | Fluttaflap 52 |
+| Nut | 39,806 | 790 | 113 | 14 | 43 | 56 | Arthrobolt 59 |
+
+The level columns are the best critter's when each keeper is beaten.
+Before, the game ended at Ivy after 9,700–10,900 actions and 65–294
+battles, the best critter at 13–18. Over eight seeds per starter (40 runs,
+in a scratch copy of the gate) every run finished. The best critter ended
+at 40–64 (median 54), in at most 59,931 actions and 159–872 battles. The
+bot carries one critter and so out-levels a person with a mixed party; the
+finale's levels were raised by 2–3 after the first runs, so it still asks
+for a level-40 critter. The `critters_keep` shot shows Ola, the captain and
+a squire.
+
+### 2026-10-31 — Critters: items, money and the Kestrel store (format 2.1)
+
+`GAME_LENGTH_PLAN.md` §5, approved with one addition from the owner:
+Auto-play must go to the store, find its way round it, and use the items.
+
+- **Items** (`ITEM`, `GAME_FORMAT.md` §3.16): five of Tuxemon's, as its
+  data has them:
+
+  | Item | Effect | Price |
+  |---|---|---|
+  | Potion | 50 HP | 100 |
+  | Super Potion | 100 HP | 300 |
+  | Mega Potion | 200 HP | 500 |
+  | Revive | half HP, only when fainted | 1,000 |
+  | Cureall | full HP and cures | 1,500 |
+
+  The builder takes `heal` (fixed or percentage), `restore` and the "0 HP"
+  condition, and refuses any other effect.
+- **Money** (`META` `0x24`): 300 coins to start with, and a keeper pays 15
+  a level of their critters (Ada's 4 + 5: 135).
+- **The rules** (`monster_play.c`): `mp_buy()`, `mp_use()`, and
+  `MP_ACT_ITEM` in a battle (it takes the turn, then the other side acts).
+  An item that wouldn't help is refused. The save is version 3: 80 B of
+  coins and bag, by item id; a version 2 save loads with the starting
+  coins.
+- **The store:** Kestrel's barn has a door now, and a room of our own
+  (`kestrel_store.json`, the CC0 interior tileset) with two counters. Sam
+  stands in the doorway until Warden Ivy is beaten ("the store opens next
+  season"), then serves behind the counter.
+- **The screens:** the battle menu is Fight, Swap, Item, Run. Catching
+  became the Item menu's first line in a wild battle ("Catch it"), as in
+  Tuxemon, because a fifth line covered the player's HP. The shop lists
+  the prices, what's in the bag and the coins. **Bag** is in the menu.
+- **Auto-play** (`monster_bot.c`) knows the shops. With money and fewer
+  than six healing items, it walks to the nearest shop and buys the
+  strongest potion that costs at most half its coins (`mb_shop()`). In a
+  keeper's battle, under a third of its HP and with no knockout ready, it
+  uses the potion that best makes up what it has lost. A shop it can't
+  reach isn't tried again until the story's flags change.
+- Smoke: `F <flag> <coins>` sets a flag and the purse (devtools), so the
+  tour opens the store: `critters_store_talk`, `critters_shop`,
+  `critters_shop_bought`, `critters_bag`. The menu's Save game and Credits
+  taps moved down a line for Bag.
+
+Measured:
+
+- `game.bin` 460,812 → 474,568 B (the store room, Sam's sheet in it, the
+  door, `ITEM`).
+- `monster_test`: the fixture's Tonic and Revival (buy, use, refuse, a
+  battle turn), Fen's prize (70), the clerk's shop, and the version 3
+  save: 952 B, every truncation and flipped bit refused, an unknown item
+  refused, and a version 2 save loading.
+- The bot finishes Act 1 with all five starters, buying 6–8 potions once
+  the store opens and using up to 5.
+- Firmware 1,806,576 → 1,811,024 B (+4,448), static DRAM unchanged.
+- A 20-minute Auto-play run in the simulator caught four critters through
+  the new Item menu.
+
+### 2026-10-31 — Critters: Route 2, the Old Keep and Dragon's Cave
+
+`GAME_LENGTH_PLAN.md` §5, approved: new areas, paid for by format 2.0. Of
+Tuxemon's Spyder maps, only six use clean tilesets alone (Route 4, 6, A, C,
+D and Dragon's Cave); Route 6 and C use flipped tiles, which the builder
+doesn't draw, and Route D is a bare meadow. The three taken:
+
+- **Route 2** (Spyder Route 4), through the Cotton Tunnel's north mouth,
+  where Digger Bram stands until Warden Ivy is beaten. It has grass on
+  both sides, levels 14–20.
+- **The Old Keep** (Spyder Route A): a hedged maze below a keep, grass
+  18–24. Tuxemon's file has almost no collision data for it, so
+  `game_region.json` gains `"solid"`, a grid of `#` (solid) and `.` (as
+  the map says). It was made from the map's ground tiles: each distinct
+  tile classed as hedge, wall, water, rock, log or floor, then checked by
+  drawing it over the map and walking it from the south entrance (the gate
+  and all 54 grass cells reachable).
+- **Dragon's Cave**, through the keep's gate: grass levels 24–30.
+
+The areas take only their maps' grass zones (`"tuxemon_events": false`):
+Tuxemon's events there are NPC lines and item pick-ups without the NPCs.
+Two signs of our own name the way. The keepers come with the acts.
+
+Measured: **`game.bin` 404,984 → 460,812 B** (+55,828: Route 2 9.4 KB, the
+Old Keep 32.0 KB, the cave 14.2 KB, all with no character sheets yet).
+`mkgame_test` walks the region through them. The bot's results are as
+before (it stops at Ivy). The `critters_route2`, `critters_keep` and
+`critters_cave` shots looked at. Firmware unchanged.
+
+### 2026-10-31 — Critters' format 2.0: the player's looks stored once
+
+`GAME_LENGTH_PLAN.md` §5, approved: every area carried its own copy of the
+player's six looks (6 sheets × 12 frames × 512 B = 36 KB), in the area's
+palette. They are now one section, `LOOK` (§3.15 of `GAME_FORMAT.md`), at 8
+bits with a palette of their own:
+
+- An area's sheets are its people's only (0 to 16). A person's sheet is an
+  index into them.
+- `ui_monster.c` reads the look's frames and the looks' palette once
+  (`look_load()`, a second 512 B lookup table in the game's block), not
+  again on every area change, and draws the player through it. The look
+  picker draws from the same frames.
+- Major version 2: a 1.x reader refuses the file, and this reader a 1.x
+  one ("a game file for an older version"). The save is unchanged. The
+  firmware and the game file go onto the board together (the flasher's
+  "with Critters" install; `monster_install.c` copies a game whose
+  fingerprint is new).
+
+Measured:
+
+- **`game.bin` 663,544 → 404,984 B** (−258,560: the eight areas' copies,
+  less `LOOK`'s 36,948 B). The fixture is 85,252 → 60,684 B.
+- Each area's palette has the room the looks took: Larkhollow's sheets went
+  from 61,440 to 24,576 B.
+- Firmware 1,806,480 → 1,806,576 B (+96), static DRAM unchanged.
+- The `critters_look*`, `critters_map` and `critters_kestrel` shots looked
+  at: the six looks and the player on the map are drawn as before.
+
+### 2026-10-31 — Critters: the engine for a longer game (format 1.3)
+
+The owner approved `GAME_LENGTH_PLAN.md` (all four decisions). First, the
+engine the acts need (§4, items 1–3), with no change to the game yet:
+
+- **Encounter steps** (`META` `0x14`): once a flag is set, a zone that names
+  a table uses another (`mp_table()`). The steps apply in order, so a table
+  can step twice. `game_region.json`'s `"steps"`; the builder refuses a step
+  on a flag no one sets, to an unknown table, or to itself.
+- **Keeper bonus** (`META` `0x23`): a keeper's creatures give that
+  percentage of a wild one's experience. `"keeper_bonus"`, 100 to 1000.
+- **Rematches:** two people may share a cell when one's `hide_if` is the
+  other's `show_if` (the reader and the builder both check).
+- **The bot** reads each zone's levels through the steps (it keeps every
+  table's top level, 64 B), and counts a keeper hidden for good as done.
+
+A 1.2 reader skips both keys. The fixture now has Fen's rematch in her cell,
+a step on the elder's flag and a 150 % bonus; `monster_test` checks each,
+including the experience (Puddlop 3: 11 × 1.5 = 16; Thornet 4: 16 × 1.5 =
+24). `mkgame_test` has five new refusals.
+
+Measured: `game.bin` 663,544 B (unchanged in size; the header says 1.3).
+The bot's results are as before. Firmware (IDF v5.5 container, LVGL v9.5.0
+vendored in a scratch copy) 1,805,744 → 1,806,480 B (+736); static DRAM
+unchanged at 147,468 B.
+
+### 2026-10-30 — Auto-play shows the party instead of the controls
+
+From the owner: while Auto-play is on, show the party in the controls' place.
+The pad object (240 × 120) draws a panel instead of the D-pad and A/B:
+
+- a title line, "Auto-play" and "Touch to take over";
+- a row for each critter: its name, level, an HP bar (green, amber below
+  half, red below a fifth) and HP as current/max;
+- in a battle, the critter fighting is in bold on a light band, and a fainted
+  one is grey. The HP is what the battle has shown so far, not the rules'
+  newer numbers, so the panel agrees with the battle card.
+
+The names are read from the card, so the draw never reads them.
+`party_watch()` runs on Auto-play's tick: it keeps the values last drawn
+(188 B in the game's heap block), reads a name only when a critter changes,
+and redraws the pad only when something shown has changed. A touch on the
+panel still takes over, and the pad comes back.
+
+Measured: the firmware image (IDF v5.5 container, LVGL v9.5.0 vendored in a
+scratch copy, the branch's previous head built alongside to the byte of the
+last entry) 1,804,448 → 1,805,744 B (+1,296, this and the five starters
+together), static DRAM unchanged at 147,468 B. The shots looked at:
+
+- `critters_auto_walk`: one critter;
+- a scratch tour left on Auto-play for 20 simulated minutes: five critters
+  in a battle, with the band, a grey fainted one, and the amber and red
+  bars.
+
+`make -C sim wasm` wasn't run: emsdk isn't in this container.
+
+### 2026-10-30 — Critters offers five first critters
+
+From the owner: add Vamporm and Nut to the starters. `META` `0x12` holds
+exactly three, and an older reader refuses any other length, so the two
+extra critters go in a new key instead. That's format **1.2**
+(`GAME_FORMAT.md` §3.2):
+
+- `0x13` holds up to five more creatures, as a count, then the positions
+  padded to 4 B. It is offered after `0x12`'s three, and needs them.
+- A 1.1 reader skips the key and still offers Agnite, Anoleaf and Cardiling.
+- `game_region.json` lists Agnite, Anoleaf, Cardiling, Vamporm and Nut. The
+  pick screen's `<` `>` wraps round, so Nut is one press left of Agnite.
+- The fixture takes a fourth starter (Rustmole) so `0x13` is round-tripped
+  in `make -C sim monster`.
+- `mkgame_test.py` refuses two starters, a repeated one, and one that isn't
+  on the allow-list.
+- The bot gate plays every starter the file offers, not the first three.
+
+Measured:
+
+- **`game.bin` 663,532 → 663,544 B** (+12: the key). Rebuilt from the pinned
+  Tuxemon with `--strict`; before the change, the same build gave the
+  committed file to the byte.
+- `MonGame` grows by 10 B (it's on the heap while the game is open).
+- The bot from seed 1 beats every keeper with each of the five:
+
+  | Starter | Battles | Lost | Main critter at the end |
+  |---|---|---|---|
+  | Agnite | 244 | 7 | 15 |
+  | Anoleaf | 291 | 11 | 16 |
+  | Cardiling | 236 | 8 | 15 |
+  | Vamporm | 65 | 0 | Fluttaflap 13 |
+  | Nut | 294 | 7 | Arthrobolt 18 |
+
+  Vamporm's and Nut's lines evolve at 9 and 12, so they win Act 1 easily.
+  None of the other three evolves before the end.
+- The smoke tour shows both new starters (`critters_pick_nut`,
+  `critters_pick_vamporm`), then goes back to Agnite, so the rest of the tour
+  is unchanged.
+
 ### 2026-10-29 — Critters keeps its progress in the web emulator
 
 From the owner: in the web emulator, Critters' progress didn't save. The game

@@ -10,6 +10,9 @@ creature	thornet	4
 creature	rustmole	5
 flag	beat_fen	1
 flag	met_elder	2
+flag	beat_fen2	3
+item	tonic	1
+item	revival	2
 move	bash	1
 move	ember	2
 move	focus_beam	3

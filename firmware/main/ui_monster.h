@@ -30,6 +30,7 @@ int  mon_ui_playing(void);       /* a game is under way (Party, Save, New game) 
 int  mon_ui_save(void);          /* 0 saved; else the error is in mon_ui_error() */
 const char *mon_ui_error(void);
 void mon_ui_party(void);
+void mon_ui_bag(void);           /* the items and the coins; in a battle, its Item menu */
 void mon_ui_new_game(void);      /* asks first */
 void mon_ui_credits(void);
 /* Auto-play (GAME_PLAN.md §8): on while a game is under way; a touch on the
@@ -42,6 +43,8 @@ void ui_mon_auto_changed(int on);
 #ifdef UI_DEVTOOLS
 /* The smoke tour: put the player at (x, y) of area i, facing N E S W = 0..3. */
 void mon_ui_test_place(int area, int x, int y, int facing);
+/* ...and set story flag f and the purse */
+void mon_ui_test_give(int flag, int coins);
 #endif
 
 #endif

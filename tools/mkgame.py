@@ -38,7 +38,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mkcourse import fold, latin_fallback  # noqa: E402  (one set of text rules)
 
-FORMAT_MAJOR, FORMAT_MINOR = 1, 1      # 1.1 added people to the areas
+FORMAT_MAJOR, FORMAT_MINOR = 2, 1      # 2.0: the player's looks once, in LOOK; 2.1 items, money and shops
 MAGIC = b"CYDG"
 
 TUXEMON_URL = "https://github.com/Tuxemon/Tuxemon.git"
@@ -60,17 +60,20 @@ MAX_AREA_CELLS = 255          # width and height each
 MAX_PEOPLE = 32               # in one area (monster.h MG_MAX_PEOPLE)
 MAX_FLAGS = 256               # flags are numbered 1 .. 255
 TEAM = 3                      # a trainer's creatures
-PERSON_KINDS = {"talk": 0, "trainer": 1, "healer": 2}
+PERSON_KINDS = {"talk": 0, "trainer": 1, "healer": 2, "shop": 3}
+I_HEAL, I_HEAL_PCT, I_CURE, I_REVIVE = 1, 2, 4, 8
+MAX_ITEMS = 9
 
 SECTIONS = [b"META", b"TYPE", b"SHAP", b"STAT", b"MOVE", b"MONS", b"LRNS",
-            b"ENCT", b"AREA", b"ADAT", b"SPRT", b"TEXT", b"CRED"]
+            b"ENCT", b"AREA", b"ADAT", b"SPRT", b"TEXT", b"CRED", b"LOOK", b"ITEM"]
 CRC_ON_OPEN = {b"META", b"TYPE", b"SHAP", b"STAT", b"MOVE", b"MONS", b"LRNS",
-               b"ENCT", b"AREA", b"TEXT"}
+               b"ENCT", b"AREA", b"TEXT", b"ITEM"}
 
 # META keys (GAME_FORMAT.md 3.2)
 K_TITLE, K_SOURCE, K_BUILD = 0x01, 0x02, 0x03
-K_START, K_LOOKS, K_STARTERS = 0x10, 0x11, 0x12
-K_RULES, K_CAPTURE, K_GROWTH = 0x20, 0x21, 0x22
+K_START, K_LOOKS, K_STARTERS, K_MORE_STARTERS, K_STEPS = 0x10, 0x11, 0x12, 0x13, 0x14
+MAX_STARTERS, MAX_STEPS = 8, 32
+K_RULES, K_CAPTURE, K_GROWTH, K_KEEPER, K_MONEY = 0x20, 0x21, 0x22, 0x23, 0x24
 
 RANGES = ["melee", "touch", "ranged", "reach", "reliable", "special"]
 SPEEDS = ["extremely_slow", "very_slow", "slow", "normal", "fast", "very_fast", "extremely_fast"]
@@ -305,6 +308,15 @@ class Rules:
         for t, why in sorted(unsupported.items()):
             report.append(f"  left out {t}: {why}")
 
+        self.items = {}         # slug: (effects, amount, price), in the region's order
+        if len(region.get("items", [])) > MAX_ITEMS:
+            fail(f"game_region.json: items: at most {MAX_ITEMS}")
+        for slug in region.get("items", []):
+            p = db / "item" / f"{slug}.yaml"
+            if not p.exists() or slug in self.items:
+                fail(f"game_region.json: item {slug} isn't in Tuxemon, or is listed twice")
+            self.items[slug] = self._item(slug, y(p))
+
         self.encounters = {}
         for slug, rows in sorted(region.get("encounters", {}).items()):
             for r in rows:
@@ -338,6 +350,27 @@ class Rules:
         if not d.get("effects"):
             return "no effects"
         return None
+
+    @staticmethod
+    def _item(slug, d):
+        """An item as GAME_FORMAT.md 3.16 keeps it: heal a fixed number or a
+        percentage, restore (cure; with a condition of 0 HP, revive)."""
+        eff, amount = 0, 0
+        for e in d.get("effects") or []:
+            p = e.get("parameters") or []
+            if e["type"] == "heal" and len(p) == 2 and p[1] in ("fixed", "percentage") and not eff & 3:
+                eff |= I_HEAL if p[1] == "fixed" else I_HEAL_PCT
+                amount = int(p[0]) if p[1] == "fixed" else round(float(p[0]) * 100)
+            elif e["type"] == "restore" and not p:
+                eff |= I_CURE
+            else:
+                fail(f"item {slug}: effect {e['type']} {' '.join(map(str, p))} isn't played")
+        if any(c.get("type") == "current_hp" and (c.get("parameters") or []) == ["==", "0"]
+               for c in d.get("conditions") or []):
+            eff |= I_REVIVE
+        if not eff or (eff & 3 and not 0 < amount <= (100 if eff & I_HEAL_PCT else 1000)):
+            fail(f"item {slug}: nothing it does is played, or an amount out of range")
+        return eff, amount, int(d.get("cost", 0))
 
     def name(self, slug):
         return self.po.get(slug, slug.replace("_", " ").title())
@@ -904,15 +937,18 @@ def region_events(a, ar, mv, area_ix, rules, ids, flag_names):
         zones.append((rect(z["at"], "a zone"), z["table"], round(chance * 100)))
     for sg in a.get("signs", []):
         talks.append((rect(sg["at"], "a sign"), facing(sg.get("facing"), "a sign"), text_ok(sg["text"], f"{where} sign")))
-    cells = set()
+    cells = {}
     for k, pe in enumerate(a.get("people", [])):
         what = f"person {k} ({pe.get('name', '?')})"
         x, y = pe["at"]
         if not (0 <= x < ar.w and 0 <= y < ar.h):
             fail(f"{where}: {what} stands outside the area")
-        if (x, y) in cells:
-            fail(f"{where}: {what} shares a cell")
-        cells.add((x, y))
+        # one to a cell, unless one's going is the other's coming (a keeper and their rematch)
+        for q in cells.get((x, y), []):
+            if not ((q.get("hide_if") and q.get("hide_if") == pe.get("show_if")) or
+                    (pe.get("hide_if") and pe.get("hide_if") == q.get("show_if"))):
+                fail(f"{where}: {what} shares a cell")
+        cells.setdefault((x, y), []).append(pe)
         kind = pe.get("kind", "talk")
         if kind not in PERSON_KINDS:
             fail(f"{where}: {what}: kind {kind!r}")
@@ -1098,8 +1134,17 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
     looks = region["player"] if isinstance(region["player"], list) else [region["player"]]
     if not 1 <= len(looks) <= 8 or len(set(looks)) != len(looks):
         fail("game_region.json: the player: 1 to 8 different sheets")
+    look_frames = []
     for c in looks:
-        sheet_img(c, "the player")
+        im = sheet_img(c, "the player")
+        for f in range(CHAR_FRAMES):
+            x, y = f % 3 * CHAR_W, f // 3 * CHAR_H
+            look_frames.append(im.crop((x, y, x + CHAR_W, y + CHAR_H)))
+    look_pal = make_palette(look_frames, 255)
+    memo = {}
+    LOOK = struct.pack("<BBH", len(looks), 8, len(look_pal))
+    LOOK += pad4(struct.pack(f"<{1 + len(look_pal)}H", 0, *(rgb565(c) for c in look_pal)))
+    LOOK += b"".join(pack_pixels(index_image(f, look_pal, memo), 8) for f in look_frames)
     flag_names = set()
     for a in region["areas"]:
         if a.get("layout"):
@@ -1107,6 +1152,14 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
         else:
             ar = Area(root, a["map"], allowed, cache, report)
         mv, hop = ar.movement()
+        if "solid" in a:        # cells the map's own data leaves open but shouldn't be (GAME_FORMAT.md 1)
+            rows = a["solid"]
+            if len(rows) != ar.h or any(len(r) != ar.w or set(r) - {"#", "."} for r in rows):
+                fail(f"game_region.json: {ar.slug}: solid needs {ar.h} rows of {ar.w} '#' or '.'")
+            for y, r in enumerate(rows):
+                for x, ch in enumerate(r):
+                    if ch == "#":
+                        mv[y * ar.w + x] = 0x0F
         below, above = ar.composite()
         tiles, tix = [], {}
 
@@ -1123,7 +1176,7 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
         people = a.get("people", [])
         if len(people) > MAX_PEOPLE:
             fail(f"{ar.slug}: {len(people)} people; the limit is {MAX_PEOPLE}")
-        chars = list(looks)
+        chars = []                              # the people's sheets; the looks are LOOK's (2.0)
         for pe in people:
             if pe.get("sheet") in looks:
                 fail(f"{ar.slug}: {pe.get('name')} wears one of the player's looks")
@@ -1235,13 +1288,31 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
     META += meta_entry(K_BUILD, f"mkgame {FORMAT_MAJOR}.{FORMAT_MINOR}".encode())
     META += meta_entry(K_START, struct.pack("<HBBB3x", area_ix[st["area"]], st["x"], st["y"],
                                             DIRS[st.get("facing", "down")]))
-    if len(looks) > 1:
-        META += meta_entry(K_LOOKS, struct.pack("<B3x", len(looks)))
     if "starters" in region:
         sts = region["starters"]
-        if len(sts) != 3 or any(c not in mon_ix for c in sts):
-            fail("game_region.json: starters: three creatures from the allow-list")
-        META += meta_entry(K_STARTERS, struct.pack("<3H2x", *(mon_ix[c] for c in sts)))
+        if not 3 <= len(sts) <= MAX_STARTERS or len(set(sts)) != len(sts) or any(c not in mon_ix for c in sts):
+            fail(f"game_region.json: starters: three to {MAX_STARTERS} different creatures from the allow-list")
+        META += meta_entry(K_STARTERS, struct.pack("<3H2x", *(mon_ix[c] for c in sts[:3])))
+        more = sts[3:]
+        if more:            # 1.2: a 1.1 reader skips the key and offers the first three
+            META += meta_entry(K_MORE_STARTERS, pad4(struct.pack(f"<BB{len(more)}H", len(more), 0,
+                                                                 *(mon_ix[c] for c in more))))
+    steps = region.get("steps", [])
+    if steps:               # 1.3: a 1.2 reader skips the key, and its zones keep their first tables
+        set_flags = {pe["flag"] for a in region["areas"] for pe in a.get("people", []) if pe.get("flag")}
+        if len(steps) > MAX_STEPS:
+            fail(f"game_region.json: steps: at most {MAX_STEPS}")
+        ent = b""
+        for s in steps:
+            if s["flag"] not in set_flags:
+                fail(f"game_region.json: a step's flag {s['flag']} is never set")
+            for t in (s["table"], s["to"]):
+                if t not in enc_ix:
+                    fail(f"game_region.json: a step names table {t}, which the encounters don't have")
+            if s["table"] == s["to"]:
+                fail(f"game_region.json: a step from {s['table']} to itself")
+            ent += struct.pack("<HHHH", assign_id(ids, "flag", s["flag"]), enc_ix[s["table"]], enc_ix[s["to"]], 0)
+        META += meta_entry(K_STEPS, ent)
     mc, cc, cb = rules.monster_cfg, rules.capture, rules.combat
     lo, hi = cb["multiplier_range"]
     META += meta_entry(K_RULES, struct.pack("<8I", 7, int(mc["coeff_stats"]), round(lo * 100), round(hi * 100),
@@ -1254,6 +1325,16 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
     eg = mc["experience_groups"]
     META += meta_entry(K_GROWTH, struct.pack("<4I", int(mc["iv_range"][1]),
                                              *(round(float(eg[g]["multiplier"]) * 100) for g in EXP_GROUPS)))
+    if "money" in region:
+        mo = region["money"]
+        if not (0 <= mo.get("start", 0) <= 999999 and 0 <= mo.get("per_level", 0) <= 10000):
+            fail("game_region.json: money: start 0-999999, per_level 0-10000")
+        META += meta_entry(K_MONEY, struct.pack("<II", mo.get("start", 0), mo.get("per_level", 0)))
+    if "keeper_bonus" in region:
+        kb = region["keeper_bonus"]
+        if not isinstance(kb, int) or not 100 <= kb <= 1000:
+            fail("game_region.json: keeper_bonus: a percent, 100 to 1000")
+        META += meta_entry(K_KEEPER, struct.pack("<I", kb))
 
     # credits
     if source.startswith("Tuxemon "):
@@ -1272,9 +1353,18 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
         cred.append("")
     CRED = "\n".join(text_ok(c, "credits") if c else "" for c in cred).encode("utf-8")
 
+    ITEM = struct.pack("<HH", len(rules.items), 0)
+    for s, (eff, amount, price) in rules.items.items():
+        if price > 999999:
+            fail(f"item {s}: price {price}")
+        ITEM += struct.pack("<IBxHI", assign_id(ids, "item", s), eff, amount, price) + \
+            text.ref(text_ok(rules.name(s), f"item {s}")) + b"\0" * 4
+    shops = sum(1 for a in region["areas"] for pe in a.get("people", []) if pe.get("kind") == "shop")
+    if shops and not any(price for _, _, price in rules.items.values()):
+        fail("game_region.json: a shop, but no item with a price")
     secs = {b"META": META, b"TYPE": TYPE, b"SHAP": SHAP, b"STAT": STAT, b"MOVE": MOVE, b"MONS": MONS,
             b"LRNS": LRNS, b"ENCT": ENCT, b"AREA": AREA, b"ADAT": bytes(ADAT), b"SPRT": bytes(SPRT),
-            b"TEXT": bytes(text.b), b"CRED": CRED}
+            b"TEXT": bytes(text.b), b"CRED": CRED, b"LOOK": LOOK, b"ITEM": ITEM}
     off = 32 + 16 * len(SECTIONS)
     table, body = b"", b""
     for tag in SECTIONS:
@@ -1322,8 +1412,9 @@ class Game:
                 fail(f"section {tag.decode()} CRC")
             self.sec[tag] = b
         for t in SECTIONS:
-            if t not in self.sec:
+            if t not in self.sec and t != b"ITEM":          # ITEM (2.1) may be missing
                 fail(f"no {t.decode()} section")
+        self.sec.setdefault(b"ITEM", struct.pack("<HH", 0, 0))
         self.text = self.sec[b"TEXT"]
 
     def s(self, b, o):
@@ -1350,8 +1441,8 @@ class Game:
         t0 = 4 + 8 * n
         return names, [list(b[t0 + n * i:t0 + n * i + n]) for i in range(n)]
 
-    def records(self, tag, size):
-        b = self.sec[tag]
+    def records(self, tag, size, skip=0):
+        b = self.sec[tag][skip:]
         if len(b) % size:
             fail(f"{tag.decode()} isn't whole {size}-byte records")
         return [b[i:i + size] for i in range(0, len(b), size)]
@@ -1437,6 +1528,20 @@ class Game:
         a["sizes"] = {"head": head_len, "tiles": tlen, "characters": clen, "chunks": len(cdir) * csz}
         return a
 
+    def looks(self):
+        """(n, palette as RGB triples with index 0 first, frames as index lists)"""
+        b = self.sec[b"LOOK"]
+        n, bpp, ncol = struct.unpack_from("<BBH", b)
+        if not 1 <= n <= 8 or bpp != 8 or not 1 <= ncol <= 255:
+            fail("LOOK: out of range")
+        o = 4 + ((2 * (1 + ncol) + 3) & ~3)
+        fsz = CHAR_W * CHAR_H
+        if len(b) != o + n * CHAR_FRAMES * fsz:
+            fail("LOOK: the wrong size")
+        pal = [rgb888(v) for v in struct.unpack_from(f"<{1 + ncol}H", b, 4)]
+        frames = [list(b[o + i * fsz:o + (i + 1) * fsz]) for i in range(n * CHAR_FRAMES)]
+        return n, pal, frames
+
     def sprites(self):
         out = []
         for r in self.records(b"MONS", 48):
@@ -1463,12 +1568,24 @@ def dump(g):
     out.append(f"source {m[K_SOURCE].decode()}")
     a, x, y, f = struct.unpack_from("<HBBB", m[K_START])
     out.append(f"start area {a} at {x},{y} facing {f}")
-    out.append(f"looks {m[K_LOOKS][0] if K_LOOKS in m else 1}")
+    nl, lpal, _ = g.looks()
+    out.append(f"looks {nl} colours {len(lpal) - 1} crc {crc32(g.sec[b'LOOK']):08x}")
     if K_STARTERS in m:
-        out.append("starters " + " ".join(map(str, struct.unpack_from("<3H", m[K_STARTERS]))))
+        sts = list(struct.unpack_from("<3H", m[K_STARTERS]))
+        if K_MORE_STARTERS in m:
+            sts += struct.unpack_from(f"<{m[K_MORE_STARTERS][0]}H", m[K_MORE_STARTERS], 2)
+        out.append("starters " + " ".join(map(str, sts)))
     out.append("rules " + " ".join(map(str, struct.unpack("<8I", m[K_RULES]))))
     out.append("capture " + " ".join(map(str, struct.unpack("<7I", m[K_CAPTURE]))))
     out.append("growth " + " ".join(map(str, struct.unpack("<4I", m[K_GROWTH]))))
+    out.append(f"keeper bonus {struct.unpack('<I', m[K_KEEPER])[0] if K_KEEPER in m else 100}")
+    out.append("money " + " ".join(map(str, struct.unpack("<II", m[K_MONEY]) if K_MONEY in m else (0, 0))))
+    for r in g.records(b"ITEM", 24, skip=4):
+        iid, eff, amount, price = struct.unpack_from("<IBxHI", r)
+        out.append(f"item {iid} {g.s(r, 12)} effects {eff} amount {amount} price {price}")
+    if K_STEPS in m:
+        st = [struct.unpack_from("<HHH", m[K_STEPS], 8 * i) for i in range(len(m[K_STEPS]) // 8)]
+        out.append("steps " + " ".join(f"{f}:{t}>{to}" for f, t, to in st))
     names, table = g.types()
     for n, row in zip(names, table):
         out.append(f"type {n} " + " ".join(map(str, row)))
@@ -1509,7 +1626,8 @@ def dump(g):
             team = " ".join(f"{m}:{lv}" for m, lv in p[12]) or "-"
             out.append(f"  person {p[0]},{p[1]} facing {p[2]} sheet {p[3]} kind {p[4]} sight {p[5]} "
                        f"flags {p[6]}/{p[7]}/{p[8]} team {team}: {p[9]} | {p[10]} | {p[11]}")
-        out.append(f"  cells crc {crc32(struct.pack(f'<{len(a['cells'])}H', *a['cells'])):08x} "
+        cells = struct.pack(f"<{len(a['cells'])}H", *a["cells"])
+        out.append(f"  cells crc {crc32(cells):08x} "
                    f"move crc {crc32(bytes(a['move'])):08x} overlays {len(a['overlays'])}")
     out.append("credits " + f"{crc32(g.sec[b'CRED']):08x}")
     return "\n".join(out) + "\n"
@@ -1556,16 +1674,17 @@ def preview(g, outdir, tag, start=None):
         px = im.load()
         # the people standing, the player at the start (facing down), then the overlays
         stand = [10, 7, 1, 4]                 # N E S W: the middle frame of rows back, right, front, left
-        figs = [(p[0], p[1], p[3] * CHAR_FRAMES + stand[p[2]]) for p in a["people"]]
+        figs = [(p[0], p[1], a["frames"], a["palette"], p[3] * CHAR_FRAMES + stand[p[2]]) for p in a["people"]]
         if ai == sa:
-            figs.append((sx, sy, 1))
-        for x, y, f in sorted(figs, key=lambda t: t[1]):
-            if f >= len(a["frames"]):
+            _, lpal, lframes = g.looks()
+            figs.append((sx, sy, lframes, lpal, 1))
+        for x, y, frames, pal, f in sorted(figs, key=lambda t: t[1]):
+            if f >= len(frames):
                 continue
             ox, oy = x * TILE, y * TILE - (CHAR_H - TILE)
-            for j, v in enumerate(a["frames"][f]):
+            for j, v in enumerate(frames[f]):
                 if v and 0 <= oy + j // CHAR_W:
-                    px[ox + j % CHAR_W, oy + j // CHAR_W] = a["palette"][v]
+                    px[ox + j % CHAR_W, oy + j // CHAR_W] = pal[v]
         for i, t in a["overlays"].items():
             put(a["tiles"][t], i % a["w"] * TILE, i // a["w"] * TILE, True)
         p = outdir / f"{tag}_{ai}_{a['name'].replace(' ', '_').lower()}.png"

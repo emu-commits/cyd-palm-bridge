@@ -86,6 +86,14 @@ CREATURES = {
                   [(1, "scratch")], [(200, 200, 230), (90, 90, 120)]),   # in the tree, not on the allow-list
 }
 
+# slug: (effects, conditions, cost), as Tuxemon's item yaml has them
+ITEMS = {
+    "tonic": ([{"type": "heal", "parameters": ["20", "fixed"]}],
+              [{"type": "current_hp", "parameters": [">", "0"], "operator": "is"}], 50),
+    "revival": ([{"type": "restore"}, {"type": "heal", "parameters": ["0.5", "percentage"]}],
+                [{"type": "current_hp", "parameters": ["==", "0"], "operator": "is"}], 300),
+}
+
 NAMES = {
     "fire": "Fire", "metal": "Metal", "normal": "Normal", "venom": "Venom", "water": "Water", "wood": "Wood",
     "poison": "Poison", "burn": "Burn", "recover": "Recover",
@@ -94,6 +102,7 @@ NAMES = {
     "focus_beam": "Focus Beam", "frenzy": "Frenzy",
     "emberkit": "Emberkit", "blazecat": "Blazecat", "puddlop": "Puddlop", "thornet": "Thornet",
     "rustmole": "Rustmole", "ghostling": "Ghostling",
+    "tonic": "Tonic", "revival": "Revival",
     "fixture_sign_meadow": "Meadow. The burrow is east, past the trees.",
     "fixture_sign_burrow": "“Mind the moles” — the keeper",
 }
@@ -385,6 +394,9 @@ def main(out):
         p = tux / "gfx" / "sprites" / "battle" / f"{s}-sheet.png"
         p.parent.mkdir(parents=True, exist_ok=True)
         sprite_sheet(s, colours).save(p)
+    for s, (effs, conds, cost) in ITEMS.items():
+        write(db / "item" / f"{s}.yaml", yaml_dump({"slug": s, "effects": effs, "conditions": conds,
+                                                    "cost": cost, "category": "potion"}) + "\n")
     for kind in ("fixture_tiles", "fixture_decor"):
         p = tux / "gfx" / "tilesets" / f"{kind}.png"
         p.parent.mkdir(parents=True, exist_ok=True)

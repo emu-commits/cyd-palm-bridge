@@ -24,6 +24,16 @@ int mb_init(MbBot *b, MonGame *g, uint32_t seed, uint8_t *scratch, uint32_t cap)
     b->rng = seed ? seed : 0x2545F491u;
     b->grid_area = -1;
     b->n_areas = (uint16_t)(g->n_areas < MB_MAX_AREAS ? g->n_areas : MB_MAX_AREAS);
+    for(uint32_t t = 0; t < g->n_tables && t < MB_MAX_TABLES; t++){
+        uint16_t n;
+        if(mg_enc_rows(g, t, &n)) continue;
+        for(uint32_t j = 0; j < n; j++){
+            MgEncRow row;
+            int r = mg_enc_row(g, t, j, &row);
+            if(r) return r;
+            if(row.hi > b->table_hi[t]) b->table_hi[t] = row.hi;
+        }
+    }
     for(uint32_t i = 0; i < b->n_areas; i++){
         MgArea a;
         int r = mg_area_open(g, i, &a, scratch, cap);
@@ -39,7 +49,7 @@ int mb_init(MbBot *b, MonGame *g, uint32_t seed, uint8_t *scratch, uint32_t cap)
         for(uint32_t k = 0; k < a.n_people && b->n_people < MB_MAX_PEOPLE; k++){
             MgPerson p;
             mg_person(&a, k, &p);
-            if(p.kind != MG_P_TRAINER && p.kind != MG_P_HEALER) continue;
+            if(p.kind != MG_P_TRAINER && p.kind != MG_P_HEALER && p.kind != MG_P_SHOP) continue;
             MbPerson *o = &b->people[b->n_people++];
             o->area = (uint8_t)i; o->x = p.x; o->y = p.y; o->kind = p.kind; o->index = (uint8_t)k;
             o->flag = p.flag; o->hide_if = p.hide_if; o->show_if = p.show_if;
@@ -51,14 +61,7 @@ int mb_init(MbBot *b, MonGame *g, uint32_t seed, uint8_t *scratch, uint32_t cap)
             mg_zone(&a, k, &z);
             if(!z.chance || mg_enc_rows(g, z.table, &n) || !n) continue;
             MbZone *o = &b->zones[b->n_zones++];
-            o->area = (uint8_t)i; o->x = z.x; o->y = z.y; o->w = z.w; o->h = z.h;
-            o->lo = 0xFF; o->hi = 0;
-            for(uint32_t j = 0; j < n; j++){
-                MgEncRow row;
-                if((r = mg_enc_row(g, z.table, j, &row))) return r;
-                if(row.lo < o->lo) o->lo = row.lo;
-                if(row.hi > o->hi) o->hi = row.hi;
-            }
+            o->area = (uint8_t)i; o->x = z.x; o->y = z.y; o->w = z.w; o->h = z.h; o->table = z.table;
         }
     }
     return 0;
@@ -333,7 +336,8 @@ static int grind(MbBot *b, const MpWorld *w, int *dir){
     int bd = 0;
     for(int k = 0; k < b->n_zones; k++){
         const MbZone *z = &b->zones[k];
-        uint32_t fit = (uint32_t)abs(z->hi - want);
+        uint16_t t = mp_table(w, z->table);
+        uint32_t fit = (uint32_t)abs((t < MB_MAX_TABLES ? b->table_hi[t] : 0) - want);
         if(z->area != w->area.index){
             int d = 0;
             uint32_t s = toward(b, w, z->area, &d);
@@ -366,22 +370,72 @@ static int grind(MbBot *b, const MpWorld *w, int *dir){
     return 1;
 }
 
-/* to the nearest healer: 1 and the press, or 0 if none can be reached */
-static int rest(MbBot *b, const MpWorld *w, int *what, int *dir){
+/* to the nearest healer (or shop): its score (fewer areas away first, then
+ * fewer steps) and the press, or FAR if none can be reached */
+static uint32_t to_nearest(MbBot *b, const MpWorld *w, int kind, int *what, int *dir){
     uint32_t near = FAR;
     for(int k = 0; k < b->n_people; k++){
         const MbPerson *p = &b->people[k];
         int wh, dd;
-        if(p->kind != MG_P_HEALER || !present(w, p)) continue;
+        if(p->kind != kind || !present(w, p)) continue;
         uint32_t s = to_person(b, w, p, &wh, &dd);
         if(s < near){ near = s; *what = wh; *dir = dd; }
     }
-    return near != FAR;
+    return near;
 }
 
+/* a healing item (not a revive): its HP for a creature of max HP `max`, or 0 */
+static uint32_t heals(const MgItem *it, uint32_t max){
+    if(it->effects & MG_I_REVIVE) return 0;
+    if(it->effects & MG_I_HEAL) return it->amount;
+    if(it->effects & MG_I_HEAL_PCT) return max * it->amount / 100;
+    return 0;
+}
+
+static uint32_t top_hp(const MpWorld *w){
+    uint32_t m = 0;
+    for(int i = 0; i < w->n_party; i++) if(w->party[i].stat[MG_HP] > m) m = w->party[i].stat[MG_HP];
+    return m;
+}
+
+int mb_shop(const MbBot *b, MpWorld *w){
+    uint32_t have = 0, max = top_hp(w), best = 0;
+    int pick = -1;
+    for(uint32_t i = 0; i < b->g->n_items && i < MP_BAG; i++){
+        MgItem it;
+        if(mg_item(b->g, i, &it) || !heals(&it, max)) continue;
+        have += w->bag[i];
+        if(it.price && it.price * 2 <= w->money && w->bag[i] < MP_BAG_MAX && heals(&it, max) > best){
+            best = heals(&it, max);
+            pick = (int)i;
+        }
+    }
+    return have < MB_HEALS ? pick : -1;
+}
+
+/* the healing item that suits party member who best: the smallest that makes
+ * up two thirds of what it's lost, else the biggest; -1 if none would help */
+static int heal_for(MbBot *b, MpWorld *w, int who){
+    const MpCreature *c = &w->party[who];
+    uint32_t lost = (uint32_t)c->stat[MG_HP] - c->hp, best_fit = 0xFFFFFFFFu, biggest = 0;
+    int fit = -1, big = -1;
+    for(uint32_t i = 0; i < b->g->n_items && i < MP_BAG; i++){
+        MgItem it;
+        uint32_t g;
+        if(!w->bag[i] || mg_item(b->g, i, &it) || !heals(&it, c->stat[MG_HP]) || !mp_item_helps(w, (uint16_t)i, who, &g))
+            continue;
+        if(g * 3 >= lost * 2 && heals(&it, c->stat[MG_HP]) < best_fit){ best_fit = heals(&it, c->stat[MG_HP]); fit = (int)i; }
+        if(g > biggest){ biggest = g; big = (int)i; }
+    }
+    return fit >= 0 ? fit : big;
+}
+
+/* every keeper beaten, or gone for good (a rematch's first match, say) */
 int mb_done(const MbBot *b, const MpWorld *w){
-    for(int k = 0; k < b->n_people; k++)
-        if(b->people[k].kind == MG_P_TRAINER && !mp_flag(w, b->people[k].flag)) return 0;
+    for(int k = 0; k < b->n_people; k++){
+        const MbPerson *p = &b->people[k];
+        if(p->kind == MG_P_TRAINER && !mp_flag(w, p->flag) && !(p->hide_if && mp_flag(w, p->hide_if))) return 0;
+    }
     return 1;
 }
 
@@ -415,16 +469,39 @@ int mb_world(MbBot *b, MpWorld *w, int *dir){
     b->goal = (uint8_t)(goal + 1);
     int train = best == FAR || best_level(w) < top;
     int tired = worn(w) || (best != FAR && !train && health(w) < 75);
-    /* resting and training keep out of keepers' sight if there's a way */
-    for(int unseen = 1; (tired || train) && unseen >= 0; unseen--){
+    /* shopping: when it has the money for what it wants, and isn't worn down.
+     * A shop it can't reach isn't tried again until the story moves on. */
+    uint32_t story = 1;
+    for(uint32_t i = 0; i < sizeof w->flags; i++) story = story * 31u + w->flags[i];
+    if(!worn(w) && b->no_shop != story && mb_shop(b, w) >= 0){
         int wh = MB_STEP, dd = 0;
-        search(b, w, unseen);
-        if(tired && rest(b, w, &wh, &dd)){
-            snprintf(b->why, sizeof b->why, "going to rest");
+        if(to_nearest(b, w, MG_P_SHOP, &wh, &dd) != FAR){
+            snprintf(b->why, sizeof b->why, "going shopping");
             *dir = dd;
             return wh;
         }
-        if(train && grind(b, w, dir)){
+        b->no_shop = story;
+    }
+    /* resting keeps out of keepers' sight if that isn't further: a healer
+     * past a keeper's line in this area beats one two areas back, or it
+     * would turn round at the area's edge and come back for ever */
+    if(tired){
+        int wh1 = MB_STEP, d1 = 0, wh0 = MB_STEP, d0 = 0;
+        search(b, w, 1);
+        uint32_t s1 = to_nearest(b, w, MG_P_HEALER, &wh1, &d1);
+        search(b, w, 0);
+        uint32_t s0 = to_nearest(b, w, MG_P_HEALER, &wh0, &d0);
+        if(s1 != FAR || s0 != FAR){
+            int seen = s1 == FAR || (s0 != FAR && s0 / 4096 < s1 / 4096);
+            snprintf(b->why, sizeof b->why, "going to rest");
+            *dir = seen ? d0 : d1;
+            return seen ? wh0 : wh1;
+        }
+    }
+    /* training keeps out of keepers' sight if there's a way */
+    for(int unseen = 1; train && unseen >= 0; unseen--){
+        search(b, w, unseen);
+        if(grind(b, w, dir)){
             if(best == FAR) snprintf(b->why, sizeof b->why, "training: no keeper in reach");
             else snprintf(b->why, sizeof b->why, "training for a level %d keeper", top);
             return MB_STEP;
@@ -520,6 +597,15 @@ void mb_battle(MbBot *b, MpWorld *w, MpBattle *bt, int *act, int *arg){
            (bt->wild.hp * 2u <= bt->wild.stat[MG_HP] || dmg >= bt->wild.hp)){
             b->tries++;
             *act = MP_ACT_CATCH; *arg = 0;
+            return;
+        }
+    }
+    if(bt->trainer && me->hp * 3u < me->stat[MG_HP]){
+        /* low in a keeper's battle: heal, unless the next blow wins */
+        uint32_t sc;
+        int mv = best_move(b, me, &bt->wild, bt->recharge[0], &sc), it = heal_for(b, w, bt->active);
+        if(it >= 0 && !(mv >= 0 && sc / 100 >= bt->wild.hp)){
+            *act = MP_ACT_ITEM; *arg = it | bt->active << 8;
             return;
         }
     }

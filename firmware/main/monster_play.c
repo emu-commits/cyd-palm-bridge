@@ -227,6 +227,13 @@ int mp_present(const MpWorld *w, const MgPerson *p){
 }
 
 /* the person standing at (x, y), or -1 */
+uint16_t mp_table(const MpWorld *w, uint16_t table){
+    const MonGame *g = w->g;
+    for(uint32_t i = 0; i < g->n_steps; i++)
+        if(g->steps[i].table == table && mp_flag(w, g->steps[i].flag)) table = g->steps[i].to;
+    return table;
+}
+
 static int person_at(const MpWorld *w, int x, int y, MgPerson *p){
     for(uint32_t k = 0; k < w->area.n_people; k++){
         mg_person(&w->area, k, p);
@@ -380,7 +387,7 @@ int mp_step(MpWorld *w, int dir, MpBattle *b, MpLog *log){
         MgZone z;
         mg_zone(&w->area, k, &z);
         if(!in_rect(w->x, w->y, z.x, z.y, z.w, z.h)) continue;
-        if(alive(w) && b && mp_below(&w->rng, 10000) < z.chance) return encounter(w, z.table, b, log);
+        if(alive(w) && b && mp_below(&w->rng, 10000) < z.chance) return encounter(w, mp_table(w, z.table), b, log);
         break;
     }
     return 0;
@@ -409,6 +416,7 @@ int mp_interact(MpWorld *w, MpBattle *b, MpLog *log){
             w->respawn_x = w->x; w->respawn_y = w->y; w->respawn_facing = w->facing;
             say(log, MP_EV_HEALED, 0, (uint32_t)k, 0, 0);
         }
+        if(p.kind == MG_P_SHOP) say(log, MP_EV_SHOP, 0, (uint32_t)k, 0, 0);
         mp_set_flag(w, p.flag);
         return 1;
     }
@@ -442,6 +450,56 @@ int mp_new(MpWorld *w, MonGame *g, uint8_t *head, uint32_t seed, uint16_t starte
     uint8_t lv = (uint8_t)(g->rules[5] < 5 ? g->rules[5] : 5);
     if((r = mp_make(g, &w->rng, starter, lv, &w->party[0]))) return werr(w, r, "no such creature");
     w->n_party = 1;
+    w->money = g->money_start;
+    return 0;
+}
+
+/* ---- items and money ---- */
+
+int mp_item_helps(MpWorld *w, uint16_t item, int who, uint32_t *gain){
+    MgItem it;
+    if(gain) *gain = 0;
+    if(item >= w->g->n_items || who < 0 || who >= w->n_party || mg_item(w->g, item, &it)) return 0;
+    const MpCreature *c = &w->party[who];
+    uint32_t max = c->stat[MG_HP], heal = 0;
+    if((it.effects & MG_I_REVIVE) ? c->hp : !c->hp) return 0;     /* a revive is for the fainted only */
+    if(it.effects & MG_I_HEAL) heal = it.amount;
+    else if(it.effects & MG_I_HEAL_PCT) heal = max * it.amount / 100 ? max * it.amount / 100 : 1;
+    if(heal > max - c->hp) heal = max - c->hp;
+    if(gain) *gain = heal;
+    int cure = (it.effects & MG_I_CURE) && c->status && c->status <= w->g->n_statuses &&
+               (w->g->statuses[c->status - 1].flags & 1);
+    return heal || cure || (it.effects & MG_I_REVIVE);
+}
+
+int mp_buy(MpWorld *w, uint16_t item){
+    MgItem it;
+    if(item >= w->g->n_items || mg_item(w->g, item, &it) || !it.price || it.price > w->money ||
+       w->bag[item] >= MP_BAG_MAX) return MG_ERANGE;
+    w->money -= it.price;
+    w->bag[item]++;
+    return 0;
+}
+
+/* item i on party member who: the bag's one, its effects, the event */
+static void use_item(MpWorld *w, uint16_t item, int who, MpLog *log){
+    MgItem it;
+    uint32_t heal;
+    MpCreature *c = &w->party[who];
+    mp_item_helps(w, item, who, &heal);
+    mg_item(w->g, item, &it);
+    w->bag[item]--;
+    if((it.effects & MG_I_REVIVE) && !c->hp && !heal) heal = 1;    /* back on its feet, at least */
+    c->hp = (uint16_t)(c->hp + heal);
+    if((it.effects & (MG_I_CURE | MG_I_REVIVE)) && c->status && c->status <= w->g->n_statuses &&
+       (w->g->statuses[c->status - 1].flags & 1)) c->status = 0;
+    say(log, MP_EV_ITEM, 0, item, (uint32_t)who, heal);
+}
+
+int mp_use(MpWorld *w, uint16_t item, int who, MpLog *log){
+    if(log){ log->n = 0; log->overflow = 0; }
+    if(item >= MP_BAG || !w->bag[item] || !mp_item_helps(w, item, who, NULL)) return MG_ERANGE;
+    use_item(w, item, who, log);
     return 0;
 }
 
@@ -633,6 +691,7 @@ static int resolve(MpWorld *w, MpBattle *b, MpLog *log){
     }
     if(!b->wild.hp){
         uint32_t gain = mp_exp_for(g, b->wild.mon, b->wild.level) / b->wild.level, n = 0;
+        if(b->trainer) gain = (uint32_t)((uint64_t)gain * g->keeper_bonus / 100);
         for(int i = 0; i < w->n_party; i++) if((b->fought >> i & 1) && w->party[i].hp) n++;
         if(n){
             uint32_t each = gain / n;
@@ -662,6 +721,13 @@ static int resolve(MpWorld *w, MpBattle *b, MpLog *log){
             mg_person(&w->area, b->trainer - 1u, &p);
             mp_set_flag(w, p.flag);
             say(log, MP_EV_BEATEN, 0, b->trainer - 1u, 0, 0);
+            uint32_t prize = 0;
+            for(int i = 0; i < b->n_team; i++) prize += b->team[i].level;
+            prize *= g->money_per_level;
+            if(prize){
+                w->money = w->money + prize > MP_MONEY_MAX ? MP_MONEY_MAX : w->money + prize;
+                say(log, MP_EV_PRIZE, 0, b->trainer - 1u, 0, prize);
+            }
             if(p.after.len) say(log, MP_EV_TALK, 0, b->trainer - 1u, p.after.len, p.after.off);
         }
         battle_end(w, b);
@@ -727,6 +793,10 @@ int mp_turn(MpWorld *w, MpBattle *b, int act_kind, int arg, MpLog *log){
     case MP_ACT_RUN:
         if(b->trainer) return MG_ERANGE;
         break;
+    case MP_ACT_ITEM:
+        if(arg < 0 || (arg & 0xFF) >= MP_BAG || !w->bag[arg & 0xFF] || !mp_item_helps(w, (uint16_t)(arg & 0xFF), arg >> 8, NULL))
+            return MG_ERANGE;
+        break;
     default:
         return MG_ERANGE;
     }
@@ -737,6 +807,7 @@ int mp_turn(MpWorld *w, MpBattle *b, int act_kind, int arg, MpLog *log){
         say(log, MP_EV_SWAP, 0, (uint32_t)arg, 0, 0);
         if(b->need_swap){ b->need_swap = 0; return 0; }      /* a fainted creature replaced: no turn */
     }
+    if(act_kind == MP_ACT_ITEM) use_item(w, (uint16_t)(arg & 0xFF), arg >> 8, log);
     int foe_slot = mp_wild_choice(w, b);
     if(act_kind == MP_ACT_RUN){
         int32_t chance = 40 + 15 * ((int32_t)b->run_tries + me->level - b->wild.level);
@@ -779,7 +850,7 @@ int mp_turn(MpWorld *w, MpBattle *b, int act_kind, int arg, MpLog *log){
 }
 
 /* ---- the save -------------------------------------------------------------
- * A 32-byte header: "CYDS", u16 version (2), u16 box count, u32 the game
+ * A 32-byte header: "CYDS", u16 version (3), u16 box count, u32 the game
  * file's fingerprint, u32 the generator, u32 area id, u8 x, y, facing, party
  * count, u32 CRC-32 of the records, u32 CRC-32 of bytes 0-27. Then, from
  * version 2, a 40-byte record of the story: the flags (32 B, flag f is bit
@@ -789,7 +860,25 @@ int mp_turn(MpWorld *w, MpBattle *b, int act_kind, int arg, MpLog *log){
  * none), u8 iv x 6, u16 0, u32 move id x 4 (0 none). The records' CRC covers
  * the story's record too. Ids, not positions, so a rebuilt game file
  * (game_ids.tsv keeps the numbers) still loads the save. A version 1 save
- * (no story record) loads with no flags set. Replaced whole (safefile.h). */
+ * (no story record) loads with no flags set. From version 3, after the story,
+ * 80 bytes of money and bag: u32 coins, u32 0, then 9 x (u32 item id, u16
+ * count, u16 0), unused slots zero; a version 1 or 2 save starts with META
+ * 0x24's coins and nothing in the bag. Replaced whole (safefile.h). */
+
+#define BAG_BYTES 80
+
+static void put_bag(MpWorld *w, uint8_t *p){
+    memset(p, 0, BAG_BYTES);
+    put32(p, w->money);
+    int n = 0;
+    for(uint32_t i = 0; i < w->g->n_items && i < MP_BAG; i++){
+        MgItem it;
+        if(!w->bag[i] || mg_item(w->g, i, &it)) continue;
+        put32(p + 8 + 8 * n, it.id);
+        put16(p + 12 + 8 * n, w->bag[i]);
+        n++;
+    }
+}
 
 static void put_story(MpWorld *w, uint8_t *p){
     MgAreaDir d;
@@ -817,11 +906,13 @@ static void put_rec(MonGame *g, const MpCreature *c, uint8_t *p){
 }
 
 int mp_save(MpWorld *w, const char *path){
-    uint8_t h[MP_SAVE_HEADER], rec[MP_SAVE_REC], story[MP_SAVE_REC];
+    uint8_t h[MP_SAVE_HEADER], rec[MP_SAVE_REC], story[MP_SAVE_REC], bag[BAG_BYTES];
     uint32_t crc, n = (uint32_t)w->n_party + w->n_box;
     SafeFile sf;
     put_story(w, story);
+    put_bag(w, bag);
     crc = mg_crc32(0, story, MP_SAVE_REC);
+    crc = mg_crc32(crc, bag, BAG_BYTES);
     for(uint32_t i = 0; i < n; i++){
         put_rec(w->g, i < w->n_party ? &w->party[i] : &w->box[i - w->n_party], rec);
         crc = mg_crc32(crc, rec, MP_SAVE_REC);
@@ -838,7 +929,8 @@ int mp_save(MpWorld *w, const char *path){
     put32(h + 28, mg_crc32(0, h, 28));
     FILE *f = sf_open(&sf, path, "wb");
     if(!f) return werr(w, MG_EIO, "can't write the save");
-    int ok = fwrite(h, 1, sizeof h, f) == sizeof h && fwrite(story, 1, sizeof story, f) == sizeof story;
+    int ok = fwrite(h, 1, sizeof h, f) == sizeof h && fwrite(story, 1, sizeof story, f) == sizeof story &&
+             fwrite(bag, 1, sizeof bag, f) == sizeof bag;
     for(uint32_t i = 0; ok && i < n; i++){
         put_rec(w->g, i < w->n_party ? &w->party[i] : &w->box[i - w->n_party], rec);
         ok = fwrite(rec, 1, MP_SAVE_REC, f) == MP_SAVE_REC;
@@ -923,6 +1015,27 @@ int mp_load(MpWorld *w, MonGame *g, uint8_t *head, const char *path){
             w->respawn_x = rec[36]; w->respawn_y = rec[37]; w->respawn_facing = rec[38];
         }
         else if(rec[36] || rec[37] || rec[38]){ werr(w, MG_EBAD, "the save is damaged"); goto out; }
+    }
+    w->money = g->money_start;
+    if(version >= 3){
+        uint8_t bag[BAG_BYTES];
+        if(fread(bag, 1, BAG_BYTES, f) != BAG_BYTES){ werr(w, MG_EBAD, "the save is cut short"); goto out; }
+        crc = mg_crc32(crc, bag, BAG_BYTES);
+        w->money = le32(bag);
+        if(w->money > MP_MONEY_MAX || le32(bag + 4)){ werr(w, MG_EBAD, "the save is damaged"); goto out; }
+        for(int i = 0; i < 9; i++){
+            const uint8_t *s = bag + 8 + 8 * i;
+            uint16_t pos;
+            if(!le32(s)){
+                if(le16(s + 4) || le16(s + 6)){ werr(w, MG_EBAD, "the save is damaged"); goto out; }
+                continue;
+            }
+            if(mg_find_item(g, le32(s), &pos)){ werr(w, MG_EBAD, "the save has an item this game file doesn't"); goto out; }
+            if(!le16(s + 4) || le16(s + 4) > MP_BAG_MAX || le16(s + 6) || w->bag[pos]){
+                werr(w, MG_EBAD, "the save is damaged"); goto out;
+            }
+            w->bag[pos] = (uint8_t)le16(s + 4);
+        }
     }
     for(uint32_t i = 0; i < nparty + nbox; i++){
         if(fread(rec, 1, MP_SAVE_REC, f) != MP_SAVE_REC){ werr(w, MG_EBAD, "the save is cut short"); goto out; }

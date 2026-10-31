@@ -22,7 +22,7 @@ before touching anything.
 - `docs/SRS_PLAN.md`: the built-in spaced-repetition app. **This is the
   current project; see "Current work" below.**
 - `docs/GAME_PLAN.md`: a monster-catching game from Tuxemon's content.
-  **G0 to G3 done 2026-10-16**: the format (now 1.1: people, looks,
+  **G0 to G3 done 2026-10-16**: the format (now 2.0: the looks in their own section; 1.1 added people, looks,
   starters) and converter, the rules (`monster.c`, `monster_play.c`), the
   screens (`ui_monster.c`, "Critters" in the Games folder), and the first
   region: two towns of our own layout (`tools/game_maps/`), three Tuxemon
@@ -35,7 +35,12 @@ before touching anything.
   web emulator puts it on its card. **Also done 2026-10-16:** rooms behind
   every open door (our own CC0 tileset, `tools/gen_interior_sheet.py`) and
   **G4, Auto-play** (`monster_bot.c`; `make -C sim monster` checks it beats
-  every keeper). Next: the owner's bench items (G5). The Tuxemon checkout
+  every keeper). Next: the owner's bench items (G5). **Built 2026-10-31
+  (the owner approved it):** `docs/GAME_LENGTH_PLAN.md`, a game three times
+  longer: format 2.1 (the looks once; items, money, shops), Route 2, the Old
+  Keep, Dragon's Cave and the Kestrel store, 32 keepers over three acts, and
+  Auto-play that shops and heals; `make -C sim monster` checks it finishes
+  with its first critter at 36 or more. The Tuxemon checkout
   never enters the repo.
 - `docs/APP_PLATFORM_PLAN.md`: native C apps loaded from the SD card.
   **On hold since 2026-09-29**; don't build any of it without the user's yes.

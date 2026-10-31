@@ -33,7 +33,8 @@
 #define GAME   "../tests/data/game/game.bin"
 #define BATTLE "../tests/data/game/battle.txt"
 #define REGION "../courses/critters/game.bin"
-#define BOT_LIMIT 40000L            /* presses and battle turns, all told: about 3x the worst of 60 seeds */
+#define BOT_LIMIT 400000L           /* presses and battle turns, all told (GAME_LENGTH_PLAN.md) */
+#define BOT_MAIN_MIN 36             /* the first critter's level when every keeper is beaten, at least (the owner's ask) */
 static const char *SAVE = "build/monster_save.bin";   /* MONSTER_SAVE overrides */
 
 static int fails;
@@ -67,11 +68,28 @@ static int dump(const char *path){
         }
     }
     printf("start area %u at %u,%u facing %u\n", g.start_area, g.start_x, g.start_y, g.start_facing);
-    printf("looks %u\n", g.looks);
-    if(g.n_starters) printf("starters %u %u %u\n", g.starters[0], g.starters[1], g.starters[2]);
+    printf("looks %u colours %u crc %08x\n", g.looks, g.look_colours, (unsigned)g.s[MG_LOOK].crc);
+    if(g.n_starters){
+        printf("starters");
+        for(int i = 0; i < g.n_starters; i++) printf(" %u", g.starters[i]);
+        printf("\n");
+    }
     printf("rules");   for(int i = 0; i < 8; i++) printf(" %u", (unsigned)g.rules[i]);   printf("\n");
     printf("capture"); for(int i = 0; i < 7; i++) printf(" %u", (unsigned)g.capture[i]); printf("\n");
     printf("growth");  for(int i = 0; i < 4; i++) printf(" %u", (unsigned)g.growth[i]);  printf("\n");
+    printf("keeper bonus %u\n", (unsigned)g.keeper_bonus);
+    printf("money %u %u\n", (unsigned)g.money_start, (unsigned)g.money_per_level);
+    for(uint32_t i = 0; i < g.n_items; i++){
+        MgItem it;
+        mg_item(&g, i, &it);
+        text(&g, it.name, t);
+        printf("item %u %s effects %u amount %u price %u\n", (unsigned)it.id, t, it.effects, it.amount, (unsigned)it.price);
+    }
+    if(g.n_steps){
+        printf("steps");
+        for(int i = 0; i < g.n_steps; i++) printf(" %u:%u>%u", g.steps[i].flag, g.steps[i].table, g.steps[i].to);
+        printf("\n");
+    }
     for(uint32_t i = 0; i < g.n_types; i++){
         MgStr s;
         mg_type_name(&g, i, &s);
@@ -392,10 +410,14 @@ static void people(void){
     MpWorld *w = calloc(1, sizeof *w);
     MpLog log;
     MpBattle b;
-    MgPerson fen;
+    MgPerson fen, fen2;
     CHECK(mp_new(w, &G, HEAD, 3, mon_named("Emberkit")) == 0, "a new game: %s", w->err);
-    CHECK(G.looks == 2 && w->area.n_people == 2, "two looks, and two people in the meadow");
+    CHECK(G.looks == 2 && w->area.n_people == 3, "two looks, and three people in the meadow");
     mg_person(&w->area, 0, &fen);
+    mg_person(&w->area, 2, &fen2);
+    /* her rematch shares her cell: it comes when she goes */
+    CHECK(fen2.x == fen.x && fen2.y == fen.y && fen2.kind == MG_P_TRAINER && fen.hide_if && fen2.show_if == fen.hide_if &&
+          fen2.level[0] == 8 && mp_present(w, &fen) && !mp_present(w, &fen2), "Keeper Fen's rematch, not there yet");
     CHECK(fen.kind == MG_P_TRAINER && fen.sight == 2 && fen.mon[1] == mon_named("Thornet") && fen.level[1] == 4 &&
           fen.mon[2] == MG_NONE16, "Keeper Fen's record");
     /* the guard is in the way */
@@ -417,16 +439,23 @@ static void people(void){
     uint32_t rng = 9;
     mp_make(&G, &rng, mon_named("Blazecat"), 40, &w->party[0]);
     b.active = 0;
-    int sends = 0, turns = 0;
+    int sends = 0, turns = 0, nexp = 0;
+    uint32_t exp[4] = { 0 };
     while(!b.over && turns++ < 40){
         int slot = 0;
         while(slot < MP_MOVES && (w->party[0].moves[slot] == MP_NO_MOVE || b.recharge[0][slot])) slot++;
         mp_turn(w, &b, MP_ACT_MOVE, slot < MP_MOVES ? slot : -1, &log);
         if(has_ev(&log, MP_EV_SENDS)) sends++;
+        for(int i = 0; i < log.n; i++) if(log.ev[i].kind == MP_EV_EXP && nexp < 4) exp[nexp++] = log.ev[i].n;
     }
     CHECK(b.over && sends == 1 && has_ev(&log, MP_EV_WIN) && has_ev(&log, MP_EV_BEATEN), "beating Fen (%d turns)", turns);
+    /* the keeper bonus, 150 %: Puddlop 3 (slow) is 3^3 x 1.25 / 3 = 11, so 16; Thornet 4 is 4^3 / 4 = 16, so 24 */
+    CHECK(G.keeper_bonus == 150 && nexp == 2 && exp[0] == 16 && exp[1] == 24, "a keeper's experience: %u %u",
+          (unsigned)exp[0], (unsigned)exp[1]);
     said(&log, "Fen is beaten.", "Fen after the battle");
     CHECK(mp_flag(w, fen.flag), "Fen's flag is set");
+    /* her prize: 10 coins a level of her critters, 3 + 4 */
+    CHECK(has_ev(&log, MP_EV_PRIZE) && w->money == G.money_start + 70, "Fen's prize: %u coins", (unsigned)w->money);
     /* beaten: she says her piece and doesn't battle again */
     w->x = 4; w->y = 14; w->facing = MG_E;
     CHECK(mp_interact(w, &b, &log) == 1 && b.over && !has_ev(&log, MP_EV_TRAINER), "Fen won't battle twice");
@@ -440,14 +469,25 @@ static void people(void){
     w->x = 3; w->y = 1; w->facing = MG_N;
     mp_step(w, MG_N, &b, &log);
     CHECK(w->area.index == 2 && w->x == 6 && w->y == 8, "into the village");
+    MgZone vz;
+    mg_zone(&w->area, 0, &vz);
+    CHECK(G.n_steps == 1 && G.steps[0].table == vz.table && mp_table(w, vz.table) == vz.table,
+          "the village grass, before the elder");
     w->x = 5; w->y = 3; w->facing = MG_N;
     mp_interact(w, &b, &log);
     said(&log, "Hello, keeper.", "the elder, first");
+    /* the elder's flag: the grass steps up a table, and Fen gives way to her rematch */
+    CHECK(mp_table(w, vz.table) == G.steps[0].to, "the village grass, after the elder");
+    CHECK(!mp_present(w, &fen) && mp_present(w, &fen2), "Fen gone, her rematch there");
     mp_interact(w, &b, &log);
     said(&log, "Again?", "the elder, again");
     w->x = 9; w->y = 3; w->facing = MG_N;
     CHECK(mp_interact(w, &b, &log) == 1, "the herald is there once Fen is beaten");
     said(&log, "Fen is beaten!", "the herald");
+    /* the clerk: their words, then the shop */
+    w->x = 7; w->y = 3; w->facing = MG_N;
+    CHECK(mp_interact(w, &b, &log) == 1 && log.n == 2 && log.ev[0].kind == MP_EV_TALK && log.ev[1].kind == MP_EV_SHOP,
+          "the clerk opens the shop");
     w->party[0].hp = 1;
     w->x = 2; w->y = 3; w->facing = MG_N;
     CHECK(mp_interact(w, &b, &log) == 1 && has_ev(&log, MP_EV_HEALED) && w->party[0].hp == w->party[0].stat[MG_HP],
@@ -469,6 +509,47 @@ static void people(void){
     CHECK(mp_new(w, &G, HEAD, 3, mon_named("Emberkit")) == 0, "a new game");
     w->x = 4; w->y = 14; w->facing = MG_E;
     CHECK(mp_interact(w, &b, &log) == 1 && !b.over && b.trainer == 1 && has_ev(&log, MP_EV_TRAINER), "Fen, spoken to");
+    free(w);
+}
+
+/* ---- items, money and the shop (2.1) ---- */
+
+static void items(void){
+    MpWorld *w = calloc(1, sizeof *w);
+    MpLog log;
+    MpBattle b;
+    CHECK(mp_new(w, &G, HEAD, 3, mon_named("Emberkit")) == 0, "a new game: %s", w->err);
+    CHECK(G.n_items == 2 && w->money == 100 && !w->bag[0] && !w->bag[1], "a new game's money and bag");
+    MgItem tonic, revival;
+    mg_item(&G, 0, &tonic);
+    mg_item(&G, 1, &revival);
+    CHECK(tonic.effects == MG_I_HEAL && tonic.amount == 20 && tonic.price == 50 &&
+          revival.effects == (MG_I_HEAL_PCT | MG_I_CURE | MG_I_REVIVE) && revival.amount == 50, "the items' records");
+    /* buying */
+    CHECK(!mp_buy(w, 0) && !mp_buy(w, 0) && w->money == 0 && w->bag[0] == 2, "two tonics for 100");
+    CHECK(mp_buy(w, 0) == MG_ERANGE && mp_buy(w, 1) == MG_ERANGE && mp_buy(w, 9) == MG_ERANGE, "not without the money");
+    /* using: a tonic on a full creature does nothing, on a hurt one heals 20 */
+    MpCreature *c = &w->party[0];
+    uint32_t gain;
+    CHECK(!mp_item_helps(w, 0, 0, NULL) && mp_use(w, 0, 0, &log) == MG_ERANGE, "no tonic on a creature at full HP");
+    c->hp = 5;
+    CHECK(mp_item_helps(w, 0, 0, &gain) && gain == (c->stat[MG_HP] - 5u < 20 ? c->stat[MG_HP] - 5u : 20u), "a tonic would heal %u", (unsigned)gain);
+    CHECK(!mp_use(w, 0, 0, &log) && c->hp == 5 + gain && w->bag[0] == 1 && has_ev(&log, MP_EV_ITEM), "a tonic used");
+    /* a revival: only on a fainted creature, to half its HP, its poison gone */
+    w->bag[1] = 1;
+    CHECK(!mp_item_helps(w, 1, 0, NULL), "no revival for a creature still standing");
+    c->hp = 0; c->status = 1;
+    CHECK(!mp_item_helps(w, 0, 0, NULL), "no tonic for a fainted creature");
+    CHECK(!mp_use(w, 1, 0, &log) && c->hp == c->stat[MG_HP] / 2 && !c->status && !w->bag[1], "a revival used");
+    /* in a battle: an item is the turn, then the other side acts */
+    MpCreature wild;
+    uint32_t rng = 4;
+    mp_make(&G, &rng, mon_named("Puddlop"), 2, &wild);
+    CHECK(!mp_battle_start(w, &b, &wild), "a battle");
+    c->hp = 3;
+    CHECK(!mp_turn(w, &b, MP_ACT_ITEM, 0 | 0 << 8, &log) && log.ev[0].kind == MP_EV_ITEM && !w->bag[0] &&
+          (has_ev(&log, MP_EV_USE) || has_ev(&log, MP_EV_RECHARGE)), "a tonic in a battle, then the wild one's move");
+    CHECK(mp_turn(w, &b, MP_ACT_ITEM, 0, &log) == MG_ERANGE, "no tonic left");
     free(w);
 }
 
@@ -726,19 +807,22 @@ static void saves(MpWorld *w){
     mp_set_flag(w, 255);
     w->look = 1;
     w->has_respawn = 1; w->respawn_area = 2; w->respawn_x = 4; w->respawn_y = 5; w->respawn_facing = MG_W;
+    w->money = 1234; w->bag[1] = 3;
     CHECK(mp_save(w, SAVE) == 0, "saving: %s", w->err);
     CHECK(mp_load(v, &G, head2, SAVE) == 0, "loading: %s", v->err);
     CHECK(v->n_party == w->n_party && v->n_box == w->n_box && v->x == w->x && v->y == w->y &&
           v->facing == w->facing && v->rng == w->rng && v->area.index == w->area.index, "the world after a round trip");
     CHECK(!memcmp(v->flags, w->flags, sizeof w->flags) && v->look == 1 && v->has_respawn && v->respawn_area == 2 &&
           v->respawn_x == 4 && v->respawn_y == 5 && v->respawn_facing == MG_W, "the story after a round trip");
+    CHECK(v->money == 1234 && !v->bag[0] && v->bag[1] == 3, "the money and the bag after a round trip");
     for(int i = 0; i < w->n_party; i++)
         CHECK(!memcmp(&v->party[i], &w->party[i], sizeof w->party[i]), "party member %d after a round trip", i);
     for(int i = 0; i < w->n_box; i++)
         CHECK(!memcmp(&v->box[i], &w->box[i], sizeof w->box[i]), "box %d after a round trip", i);
     long n;
     uint8_t *good = slurp(SAVE, &n);
-    CHECK(n == MP_SAVE_HEADER + MP_SAVE_REC * (1 + w->n_party + w->n_box), "the save is %ld bytes", n);
+    const long BAG = 80;
+    CHECK(n == MP_SAVE_HEADER + MP_SAVE_REC * (1 + w->n_party + w->n_box) + BAG, "the save is %ld bytes", n);
     /* every truncation, and every flipped bit, refused */
     int took = 0;
     for(long k = 0; k < n; k++){
@@ -758,7 +842,7 @@ static void saves(MpWorld *w){
     printf("  save: %ld bytes; %ld truncations and %ld flipped bits refused\n", n, n, n * 8);
     /* a creature this file doesn't have (the CRCs fixed, so the id is what's checked) */
     memcpy(bad, good, (size_t)n);
-    bad[MP_SAVE_HEADER + MP_SAVE_REC] = 77;
+    bad[MP_SAVE_HEADER + MP_SAVE_REC + BAG] = 77;
     uint32_t crc = mg_crc32(0, bad + MP_SAVE_HEADER, (uint32_t)(n - MP_SAVE_HEADER));
     for(int i = 0; i < 4; i++) bad[24 + i] = (uint8_t)(crc >> (8 * i));
     crc = mg_crc32(0, bad, 28);
@@ -781,10 +865,32 @@ static void saves(MpWorld *w){
     for(int i = 0; i < 4; i++) bad[28 + i] = (uint8_t)(crc >> (8 * i));
     spit(SAVE, bad, n);
     CHECK(mp_load(v, &G, head2, SAVE) == MG_EBAD, "a look past the file's");
+    /* an item this file doesn't have */
+    memcpy(bad, good, (size_t)n);
+    bad[MP_SAVE_HEADER + MP_SAVE_REC + 8] = 99;
+    crc = mg_crc32(0, bad + MP_SAVE_HEADER, (uint32_t)(n - MP_SAVE_HEADER));
+    for(int i = 0; i < 4; i++) bad[24 + i] = (uint8_t)(crc >> (8 * i));
+    crc = mg_crc32(0, bad, 28);
+    for(int i = 0; i < 4; i++) bad[28 + i] = (uint8_t)(crc >> (8 * i));
+    spit(SAVE, bad, n);
+    CHECK(mp_load(v, &G, head2, SAVE) == MG_EBAD && strstr(v->err, "item"), "an unknown item: %s", v->err);
+    /* a version 2 save (before the bag) loads with the starting money and nothing in the bag */
+    long n2 = n - BAG;
+    memcpy(bad, good, MP_SAVE_HEADER + MP_SAVE_REC);
+    memcpy(bad + MP_SAVE_HEADER + MP_SAVE_REC, good + MP_SAVE_HEADER + MP_SAVE_REC + BAG,
+           (size_t)(n2 - MP_SAVE_HEADER - MP_SAVE_REC));
+    bad[4] = 2; bad[5] = 0;
+    crc = mg_crc32(0, bad + MP_SAVE_HEADER, (uint32_t)(n2 - MP_SAVE_HEADER));
+    for(int i = 0; i < 4; i++) bad[24 + i] = (uint8_t)(crc >> (8 * i));
+    crc = mg_crc32(0, bad, 28);
+    for(int i = 0; i < 4; i++) bad[28 + i] = (uint8_t)(crc >> (8 * i));
+    spit(SAVE, bad, n2);
+    CHECK(mp_load(v, &G, head2, SAVE) == 0 && v->money == G.money_start && !v->bag[1] && mp_flag(v, 2),
+          "a version 2 save: %s", v->err);
     /* a version 1 save (before the story's record) still loads, with no flags */
-    long n1 = n - MP_SAVE_REC;
+    long n1 = n - MP_SAVE_REC - BAG;
     memcpy(bad, good, MP_SAVE_HEADER);
-    memcpy(bad + MP_SAVE_HEADER, good + MP_SAVE_HEADER + MP_SAVE_REC, (size_t)(n1 - MP_SAVE_HEADER));
+    memcpy(bad + MP_SAVE_HEADER, good + MP_SAVE_HEADER + MP_SAVE_REC + BAG, (size_t)(n1 - MP_SAVE_HEADER));
     bad[4] = 1; bad[5] = 0;
     crc = mg_crc32(0, bad + MP_SAVE_HEADER, (uint32_t)(n1 - MP_SAVE_HEADER));
     for(int i = 0; i < 4; i++) bad[24 + i] = (uint8_t)(crc >> (8 * i));
@@ -821,7 +927,7 @@ static int bot_plays(MonGame *g, int pick, uint32_t seed){
     MbBot *b = malloc(sizeof *b);
     MpBattle bt;
     MpLog log;
-    long n, battles = 0, keepers = 0, lost = 0, lost_k = 0, caught = 0, stuck = 0, learnt = 0;
+    long n, battles = 0, keepers = 0, lost = 0, lost_k = 0, caught = 0, stuck = 0, learnt = 0, bought = 0, used = 0;
     int ok = 0;
     char who[32] = "?";
     w->head_cap = cap;
@@ -863,6 +969,15 @@ static int bot_plays(MonGame *g, int pick, uint32_t seed){
                 printf("  (%s)\n", b->why);
             }
             if(e->kind == MP_EV_CAUGHT) caught++;
+            if(e->kind == MP_EV_ITEM) used++;
+            if(e->kind == MP_EV_SHOP){         /* as the screens do: buy what it asks for, then leave */
+                int it;
+                while((it = mb_shop(b, w)) >= 0){
+                    CHECK(!mp_buy(w, (uint16_t)it), "bot: a purchase the rules refuse");
+                    bought++;
+                    if(bought > 10000) break;
+                }
+            }
             if(e->kind == MP_EV_LEARN_FULL){
                 int slot = mb_learn(b, w, e->a, e->b);
                 if(slot >= 0){ mp_learn(g, &w->party[e->a], e->b, slot); learnt++; }
@@ -877,9 +992,13 @@ static int bot_plays(MonGame *g, int pick, uint32_t seed){
         size_t l = strlen(party);
         snprintf(party + l, sizeof party - l, "%s%s %u", i ? ", " : "", t, w->party[i].level);
     }
+    int main_lv = w->party[0].level;
+    for(int i = 1; i < w->n_party; i++) if(w->party[i].level > main_lv) main_lv = w->party[i].level;
+    CHECK(!ok || main_lv >= BOT_MAIN_MIN, "bot: the best critter ends at level %d, under %d", main_lv, BOT_MAIN_MIN);
     printf("  bot with %s, seed %u: %s after %ld actions; %ld battles, %ld keepers, %ld lost, "
-           "(%ld to keepers), %ld caught, %ld moves relearnt, %ld stuck; party %s\n", who, (unsigned)seed,
-           ok ? "every keeper beaten" : "NOT finished", n, battles, keepers, lost, lost_k, caught, learnt, stuck, party);
+           "(%ld to keepers), %ld caught, %ld moves relearnt, %ld stuck, %ld bought, %ld used, %u coins; party %s\n",
+           who, (unsigned)seed, ok ? "every keeper beaten" : "NOT finished", n, battles, keepers, lost, lost_k, caught,
+           learnt, stuck, bought, used, (unsigned)w->money, party);
     if(!ok) printf("  bot: last doing: %s, in area %u at %u,%u\n", b->why, w->area.index, w->x, w->y);
     mb_free(b);
     free(b); free(w); free(head); free(scratch);
@@ -889,7 +1008,7 @@ static int bot_plays(MonGame *g, int pick, uint32_t seed){
 static void autoplay(void){
     MonGame g;
     if(mg_open(&g, REGION)){ CHECK(0, "%s: %s", REGION, g.err); return; }
-    for(int pick = 0; pick < 3; pick++)
+    for(int pick = 0; pick < (g.n_starters ? g.n_starters : 3); pick++)
         CHECK(bot_plays(&g, pick, 1), "bot: didn't finish the region with first critter %d", pick);
     mg_close(&g);
 }
@@ -906,6 +1025,7 @@ int main(int argc, char **argv){
     formulas();
     walking();
     people();
+    items();
     encounters();
     outcomes();
     MpWorld *w = battles();
