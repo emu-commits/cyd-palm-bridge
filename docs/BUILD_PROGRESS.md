@@ -16,6 +16,54 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-01 — Critters: the owner's water axolotl line
+
+The owner sent three more drawings (basic, stage 1, stage 2): a water
+axolotl. They came in through `tools/game_creatures/README.md`'s steps.
+`mksheet.py` needed two fixes first; the fire foxes' sheets are the same to
+the byte after both (`--check`).
+
+- **A dark checkerboard.** These drawings sit on greys of about 30 and 85,
+  and the tool knew only light backgrounds ("found 1 drawings"). The
+  background's greys are now learnt from the picture's border (`Backdrop`):
+  if the border's median grey is light, the old rule holds unchanged;
+  if it's dark, the background is the neutral greys from the border's 10th
+  centile less 12 to its 90th plus 16 (18..104 here), and the hole and
+  fringe rules use the same two tones.
+- **Drawings whose boxes overlap.** Maelstrotl's tornado and its back's
+  tail swirl come within a few pixels, so the front and back joined into one
+  drawing. Now two big pieces (a quarter of the biggest or more) are never
+  joined; a loose piece (a splash, a bubble) goes with the big piece whose
+  *pixels* are nearest, found by one breadth-first pass out from the big
+  pieces (box distance gave the tornado's splashes to the back). Each
+  drawing then samples only its own pieces, since the front's box now runs
+  27 px into the back's.
+- **Measured** (1248 or 1264 × 848 JPEGs): the pixel is 5.26, 5.30 and 5.24
+  picture pixels, so all three were halved again. Gillpip: front 34 × 38,
+  back 34 × 40. Rillotl: 44 × 42 and 42 × 41. Maelstrotl: 56 × 48 and
+  48 × 48. Icons 17–21 px. Each front and back uses 15 colours.
+  Maelstrotl is the busiest drawing yet, and its spines come out grainy.
+- **The line:** Gillpip (water, polliwog) evolves at 16 into Rillotl (water,
+  humanoid), at 32 into Maelstrotl (water, brute). Their moves: Bubbles,
+  Water Bullet, Font, Water Blast, Kraken and Tsunami, with Gnaw, Fluff Up,
+  Saber and All In. Hook, Blood Bond and Wallow were tried first; the build
+  report showed their effects aren't played, so they were swapped. New move
+  numbers 40–43 (Bubbles, Tsunami, Water Blast, Water Bullet), creatures
+  31–33.
+- **Wild only, rare** (rate 10, Maelstrotl 8): Brideswood in acts 1 and 2,
+  Route 1 and Brideswood in act 3, the Old Keep once Ashe is beaten.
+- **`game.bin`: 584,844 → 597,844 B** (+13,000). The `game` partition is
+  983,040 B.
+- **Seen in the simulator** (a scratch build only: Gillpip as the first
+  starter, Route 1 nothing but Maelstrotl). The pick screen, a battle, the
+  move list and the party all draw right.
+- **Gates:** make test, make ftest, the sim list (smoke included), smoke32,
+  mkcourse_test and mkgame_test all pass; mkgame_test's `--check` of every
+  "ours" sheet now covers the dark checkerboard. In `make -C sim monster`,
+  Auto-play still beats all 32 keepers with each of the five starters. The
+  firmware is unchanged: 0x1ba270 B, DRAM 147,468 B (81.59 %). wasm wasn't
+  run (no emsdk).
+
 ### 2026-11-01 — Critters: critters of our own, and the owner's fire fox line
 
 The owner sent three drawings (basic, stage 1, stage 2) of a new fire type and

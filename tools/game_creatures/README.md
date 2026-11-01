@@ -5,7 +5,7 @@ Tuxemon. Each one is three files and an allow-list line:
 
 | File | What it is |
 |---|---|
-| `tools/game_art/src/<slug>.jpg` (or `.png`) | The drawing as it came: front, back and two icons, blown up, on white or a checkerboard. Kept so the sheet can always be made again. |
+| `tools/game_art/src/<slug>.jpg` (or `.png`) | The drawing as it came: front, back and two icons, blown up, on white or a checkerboard (light or dark). Kept so the sheet can always be made again. |
 | `tools/game_art/<slug>-sheet.png` | The 128 × 88 battle sheet the game reads, made from the drawing by `tools/mksheet.py`. |
 | `tools/game_creatures/<slug>.yaml` | Its rules: name, types, body shape, stage, moves by level, evolution, catch rate, and the Dex text. |
 | `tools/game_allow.tsv` | `creature <slug> <licence> <authors> tools/game_art/<slug>-sheet.png ours` |
@@ -15,7 +15,10 @@ Tuxemon. Each one is three files and an allow-list line:
 1. **Save the drawing** as `tools/game_art/src/<slug>.jpg`. The slug is the
    name in lower case (`cinderkit`). Lay it out like a Tuxemon sheet: the
    front top left, the back top right, the two 24 px icons under the front.
-   It may be any size and needn't sit on an exact grid. The icons may be left
+   It may be any size and needn't sit on an exact grid. The background may be
+   white or a checkerboard, light or dark: its greys are learnt from the
+   picture's border. A splash or tornado may come close to the other drawing:
+   each loose piece goes with the drawing nearest it. The icons may be left
    out; the front is then shrunk to make them.
 2. **Make the sheet:**
 
@@ -73,3 +76,22 @@ for Pyrewing. They live in the wild, rarely:
 | Pyrewing | | | Dragon's Cave once Wyrmkeeper Ashe is beaten, 36–38 |
 
 The drawings were made at twice the game's size, so the sheets are halved.
+
+## The axolotl line (2026-11-01)
+
+The owner's second line, on a dark checkerboard: **Gillpip** (water,
+polliwog) evolves at 16 into **Rillotl** (water, humanoid), which evolves at
+32 into **Maelstrotl** (water, brute). The moves are Tuxemon's water moves
+(Bubbles, Water Bullet, Font, Water Blast, Kraken, Tsunami) with Gnaw, Fluff
+Up, Saber and All In. Hook, Blood Bond and Wallow would suit them, but the
+game doesn't play their effects yet. They live in the wild, rarely:
+
+| | Act 1 | Act 2 | Act 3 |
+|---|---|---|---|
+| Gillpip | Brideswood, 5–7 | Brideswood, 14–17 | |
+| Rillotl | | | Route 1, 22–26; Brideswood, 24–28 |
+| Maelstrotl | | | The Old Keep once Wyrmkeeper Ashe is beaten, 34–36 |
+
+These drawings were at twice the game's size too, so the sheets are halved.
+Maelstrotl is the busiest drawing yet; at 15 colours and half size its
+spines and armour come out grainy.

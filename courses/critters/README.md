@@ -19,8 +19,9 @@ Kestrel store, which opens once Ivy is beaten. Three acts: the first
 region's nine keepers; their rematches, Route 2 and the Old Keep's squires
 and captain, then the Ring again; and Dragon's Cave, its Wyrmkeeper, and
 Dr Wren for the Larkhollow plate (32 keepers in all, the last at level 43).
-30 creatures in whole evolution lines and their moves (27 of Tuxemon's,
-and the owner's fire fox line: Cinderkit, Scorchvix, Pyrewing); five items; 47
+33 creatures in whole evolution lines and their moves (27 of Tuxemon's, and
+the owner's fire fox line, Cinderkit, Scorchvix, Pyrewing, and axolotl line,
+Gillpip, Rillotl, Maelstrotl); five items; 47
 townspeople and keepers, each with words of our own; and six looks for the
 player. Every tile, creature
 sprite and character sheet in it is on the allow-list with its licence
@@ -54,9 +55,10 @@ Tuxemon checkout itself never enters this repository.
   2026-11-01: Tuxemon's back was a green butterfly unlike its front). The
   sheet, `tools/game_art/fluttaflap-sheet.png`, is Spalding004's with that
   back, so it stays **CC BY-SA 4.0**; its front and back share 15 colours.
-- **The fire fox line** (Cinderkit, Scorchvix, Pyrewing) is the owner's
-  drawing (2026-11-01), credited to CYD Palm under **CC0 1.0** like the rest
-  of our art. Their sheets are made from the drawings by `tools/mksheet.py`
+- **The fire fox line** (Cinderkit, Scorchvix, Pyrewing) and **the axolotl
+  line** (Gillpip, Rillotl, Maelstrotl) are the owner's drawings
+  (2026-11-01), credited to CYD Palm under **CC0 1.0** like the rest of our
+  art. Their sheets are made from the drawings by `tools/mksheet.py`
   (`tools/game_creatures/README.md`), and their rules are ours, under the
   GPLv3; their moves are Tuxemon's.
 - **The townspeople** are each under the licence listed beside them: CC BY-SA
@@ -91,12 +93,15 @@ The device shows the same list under Menu ▸ Credits in the game.
 - Eyesore: Cavalcadeur, josepharaoh99 (CC-BY-SA 4.0)
 - Fluttaflap: Spalding004, CYD Palm (back) (CC-BY-SA 4.0)
 - Gectile: Spalding004 (CC-BY-SA 4.0)
+- Gillpip: CYD Palm (CC0 1.0)
+- Maelstrotl: CYD Palm (CC0 1.0)
 - Noctalo: Catch Challenger (CC-BY-SA 4.0)
 - Noctula: Catch Challenger (CC-BY-SA 4.0)
 - Nut: TacoBot (CC0 1.0)
 - Pigabyte: josepharaoh99 (CC-BY-SA 4.0)
 - Propellercat: tamashihoshi (CC-BY-SA 4.0)
 - Pyrewing: CYD Palm (CC0 1.0)
+- Rillotl: CYD Palm (CC0 1.0)
 - Scorchvix: CYD Palm (CC0 1.0)
 - Selket: Catch Challenger (CC-BY-SA 4.0)
 - Selmatek: Catch Challenger (CC-BY-SA 4.0)

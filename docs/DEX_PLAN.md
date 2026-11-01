@@ -268,8 +268,9 @@ Separately, and not part of the Dex: **the owner's new critters.** Built
 2026-11-01 (`tools/game_creatures/README.md`): `tools/mksheet.py` turns a
 drawing into its sheet, and a creature of our own has its rules in
 `tools/game_creatures/<slug>.yaml` and an allow-list line with status
-"ours". The first is the fire fox line (Cinderkit, Scorchvix, Pyrewing), so
-the game has **30** critters now, not the 27 counted below; their
+"ours". The first are the fire fox line (Cinderkit, Scorchvix, Pyrewing) and
+the axolotl line (Gillpip, Rillotl, Maelstrotl), so the game has **33**
+critters now, not the 27 counted below; their
 descriptions are in their rules, ready for the Dex. Who uses them in Acts 2
 and 3 is still open: today they're only wild.
 

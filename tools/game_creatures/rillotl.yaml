@@ -1,0 +1,25 @@
+# Rillotl: the axolotl line's second stage. The owner's drawing (2026-11-01).
+name: Rillotl
+description: >-
+  Its tail trails a fin of living water that it can't put down. It wears a
+  blue stone it found in a spring and lets no one near it.
+drawing: tools/game_art/src/rillotl.jpg
+types: [water]
+shape: humanoid
+stage: stage1
+experience_group: default
+catch_rate: 70
+lower_catch_resistance: 0.9
+upper_catch_resistance: 1.15
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: gnaw}
+- {level_learned: 1, technique: bubbles}
+- {level_learned: 1, technique: water_bullet}
+- {level_learned: 12, technique: fluff_up}
+- {level_learned: 15, technique: water_blast}
+- {level_learned: 20, technique: kraken}
+- {level_learned: 25, technique: saber}
+- {level_learned: 30, technique: all_in}
+evolutions:
+- {at_level: 32, monster_slug: maelstrotl}

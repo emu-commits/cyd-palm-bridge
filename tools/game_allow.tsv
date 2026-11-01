@@ -68,6 +68,9 @@ creature	propellercat	CC-BY-SA 4.0	tamashihoshi	ATTRIBUTIONS.md "Propellercat" (
 creature	cinderkit	CC0 1.0	CYD Palm	tools/game_art/cinderkit-sheet.png	ours
 creature	scorchvix	CC0 1.0	CYD Palm	tools/game_art/scorchvix-sheet.png	ours
 creature	pyrewing	CC0 1.0	CYD Palm	tools/game_art/pyrewing-sheet.png	ours
+creature	gillpip	CC0 1.0	CYD Palm	tools/game_art/gillpip-sheet.png	ours
+creature	rillotl	CC0 1.0	CYD Palm	tools/game_art/rillotl-sheet.png	ours
+creature	maelstrotl	CC0 1.0	CYD Palm	tools/game_art/maelstrotl-sheet.png	ours
 
 # The townspeople are Tuxemon's sheets (mods/tuxemon/sprites/<slug>.png), each
 # credited under "Character Front Sprites" in ATTRIBUTIONS.md, which names who

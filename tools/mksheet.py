@@ -7,7 +7,7 @@
 
 The drawing is pixel art blown up (a JPEG or PNG of any size, as an image
 generator or a paint program exports it), on a white or checkerboard
-background, laid out like Tuxemon's sheets:
+background (light or dark), laid out like Tuxemon's sheets:
 
     +---------------------+---------------------+
     |                     |                     |
@@ -20,11 +20,13 @@ background, laid out like Tuxemon's sheets:
 The two icons are optional: with only a front and a back, the icons are the
 front made small. Nothing has to be on an exact grid. The tool:
 
-1. finds the background: everything light and grey that reaches the edge of
-   the picture, and the holes in the drawing that show the checkerboard or
+1. finds the background: its greys are learnt from the picture's border
+   (white, a light checkerboard or a dark one), and it's those greys that reach
+   the edge of the picture, and the holes in the drawing that show the checkerboard or
    are too big for an eye's white (so the white of an eye stays);
 2. finds the drawings (front, back, two icons) as the groups of what's left,
-   the two biggest being the front (left) and the back;
+   the two biggest being the front (left) and the back. A splash or a flame
+   apart from the body joins the big piece it's nearest to, never both;
 3. finds the drawing's pixel size from where the colour changes, across all
    of them together, then each drawing's own offset (generated art often
    sits a little differently in each);
@@ -71,10 +73,48 @@ def wdist(a, b):
 
 # ---------------------------------------------------------------- 1, 2: background and drawings
 
-def background(px, w, h):
-    """1 where the pixel is background: light grey, connected to the picture's edge."""
-    def bgish(c):
-        return min(c) >= BG_MIN and max(c) - min(c) <= BG_SPREAD
+class Backdrop:
+    """What the background looks like, learnt from the picture's border. A light one
+    (white, or the usual light checkerboard) is every light grey; a dark one (a
+    dark checkerboard) is the greys between its two tones, with a margin for JPEG.
+    `two_tones(c)` says which of the checkerboard's tones a pixel is nearer, for
+    telling a hole that shows the checkerboard from an eye's white or its pupil;
+    `fringe(c)` is a sampled cell that is the background blurred into the drawing."""
+
+    def __init__(self, px, w, h):
+        border = [px[y * w + x] for x in range(0, w, 2) for y in (0, h - 1)]
+        border += [px[y * w + x] for y in range(0, h, 2) for x in (0, w - 1)]
+        grey = sorted(min(c) for c in border if max(c) - min(c) <= BG_SPREAD)
+        if len(grey) < len(border) // 2:
+            fail("the picture's border isn't a grey background (white or a checkerboard)")
+        mid = grey[len(grey) // 2]
+        self.light = mid >= BG_MIN
+        if self.light:
+            self.lo, self.hi, self.split = BG_MIN, 255, 224
+        else:
+            # the checkerboard's two tones: the 10th and 90th centiles of the border's greys
+            t0, t1 = grey[len(grey) // 10], grey[len(grey) * 9 // 10]
+            self.lo, self.hi, self.split = max(0, t0 - 12), min(255, t1 + 16), (t0 + t1) // 2
+        self.tones = "light" if self.light else f"dark, its greys {self.lo}..{self.hi}"
+
+    def bgish(self, c):
+        return max(c) - min(c) <= BG_SPREAD and min(c) >= self.lo and max(c) <= self.hi
+
+    def checker(self, hole):
+        """How many of a hole's pixels are each of the two tones (light first)."""
+        if self.light:
+            return (sum(1 for c in hole if min(c) >= 232), sum(1 for c in hole if min(c) < 216))
+        return (sum(1 for c in hole if min(c) > self.split + 8), sum(1 for c in hole if max(c) < self.split - 8))
+
+    def fringe(self, c):
+        if self.light:
+            return min(c) >= 150 and max(c) - min(c) <= 40
+        return max(c) - min(c) <= 20 and min(c) >= self.lo and max(c) <= self.hi
+
+
+def background(px, w, h, bd):
+    """1 where the pixel is background: the backdrop's greys, connected to the picture's edge."""
+    bgish = bd.bgish
     bg = bytearray(w * h)
     q = deque()
     for x in range(w):
@@ -98,7 +138,7 @@ def background(px, w, h):
         if y < h - 1:
             q.append(i + w)
     # holes: background showing through the drawing (between an arm and the body).
-    # A hole is a light grey patch the edge doesn't reach that shows the checkerboard
+    # A hole is a background-grey patch the edge doesn't reach that shows the checkerboard
     # (both its tones) or is too big to be an eye's white or a highlight.
     seen = bytearray(bg)
     big = w * h // 2000
@@ -115,16 +155,16 @@ def background(px, w, h):
                 if ok and not seen[j] and bgish(px[j]):
                     seen[j] = 1
                     q.append(j)
-        light = sum(1 for i in hole if min(px[i]) >= 232)
-        grey = sum(1 for i in hole if min(px[i]) < 216)
+        light, grey = bd.checker([px[i] for i in hole])
         if len(hole) >= big or (len(hole) >= 64 and min(light, grey) >= len(hole) // 6):
             for i in hole:
                 bg[i] = 1
     return bg
 
 
-def components(bg, w, h, least):
-    """Bounding boxes (x0, y0, x1, y1, pixels) of the 8-connected foreground pieces."""
+def components(bg, w, h, least, label=None):
+    """Bounding boxes (x0, y0, x1, y1, pixels) of the 8-connected foreground pieces.
+    With `label` (a list of w * h), each kept piece's pixels are set to its index."""
     seen = bytearray(bg)
     out = []
     for start in range(w * h):
@@ -135,9 +175,11 @@ def components(bg, w, h, least):
         x0 = x1 = start % w
         y0 = y1 = start // w
         n = 0
+        mine = []
         while q:
             i = q.pop()
             n += 1
+            mine.append(i)
             x, y = i % w, i // w
             x0, x1, y0, y1 = min(x0, x), max(x1, x), min(y0, y), max(y1, y)
             for dy in (-1, 0, 1):
@@ -152,30 +194,80 @@ def components(bg, w, h, least):
                             seen[j] = 1
                             q.append(j)
         if n >= least:
+            if label is not None:
+                for i in mine:
+                    label[i] = len(out)
             out.append([x0, y0, x1 + 1, y1 + 1, n])
     return out
 
 
+def nearest_big(pieces, label, w, h, gap):
+    """The pieces near a big one (a quarter of the biggest or more) joined to it, each to
+    the big piece whose pixels are nearest (not whose box is: a splash between the front's
+    tornado and the back's tail belongs to the nearer). Returns the pieces left."""
+    big = max(p[4] for p in pieces) // 4
+    owner = [-1] * (w * h)
+    dist = [0] * (w * h)
+    q = deque()
+    for i in range(w * h):
+        k = label[i]
+        if k >= 0 and pieces[k][4] >= big:
+            owner[i] = k
+            q.append(i)
+    near = {}                          # small piece -> (distance, big piece)
+    while q:
+        i = q.popleft()
+        d = dist[i]
+        k = label[i]
+        if k >= 0 and pieces[k][4] < big:
+            if k not in near or (d, owner[i]) < near[k]:
+                near[k] = (d, owner[i])
+        if d >= gap:
+            continue
+        x, y = i % w, i // w
+        for j, ok in ((i - 1, x > 0), (i + 1, x < w - 1), (i - w, y > 0), (i + w, y < h - 1)):
+            if ok and owner[j] < 0:
+                owner[j] = owner[i]
+                dist[j] = d + 1
+                q.append(j)
+    out = [list(p[:5]) + [[k]] for k, p in enumerate(pieces)]
+    for k, (_, b) in sorted(near.items()):
+        a, p = out[b], pieces[k]
+        out[b] = [min(a[0], p[0]), min(a[1], p[1]), max(a[2], p[2]), max(a[3], p[3]), a[4] + p[4], a[5] + [k]]
+    return [p for k, p in enumerate(out) if k not in near]
+
+
 def group(boxes, gap):
-    """Join pieces whose boxes come within `gap` of each other (a flame apart from its ear)."""
-    boxes = [list(b) for b in boxes]
-    joined = True
-    while joined:
-        joined = False
+    """Join pieces whose boxes come within `gap` of each other (a flame apart from its ear),
+    the closest pair first, but never two big ones (a quarter of the biggest or more):
+    those are the front and the back, however close a tail comes to the other's tornado."""
+    big = max(b[4] for b in boxes) // 4
+    boxes = [list(b[:5]) + [b[4] >= big, list(b[5]) if len(b) > 5 else []] for b in boxes]
+
+    def apart(a, b):
+        dx = max(a[0] - b[2], b[0] - a[2], 0)
+        dy = max(a[1] - b[3], b[1] - a[3], 0)
+        cx = (a[0] + a[2] - b[0] - b[2]) ** 2 + (a[1] + a[3] - b[1] - b[3]) ** 2
+        return max(dx, dy), cx
+
+    while True:
+        best = None
         for i in range(len(boxes)):
             for j in range(i + 1, len(boxes)):
                 a, b = boxes[i], boxes[j]
-                if a[0] - gap < b[2] and b[0] - gap < a[2] and a[1] - gap < b[3] and b[1] - gap < a[3]:
-                    boxes[i] = [min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]), a[4] + b[4]]
-                    del boxes[j]
-                    joined = True
-                    break
-            if joined:
-                break
-    return boxes
+                if a[5] and b[5]:
+                    continue
+                d = apart(a, b)
+                if d[0] < gap and (best is None or d < best[0]):
+                    best = (d, i, j)
+        if best is None:
+            return [b[:5] + [b[6]] for b in boxes]
+        _, i, j = best
+        a, b = boxes[i], boxes[j]
+        boxes[i] = [min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]), a[4] + b[4], a[5] or b[5],
+                    a[6] + b[6]]
+        del boxes[j]
 
-
-# ---------------------------------------------------------------- 3: the pixel grid
 
 def edge_signal(px, bg, w, box, axis):
     """How much the colour changes across each column (axis 0) or row (axis 1) boundary."""
@@ -243,7 +335,7 @@ def phase(sig, p):
                key=lambda t: (t[0], -abs(t[2] - p)))
 
 
-def sample(px, bg, w, h, box, gx, gy):
+def sample(px, bg, w, h, box, gx, gy, bd):
     """The drawing's own pixels: the median of each cell's middle (a list of rows of
     RGB tuples, None where the cell is mostly background)."""
     (pw, ox), (ph, oy) = gx, gy
@@ -268,13 +360,13 @@ def sample(px, bg, w, h, box, gx, gy):
             else:
                 row.append(None)
         rows.append(row)
-    # the fringe: light grey cells on the drawing's edge are the background's, blurred in
+    # the fringe: background-grey cells on the drawing's edge are the background's, blurred in
     changed = True
     while changed:
         changed = False
         for j, row in enumerate(rows):
             for i, c in enumerate(row):
-                if c is None or min(c) < 150 or max(c) - min(c) > 40:
+                if c is None or not bd.fringe(c):
                     continue
                 if any(not (0 <= j + dj < len(rows) and 0 <= i + di < len(row)) or rows[j + dj][i + di] is None
                        for dj, di in ((0, -1), (0, 1), (-1, 0), (1, 0))):
@@ -395,9 +487,13 @@ def build(src, notes, scale=None):
     im = Image.open(src).convert("RGB")
     w, h = im.size
     px = list(im.get_flattened_data())
-    bg = background(px, w, h)
-    pieces = components(bg, w, h, least=max(16, w * h // 20000))
-    parts = group(pieces, gap=max(4, w // 64))
+    bd = Backdrop(px, w, h)
+    notes.append(f"the background: {bd.tones}")
+    bg = background(px, w, h, bd)
+    label = [-1] * (w * h)
+    pieces = components(bg, w, h, least=max(16, w * h // 20000), label=label)
+    gap = max(4, w // 64)
+    parts = group(nearest_big(pieces, label, w, h, gap), gap)
     parts = [p for p in parts if p[4] >= max(q[4] for q in parts) // 50]
     if len(parts) not in (2, 4):
         fail(f"{src}: found {len(parts)} drawings, want a front, a back and two icons "
@@ -405,14 +501,25 @@ def build(src, notes, scale=None):
     parts.sort(key=lambda p: -p[4])
     boxes = sorted(parts[:2], key=lambda p: p[0]) + sorted(parts[2:], key=lambda p: p[0])
     names = ("the front", "the back", "icon 1", "icon 2")[:len(boxes)]
-    sigs = [(edge_signal(px, bg, w, b, 0), edge_signal(px, bg, w, b, 1)) for b in boxes]
+    # each drawing sees only its own pieces (and specks too small to be pieces): where
+    # two boxes overlap, the other drawing's pixels are background to it
+    masks = []
+    for b in boxes:
+        mine = set(b[5])
+        m = bytearray(bg)
+        for y in range(b[1], b[3]):
+            for i in range(y * w + b[0], y * w + b[2]):
+                if label[i] >= 0 and label[i] not in mine:
+                    m[i] = 1
+        masks.append(m)
+    sigs = [(edge_signal(px, m, w, b, 0), edge_signal(px, m, w, b, 1)) for b, m in zip(boxes, masks)]
     hi = min(40.0, min(min(b[2] - b[0], b[3] - b[1]) for b in boxes) / 6)
     p = art_pixel([s for pair in sigs for s in pair], 3.0, max(4.0, hi))
     notes.append(f"the drawing's pixel: {p:.2f} of the picture's")
     arts = []
-    for name, box, (sx, sy) in zip(names, boxes, sigs):
+    for name, box, m, (sx, sy) in zip(names, boxes, masks, sigs):
         gx, gy = phase(sx, p), phase(sy, p)
-        rows = sample(px, bg, w, h, box, (gx[2], gx[1]), (gy[2], gy[1]))
+        rows = sample(px, m, w, h, box, (gx[2], gx[1]), (gy[2], gy[1]), bd)
         arts.append(rows)
         notes.append(f"{name}: at ({box[0]},{box[1]})-({box[2]},{box[3]}), its pixel {gx[2]:.3f} x {gy[2]:.3f}, "
                      f"{len(rows[0])} x {len(rows)}")
