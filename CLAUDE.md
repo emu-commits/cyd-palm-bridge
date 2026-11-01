@@ -42,6 +42,10 @@ before touching anything.
   Auto-play that shops and heals; `make -C sim monster` checks it finishes
   with its first critter at 36 or more. The Tuxemon checkout
   never enters the repo.
+- `docs/DEX_PLAN.md`: **Dex**, the critter index (Games folder, under
+  Critters), with a speaker like Coach and Guru. **Design and plan only
+  (2026-11-01)**, with mock-ups in `docs/img/dex/`; §9 holds the owner's
+  decisions. Don't build it before they're answered.
 - `docs/APP_PLATFORM_PLAN.md`: native C apps loaded from the SD card.
   **On hold since 2026-09-29**; don't build any of it without the user's yes.
 
