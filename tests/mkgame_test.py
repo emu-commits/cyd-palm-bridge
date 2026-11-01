@@ -167,6 +167,10 @@ def main():
         r = build(tree, t / "bad.bin", ids, allow=bad_allow)
         check(r.returncode != 0 and "tools/game_art/stranger.png" in r.stderr,
               f"an 'ours' sheet that isn't in tools/game_art: {r.stderr.strip()}")
+        bad_allow.write_text((FIX / "allow.tsv").read_text().replace("\tconfirmed\n", "\tedited\n", 1))
+        r = build(tree, t / "bad.bin", ids, allow=bad_allow)
+        check(r.returncode != 0 and "-sheet.png" in r.stderr and "edited" in r.stderr,
+              f"an 'edited' sheet that isn't in tools/game_art: {r.stderr.strip()}")
 
     # 4. the committed game
     game = ROOT / "courses" / "critters" / "game.bin"
@@ -191,6 +195,13 @@ def main():
                        capture_output=True, text=True)
     check(r.returncode == 0, f"tools/game_art/player*.png: {r.stdout}{r.stderr}")
     check("interior: CYD Palm (CC0 1.0)" in cred, "the committed game's rooms aren't our tileset")
+    check("Fluttaflap: Spalding004, CYD Palm (back) (CC-BY-SA 4.0)" in cred,
+          "the committed game's Fluttaflap isn't the sheet with the owner's back")
+    for s, v in allow["creature"].items():
+        if v["status"] == "edited":
+            from PIL import Image
+            im = Image.open(ROOT / v["source"])
+            check(im.size == (128, 88) and im.mode == "RGBA", f"{v['source']}: {im.size} {im.mode}")
     r = subprocess.run([sys.executable, str(ROOT / "tools" / "gen_interior_sheet.py"), "--check"],
                        capture_output=True, text=True)
     check(r.returncode == 0, f"tools/game_art/interior.png: {r.stdout}{r.stderr}")

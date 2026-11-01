@@ -215,10 +215,12 @@ def load_allow(path=ALLOW):
         if not line.strip() or line.startswith("#"):
             continue
         f = line.split("\t")
-        if len(f) != 6 or f[0] not in allow or f[5] not in ("credited", "unverified", "confirmed", "ours"):
+        if len(f) != 6 or f[0] not in allow or f[5] not in ("credited", "unverified", "confirmed", "ours", "edited"):
             fail(f"{path}:{n}: want kind, slug, licence, authors, source, status")
         if f[5] == "ours" and (f[0] == "creature" or f[4] != f"tools/game_art/{f[1]}.png"):
             fail(f"{path}:{n}: a sheet of our own is a character or a tileset at tools/game_art/{f[1]}.png")
+        if f[5] == "edited" and (f[0] != "creature" or f[4] != f"tools/game_art/{f[1]}-sheet.png"):
+            fail(f"{path}:{n}: an edited sheet is a creature's, at tools/game_art/{f[1]}-sheet.png")
         allow[f[0]][f[1]] = {"licence": f[2], "authors": f[3], "source": f[4], "status": f[5]}
     return allow
 
@@ -1079,7 +1081,11 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
         lo = round(float(d.get("lower_catch_resistance", 1)) * 100)
         hi = round(float(d.get("upper_catch_resistance", 1)) * 100)
         # sprite: front at (0,0), back at (64,0) of the 128x88 sheet
-        sheet = Image.open(root / "mods" / "tuxemon" / "gfx" / "sprites" / "battle" / f"{s}-sheet.png").convert("RGBA")
+        # (an "edited" line's sheet is ours, in tools/game_art: Tuxemon's with a part redrawn)
+        sheet = Image.open(TOOLS / "game_art" / f"{s}-sheet.png" if allow["creature"][s]["status"] == "edited" else
+                           root / "mods" / "tuxemon" / "gfx" / "sprites" / "battle" / f"{s}-sheet.png").convert("RGBA")
+        if sheet.size != (2 * SPRITE_W, 88):
+            fail(f"creature {s}: its sheet is {sheet.size[0]} x {sheet.size[1]}; want 128 x 88")
         front = sheet.crop((0, 0, SPRITE_W, SPRITE_H))
         back = sheet.crop((SPRITE_W, 0, 2 * SPRITE_W, SPRITE_H))
         pal = make_palette([front, back], 15)

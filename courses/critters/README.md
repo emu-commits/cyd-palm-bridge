@@ -49,6 +49,10 @@ Tuxemon checkout itself never enters this repository.
 - **The player** (six looks) and **the rooms' tiles** are drawn for this
   project (`tools/gen_player_sheet.py`, `tools/gen_interior_sheet.py`) and are
   public domain (**CC0 1.0**).
+- **Fluttaflap's back** is redrawn for this project (the owner's drawing,
+  2026-11-01: Tuxemon's back was a green butterfly unlike its front). The
+  sheet, `tools/game_art/fluttaflap-sheet.png`, is Spalding004's with that
+  back, so it stays **CC BY-SA 4.0**; its front and back share 15 colours.
 - **The townspeople** are each under the licence listed beside them: CC BY-SA
   4.0, CC0, or CC BY (Catch Challenger's, per Tuxemon's credits).
 - **The towns' and rooms' layouts, the story and the dialogue** are ours,
@@ -78,7 +82,7 @@ The device shows the same list under Menu ▸ Credits in the game.
 - Dune Pincher: tamashihoshi (CC-BY-SA 4.0)
 - Eyenemy: Cavalcadeur (CC-BY-SA 4.0)
 - Eyesore: Cavalcadeur, josepharaoh99 (CC-BY-SA 4.0)
-- Fluttaflap: Spalding004 (CC-BY-SA 4.0)
+- Fluttaflap: Spalding004, CYD Palm (back) (CC-BY-SA 4.0)
 - Gectile: Spalding004 (CC-BY-SA 4.0)
 - Noctalo: Catch Challenger (CC-BY-SA 4.0)
 - Noctula: Catch Challenger (CC-BY-SA 4.0)

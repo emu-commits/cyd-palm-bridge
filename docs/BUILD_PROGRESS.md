@@ -16,6 +16,45 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-01 — Critters: Fluttaflap's new back (the owner's drawing)
+
+Tuxemon's Fluttaflap sheet had a red moth-bat front and a green butterfly
+back. The owner redrew the back to match the front and sent the sheet as a
+1233 × 848 JPEG. It's now `tools/game_art/fluttaflap-sheet.png` (128 × 88,
+RGBA, the usual layout), and `game.bin` uses it.
+
+- **Conversion.** The JPEG is the whole sheet at 9.716×. Fitting the
+  front's 64 × 64 pixels against Tuxemon's front gave the scale and offset
+  (7.7 levels mean error a channel). The back was pasted about a third of a
+  pixel off that grid, so it got its own fit, chosen by the least colour
+  spread inside each cell (4.5× less than on the front's grid). Each pixel
+  is the median of the 5 × 5 source pixels at its centre. Near-white is
+  transparent. Then 10 colours, and the browns within 18 levels of the
+  front's own browns were snapped to them.
+- **Only the back is new.** The front and both icons are Tuxemon's,
+  pixel for pixel, before the colour step.
+- **15 colours for front and back together, chosen here, not by mkgame.**
+  With the 25 colours left to mkgame's median cut, the back's large coral
+  areas took the palette, and the front lost its pink fluff (to tan), its
+  eye whites and its yellow wing lines. The closest pair was merged
+  instead, until 15 were left. The back's four big colours were kept; the
+  commoner colour stood each time, so no new blends. The front keeps all
+  three. Its wing red is now the back's coral, so the two match. mkgame
+  then reduces nothing ("10 reduced to 15 colours", was 11).
+- **`game_allow.tsv` status `edited`.** A creature's Tuxemon sheet with a
+  part redrawn, at `tools/game_art/<slug>-sheet.png`. It keeps the licence
+  (CC BY-SA 4.0) and names who redrew what: "Spalding004; CYD Palm
+  (back)". mkgame reads that sheet instead of Tuxemon's, and refuses one
+  that isn't 128 × 88. The credits and `courses/critters/README.md` say so.
+- **`mkgame_test`** refuses an `edited` line that isn't in `tools/game_art`.
+  It also checks that the committed game credits the new back and that the
+  sheet is 128 × 88 RGBA.
+
+Measured: `game.bin` 572,000 → 572,016 B (the longer credit line; the
+sprite record is 4,136 B as before). Rebuilding the old allow-list with
+the pinned Pillow 12.3.0 gave the committed file to the byte first. No C
+changed: the firmware is 1,811,056 B, static DRAM unchanged.
+
 ### 2026-10-31 — Critters: Acts 2 and 3, and the finale
 
 The content of `GAME_LENGTH_PLAN.md`, on the engine, areas and store built

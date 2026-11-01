@@ -17,6 +17,10 @@
 #            ours:       drawn for this project, CC0, at tools/game_art/<slug>.png
 #                        (characters and tilesets: tools/gen_player_sheet.py draws the
 #                        player, tools/gen_interior_sheet.py the rooms indoors)
+#            edited:     a creature's Tuxemon sheet with a part redrawn for this
+#                        project, at tools/game_art/<slug>-sheet.png (128 x 88);
+#                        it keeps the original's licence (CC BY-SA asks that),
+#                        and the authors add who redrew what
 #
 # Left out on purpose (section 10): anything under the "XYG Open Source
 # License" (Kelvin Shadewing's sets, and core_buildings, core_set pieces,
@@ -38,7 +42,7 @@ creature	cardiwing	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?t
 creature	cardinale	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Cardinale	credited
 creature	vamporm	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Vamporm	credited
 creature	dracune	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Dracune	credited
-creature	fluttaflap	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Fluttaflap	credited
+creature	fluttaflap	CC-BY-SA 4.0	Spalding004; CYD Palm (back)	tools/game_art/fluttaflap-sheet.png	edited
 creature	anoleaf	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Anoleaf	credited
 creature	gectile	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Gectile	credited
 creature	velocitile	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Velocitile	credited
