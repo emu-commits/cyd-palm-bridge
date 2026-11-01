@@ -42,6 +42,11 @@ before touching anything.
   Auto-play that shops and heals; `make -C sim monster` checks it finishes
   with its first critter at 36 or more. The Tuxemon checkout
   never enters the repo.
+- `tools/game_creatures/README.md`: **critters of our own** (2026-11-01):
+  `tools/mksheet.py` turns the owner's drawing (any size, on white or a
+  checkerboard; kept in `tools/game_art/src/`) into the 128×88 sheet, and the
+  rules are `tools/game_creatures/<slug>.yaml` with an "ours" allow-list
+  line. The first is the fire fox line: Cinderkit, Scorchvix, Pyrewing.
 - `docs/DEX_PLAN.md`: **Dex**, the critter index (Games folder, under
   Critters), with a speaker like Coach and Guru. **Design and plan only
   (2026-11-01)**, with mock-ups in `docs/img/dex/`; §9 holds the owner's

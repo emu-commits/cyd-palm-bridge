@@ -49,6 +49,7 @@ TOOLS = Path(__file__).resolve().parent
 ALLOW = TOOLS / "game_allow.tsv"
 REGION = TOOLS / "game_region.json"
 IDS = TOOLS / "game_ids.tsv"
+CREATURES = TOOLS / "game_creatures"   # critters of our own: their rules (tools/game_creatures/README.md)
 
 TILE = 16
 CHUNK = 16                    # cells per chunk side: a screen spans at most 2 x 2 (GAME_FORMAT.md 3.11)
@@ -217,8 +218,10 @@ def load_allow(path=ALLOW):
         f = line.split("\t")
         if len(f) != 6 or f[0] not in allow or f[5] not in ("credited", "unverified", "confirmed", "ours", "edited"):
             fail(f"{path}:{n}: want kind, slug, licence, authors, source, status")
-        if f[5] == "ours" and (f[0] == "creature" or f[4] != f"tools/game_art/{f[1]}.png"):
-            fail(f"{path}:{n}: a sheet of our own is a character or a tileset at tools/game_art/{f[1]}.png")
+        if f[5] == "ours" and f[0] == "creature" and f[4] != f"tools/game_art/{f[1]}-sheet.png":
+            fail(f"{path}:{n}: a creature of our own has its sheet at tools/game_art/{f[1]}-sheet.png")
+        if f[5] == "ours" and f[0] != "creature" and f[4] != f"tools/game_art/{f[1]}.png":
+            fail(f"{path}:{n}: a sheet of our own is at tools/game_art/{f[1]}.png")
         if f[5] == "edited" and (f[0] != "creature" or f[4] != f"tools/game_art/{f[1]}-sheet.png"):
             fail(f"{path}:{n}: an edited sheet is a creature's, at tools/game_art/{f[1]}-sheet.png")
         allow[f[0]][f[1]] = {"licence": f[2], "authors": f[3], "source": f[4], "status": f[5]}
@@ -254,8 +257,46 @@ def save_ids(ids, path=IDS):
 
 # ---------------------------------------------------------------- the rules
 
+OWN_KEYS = {"name", "description", "drawing", "types", "shape", "stage", "experience_group", "moveset",
+            "evolutions", "catch_rate", "lower_catch_resistance", "upper_catch_resistance"}
+
+
+def own_creature(path, slug, techs_dir, types, shapes, text_check=True):
+    """A creature of our own (status "ours"): its rules in Tuxemon's shape, with its
+    name and Dex text, checked here so a typo fails the build, not the game."""
+    yaml = need_yaml()
+    if not path.exists():
+        fail(f"creature {slug} is ours, but {path} doesn't exist")
+    d = yaml.safe_load(open(path, encoding="utf-8"))
+    where = f"{path.name}"
+    if not isinstance(d, dict) or set(d) - OWN_KEYS or {"name", "types", "shape", "stage", "moveset"} - set(d):
+        fail(f"{where}: want {', '.join(sorted(OWN_KEYS))} "
+             f"(name, types, shape, stage and moveset at least)")
+    text_ok(d["name"], f"{where}: name")
+    if d.get("description") is not None:
+        text_ok(d["description"], f"{where}: description")
+    if not 1 <= len(d["types"]) <= 2 or set(d["types"]) - set(types):
+        fail(f"{where}: types: one or two of {', '.join(types)}")
+    if d["shape"] not in shapes:
+        fail(f"{where}: shape: one of {', '.join(sorted(shapes))}")
+    if d["stage"] not in STAGES or d.get("experience_group", "default") not in EXP_GROUPS:
+        fail(f"{where}: stage one of {', '.join(STAGES)}; experience_group one of {', '.join(EXP_GROUPS)}")
+    for mv in d["moveset"]:
+        if set(mv) != {"level_learned", "technique"} or not 1 <= int(mv["level_learned"]) <= 100:
+            fail(f"{where}: moveset: each a level_learned (1 to 100) and a technique")
+        if not (techs_dir / f"{mv['technique']}.yaml").exists():
+            fail(f"{where}: technique {mv['technique']} isn't in Tuxemon")
+    for e in d.get("evolutions") or []:
+        if set(e) != {"at_level", "monster_slug"} or not 1 < int(e["at_level"]) <= 100:
+            fail(f"{where}: evolutions: each an at_level (2 to 100) and a monster_slug")
+    for k in ("catch_rate", "lower_catch_resistance", "upper_catch_resistance"):
+        if k in d and not 0 <= float(d[k]) <= 255:
+            fail(f"{where}: {k} out of range")
+    return d
+
+
 class Rules:
-    def __init__(self, root, allow, region, report):
+    def __init__(self, root, allow, region, report, creatures=CREATURES):
         yaml = need_yaml()
         self.root = root
         db = root / "mods" / "tuxemon" / "db"
@@ -286,11 +327,22 @@ class Rules:
             self.statuses[slug] = y(db / "status" / f"{slug}.yaml")
 
         self.mons = {}
+        self.own_names = {}
         for slug in sorted(allow["creature"]):
+            if allow["creature"][slug]["status"] == "ours":
+                d = own_creature(Path(creatures) / f"{slug}.yaml", slug, db / "technique", self.types,
+                                 self.shape_ix)
+                self.own_names[slug] = d["name"]
+                self.mons[slug] = d
+                continue
             p = db / "monster" / f"{slug}.yaml"
             if not p.exists():
                 fail(f"game_allow.tsv: creature {slug} isn't in Tuxemon")
             self.mons[slug] = y(p)
+        for slug, d in self.mons.items():
+            for e in d.get("evolutions") or []:
+                if allow["creature"][slug]["status"] == "ours" and e["monster_slug"] not in self.mons:
+                    fail(f"creature {slug} evolves into {e['monster_slug']}, which isn't in the allow-list")
         self.techs = {}
         unsupported = {}
         for slug in sorted(self.mons):
@@ -375,6 +427,8 @@ class Rules:
         return eff, amount, int(d.get("cost", 0))
 
     def name(self, slug):
+        if slug in self.own_names:
+            return self.own_names[slug]
         return self.po.get(slug, slug.replace("_", " ").title())
 
 
@@ -980,7 +1034,7 @@ def region_events(a, ar, mv, area_ix, rules, ids, flag_names):
 
 
 def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=True,
-          source=f"Tuxemon {TUXEMON_COMMIT}"):
+          source=f"Tuxemon {TUXEMON_COMMIT}", creatures=CREATURES):
     """`source` names where the content came from: the pinned commit, or, for
     the test fixture (--unpinned), what the caller says."""
     from PIL import Image
@@ -990,7 +1044,7 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
         bad = [f"{k} {s}" for k, d in allow.items() for s, v in d.items() if v["status"] == "unverified"]
         if bad:
             fail("unverified allow-list lines: " + ", ".join(bad))
-    rules = Rules(root, allow, region, report)
+    rules = Rules(root, allow, region, report, creatures)
     text = Text()
 
     # types, shapes, statuses
@@ -1081,9 +1135,13 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
         lo = round(float(d.get("lower_catch_resistance", 1)) * 100)
         hi = round(float(d.get("upper_catch_resistance", 1)) * 100)
         # sprite: front at (0,0), back at (64,0) of the 128x88 sheet
-        # (an "edited" line's sheet is ours, in tools/game_art: Tuxemon's with a part redrawn)
-        sheet = Image.open(TOOLS / "game_art" / f"{s}-sheet.png" if allow["creature"][s]["status"] == "edited" else
-                           root / "mods" / "tuxemon" / "gfx" / "sprites" / "battle" / f"{s}-sheet.png").convert("RGBA")
+        # (an "edited" line's sheet is in tools/game_art: Tuxemon's with a part redrawn;
+        # an "ours" line's is ours, made by tools/mksheet.py from the drawing)
+        sp = (TOOLS / "game_art" / f"{s}-sheet.png" if allow["creature"][s]["status"] in ("edited", "ours") else
+              root / "mods" / "tuxemon" / "gfx" / "sprites" / "battle" / f"{s}-sheet.png")
+        if not sp.exists():
+            fail(f"creature {s}: no sheet at {sp}")
+        sheet = Image.open(sp).convert("RGBA")
         if sheet.size != (2 * SPRITE_W, 88):
             fail(f"creature {s}: its sheet is {sheet.size[0]} x {sheet.size[1]}; want 128 x 88")
         front = sheet.crop((0, 0, SPRITE_W, SPRITE_H))
@@ -1732,6 +1790,7 @@ def main(argv=None):
     ap.add_argument("--allow", default=str(ALLOW))
     ap.add_argument("--region", default=str(REGION))
     ap.add_argument("--ids", default=str(IDS))
+    ap.add_argument("--creatures", default=str(CREATURES), help="the rules of our own creatures")
     ap.add_argument("--check", action="store_true", help="validate files and print sizes")
     ap.add_argument("--dump", action="store_true", help="print the canonical dump")
     ap.add_argument("--preview", metavar="DIR", help="draw each file's areas and sprites into DIR")
@@ -1756,7 +1815,7 @@ def main(argv=None):
             report = []
             ids = load_ids(args.ids)
             data = build(root, args.bpp, report, ids, args.allow, args.region, spike=not args.strict,
-                         source=source)
+                         source=source, creatures=args.creatures)
             save_ids(ids, args.ids)
             Path(args.output).write_bytes(data)
             Game(data)

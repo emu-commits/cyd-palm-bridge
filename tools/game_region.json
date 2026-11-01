@@ -438,7 +438,8 @@
       {"creature": "cateye",       "levels": [6, 8], "rate": 20},
       {"creature": "dune_pincher", "levels": [6, 9], "rate": 20},
       {"creature": "noctula",      "levels": [6, 8], "rate": 20},
-      {"creature": "djinnbo",      "levels": [7, 9], "rate": 10}
+      {"creature": "djinnbo",      "levels": [7, 9], "rate": 10},
+      {"creature": "cinderkit",    "levels": [6, 8], "rate": 10}
     ],
     "spyder_route4": [
       {"creature": "noctula",      "levels": [14, 17], "rate": 20},
@@ -465,7 +466,8 @@
       {"creature": "noctalo",      "levels": [30, 33], "rate": 15},
       {"creature": "eyesore",      "levels": [30, 34], "rate": 15},
       {"creature": "djinnbo",      "levels": [31, 34], "rate": 15},
-      {"creature": "selmatek",     "levels": [30, 34], "rate": 10}
+      {"creature": "selmatek",     "levels": [30, 34], "rate": 10},
+      {"creature": "scorchvix",    "levels": [30, 32], "rate": 10}
     ],
     "route1_b": [
       {"creature": "cardiling",  "levels": [12, 15], "rate": 15},
@@ -474,7 +476,8 @@
       {"creature": "noctula",    "levels": [12, 15], "rate": 15},
       {"creature": "zunna",      "levels": [13, 16], "rate": 20},
       {"creature": "fluttaflap", "levels": [13, 16], "rate": 15},
-      {"creature": "arthrobolt", "levels": [13, 16], "rate": 10}
+      {"creature": "arthrobolt", "levels": [13, 16], "rate": 10},
+      {"creature": "cinderkit",  "levels": [12, 15], "rate": 10}
     ],
     "brideswood_b": [
       {"creature": "noctula",    "levels": [14, 17], "rate": 20},
@@ -489,7 +492,8 @@
       {"creature": "cateye",       "levels": [16, 20], "rate": 20},
       {"creature": "dune_pincher", "levels": [16, 20], "rate": 20},
       {"creature": "noctalo",      "levels": [18, 20], "rate": 20},
-      {"creature": "djinnbo",      "levels": [17, 20], "rate": 15}
+      {"creature": "djinnbo",      "levels": [17, 20], "rate": 15},
+      {"creature": "scorchvix",  "levels": [17, 20], "rate": 10}
     ],
     "route1_c": [
       {"creature": "cardiwing",  "levels": [22, 26], "rate": 20},
@@ -520,7 +524,8 @@
       {"creature": "propellercat", "levels": [26, 30], "rate": 15},
       {"creature": "pigabyte",     "levels": [26, 30], "rate": 15},
       {"creature": "fluttaflap",   "levels": [26, 30], "rate": 15},
-      {"creature": "djinnbo",      "levels": [27, 30], "rate": 15}
+      {"creature": "djinnbo",      "levels": [27, 30], "rate": 15},
+      {"creature": "scorchvix",   "levels": [26, 30], "rate": 10}
     ],
     "keep_c": [
       {"creature": "eyesore",      "levels": [28, 32], "rate": 15},
@@ -549,7 +554,8 @@
       {"creature": "djinnbo",    "levels": [33, 37], "rate": 15},
       {"creature": "cardinale",  "levels": [36, 38], "rate": 8},
       {"creature": "velocitile", "levels": [36, 38], "rate": 8},
-      {"creature": "agnigon",    "levels": [36, 38], "rate": 9}
+      {"creature": "agnigon",    "levels": [36, 38], "rate": 9},
+      {"creature": "pyrewing",     "levels": [36, 38], "rate": 8}
     ]
   }
 }

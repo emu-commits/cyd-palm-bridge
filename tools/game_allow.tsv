@@ -16,7 +16,10 @@
 #            confirmed:  checked by hand against the source link (G3)
 #            ours:       drawn for this project, CC0, at tools/game_art/<slug>.png
 #                        (characters and tilesets: tools/gen_player_sheet.py draws the
-#                        player, tools/gen_interior_sheet.py the rooms indoors)
+#                        player, tools/gen_interior_sheet.py the rooms indoors); a
+#                        creature of our own has its sheet at tools/game_art/<slug>-sheet.png,
+#                        made by tools/mksheet.py from the drawing, and its rules in
+#                        tools/game_creatures/<slug>.yaml (see the README there)
 #            edited:     a creature's Tuxemon sheet with a part redrawn for this
 #                        project, at tools/game_art/<slug>-sheet.png (128 x 88);
 #                        it keeps the original's licence (CC BY-SA asks that),
@@ -61,6 +64,10 @@ creature	cateye	CC-BY-SA 4.0	Cavalcadeur	ATTRIBUTIONS.md "Cateye" (https://forum
 creature	dune_pincher	CC-BY-SA 4.0	tamashihoshi	ATTRIBUTIONS.md "Dune Pincher" (https://forum.tuxemon.org/viewtopic.php?pid=519#p519)	credited
 creature	djinnbo	CC-BY-SA 4.0	Cavalcadeur; rsg167	ATTRIBUTIONS.md "Djinnbo" (http://forum.tuxemon.org/viewtopic.php?id=43)	credited
 creature	propellercat	CC-BY-SA 4.0	tamashihoshi	ATTRIBUTIONS.md "Propellercat" (https://forum.tuxemon.org/viewtopic.php?id=74)	credited
+# The owner's critters (2026-11-01): the fire fox line, drawn for this project.
+creature	cinderkit	CC0 1.0	CYD Palm	tools/game_art/cinderkit-sheet.png	ours
+creature	scorchvix	CC0 1.0	CYD Palm	tools/game_art/scorchvix-sheet.png	ours
+creature	pyrewing	CC0 1.0	CYD Palm	tools/game_art/pyrewing-sheet.png	ours
 
 # The townspeople are Tuxemon's sheets (mods/tuxemon/sprites/<slug>.png), each
 # credited under "Character Front Sprites" in ATTRIBUTIONS.md, which names who

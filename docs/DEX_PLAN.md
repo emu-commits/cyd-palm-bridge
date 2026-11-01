@@ -264,12 +264,14 @@ the heap is given back, as they do for Study.
   the Dex; the heap is unchanged after closing; ◀ ▶ are fast enough on the
   board.
 
-Separately, and not part of the Dex: **the owner's new critters.** They'll
-come as sheets in the same 128×88 format, with their rules. `mkgame.py`
-reads creatures only from the Tuxemon checkout today, so it needs a source
-of our own for them, like `tools/game_art/` for characters, with entries
-in the allow-list (status "ours"). That's its own plan, and it also covers
-where the new critters live and who uses them in Acts 2 and 3.
+Separately, and not part of the Dex: **the owner's new critters.** Built
+2026-11-01 (`tools/game_creatures/README.md`): `tools/mksheet.py` turns a
+drawing into its sheet, and a creature of our own has its rules in
+`tools/game_creatures/<slug>.yaml` and an allow-list line with status
+"ours". The first is the fire fox line (Cinderkit, Scorchvix, Pyrewing), so
+the game has **30** critters now, not the 27 counted below; their
+descriptions are in their rules, ready for the Dex. Who uses them in Acts 2
+and 3 is still open: today they're only wild.
 
 ## 9) Decisions for the owner
 

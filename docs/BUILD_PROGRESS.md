@@ -16,6 +16,79 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-01 — Critters: critters of our own, and the owner's fire fox line
+
+The owner sent three drawings (basic, stage 1, stage 2) of a new fire type and
+asked for a standard way to bring in many more. `tools/game_creatures/README.md`
+is that way, step by step.
+
+- **`tools/mksheet.py`** turns a drawing into the 128 × 88 sheet. The
+  drawing can be any size, on white or a checkerboard, and needn't be on an
+  exact grid. The steps are in its docstring. In short:
+  - The background is the light grey reaching the edge, plus holes that show
+    the checkerboard or are too big for an eye's white.
+  - The four drawings are the groups that are left.
+  - The drawing's pixel size comes from where the colour changes, across
+    all four together. Each drawing gets its own offset.
+  - Each pixel is the median of the middle of its cell, and light fringe is
+    peeled off the edges.
+  - The art is then halved until it fits. Each 2 × 2 block becomes its
+    medoid, or its outline colour if it has one. Without that, the outlines
+    and the faces were lost.
+  - The front and back are placed centred, 6 px and 1 px from the bottom.
+  - They are reduced together to 15 colours: median cut to 64, then the
+    closest pair is merged, with the distance scaled by the smaller pair's
+    size so eyes and gems last. Two rounds of Lloyd follow.
+  - Pure Pillow, about 3 s a drawing, and the same to the byte each time.
+- **Measured on the three drawings** (1264 × 848 JPEGs):
+  - The pixel is 5.30 picture pixels in all three, and each drawing's own fit
+    is within 0.3 % of that. They were drawn at twice the game's size, so the
+    tool halved them.
+  - Cinderkit: front 29 × 33, back 30 × 40. Scorchvix: 37 × 42 and 37 × 42.
+    Pyrewing: 50 × 49 and 51 × 48. The icons are 16–19 px.
+  - Each one's front and back use 15 colours. mkgame reduces nothing further
+    ("10 reduced to 15 colours", as before).
+  - The first try took the pixel size per drawing and picked multiples
+    (10.6, 15.9, 36.8). Scoring each size by how much *more* of the change
+    falls on one phase than chance would (not by the share alone) fixed that.
+- **Creatures of our own in `mkgame.py`.**
+  - An allow-list line `creature <slug> … tools/game_art/<slug>-sheet.png
+    ours` takes its rules from `tools/game_creatures/<slug>.yaml`, which has
+    Tuxemon's keys plus `name`, `description` (for the Dex) and `drawing`.
+  - Before anything is built, the rules are checked: the keys, the types,
+    the shape, the stage, the experience group, that each move is in
+    Tuxemon, that each evolution's target is on the list, and the ranges.
+    A missing sheet fails too.
+  - Our creatures sort after Tuxemon's (no Tuxemon number, so `txmn 0`).
+    New numbers are 28–30 in `game_ids.tsv`.
+- **The fire fox line:**
+  - **Cinderkit** (fire, varmint) evolves at 16 into **Scorchvix** (fire,
+    hunter), which evolves at 32 into **Pyrewing** (fire and sky, brute).
+  - Their moves are Tuxemon's: Gnaw, Tinder, Fire Claw, Fluff Up, Magma,
+    Breathe Fire, Saber, Flamethrower and All In, plus Wing Tip and
+    Peregrine for Pyrewing. All of them were already in the game.
+  - They're rare in the wild: in six tables, at rate 10 (Pyrewing 8) beside
+    the others' 10–30. README's table lists them.
+  - Credited "CYD Palm (CC0 1.0)" like the rest of our art. The drawings
+    are kept in `tools/game_art/src/` (575 KB) so the sheets can be made
+    again.
+- **`game.bin`: 572,016 → 584,844 B** (+12,828: three 4,136 B sprites, the
+  names, credits and tables). The `game` partition is 983,040 B.
+- **Seen in the simulator** (a scratch build only: Cinderkit as the first
+  starter, Route 1 nothing but Pyrewing). The pick screen, a battle with
+  Cinderkit's back against Pyrewing's front, the move list and the party
+  all draw right.
+- **`mkgame_test`** refuses nine bad creatures of our own (a type no one
+  has, an unknown shape, no name, an unread key, an unknown move, an
+  unlisted evolution, no sheet, no rules, a sheet with the wrong name). On
+  the committed game, every "ours" sheet must be what `mksheet.py --check`
+  builds from its drawing, and the credits must name it.
+- **Gates:** make test, make ftest, the sim list (smoke included), smoke32,
+  mkcourse_test and mkgame_test all pass. In `make -C sim monster`, Auto-play
+  still beats all 32 keepers with each of the five starters. Nothing in the
+  firmware changed: 0x1ba270 B, DRAM 147,468 B (81.59 %), as before. wasm
+  wasn't run (no emsdk).
+
 ### 2026-11-01 — Critters: Fluttaflap's new back (the owner's drawing)
 
 Tuxemon's Fluttaflap sheet had a red moth-bat front and a green butterfly

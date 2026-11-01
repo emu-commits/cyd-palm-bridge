@@ -172,6 +172,40 @@ def main():
         check(r.returncode != 0 and "-sheet.png" in r.stderr and "edited" in r.stderr,
               f"an 'edited' sheet that isn't in tools/game_art: {r.stderr.strip()}")
 
+        # a creature of our own: its rules are checked (the fixture's own moves and types)
+        own = t / "own"
+        own.mkdir()
+        good = {"name": "Stranger", "description": "Not from around here.", "types": ["fire"],
+                "shape": "blob", "stage": "basic", "catch_rate": 100,
+                "moveset": [{"level_learned": 1, "technique": "scratch"}], "evolutions": []}
+        own_allow = t / "allow_own.tsv"
+        own_allow.write_text((FIX / "allow.tsv").read_text() +
+                             "creature\tstranger\tCC0 1.0\tus\ttools/game_art/stranger-sheet.png\tours\n")
+
+        def own_refused(change, words, what, write=True):
+            d = json.loads(json.dumps(good))
+            change(d)
+            if write:
+                (own / "stranger.yaml").write_text(json.dumps(d))     # JSON is YAML
+            r = subprocess.run([sys.executable, str(MKGAME), "--tuxemon", str(tree), "--unpinned", SOURCE,
+                                "--allow", str(own_allow), "--region", str(FIX / "region.json"), "--ids", str(ids),
+                                "--creatures", str(own), "-o", str(t / "bad.bin")], capture_output=True, text=True)
+            check(r.returncode != 0 and words in r.stderr, f"{what}: {r.returncode} {r.stderr.strip()}")
+        own_refused(lambda d: d.update(types=["plasma"]), "types", "a creature of our own with a type no one has")
+        own_refused(lambda d: d.update(shape="cube"), "shape", "a creature of our own with an unknown shape")
+        own_refused(lambda d: d.pop("name"), "name", "a creature of our own with no name")
+        own_refused(lambda d: d.update(colour="red"), "want", "a creature of our own with a key no one reads")
+        own_refused(lambda d: d["moveset"].append({"level_learned": 3, "technique": "moonbeam"}),
+                    "technique moonbeam", "a creature of our own with a move Tuxemon doesn't have")
+        own_refused(lambda d: d.update(evolutions=[{"at_level": 9, "monster_slug": "ghostling"}]),
+                    "isn't in the allow-list", "a creature of our own evolving into one not listed")
+        own_refused(lambda d: None, "stranger-sheet.png", "a creature of our own with no sheet")
+        (own / "stranger.yaml").unlink()
+        own_refused(lambda d: None, "doesn't exist", "a creature of our own with no rules", write=False)
+        own_allow.write_text((FIX / "allow.tsv").read_text() +
+                             "creature\tstranger\tCC0 1.0\tus\ttools/game_art/stranger.png\tours\n")
+        own_refused(lambda d: None, "stranger-sheet.png", "a creature of our own whose sheet isn't <slug>-sheet.png")
+
     # 4. the committed game
     game = ROOT / "courses" / "critters" / "game.bin"
     r = subprocess.run([sys.executable, str(MKGAME), "--check", str(game)], capture_output=True, text=True)
@@ -197,11 +231,20 @@ def main():
     check("interior: CYD Palm (CC0 1.0)" in cred, "the committed game's rooms aren't our tileset")
     check("Fluttaflap: Spalding004, CYD Palm (back) (CC-BY-SA 4.0)" in cred,
           "the committed game's Fluttaflap isn't the sheet with the owner's back")
+    import yaml
     for s, v in allow["creature"].items():
-        if v["status"] == "edited":
+        if v["status"] in ("edited", "ours"):
             from PIL import Image
             im = Image.open(ROOT / v["source"])
             check(im.size == (128, 88) and im.mode == "RGBA", f"{v['source']}: {im.size} {im.mode}")
+        if v["status"] == "ours":       # the sheet is what the drawing builds, to the byte
+            d = yaml.safe_load((ROOT / "tools" / "game_creatures" / f"{s}.yaml").read_text())
+            check(f"{d['name']}: {v['authors']} ({v['licence']})" in cred, f"the credits don't name {d['name']}")
+            r = subprocess.run([sys.executable, str(ROOT / "tools" / "mksheet.py"), "--check",
+                                str(ROOT / d["drawing"]), str(ROOT / v["source"])], capture_output=True, text=True)
+            check(r.returncode == 0, f"{v['source']}: {r.stdout}{r.stderr}")
+    ours = [s for s, v in allow["creature"].items() if v["status"] == "ours"]
+    check(len(ours) >= 3, f"the owner's fire fox line isn't in the game: {ours}")
     r = subprocess.run([sys.executable, str(ROOT / "tools" / "gen_interior_sheet.py"), "--check"],
                        capture_output=True, text=True)
     check(r.returncode == 0, f"tools/game_art/interior.png: {r.stdout}{r.stderr}")
