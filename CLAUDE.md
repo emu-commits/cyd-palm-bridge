@@ -50,9 +50,11 @@ before touching anything.
   so they're drawn again by hand (the README there; the first build drafts it). The first are the fire fox line (Cinderkit, Scorchvix, Pyrewing) and
   the water axolotl line (Gillpip, Rillotl, Maelstrotl).
 - `docs/DEX_PLAN.md`: **Dex**, the critter index (Games folder, under
-  Critters), with a speaker like Coach and Guru. **Design and plan only
-  (2026-11-01)**, with mock-ups in `docs/img/dex/`; §9 holds the owner's
-  decisions. Don't build it before they're answered.
+  Critters), a fixed hardware-like gadget: its bezel, title bar and keys never
+  change, and all other text and the speaker come through its subscreens (no
+  Coach or Guru bubble). **Design and plan only (redesigned 2026-11-02)**, with mock-ups
+  in `docs/img/dex/` (`tools/mock_dex.py`); §9 holds the owner's decisions, all made.
+  Don't build it until the owner asks.
 - `docs/APP_PLATFORM_PLAN.md`: native C apps loaded from the SD card.
   **On hold since 2026-09-29**; don't build any of it without the user's yes.
 
