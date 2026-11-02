@@ -8,7 +8,7 @@
 
 The drawing is pixel art blown up (a JPEG or PNG of any size, as an image
 generator or a paint program exports it), on a white or checkerboard
-background (light or dark), laid out like Tuxemon's sheets:
+background (light or dark) or a transparent one, laid out like Tuxemon's sheets:
 
     +---------------------+---------------------+
     |                     |                     |
@@ -24,7 +24,8 @@ front made small. Nothing has to be on an exact grid. The tool:
 1. finds the background: its greys are learnt from the picture's border
    (white, a light checkerboard or a dark one), and it's those greys that reach
    the edge of the picture, and the holes in the drawing that show the checkerboard or
-   are too big for an eye's white (so the white of an eye stays);
+   are too big for an eye's white (so the white of an eye stays). A picture with
+   transparency says so itself, and nothing is guessed from its colours;
 2. finds the drawings (front, back, two icons) as the groups of what's left,
    the two biggest being the front (left) and the back. A splash or a flame
    apart from the body joins the big piece it's nearest to, never both;
@@ -36,7 +37,9 @@ front made small. Nothing has to be on an exact grid. The tool:
    fringe off the edges;
 5. halves it (or more) until everything fits its place: a drawing made at
    twice the game's size is common. Each block becomes its own medoid
-   colour, or its outline's colour if it has any, so lines and eyes hold;
+   colour, or its outline's colour if it has any, so lines and eyes hold. The
+   eyes file (8) may fix the front and back's shrink with a "scale", to keep a
+   line's stages in proportion; the icons then fit themselves;
 6. places them in the sheet: the front centred with its feet 6 px from the
    bottom, the back centred with its feet 1 px from the bottom, the icons
    centred;
@@ -119,6 +122,29 @@ class Backdrop:
         if self.light:
             return min(c) >= 150 and max(c) - min(c) <= 40
         return max(c) - min(c) <= 20 and min(c) >= self.lo and max(c) <= self.hi
+
+
+class Transparent:
+    """The background of a picture with real transparency: nothing is told by colour, so
+    white fur on the drawing's edge isn't taken for the background blurred in."""
+    tones = "transparent"
+
+    def fringe(self, c):
+        return False
+
+
+def open_drawing(src):
+    """The picture's RGB pixels, its size, what its background is and which pixels are it."""
+    from PIL import Image
+    im = Image.open(src)
+    w, h = im.size
+    if im.has_transparency_data:
+        im = im.convert("RGBA")
+        alpha = im.getchannel("A").get_flattened_data()
+        return list(im.convert("RGB").get_flattened_data()), w, h, Transparent(), bytearray(a < 128 for a in alpha)
+    px = list(im.convert("RGB").get_flattened_data())
+    bd = Backdrop(px, w, h)
+    return px, w, h, bd, background(px, w, h, bd)
 
 
 def background(px, w, h, bd):
@@ -396,8 +422,8 @@ def dark(c):
 
 def shrink(rows, k, where=None):
     """The drawing at 1/k: each k x k block becomes its medoid (the one of its own
-    colours closest to the rest, the darker on a tie), its darkest ink if it has any
-    (so outlines and eyes hold), or clear if most of it is. Of the k x k ways to lay the blocks, the one whose blocks are most
+    colours closest to the rest, the darker on a tie), its darkest ink if a quarter of
+    it or more is ink (so outlines and eyes hold), or clear if most of it is. Of the k x k ways to lay the blocks, the one whose blocks are most
     alike. Returns an RGBA image cropped to what's drawn. `where`, a list, gets (ox, oy, left,
     top): a drawing's pixel (x, y) is the result's ((x + ox) // k - left, (y + oy) // k - top)."""
     from PIL import Image
@@ -416,6 +442,8 @@ def shrink(rows, k, where=None):
                         out.append((0, 0, 0, 0))
                         continue
                     ink = [c for c in cs if dark(c)]
+                    if 4 * len(ink) < k * k:    # a corner of an outline, in a big block, isn't a line
+                        ink = []
                     m = min(ink or cs, key=lambda c: (sum(wdist(c, d) for d in cs), lum(c), c))
                     spread += sum(wdist(m, d) for d in cs)
                     out.append(m + (255,))
@@ -593,7 +621,7 @@ def eyes_path(src):
 
 
 def write_eyes(path, eyes):
-    lines = []
+    lines = [f'  "scale": {eyes["scale"]}'] if eyes.get("scale") else []
     for part in PARTS:
         rows = [json.dumps(e) for e in eyes[part]]
         body = "[\n    " + ",\n    ".join(rows) + "\n  ]" if rows else "[]"
@@ -603,10 +631,12 @@ def write_eyes(path, eyes):
 
 def read_eyes(path):
     eyes = json.loads(Path(path).read_text())
-    if sorted(eyes) != sorted(PARTS):
-        fail(f"{path}: want exactly the parts {PARTS}")
-    for part, es in eyes.items():
-        for e in es:
+    if set(eyes) - {"scale"} != set(PARTS):
+        fail(f"{path}: want exactly the parts {PARTS}, and may have a scale")
+    if not isinstance(eyes.get("scale", 1), int) or eyes.get("scale", 1) < 1:
+        fail(f"{path}: the scale is a whole number: {eyes['scale']}")
+    for part in PARTS:
+        for e in eyes[part]:
             if not {"at", "draw", "wipe"} <= set(e) or set(e) - {"at", "draw", "wipe", "colors"}:
                 fail(f"{path}: an eye of the {part} wants at, draw and wipe, and may have colors: {e}")
     return eyes
@@ -629,12 +659,15 @@ def build(src, notes, scale=None, draft=False):
     """The sheet. `draft`: a drawing with no eyes file gets one written, from what it can
     find; otherwise that's an error, because the sheet can't be known without it."""
     from PIL import Image
-    im = Image.open(src).convert("RGB")
-    w, h = im.size
-    px = list(im.get_flattened_data())
-    bd = Backdrop(px, w, h)
+    px, w, h, bd, bg = open_drawing(src)
     notes.append(f"the background: {bd.tones}")
-    bg = background(px, w, h, bd)
+    path = eyes_path(src)
+    saved = read_eyes(path) if path.exists() else None
+    if saved is None and not draft:
+        fail(f"{path} is missing (a first build writes a draft: run mksheet.py {src} -o OUT)")
+    if scale is None and saved:
+        scale = saved.get("scale")
+    fixed = scale
     label = [-1] * (w * h)
     pieces = components(bg, w, h, least=max(16, w * h // 20000), label=label)
     gap = max(4, w // 64)
@@ -674,8 +707,17 @@ def build(src, notes, scale=None, draft=False):
         while any(-(-len(r[0]) // scale) > rw or -(-len(r) // scale) > rh for r, (rw, rh) in zip(arts, room)):
             scale += 1
         notes.append(f"scale: 1/{scale} (the smallest at which every drawing fits)")
+    scales = [scale] * len(arts)
+    if fixed:
+        notes.append(f"scale: 1/{scale} as set")
+    if fixed and len(arts) == 4:         # the front and back's size is decided: the icons still fit theirs
+        k = 1
+        while any(-(-len(r[0]) // k) > ICON or -(-len(r) // k) > ICON for r in arts[2:]):
+            k += 1
+        scales[2:] = [k, k]
+        notes.append(f"the icons: 1/{k}")
     wheres = [[] for _ in arts]
-    shrunk = [shrink(r, scale, wh) for r, wh in zip(arts, wheres)]
+    shrunk = [shrink(r, k, wh) for r, k, wh in zip(arts, scales, wheres)]
     front = fit(shrunk[0], *room[0], "the front", notes)
     back = fit(shrunk[1], *room[1], "the back", notes)
     if len(shrunk) == 4:
@@ -688,18 +730,17 @@ def build(src, notes, scale=None, draft=False):
         ic = [small, small]
     for name, a in zip(names, [front, back] + ic):
         notes.append(f"{name}: {a.width} x {a.height} in the sheet")
-    path = eyes_path(src)
-    if path.exists():
-        eyes = read_eyes(path)
+    if saved:
+        eyes = saved
         notes.append(f"eyes: from {path}")
-    elif not draft:
-        fail(f"{path} is missing (a first build writes a draft: run mksheet.py {src} -o OUT)")
     else:
         eyes = {p: [] for p in PARTS}
+        if fixed:
+            eyes["scale"] = fixed
         for k, part in enumerate(PARTS):
             if part == "back" or k >= len(arts):        # a back has no face to fix
                 continue
-            eyes[part] = find_eyes(arts[k], scale, wheres[k], part == "front")
+            eyes[part] = find_eyes(arts[k], scales[k], wheres[k], part == "front")
         write_eyes(path, eyes)
         notes.append(f"eyes: DRAFT written to {path}, a guess: check it with --look and correct it by hand")
         for part in ("front", "icon1", "icon2"):
@@ -731,7 +772,10 @@ def preview(src, sheet, path):
     from PIL import Image
     z = 4
     s = sheet.resize((SHEET_W * z, SHEET_H * z), Image.Resampling.NEAREST)
-    o = Image.open(src).convert("RGB")
+    o = Image.open(src).convert("RGBA")
+    white = Image.new("RGBA", o.size, (255, 255, 255, 255))
+    white.alpha_composite(o)
+    o = white.convert("RGB")
     o = o.resize((round(o.width * s.height / o.height), s.height), Image.Resampling.LANCZOS)
     out = Image.new("RGB", (o.width + s.width + 8, s.height), (128, 128, 128))
     out.paste(o, (0, 0))

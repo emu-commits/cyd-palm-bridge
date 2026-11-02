@@ -1,0 +1,23 @@
+# Sparkip: the lightning line's first stage. The owner's drawing (2026-11-02).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Sparkip
+description: >-
+  The little bolt on its tail crackles when it's pleased. Its fur stands on end
+  an hour before a storm, so farmers keep an eye on it.
+drawing: tools/game_art/src/sparkip.png
+types: [lightning]
+shape: varmint
+stage: basic
+experience_group: default
+catch_rate: 100
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: gnaw}
+- {level_learned: 1, technique: lightning_spheres}
+- {level_learned: 5, technique: fluff_up}
+- {level_learned: 9, technique: whirlwind}
+- {level_learned: 12, technique: battery_discharge}
+evolutions:
+- {at_level: 16, monster_slug: nimbolt}

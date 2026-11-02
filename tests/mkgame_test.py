@@ -272,6 +272,27 @@ def main():
                            capture_output=True, text=True)
         check(r.returncode == 0 and "DRAFT" in r.stdout and src.with_suffix(".eyes.json").exists(),
               f"a first build wrote no draft of the eyes: {r.stdout}{r.stderr}")
+    with tempfile.TemporaryDirectory() as tmp:      # a transparent picture, and a scale kept with the eyes
+        pic = Image.new("RGBA", (960, 600), (0, 0, 0, 0))
+        for x0, size in ((60, 240), (560, 240)):
+            pic.paste((10, 10, 10, 255), (x0, 60, x0 + size, 60 + size))
+            pic.paste((250, 250, 250, 255), (x0 + 30, 90, x0 + size - 30, 30 + size))  # white fur: not background
+        src = Path(tmp) / "clear.png"
+        pic.save(src)
+        (Path(tmp) / "clear.eyes.json").write_text(
+            '{"scale": 1, "front": [], "back": [], "icon1": [], "icon2": []}')
+        r = subprocess.run([sys.executable, str(ROOT / "tools" / "mksheet.py"), str(src), "-o", str(Path(tmp) / "o.png")],
+                           capture_output=True, text=True)
+        check(r.returncode == 0 and "the background: transparent" in r.stdout and "scale: 1/1 as set" in r.stdout,
+              f"a transparent drawing with a set scale: {r.stdout}{r.stderr}")
+        if r.returncode == 0:
+            sheet = Image.open(Path(tmp) / "o.png").convert("RGBA")
+            check(max(c[0] for c in sheet.get_flattened_data() if c[3]) > 200, "a transparent drawing lost its white")
+            check(sheet.crop((0, 0, 64, 64)).getchannel("A").getbbox() is not None, "a transparent drawing has no front")
+    rows = [[(0, 0, 0)] + [(200, 200, 200)] * 3 for _ in range(4)]      # one cell of ink in a 4 x 4 block isn't a line
+    check(mksheet.shrink(rows, 4).getpixel((0, 0))[:3] == (200, 200, 200), "1/4: a corner of ink darkened the block")
+    rows = [[(0, 0, 0), (200, 200, 200)] for _ in range(2)]             # a line at 1/2 still holds
+    check(mksheet.shrink(rows, 2).getpixel((0, 0))[:3] == (0, 0, 0), "1/2: a line didn't survive")
     ours = [s for s, v in allow["creature"].items() if v["status"] == "ours"]
     check(len(ours) >= 3, f"the owner's fire fox line isn't in the game: {ours}")
     r = subprocess.run([sys.executable, str(ROOT / "tools" / "gen_interior_sheet.py"), "--check"],

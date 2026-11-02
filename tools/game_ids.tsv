@@ -45,6 +45,9 @@ creature	scorchvix	30
 creature	gillpip	31
 creature	maelstrotl	32
 creature	rillotl	33
+creature	fulminax	34
+creature	nimbolt	35
+creature	sparkip	36
 flag	met_wren	1
 flag	beat_ada	2
 flag	beat_ben	3
@@ -126,6 +129,7 @@ move	bubbles	40
 move	tsunami	41
 move	water_blast	42
 move	water_bullet	43
+move	lightning_spheres	44
 status	burn	1
 status	poison	2
 status	recover	3

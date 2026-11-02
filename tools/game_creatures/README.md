@@ -5,7 +5,7 @@ Tuxemon. Each one is three files and an allow-list line:
 
 | File | What it is |
 |---|---|
-| `tools/game_art/src/<slug>.jpg` (or `.png`) | The drawing as it came: front, back and two icons, blown up, on white or a checkerboard (light or dark). Kept so the sheet can always be made again. |
+| `tools/game_art/src/<slug>.jpg` (or `.png`) | The drawing as it came: front, back and two icons, blown up, on white, a checkerboard (light or dark) or transparent. Kept so the sheet can always be made again. |
 | `tools/game_art/<slug>-sheet.png` | The 128 × 88 battle sheet the game reads, made from the drawing by `tools/mksheet.py`. |
 | `tools/game_creatures/<slug>.yaml` | Its rules: name, types, body shape, stage, moves by level, evolution, catch rate, and the Dex text. |
 | `tools/game_allow.tsv` | `creature <slug> <licence> <authors> tools/game_art/<slug>-sheet.png ours` |
@@ -17,7 +17,8 @@ Tuxemon. Each one is three files and an allow-list line:
    front top left, the back top right, the two 24 px icons under the front.
    It may be any size and needn't sit on an exact grid. The background may be
    white or a checkerboard, light or dark: its greys are learnt from the
-   picture's border. A splash or tornado may come close to the other drawing:
+   picture's border. Or it may be transparent, which is best: nothing is
+   guessed from the colours, so white fur on the edge stays. A splash or tornado may come close to the other drawing:
    each loose piece goes with the drawing nearest it. The icons may be left
    out; the front is then shrunk to make them.
 2. **Make the sheet:**
@@ -28,6 +29,12 @@ Tuxemon. Each one is three files and an allow-list line:
    It prints what it found: the drawing's pixel size, where each part was,
    how much it was shrunk (a drawing made at twice the game's size is halved),
    and the colours. Look at the preview: the drawing beside the sheet at 4×.
+   The tool takes the smallest scale at which everything fits, icons included,
+   so big icons can shrink the front, and a line's stages can come out in the
+   wrong order of size. Put `"scale": N` at the top of the eyes file (below) to
+   set the front and back at 1/N; the icons then fit themselves. Compare the
+   sizes with the other lines'.
+
    The front and back share **15 colours**, as every critter in the game
    does, so a drawing with many shades loses some. A drawing already at
    128 × 88 with 15 colours or fewer goes in exactly as drawn.
@@ -124,3 +131,29 @@ game doesn't play their effects yet. They live in the wild, rarely:
 These drawings were at twice the game's size too, so the sheets are halved.
 Maelstrotl is the busiest drawing yet; at 15 colours and half size its
 spines and armour come out grainy.
+
+## The lightning line (2026-11-02)
+
+The owner's third line, on real transparency: **Sparkip** (lightning, varmint)
+evolves at 16 into **Nimbolt** (lightning, hunter), which evolves at 32 into
+**Fulminax** (lightning, brute). The names, types, moves, places and Dex text
+are ours for the owner to change. They live in the wild, rarely:
+
+| | Act 1 | Act 2 | Act 3 |
+|---|---|---|---|
+| Sparkip | Route 1, 3–5 | Route 2, 14–17 | |
+| Nimbolt | | The Old Keep, 19–22 | Cotton Tunnel, 26–30 |
+| Fulminax | | | The Old Keep once Wyrmkeeper Ashe is beaten, 34–36 |
+
+These drawings are much finer than the first two lines', with no clean grid,
+so the tool samples them every 3 picture pixels and shrinks by 1/5 (Sparkip)
+and 1/4 (Nimbolt, Fulminax), set in their eyes files. That keeps their widths
+(30, 45, 58) with the other lines' (29–34, 37–44, 49–56).
+
+**Their lightning moves are few.** The game plays two of Tuxemon's lightning
+attacks that deal plain damage: Lightning Spheres and Battery Discharge. Buzz,
+Thunderball, Thunderclap, Surge, Laser Beam, Energy Claws, Energy Field and
+Static Field all need effects the game doesn't play yet (flinching, exhausted,
+blinded, sniping, charging), so the line's stronger attacks are Whirlwind,
+Saber, Radiance, All In and Energy Beam. Battery Discharge, at 1.5, is their
+strongest lightning move.

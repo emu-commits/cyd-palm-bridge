@@ -16,6 +16,30 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-02 — Critters: the owner's lightning line
+
+Three new drawings, **Sparkip**, **Nimbolt** and **Fulminax** (36 critters;
+`courses/critters/game.bin` 597,844 → 610,696 B, from `ls`). The rules, places
+and Dex text are in `tools/game_creatures/`, and its README has the table.
+
+These drawings differ from the first six, and `mksheet.py` needed three changes.
+All six older sheets still pass `--check`, so they're the same to the byte:
+
+- **Real transparency.** The drawings are RGBA PNGs. Dropping the alpha would
+  put them on black, which is the colour of their outlines. A transparent
+  picture's background is now its alpha, with no guessing from colour.
+- **A big block's ink.** A block turned dark if any of it was ink. At 1/2 that's
+  one cell in four and right, but these drawings shrink by 1/4 or 1/5, where it's
+  one in 16 or 25: outlines swelled and Fulminax's head was black noise. Ink now
+  has to be a quarter of the block, the same rule at 1/2.
+- **A kept scale.** The automatic scale let big icons decide the front's size, so
+  Nimbolt came out smaller than Sparkip. `"scale"` in the eyes file sets the front
+  and back's, and the icons fit themselves.
+
+Most lightning moves need effects the game doesn't play, so the line has only two
+lightning attacks of its own (the README). Giving it more means playing flinching
+or exhausted, which is firmware work and wasn't done.
+
 ### 2026-11-02 — Critters: eyes drawn again after the shrink
 
 The owner's verdict on the six drawings: at the game's size only the eyes are

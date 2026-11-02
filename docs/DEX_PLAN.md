@@ -63,7 +63,7 @@ picture but are drawn our own way. It's a full-screen page like Study and Guru
 | **The four keys** | y 292–314 | **◀ List Talk ▶**, always these labels |
 
 **Why the upper screen is 128 high.** In the first mock-ups it was 121. A
-front or back sprite is drawn at 2×, and 8 of the 33 critters are over 60 px
+front or back sprite is drawn at 2×, and 8 of the 36 critters are over 60 px
 tall, up to 64 (`pigabyte`, `selmatek`, `dracune`, `propellercat`, `arthrobolt`,
 `cateye`, `noctalo`, `djinnbo`; measured from their sheets). They'd lose up to
 7 rows, so the grey bezel gives up that height. None is over 64 px wide, so a
@@ -124,7 +124,7 @@ was also a confusing label, since it looks like a way out.
      shows the position.
    - A seen critter's icon is its silhouette, and its name is ???. A
      never-seen critter has no icon.
-   - **Lower screen:** the counts (**SEEN 11  CAUGHT 6 / 33**), the filter and
+   - **Lower screen:** the counts (**SEEN 11  CAUGHT 6 / 36**), the filter and
      page ("Showing all, page 1 of 7"), and what to do next.
 4. **An entry** (mock-ups 4 and 5).
    - **Upper screen:** the sprite at 2×, and beside it the number, the name,
@@ -281,12 +281,12 @@ when the app opens and freed when it closes.** It adds **no static DRAM**.
 | The open game file's directory and the save's header and bitsets | about 1 KB |
 | One entry's sprite, decoded to RGB565 with alpha, drawn at 2× by `lv_image`'s scale (no second buffer) | 12 KB |
 | The page's icons: five at 24×24 RGB565 with alpha | 8.6 KB |
-| The fixed bezel and keys, and the page's labels and rows: **five rows reused** across pages rather than 33 objects | about 3 KB of the LVGL pool (estimate) |
+| The fixed bezel and keys, and the page's labels and rows: **five rows reused** across pages rather than 36 objects | about 3 KB of the LVGL pool (estimate) |
 | The speaker's portrait: RGB565 with no alpha, 20.8 KB of flash, drawn from there | none intended, to be measured in D3 |
 | **Total** | **about 22 KB of heap, 3 KB of the pool** |
 
 There's about 106 KB of heap free with the SD card mounted, and 11 KB free
-in the LVGL pool. Paging with ◀ and ▶, rather than scrolling 33 rows,
+in the LVGL pool. Paging with ◀ and ▶, rather than scrolling 36 rows,
 keeps the Dex within the pool. The smoke tour's `B` and `E` commands prove
 the heap is given back, as they do for Study.
 
@@ -358,8 +358,8 @@ Separately, and not part of the Dex: **the owner's new critters.** Built
 drawing into its sheet, and a creature of our own has its rules in
 `tools/game_creatures/<slug>.yaml` and an allow-list line with status
 "ours". The first are the fire fox line (Cinderkit, Scorchvix, Pyrewing) and
-the axolotl line (Gillpip, Rillotl, Maelstrotl), so the game has **33**
-critters now, not the 27 counted below; their
+the axolotl line (Gillpip, Rillotl, Maelstrotl), then the lightning line
+(Sparkip, Nimbolt, Fulminax), so the game has **36** critters now, not the 27 counted below; their
 descriptions are in their rules, ready for the Dex. Who uses them in Acts 2
 and 3 is still open: today they're only wild.
 
@@ -381,7 +381,7 @@ and 3 is still open: today they're only wild.
 
 - **A critter seen but not caught** shows its silhouette, with ??? for everything
   else, as in the games.
-- **The list has the 24×24 icons**, about 11 KB in the file for 33 critters.
+- **The list has the 24×24 icons**, about 12 KB in the file for 36 critters.
 - **The Dex order:** the starters' lines first, then in the order a player meets
   them.
 - **The missing descriptions:** I draft them for the owner's review. They must fit

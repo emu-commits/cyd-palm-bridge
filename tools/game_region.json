@@ -424,7 +424,8 @@
       {"creature": "vamporm",   "levels": [2, 4], "rate": 20},
       {"creature": "anoleaf",   "levels": [2, 4], "rate": 15},
       {"creature": "noctula",   "levels": [3, 5], "rate": 15},
-      {"creature": "zunna",     "levels": [3, 5], "rate": 20}
+      {"creature": "zunna",     "levels": [3, 5], "rate": 20},
+      {"creature": "sparkip",   "levels": [3, 5], "rate": 10}
     ],
     "brideswood": [
       {"creature": "noctula",   "levels": [4, 7], "rate": 25},
@@ -449,7 +450,8 @@
       {"creature": "pigabyte",     "levels": [15, 18], "rate": 15},
       {"creature": "noctalo",      "levels": [18, 20], "rate": 10},
       {"creature": "selmatek",     "levels": [18, 20], "rate": 10},
-      {"creature": "djinnbo",      "levels": [16, 19], "rate": 10}
+      {"creature": "djinnbo",      "levels": [16, 19], "rate": 10},
+      {"creature": "sparkip",      "levels": [14, 17], "rate": 10}
     ],
     "spyder_routea": [
       {"creature": "eyesore",      "levels": [18, 22], "rate": 20},
@@ -458,7 +460,8 @@
       {"creature": "noctalo",      "levels": [19, 23], "rate": 15},
       {"creature": "selmatek",     "levels": [19, 23], "rate": 15},
       {"creature": "cateye",       "levels": [20, 24], "rate": 10},
-      {"creature": "dune_pincher", "levels": [20, 24], "rate": 10}
+      {"creature": "dune_pincher", "levels": [20, 24], "rate": 10},
+      {"creature": "nimbolt",      "levels": [19, 22], "rate": 10}
     ],
     "dragons_cave": [
       {"creature": "agnidon",      "levels": [30, 33], "rate": 15},
@@ -520,7 +523,8 @@
       {"creature": "cateye",       "levels": [26, 30], "rate": 20},
       {"creature": "dune_pincher", "levels": [26, 30], "rate": 20},
       {"creature": "noctalo",      "levels": [26, 30], "rate": 20},
-      {"creature": "djinnbo",      "levels": [27, 30], "rate": 15}
+      {"creature": "djinnbo",      "levels": [27, 30], "rate": 15},
+      {"creature": "nimbolt",      "levels": [26, 30], "rate": 10}
     ],
     "route2_c": [
       {"creature": "noctalo",      "levels": [26, 30], "rate": 20},
@@ -549,7 +553,8 @@
       {"creature": "agnidon",    "levels": [31, 35], "rate": 15},
       {"creature": "arthrobolt", "levels": [31, 35], "rate": 15},
       {"creature": "djinnbo",    "levels": [32, 36], "rate": 10},
-      {"creature": "maelstrotl", "levels": [34, 36], "rate": 8}
+      {"creature": "maelstrotl", "levels": [34, 36], "rate": 8},
+      {"creature": "fulminax",   "levels": [34, 36], "rate": 8}
     ],
     "cave_d": [
       {"creature": "agnidon",    "levels": [32, 35], "rate": 15},
