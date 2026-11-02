@@ -188,11 +188,12 @@ jobs:
   # Publishes the simulator, and the Install page with the firmware beside it,
   # to a public URL on every push (and on manual dispatch). Requires GitHub
   # Pages enabled with Source: "GitHub Actions" in the repo settings;
-  # misconfigured, it fails softly without failing the run. Tags don't deploy:
-  # the site follows main, and the github-pages environment only allows main.
+  # misconfigured, it fails softly without failing the run. The site follows
+  # main: the github-pages environment only allows the two branches named here,
+  # so any other branch, tag or pull request skips this rather than being refused.
   simulator-deploy:
     name: Deploy simulator to Pages (needs Pages source = GitHub Actions)
-    if: github.event_name != 'pull_request' && github.ref_type != 'tag'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/claude/palm-behaviours'
     needs: [ simulator-wasm, firmware-build ]
     runs-on: ubuntu-latest
     timeout-minutes: 10
