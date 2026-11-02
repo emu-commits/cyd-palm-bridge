@@ -31,6 +31,35 @@ Tuxemon. Each one is three files and an allow-list line:
    The front and back share **15 colours**, as every critter in the game
    does, so a drawing with many shades loses some. A drawing already at
    128 × 88 with 15 colours or fewer goes in exactly as drawn.
+
+   **Then fix the eyes.** Halving makes a pupil swell and loses its highlight,
+   so the sheet's eyes are drawn by hand, from
+   `tools/game_art/src/<slug>.eyes.json`. The first build writes that file as a
+   draft from the eyes it can find, and tells you what it couldn't find. It
+   finds round eyes well, and misses or misplaces narrow and slanted ones, so
+   always look:
+
+       python3 tools/mksheet.py tools/game_art/src/<slug>.jpg --look /tmp/<slug>.png
+
+   That's each part at 10× with a ruler, in the file's own coordinates (x, y
+   of the part, cropped as it sits in the sheet). Each eye in the file:
+
+       {"wipe": [x0, y0, x1, y1], "at": [x, y], "draw": [".DD.", "DHDD", "DDDD", ".DD."]}
+
+   - `wipe`: the dark pixels in this box are painted over with the colour
+     around them, except any beside the clear, which are outline;
+   - `at` and `draw`: then this is drawn: `D` is the part's darkest colour,
+     `H` its lightest, a dot leaves the pixel as it is. An eye may also have
+     `"colors": {"Y": [253, 182, 31]}`, which makes `Y` the part's nearest
+     colour to that. Slanted eyes do well in a bright colour under a brow, as
+     Scorchvix's and Pyrewing's fronts do: `["...D", ".DDD", "DYYD"]`.
+
+   The front is the one that shows on the device, along with the back:
+   `mkgame.py` doesn't read a sheet's icons today.
+
+   An empty list means that part's eyes are fine as they came (Maelstrotl's
+   front). Edit the file and build again; each try takes a few seconds. The
+   file is part of the drawing: `--check` refuses a drawing without one.
 3. **Write its rules** in `tools/game_creatures/<slug>.yaml`, copying one of
    the fire fox line's. The keys:
    - `name`, `description` (the Dex's text), `drawing` (step 1's path);

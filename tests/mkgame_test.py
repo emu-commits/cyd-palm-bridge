@@ -243,6 +243,35 @@ def main():
             r = subprocess.run([sys.executable, str(ROOT / "tools" / "mksheet.py"), "--check",
                                 str(ROOT / d["drawing"]), str(ROOT / v["source"])], capture_output=True, text=True)
             check(r.returncode == 0, f"{v['source']}: {r.stdout}{r.stderr}")
+    sys.path.insert(0, str(ROOT / "tools"))     # the eyes step: palette only, no file no sheet
+    import mksheet
+    from PIL import Image
+    pal = [(10, 10, 10), (120, 120, 120), (240, 240, 240)]
+    im = Image.new("RGBA", (7, 7), pal[1] + (255,))
+    im.putpixel((3, 3), pal[0] + (255,))
+    im.putpixel((0, 0), pal[0] + (255,))
+    im.putpixel((6, 0), (0, 0, 0, 0))
+    im.putpixel((5, 0), pal[0] + (255,))
+    eyed = mksheet.apply_eyes(im, [{"wipe": [0, 0, 6, 6], "at": [1, 4], "draw": ["DH", ".D"]}], pal, "test")
+    check(eyed.getpixel((3, 3)) == pal[1] + (255,), "the eyes step left the old eye")
+    check(eyed.getpixel((5, 0)) == pal[0] + (255,), "the eyes step wiped an outline, a pixel beside the clear")
+    check([eyed.getpixel(p)[:3] for p in ((1, 4), (2, 4), (2, 5), (1, 5))] == [pal[0], pal[2], pal[0], pal[1]],
+          "the eyes step drew the wrong thing")
+    check({c[:3] for c in eyed.get_flattened_data() if c[3]} <= set(pal), "the eyes step added a colour")
+    eyed = mksheet.apply_eyes(im, [{"wipe": [0, 0, 0, 0], "at": [1, 4], "draw": ["Y"], "colors": {"Y": [130, 130, 130]}}],
+                              pal, "test")
+    check(eyed.getpixel((1, 4))[:3] == pal[1], "an eye's named colour isn't the palette's nearest")
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "bare.jpg"
+        shutil.copy(ROOT / "tools" / "game_art" / "src" / "cinderkit.jpg", src)
+        r = subprocess.run([sys.executable, str(ROOT / "tools" / "mksheet.py"), "--check", str(src),
+                            str(ROOT / "tools" / "game_art" / "cinderkit-sheet.png")], capture_output=True, text=True)
+        check(r.returncode != 0 and "eyes.json is missing" in r.stderr, f"--check took a drawing with no eyes file: {r.stderr}")
+        check(not src.with_suffix(".eyes.json").exists(), "--check wrote an eyes file")
+        r = subprocess.run([sys.executable, str(ROOT / "tools" / "mksheet.py"), str(src), "-o", str(Path(tmp) / "o.png")],
+                           capture_output=True, text=True)
+        check(r.returncode == 0 and "DRAFT" in r.stdout and src.with_suffix(".eyes.json").exists(),
+              f"a first build wrote no draft of the eyes: {r.stdout}{r.stderr}")
     ours = [s for s, v in allow["creature"].items() if v["status"] == "ours"]
     check(len(ours) >= 3, f"the owner's fire fox line isn't in the game: {ours}")
     r = subprocess.run([sys.executable, str(ROOT / "tools" / "gen_interior_sheet.py"), "--check"],

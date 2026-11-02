@@ -46,7 +46,8 @@ before touching anything.
   `tools/mksheet.py` turns the owner's drawing (any size, on white or a
   checkerboard; kept in `tools/game_art/src/`) into the 128×88 sheet, and the
   rules are `tools/game_creatures/<slug>.yaml` with an "ours" allow-list
-  line. The first are the fire fox line (Cinderkit, Scorchvix, Pyrewing) and
+  line. Each drawing has a `<slug>.eyes.json` beside it: halving ruins eyes,
+  so they're drawn again by hand (the README there; the first build drafts it). The first are the fire fox line (Cinderkit, Scorchvix, Pyrewing) and
   the water axolotl line (Gillpip, Rillotl, Maelstrotl).
 - `docs/DEX_PLAN.md`: **Dex**, the critter index (Games folder, under
   Critters), with a speaker like Coach and Guru. **Design and plan only

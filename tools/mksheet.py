@@ -4,6 +4,7 @@
     python3 tools/mksheet.py tools/game_art/src/emberkit.jpg -o tools/game_art/emberkit-sheet.png
     python3 tools/mksheet.py SRC -o OUT --preview look.png   # also a 4x picture to judge it by
     python3 tools/mksheet.py --check SRC OUT                 # OUT is what SRC builds, to the byte
+    python3 tools/mksheet.py SRC --look look.png             # the parts at 10x with a ruler, to place eyes by
 
 The drawing is pixel art blown up (a JPEG or PNG of any size, as an image
 generator or a paint program exports it), on a white or checkerboard
@@ -41,13 +42,21 @@ front made small. Nothing has to be on an exact grid. The tool:
    centred;
 7. reduces the front and back together to 15 colours (the game's budget,
    GAME_FORMAT.md 3.9), keeping small, distinct colours (eyes, gems,
-   highlights) over shades of big areas; the icons get their own 15.
+   highlights) over shades of big areas; the icons get their own 15;
+8. draws the eyes again by hand. Halving makes a pupil swell and loses its
+   highlight, and eyes are what a face is read by, so the blown-up eye is wiped
+   and a small drawn one goes in its place, from SRC's .eyes.json beside it.
+   Only colours the part already has are used, so the budget holds. The first
+   build of a drawing writes that file as a draft from the eyes it can find,
+   and says so: look at it (--look, --preview) and correct it by hand. An empty
+   list means the part's eyes are good as they came.
 
 The result is the same to the byte every time (Pillow is pinned in
 tools/requirements-game.txt). Pure Pillow: no numpy.
 """
 import argparse
 import io
+import json
 import sys
 from collections import deque
 from pathlib import Path
@@ -385,11 +394,12 @@ def dark(c):
     return lum(c) < 8 * 48 and max(c) < 96
 
 
-def shrink(rows, k):
+def shrink(rows, k, where=None):
     """The drawing at 1/k: each k x k block becomes its medoid (the one of its own
     colours closest to the rest, the darker on a tie), its darkest ink if it has any
     (so outlines and eyes hold), or clear if most of it is. Of the k x k ways to lay the blocks, the one whose blocks are most
-    alike. Returns an RGBA image cropped to what's drawn."""
+    alike. Returns an RGBA image cropped to what's drawn. `where`, a list, gets (ox, oy, left,
+    top): a drawing's pixel (x, y) is the result's ((x + ox) // k - left, (y + oy) // k - top)."""
     from PIL import Image
     h, w = len(rows), len(rows[0])
     best = None
@@ -410,11 +420,13 @@ def shrink(rows, k):
                     spread += sum(wdist(m, d) for d in cs)
                     out.append(m + (255,))
             if best is None or spread < best[0]:
-                best = (spread, bw, bh, out)
-    _, bw, bh, out = best
+                best = (spread, bw, bh, out, ox, oy)
+    _, bw, bh, out, ox, oy = best
     im = Image.new("RGBA", (bw, bh))
     im.putdata(out)
     bb = im.getchannel("A").getbbox()
+    if where is not None:
+        where.extend((ox, oy, bb[0] if bb else 0, bb[1] if bb else 0))
     return im.crop(bb) if bb else im
 
 
@@ -469,6 +481,137 @@ def reduce_colours(images, colours=COLOURS):
     return out, palette
 
 
+# ---------------------------------------------------------------- 8: eyes
+
+PARTS = ("front", "back", "icon1", "icon2")
+EYE_BIG = [".DD.", "DHDD", "DDDD", ".DD."]
+EYE_MID = [".DD.", "DHDD", ".DD."]
+EYE_SMALL = ["HD", "DD"]
+
+
+def apply_eyes(im, eyes, palette, what):
+    """Each eye of `im`: wipe the dark pixels in its box (never one beside the clear, which
+    is outline), then draw it. In `draw`, D is the palette's darkest, H its lightest, a dot
+    leaves the pixel be, and the eye's `colors` may name more letters: {"Y": [r, g, b]} is
+    the palette's nearest to that. All of it in x, y of the part as it stands in the sheet,
+    cropped."""
+    if not eyes:
+        return im
+    im = im.copy()
+    o = im.load()
+    ink = min(palette, key=lambda c: (lum(c), c)) + (255,)
+    hi = max(palette, key=lambda c: (lum(c), c)) + (255,)
+    near = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+    def inside(x, y):
+        return 0 <= x < im.width and 0 <= y < im.height
+
+    def eyeish(x, y):
+        return o[x, y][3] and lum(o[x, y]) < 8 * 80
+
+    for e in eyes:
+        x0, y0, x1, y1 = e["wipe"]
+        todo = {(x, y) for y in range(y0, y1 + 1) for x in range(x0, x1 + 1)
+                if inside(x, y) and eyeish(x, y)
+                and all(inside(x + a, y + b) and o[x + a, y + b][3] for a, b in near)}
+        while todo:
+            left = set(todo)
+            for x, y in sorted(todo):
+                ns = [o[x + a, y + b] for a, b in near if (x + a, y + b) not in todo
+                      and inside(x + a, y + b) and o[x + a, y + b][3] and not eyeish(x + a, y + b)]
+                if ns:                                  # the commonest colour around it
+                    o[x, y] = max(ns, key=lambda c: (ns.count(c), c))
+                    left.discard((x, y))
+            if left == todo:
+                break
+            todo = left
+        ax, ay = e["at"]
+        letters = {"D": ink, "H": hi}
+        for ch, rgb in e.get("colors", {}).items():
+            letters[ch] = min(palette, key=lambda c: (wdist(c, tuple(rgb)), c)) + (255,)
+        for j, row in enumerate(e["draw"]):
+            for i, ch in enumerate(row):
+                if ch == ".":
+                    continue
+                if ch not in letters or not inside(ax + i, ay + j):
+                    fail(f"{what}: the eye at {e['at']} has {ch!r} at ({ax + i},{ay + j}), "
+                         f"in a part {im.width} x {im.height}")
+                o[ax + i, ay + j] = letters[ch]
+    return im
+
+
+def dark_blobs(rows, top_only):
+    """Dark pieces of a drawing with colour all around them, that aren't flat like a mouth:
+    what eyes look like before they're halved."""
+    h, w = len(rows), len(rows[0])
+    ink = {(x, y) for y in range(h) for x in range(w) if rows[y][x] is not None and dark(rows[y][x])}
+    seen, out = set(), []
+    for s in sorted(ink):
+        if s in seen:
+            continue
+        seen.add(s)
+        stack, cells, closed = [s], [], True
+        while stack:
+            x, y = stack.pop()
+            cells.append((x, y))
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    q = (x + dx, y + dy)
+                    if not (0 <= q[0] < w and 0 <= q[1] < h) or rows[q[1]][q[0]] is None:
+                        closed = False
+                    elif q in ink and q not in seen:
+                        seen.add(q)
+                        stack.append(q)
+        xs, ys = [c[0] for c in cells], [c[1] for c in cells]
+        bw, bh = max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
+        if closed and len(cells) >= 3 and bh >= 2 and bw <= 2 * bh and not (top_only and sum(ys) / len(ys) > h / 2):
+            out.append((min(xs), min(ys), max(xs), max(ys), len(cells)))
+    return out
+
+
+def find_eyes(rows, k, where, top_only):
+    """A first guess at a part's eyes for a human to correct: the likeliest two blobs side by
+    side, or the one if that's all there is."""
+    blobs = dark_blobs(rows, top_only)
+    pairs = [(abs(a[1] + a[3] - b[1] - b[3]) + abs(a[4] - b[4]) / max(a[4], b[4]) * 4, a, b)
+             for i, a in enumerate(blobs) for b in blobs[i + 1:]
+             if abs(a[1] + a[3] - b[1] - b[3]) <= 6 * k and abs(a[0] + a[2] - b[0] - b[2]) >= 4 * k]
+    picked = list(min(pairs, key=lambda p: p[0])[1:]) if pairs else sorted(blobs, key=lambda b: -b[4])[:1]
+    ox, oy, left, top = where
+    eyes = []
+    for x0, y0, x1, y1, _ in sorted(picked):
+        tall = (y1 - y0 + 1) / k
+        draw = EYE_BIG if tall >= 3 else EYE_MID if tall >= 2.25 else EYE_SMALL
+        box = [(x0 + ox) // k - left - 1, (y0 + oy) // k - top - 1, (x1 + ox) // k - left + 1, (y1 + oy) // k - top + 1]
+        cx, cy = ((x0 + x1) / 2 + ox) / k - left + 0.5, ((y0 + y1) / 2 + oy) / k - top + 0.5
+        eyes.append({"wipe": box, "at": [round(cx - len(draw[0]) / 2), round(cy - len(draw) / 2)], "draw": draw})
+    return eyes
+
+
+def eyes_path(src):
+    return Path(src).with_suffix(".eyes.json")
+
+
+def write_eyes(path, eyes):
+    lines = []
+    for part in PARTS:
+        rows = [json.dumps(e) for e in eyes[part]]
+        body = "[\n    " + ",\n    ".join(rows) + "\n  ]" if rows else "[]"
+        lines.append(f"  {json.dumps(part)}: {body}")
+    Path(path).write_text("{\n" + ",\n".join(lines) + "\n}\n")
+
+
+def read_eyes(path):
+    eyes = json.loads(Path(path).read_text())
+    if sorted(eyes) != sorted(PARTS):
+        fail(f"{path}: want exactly the parts {PARTS}")
+    for part, es in eyes.items():
+        for e in es:
+            if not {"at", "draw", "wipe"} <= set(e) or set(e) - {"at", "draw", "wipe", "colors"}:
+                fail(f"{path}: an eye of the {part} wants at, draw and wipe, and may have colors: {e}")
+    return eyes
+
+
 # ---------------------------------------------------------------- the whole
 
 def fit(im, w, h, what, notes):
@@ -482,7 +625,9 @@ def fit(im, w, h, what, notes):
     return im.resize((nw, nh), Image.Resampling.NEAREST)
 
 
-def build(src, notes, scale=None):
+def build(src, notes, scale=None, draft=False):
+    """The sheet. `draft`: a drawing with no eyes file gets one written, from what it can
+    find; otherwise that's an error, because the sheet can't be known without it."""
     from PIL import Image
     im = Image.open(src).convert("RGB")
     w, h = im.size
@@ -529,7 +674,8 @@ def build(src, notes, scale=None):
         while any(-(-len(r[0]) // scale) > rw or -(-len(r) // scale) > rh for r, (rw, rh) in zip(arts, room)):
             scale += 1
         notes.append(f"scale: 1/{scale} (the smallest at which every drawing fits)")
-    shrunk = [shrink(r, scale) for r in arts]
+    wheres = [[] for _ in arts]
+    shrunk = [shrink(r, scale, wh) for r, wh in zip(arts, wheres)]
     front = fit(shrunk[0], *room[0], "the front", notes)
     back = fit(shrunk[1], *room[1], "the back", notes)
     if len(shrunk) == 4:
@@ -542,10 +688,30 @@ def build(src, notes, scale=None):
         ic = [small, small]
     for name, a in zip(names, [front, back] + ic):
         notes.append(f"{name}: {a.width} x {a.height} in the sheet")
+    path = eyes_path(src)
+    if path.exists():
+        eyes = read_eyes(path)
+        notes.append(f"eyes: from {path}")
+    elif not draft:
+        fail(f"{path} is missing (a first build writes a draft: run mksheet.py {src} -o OUT)")
+    else:
+        eyes = {p: [] for p in PARTS}
+        for k, part in enumerate(PARTS):
+            if part == "back" or k >= len(arts):        # a back has no face to fix
+                continue
+            eyes[part] = find_eyes(arts[k], scale, wheres[k], part == "front")
+        write_eyes(path, eyes)
+        notes.append(f"eyes: DRAFT written to {path}, a guess: check it with --look and correct it by hand")
+        for part in ("front", "icon1", "icon2"):
+            if k >= PARTS.index(part) and len(eyes[part]) != 2:
+                notes.append(f"eyes: {len(eyes[part])} found on the {part} (narrow or slanted eyes aren't found): place them by hand")
     (front, back), pal = reduce_colours([front, back])
+    front = apply_eyes(front, eyes["front"], pal, f"{src} front")
+    back = apply_eyes(back, eyes["back"], pal, f"{src} back")
     notes.append(f"front and back: {len(pal)} colours")
     ic, ipal = reduce_colours(ic)
     notes.append(f"icons: {len(ipal)} colours")
+    ic = [apply_eyes(a, eyes[p], ipal, f"{src} {p}") for a, p in zip(ic, ("icon1", "icon2"))]
     sheet = Image.new("RGBA", (SHEET_W, SHEET_H), (0, 0, 0, 0))
     sheet.paste(front, ((SPRITE - front.width) // 2, SPRITE - FRONT_FOOT - front.height))
     sheet.paste(back, (SPRITE + (SPRITE - back.width) // 2, SPRITE - BACK_FOOT - back.height))
@@ -573,11 +739,37 @@ def preview(src, sheet, path):
     out.save(path)
 
 
+def look(sheet, path):
+    """The sheet's parts at 10x, cropped as the eyes file counts them, a ruler every 5 pixels."""
+    from PIL import Image, ImageDraw
+    z = 10
+    boxes = ((0, 0, SPRITE, SPRITE), (SPRITE, 0, SHEET_W, SPRITE),
+             (0, SPRITE, ICON, SHEET_H), (ICON, SPRITE, 2 * ICON, SHEET_H))
+    parts = [sheet.crop(b) for b in boxes]
+    parts = [p.crop(p.getchannel("A").getbbox()) for p in parts if p.getchannel("A").getbbox()]
+    out = Image.new("RGB", (sum(p.width * z + 40 for p in parts) + 8, max(p.height for p in parts) * z + 32), (40, 40, 40))
+    d = ImageDraw.Draw(out)
+    ox = 28
+    for p in parts:
+        g = Image.new("RGBA", p.size, (90, 90, 90, 255))
+        g.alpha_composite(p)
+        out.paste(g.resize((p.width * z, p.height * z), Image.Resampling.NEAREST), (ox, 20))
+        for x in range(0, p.width, 5):
+            d.line((ox + x * z, 12, ox + x * z, 20), fill=(255, 255, 255))
+            d.text((ox + x * z + 2, 2), str(x), fill=(255, 255, 255))
+        for y in range(0, p.height, 5):
+            d.line((ox - 8, 20 + y * z, ox, 20 + y * z), fill=(255, 255, 255))
+            d.text((ox - 24, 20 + y * z), str(y), fill=(255, 255, 255))
+        ox += p.width * z + 40
+    out.save(path)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("src", nargs="?")
     ap.add_argument("-o", "--out")
     ap.add_argument("--preview")
+    ap.add_argument("--look", help="write the parts at 10x with a ruler, to place eyes by")
     ap.add_argument("--check", nargs=2, metavar=("SRC", "SHEET"))
     ap.add_argument("--scale", type=int, help="take every N x N of the drawing's pixels as one "
                     "(default: the smallest N at which everything fits)")
@@ -589,14 +781,18 @@ def main(argv=None):
             fail(f"{a.check[1]} isn't what {a.check[0]} builds (run mksheet.py {a.check[0]} -o {a.check[1]})")
         print(f"{a.check[1]}: OK")
         return
-    if not a.src or not a.out:
-        ap.error("want SRC and -o OUT (or --check SRC SHEET)")
-    sheet = build(a.src, notes, a.scale)
-    Path(a.out).write_bytes(png(sheet))
+    if not a.src or not (a.out or a.look):
+        ap.error("want SRC and -o OUT or --look LOOK (or --check SRC SHEET)")
+    sheet = build(a.src, notes, a.scale, draft=True)
+    if a.out:
+        Path(a.out).write_bytes(png(sheet))
     if a.preview:
         preview(a.src, sheet, a.preview)
+    if a.look:
+        look(sheet, a.look)
     print("\n".join(notes))
-    print(f"wrote {a.out}")
+    if a.out:
+        print(f"wrote {a.out}")
 
 
 if __name__ == "__main__":

@@ -16,6 +16,30 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-02 — Critters: eyes drawn again after the shrink
+
+The owner's verdict on the six drawings: at the game's size only the eyes are
+wrong, the rest is forgivable. `mksheet.py`'s halving draws a block dark if any
+of it is dark, which holds outlines but makes pupils swell and loses their
+highlights. An AI redraw of the whole sprite (SD 1.5, SDXL, Z-Image, on the
+local GPU) was tried first and rejected by the owner.
+
+- **`mksheet.py` step 8:** after the colours are reduced, each part's eyes are
+  wiped and drawn from `tools/game_art/src/<slug>.eyes.json`, in colours the
+  part already has, so the 15-colour budget holds. A first build drafts the
+  file from the dark blobs in the drawing; `--look` shows the parts at 10x with
+  a ruler to correct it by; `--check` refuses a drawing without one.
+- **The draft is a guess.** Round eyes came out right as drafted (Gillpip,
+  Cinderkit, Rillotl). It put Scorchvix's front eyes on its necklace and found
+  none on Pyrewing's front or on its second icon: slanted eyes need placing by hand.
+  The foxes' fronts got yellow eyes under a dark brow, after a pale highlight
+  read poorly at the game's size (`colors` in the eyes file).
+- **Applied to all six.** Fronts and icons changed, except Maelstrotl's front,
+  which the owner called good as it was. Backs are the same pixels.
+  The game stores only the fronts and backs: `mkgame.py` never reads a sheet's
+  icons, so the icons' new eyes are in the sheets but not on the device.
+  Same size game.bin (597,844 B); `mkgame_test` and `make -C sim monster` pass.
+
 ### 2026-11-01 — Critters: the owner's water axolotl line
 
 The owner sent three more drawings (basic, stage 1, stage 2): a water
