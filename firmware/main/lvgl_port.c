@@ -8,6 +8,7 @@
 #include "hotsync.h"
 #include "ui.h"           /* ui_show_lock() / ui_owns_backlight() */
 #include "tapsplit.h"     /* recover the lift between two fast taps */
+#include "crt.h"          /* a TV's look for one box of the screen */
 #include "lv_font_palm.h"
 #include "lvgl.h"
 #include "esp_heap_caps.h"
@@ -48,9 +49,31 @@ static uint32_t tick_cb(void){ return (uint32_t)(esp_timer_get_time() / 1000); }
 static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map){
     int w = area->x2 - area->x1 + 1;
     int h = area->y2 - area->y1 + 1;
+    if(crt_active()){
+        /* how long it takes, for the bench (DEX_PLAN.md 2.4): a line every 5 s
+         * while it's working, under the log's debug level on a normal build */
+        static int64_t spent, since;
+        static uint32_t pixels;
+        int64_t t0 = esp_timer_get_time();
+        crt_flush(area->x1, area->y1, area->x2, area->y2, (uint16_t *)px_map);
+        int64_t t1 = esp_timer_get_time();
+        spent += t1 - t0; pixels += (uint32_t)w * h;
+        if(t1 - since > 5000000){
+            if(pixels) ESP_LOGD(TAG, "crt: %lu us for %lu px (%.2f us per 1000)",
+                                (unsigned long)spent, (unsigned long)pixels, 1000.0 * spent / pixels);
+            since = t1; spent = 0; pixels = 0;
+        }
+    }
     lv_draw_sw_rgb565_swap(px_map, (uint32_t)w * h);   /* LE render -> BE for ILI9341 */
     display_blit(area->x1, area->y1, w, h, px_map);
     lv_display_flush_ready(disp);
+}
+
+static void invalidate_cb(lv_event_t *e){
+    lv_area_t *a = lv_event_get_param(e);
+    int x1 = a->x1, x2 = a->x2;
+    crt_widen(&x1, a->y1, &x2, a->y2);
+    a->x1 = x1; a->x2 = x2;
 }
 
 /* How often the panel is read, and how far a press may jump between two reads
@@ -170,6 +193,7 @@ void lvgl_port_init(void){
     g_disp = disp; g_buf = buf; g_buf_rows = BUF_ROWS;
     lv_display_set_buffers(disp, buf, NULL, buf_bytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(disp, flush_cb);
+    lv_display_add_event_cb(disp, invalidate_cb, LV_EVENT_INVALIDATE_AREA, NULL);
 
     lv_indev_t *indev = lv_indev_create();
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);

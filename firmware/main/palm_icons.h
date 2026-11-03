@@ -13,6 +13,8 @@ extern const lv_image_dsc_t icon_wordie;    /* Wordie (Games sub-launcher) */
 extern const lv_image_dsc_t icon_sudoku;    /* Sudoku (Games sub-launcher) */
 extern const lv_image_dsc_t icon_zip;       /* Zip path puzzle (Games sub-launcher) */
 extern const lv_image_dsc_t icon_critters;  /* Critters, the monster game (Games sub-launcher) */
+extern const lv_image_dsc_t icon_dex;       /* Dex, the critter index (Games sub-launcher; dex_art.c) */
+extern const uint16_t dex_speaker[102 * 102];   /* the Dex's speaker, RGB565 (dex_art.c) */
 extern const lv_image_dsc_t icon_coach;     /* Coach focus timer (ritual Pomodoro) */
 extern const lv_image_dsc_t icon_guru;      /* Guru longevity habits (gen_guru_icon.py) */
 extern const lv_image_dsc_t icon_study;     /* Study, the SRS app (gen_study_icon.py) */

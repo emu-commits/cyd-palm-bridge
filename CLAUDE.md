@@ -52,9 +52,9 @@ before touching anything.
 - `docs/DEX_PLAN.md`: **Dex**, the critter index (Games folder, under
   Critters), a fixed hardware-like gadget: its bezel, title bar and keys never
   change, and all other text and the speaker come through its subscreens (no
-  Coach or Guru bubble). **Design and plan only (redesigned 2026-11-02)**, with mock-ups
-  in `docs/img/dex/` (`tools/mock_dex.py`); §9 holds the owner's decisions, all made.
-  Don't build it until the owner asks.
+  Coach or Guru bubble). **Built in the sim 2026-11-03** (`ui_dex.c`, `dex.c`, the
+  TV effect in `crt.c`; game format 2.2, save version 4; gate `make -C sim dex`);
+  its bench items are the owner's. §9 holds the owner's decisions.
 - `docs/APP_PLATFORM_PLAN.md`: native C apps loaded from the SD card.
   **On hold since 2026-09-29**; don't build any of it without the user's yes.
 

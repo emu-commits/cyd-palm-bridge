@@ -5,8 +5,14 @@
  *   - evolving, or letting a creature go, doesn't take a mark back;
  *   - a version 4 save keeps them, and mp_read_marks() reads what mp_load() does;
  *   - a version 3 save loads with the marks made from its party and box;
- *   - mp_read_marks() refuses what mp_load() refuses.
+ *   - mp_read_marks() refuses what mp_load() refuses;
+ *   - the speaker's choice of line, for each state.
+ * And for tests/dex_check.py, which works the same answers out from mkgame.py's
+ * reading of the file and checks every line fits the lower screen:
+ *   dex_test where FILE    every critter's Where answer, act by act
+ *   dex_test lines FILE    every line he can say
  * Run from sim/. */
+#include "dex.h"
 #include "monster.h"
 #include "monster_play.h"
 
@@ -215,10 +221,177 @@ static void events(void){
     free(good); free(bad); free(v); free(w);
 }
 
-int main(void){
+/* ---- 3. what he says ---- */
+
+/* a Dex with these marks and no save file behind it */
+static void marks_of(Dex *d, const char *names){
+    memset(d->marks.seen, 0, sizeof d->marks.seen);
+    memset(d->marks.caught, 0, sizeof d->marks.caught);
+    d->has_save = 1;
+    d->n_seen = d->n_caught = 0;
+    for(int p = 0; p < d->n; p++){
+        MgMon m;
+        char t[32], key[40];
+        mg_mon(&d->g, d->mon[p], &m);
+        mg_text(&d->g, m.name, t, sizeof t);
+        snprintf(key, sizeof key, "+%s+", t);
+        int c = strstr(names, key) != NULL;
+        snprintf(key, sizeof key, "?%s?", t);
+        int e = strstr(names, key) != NULL;
+        d->state[p] = c ? DX_CAUGHT : e ? DX_SEEN : DX_NEVER;
+        if(d->state[p]) d->n_seen++;
+        if(c){ d->marks.caught[m.id / 8] |= (uint8_t)(1u << (m.id % 8)); d->caught[d->n_caught++] = (uint16_t)p; }
+        if(c || e) d->marks.seen[m.id / 8] |= (uint8_t)(1u << (m.id % 8));
+    }
+}
+
+static void lines(void){
+    Dex d;
+    char t[DX_LINE], n[24];
+    uint8_t *head;
+    remove(SAVE);
+    CHECK(!dx_open(&d, GAME, SAVE), "dx_open: %s", d.g.err);
+    head = malloc(d.head_cap);
+    CHECK(!d.has_save && !d.n_seen, "no save, nothing marked");
+    dx_greeting(&d, t, sizeof t, head);
+    CHECK(strstr(t, "licence"), "no save: %s", t);
+    dx_number(6, n, sizeof n); CHECK(!strcmp(n, "Six"), "%s", n);
+    dx_number(33, n, sizeof n); CHECK(!strcmp(n, "Thirty-three"), "%s", n);
+    dx_number(40, n, sizeof n); CHECK(!strcmp(n, "Forty"), "%s", n);
+    dx_number(19, n, sizeof n); CHECK(!strcmp(n, "Nineteen"), "%s", n);
+    /* the fixture: Puddlop, Emberkit > Blazecat, Thornet, Rustmole */
+    marks_of(&d, "");
+    dx_greeting(&d, t, sizeof t, head);
+    CHECK(strstr(t, "Not one yet"), "none yet: %s", t);
+    marks_of(&d, "+Emberkit+");
+    dx_greeting(&d, t, sizeof t, head);
+    CHECK(strstr(t, "Your Emberkit's line has one left"), "a line one short, on an odd count: %s", t);
+    marks_of(&d, "+Puddlop+ +Thornet+");
+    dx_greeting(&d, t, sizeof t, head);
+    CHECK(strstr(t, "Two of five") && strstr(t, "Something"), "a hint: %s", t);
+    CHECK(!strstr(t, "Emberkit") && !strstr(t, "Blazecat"), "a hint never names what's unseen: %s", t);
+    marks_of(&d, "+Puddlop+ ?Emberkit? ?Blazecat? ?Thornet? ?Rustmole?");
+    dx_greeting(&d, t, sizeof t, head);
+    CHECK(strstr(t, "met them all"), "every one seen: %s", t);
+    marks_of(&d, "+Puddlop+ +Emberkit+ +Blazecat+ +Thornet+ +Rustmole+");
+    dx_greeting(&d, t, sizeof t, head);
+    CHECK(strstr(t, "Five of five") && strstr(t, "nothing left"), "complete: %s", t);
+    /* Talk on an entry */
+    int pud = 0;
+    for(int p = 0; p < d.n; p++) if(d.mon[p] == mon_named("Puddlop")) pud = p;
+    marks_of(&d, "?Puddlop?");
+    dx_talk(&d, pud, t, sizeof t, head);
+    CHECK(!strcmp(t, "Nothing on this one yet."), "seen, not caught: %s", t);
+    marks_of(&d, "+Puddlop+");
+    dx_talk(&d, pud, t, sizeof t, head);
+    CHECK(strstr(t, "levels 2 to 4") || strstr(t, "levels"), "caught: %s", t);
+    d.marks.starter = id_of(d.mon[pud]);
+    dx_talk(&d, pud, t, sizeof t, head);
+    CHECK(strstr(t, "Yours came from"), "the first critter: %s", t);
+    dx_talk(&d, -1, t, sizeof t, head);
+    CHECK(!strcmp(t, "Nothing on this one yet."), "no entry");
+    /* no memory for the search: he still speaks */
+    d.marks.starter = 0;
+    dx_talk(&d, pud, t, sizeof t, NULL);
+    CHECK(strstr(t, "smudged"), "no head: %s", t);
+    marks_of(&d, "+Puddlop+ +Thornet+");
+    dx_greeting(&d, t, sizeof t, NULL);
+    CHECK(strstr(t, "Two of five"), "no head, no hint: %s", t);
+    free(head);
+    dx_close(&d);
+}
+
+/* ---- for tests/dex_check.py ---- */
+
+/* the acts: no flags, then the steps' flags one more at a time, in their order */
+static int acts_of(const MonGame *g, uint16_t *flags){
+    int n = 0;
+    for(uint32_t i = 0; i < g->n_steps; i++){
+        int seen = 0;
+        for(int k = 0; k < n; k++) seen |= flags[k] == g->steps[i].flag;
+        if(!seen && n < MG_MAX_STEPS) flags[n++] = g->steps[i].flag;
+    }
+    return n;
+}
+
+static int dump_where(const char *path){
+    Dex d;
+    if(dx_open(&d, path, "/nonexistent")){ printf("FAIL: %s\n", d.g.err); return 1; }
+    uint8_t *head = malloc(d.head_cap);
+    uint16_t flags[MG_MAX_STEPS];
+    int acts = acts_of(&d.g, flags);
+    for(int act = 0; act <= acts; act++){
+        if(act) d.marks.flags[flags[act - 1] / 8] |= (uint8_t)(1u << (flags[act - 1] % 8));
+        for(uint32_t mon = 0; mon < d.n; mon++){
+            DxWhere w;
+            if(dx_where(&d, (uint16_t)mon, &w, head)){ printf("FAIL: where: %s\n", d.g.err); return 1; }
+            printf("%d %u %u %u %u", act, (unsigned)mon, w.lo == 255 ? 0 : w.lo, w.hi, w.n_areas + w.more_areas);
+            for(int i = 0; i < w.n_areas; i++) printf("|%s", w.area[i]);
+            printf("\n");
+        }
+    }
+    free(head);
+    dx_close(&d);
+    return 0;
+}
+
+static int dump_lines(const char *path){
+    Dex d;
+    char t[DX_LINE];
+    if(dx_open(&d, path, "/nonexistent")){ printf("FAIL: %s\n", d.g.err); return 1; }
+    uint8_t *head = malloc(d.head_cap);
+    uint16_t flags[MG_MAX_STEPS];
+    int acts = acts_of(&d.g, flags);
+    dx_greeting(&d, t, sizeof t, head);
+    printf("%s\n", t);
+    d.has_save = 1;
+    for(int act = 0; act <= acts; act++){
+        if(act) d.marks.flags[flags[act - 1] / 8] |= (uint8_t)(1u << (flags[act - 1] % 8));
+        for(int yours = 0; yours < 2; yours++)
+            for(int p = 0; p < d.n; p++){
+                MgMon m;
+                mg_mon(&d.g, d.mon[p], &m);
+                memset(d.marks.seen, 0, sizeof d.marks.seen);
+                memset(d.marks.caught, 0, sizeof d.marks.caught);
+                d.n_seen = d.n_caught = 0;
+                for(int q = 0; q < d.n; q++){    /* every count of caught, with this one the last caught */
+                    MgMon o;
+                    mg_mon(&d.g, d.mon[q], &o);
+                    d.state[q] = q <= p ? DX_CAUGHT : DX_NEVER;
+                    if(q > p) continue;
+                    d.marks.seen[o.id / 8] |= (uint8_t)(1u << (o.id % 8));
+                    d.marks.caught[o.id / 8] |= (uint8_t)(1u << (o.id % 8));
+                    d.n_seen++;
+                    d.caught[d.n_caught++] = (uint16_t)q;
+                }
+                d.marks.starter = yours ? m.id : 0;
+                dx_greeting(&d, t, sizeof t, head);
+                printf("%s\n", t);
+                dx_talk(&d, p, t, sizeof t, head);
+                printf("%s\n", t);
+                dx_greeting(&d, t, sizeof t, NULL);
+                printf("%s\n", t);
+            }
+    }
+    d.marks.starter = 0;
+    dx_talk(&d, 0, t, sizeof t, NULL);
+    printf("%s\n", t);
+    for(int p = 0; p < d.n; p++) d.state[p] = DX_SEEN;
+    d.n_seen = d.n; d.n_caught = 1; d.state[0] = DX_CAUGHT; d.caught[0] = 0;
+    dx_greeting(&d, t, sizeof t, head);
+    printf("%s\n", t);
+    free(head);
+    dx_close(&d);
+    return 0;
+}
+
+int main(int argc, char **argv){
+    if(argc == 3 && !strcmp(argv[1], "where")) return dump_where(argv[2]);
+    if(argc == 3 && !strcmp(argv[1], "lines")) return dump_lines(argv[2]);
     if(mg_open(&G, GAME)){ printf("FAIL: %s: %s\n", GAME, G.err); return 1; }
     file_part();
     events();
+    lines();
     mg_close(&G);
     if(fails){ printf("dex: FAILED (%d failures)\n", fails); return 1; }
     printf("dex: OK\n");

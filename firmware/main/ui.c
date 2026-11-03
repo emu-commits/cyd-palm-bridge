@@ -43,7 +43,9 @@
 #include "course.h"       /* Study: the course file reader                        */
 #include "srs.h"          /* Study: the schedulers and the progress on the card   */
 #include "study.h"        /* Study: a round's questions, and the courses on the card */
-#include "ui_monster.h"   /* Games: Critters, the monster game's screens          */
+#include "ui_monster.h"
+#include "ui_dex.h"
+#include "crt.h"   /* Games: Critters, the monster game's screens          */
 #include "lvgl.h"
 #include <string.h>
 #include <strings.h>      /* strncasecmp for the Address Look Up filter */
@@ -162,6 +164,9 @@ static void st_menu(lv_obj_t *panel);
 static int  g_st_open;
 static void show_app(const char *name);
 static void show_critters(void);
+static void show_dex(void);
+static void dex_bar(int on);
+static void crt_watch(int on);
 
 /* a borderless, non-scrolling panel with a solid fill */
 static lv_obj_t *panel(lv_obj_t *parent, int x, int y, int w, int h, lv_color_t col){
@@ -2399,6 +2404,7 @@ static void show_app(const char *name){
     if(!strcmp(name, "Guru")){ show_guru(); return; }
     if(!strcmp(name, "Study")){ show_study(); return; }
     if(!strcmp(name, "Critters")){ show_critters(); return; }
+    if(!strcmp(name, "Dex")){ show_dex(); return; }
     cur_app = NULL;
     content_clear();
     lv_label_set_text(title_lbl, name);
@@ -5933,6 +5939,19 @@ static void act_mon_bag(lv_event_t *e){ (void)e; menu_close(); mon_ui_set_auto(0
 static void act_mon_new(lv_event_t *e){ (void)e; menu_close(); mon_ui_set_auto(0); mon_ui_new_game(); }
 static void act_mon_credits(lv_event_t *e){ (void)e; menu_close(); mon_ui_set_auto(0); mon_ui_credits(); }
 static void act_mon_auto(lv_event_t *e){ (void)e; menu_close(); mon_ui_set_auto(!mon_ui_auto()); }
+/* the menu's TV effect item, in the Dex and Critters: on the panel it may want
+ * to be stronger or lighter than the mock-ups showed (DEX_PLAN.md 2.4) */
+static lv_obj_t *g_tv_lbl;
+static const char *tv_item_text(void){
+    static char t[24];
+    snprintf(t, sizeof t, "TV effect: %s", crt_strength_name(crt_strength()));
+    return t;
+}
+static void act_tv(lv_event_t *e){
+    (void)e;
+    tv_strength_next();
+    if(g_tv_lbl) lv_label_set_text(g_tv_lbl, tv_item_text());
+}
 /* the title bar while Auto-play is on (ui_monster.c calls it) */
 void ui_mon_auto_changed(int on){
     if(title_lbl && mon_ui_open()) lv_label_set_text(title_lbl, on ? "Auto-play" : "Critters");
@@ -6013,6 +6032,10 @@ static void menu_open(void){
         menu_item(panel, "Reset counters", act_co_reset);
     }
     if(g_st_open) st_menu(panel);                          /* Study only */
+    if(dex_ui_open()){                                      /* Dex only */
+        menu_header(panel, "Dex");
+        g_tv_lbl = menu_item_lbl(panel, tv_item_text(), act_tv);
+    }
     if(mon_ui_open()){                                      /* Critters only */
         menu_header(panel, "Critters");
         if(mon_ui_playing()){
@@ -9106,6 +9129,9 @@ static void content_clear(void){
     lv_obj_clean(content);
     /* only the screen that asks for it keeps it; Study, swapping one of its
      * own screens for another, says for itself (st_screen) */
+    dex_ui_close();
+    dex_bar(0);
+    crt_watch(0);
     if(!g_st_keep) ui_full_screen(0);
     /* A greeting stands on lv_layer_top() OVER the screen it is greeting, so it
      * is not in `content` and lv_obj_clean() cannot reach it. Every screen swap
@@ -9407,9 +9433,9 @@ static void games_pause_clocks(void){
  * a thing you open to drill at, it keeps a score and a streak, and it is not where
  * any of your data lives. Kana comes with it -- the "あ" button inside Graffiti has
  * always been the only way in, and that is unchanged. */
-static const char           *GAMES[]      = { "Mines", "Wordie", "Sudoku", "Zip", "Critters", "Graffiti" };
+static const char           *GAMES[]      = { "Mines", "Wordie", "Sudoku", "Zip", "Critters", "Graffiti", "Dex" };
 static const lv_image_dsc_t *GAME_ICONS[] = { &icon_mines, &icon_wordie, &icon_sudoku,
-                                              &icon_zip, &icon_critters, &icon_graffiti };
+                                              &icon_zip, &icon_critters, &icon_graffiti, &icon_dex };
 #define NGAMES ((int)(sizeof(GAMES)/sizeof(GAMES[0])))
 
 static void games_pick_cb(lv_event_t *e){
@@ -9420,6 +9446,7 @@ static void games_pick_cb(lv_event_t *e){
     else if(!strcmp(g,"Zip"))      show_zip();
     else if(!strcmp(g,"Critters")) show_app("Critters");    /* the unlock comes back to it */
     else if(!strcmp(g,"Graffiti")) show_trainer();
+    else if(!strcmp(g,"Dex"))      show_app("Dex");         /* so is the Dex */
 }
 static void show_games(void){
     kill_kb(); cur_app=NULL; cur_uid=0;
@@ -9471,6 +9498,84 @@ static void show_critters(void){
     update_cat_trigger();
     mon_ui_show(content);
     if(g_mon_wake_auto){ g_mon_wake_auto = 0; mon_ui_set_auto(1); }    /* the lock paused it */
+}
+
+/* Dex: the critter index (docs/DEX_PLAN.md), a gadget in the game's world. Its
+ * title bar is part of the hardware: everything stays where the system puts it,
+ * in the case's colours, so content_clear() must put them back. ui_dex.c does
+ * the rest. */
+#define DEX_RED    lv_color_hex(0x7B1C29)
+#define DEX_CREAM  lv_color_hex(0xF7F3E7)
+#define DEX_KEY    lv_color_hex(0x4270BD)
+#define DEX_KEY_DN lv_color_hex(0x264A88)
+#define DEX_GREEN  lv_color_hex(0x9CBD5A)
+#define DEX_INK    lv_color_hex(0x183018)
+static lv_obj_t *g_dex_clock;       /* the small green screen behind the clock: set while it's dressed */
+
+/* The TV effect stands aside while anything but a toast is over the screen: the
+ * system's menu and alerts aren't part of the tube. A look every tenth of a second
+ * while the effect is on: at most a frame or two of them through it. */
+static lv_timer_t *g_crt_timer;
+static void crt_watch_cb(lv_timer_t *t){
+    (void)t;
+    int n = (int)lv_obj_get_child_count(lv_layer_top());
+    if(g_toast && lv_obj_get_parent(g_toast) == lv_layer_top()) n--;
+    if(!n == !crt_paused()){
+        crt_pause(n > 0);
+        lv_obj_invalidate(lv_screen_active());
+    }
+}
+static void crt_watch(int on){
+    if(on && !g_crt_timer) g_crt_timer = lv_timer_create(crt_watch_cb, 100, NULL);
+    if(!on && g_crt_timer){ lv_timer_delete(g_crt_timer); g_crt_timer = NULL; }
+}
+
+static void dex_bar_key(lv_obj_t *b){
+    lv_obj_set_style_bg_color(b, DEX_KEY, 0);
+    lv_obj_set_style_bg_color(b, DEX_KEY_DN, LV_STATE_PRESSED);
+    lv_obj_set_style_radius(b, 3, 0);
+    lv_obj_set_style_border_width(b, 1, 0);
+    lv_obj_set_style_border_color(b, lv_color_hex(0x000000), 0);
+}
+
+static void dex_bar(int on){
+    if(on == !!g_dex_clock || !title_bar) return;
+    if(on){
+        int hx = tb_home_x(), x0 = LCD_W - hx + 3;
+        lv_obj_set_style_bg_color(title_bar, DEX_RED, 0);
+        lv_obj_set_style_text_color(title_lbl, DEX_CREAM, 0);
+        lv_obj_set_style_text_color(clock_lbl, DEX_INK, 0);
+        g_dex_clock = lv_obj_create(title_bar);
+        lv_obj_remove_style_all(g_dex_clock);
+        lv_obj_set_pos(g_dex_clock, x0, 2);
+        lv_obj_set_size(g_dex_clock, hx - 3 - x0 + 1, TITLE_H - 4);
+        lv_obj_set_style_bg_color(g_dex_clock, DEX_GREEN, 0);
+        lv_obj_set_style_bg_opa(g_dex_clock, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(g_dex_clock, 3, 0);
+        lv_obj_set_style_border_width(g_dex_clock, 1, 0);
+        lv_obj_set_style_border_color(g_dex_clock, lv_color_hex(0x000000), 0);
+        lv_obj_clear_flag(g_dex_clock, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_move_background(g_dex_clock);
+        if(g_tb_home) dex_bar_key(g_tb_home);
+        if(g_tb_menu) dex_bar_key(g_tb_menu);
+    } else {
+        lv_obj_set_style_bg_color(title_bar, COL_TITLE, 0);
+        lv_obj_set_style_text_color(title_lbl, COL_TITLE_FG, 0);
+        lv_obj_set_style_text_color(clock_lbl, COL_TITLE_FG, 0);
+        lv_obj_delete(g_dex_clock);
+        g_dex_clock = NULL;
+    }
+}
+
+static void show_dex(void){
+    kill_kb(); cur_app = NULL; cur_uid = 0;
+    content_clear();
+    ui_full_screen(1);
+    lv_label_set_text(title_lbl, "Dex");
+    update_cat_trigger();
+    dex_bar(1);
+    dex_ui_show(content);
+    crt_watch(1);
 }
 
 /* ========================= Coach (ritual focus timer) =======================

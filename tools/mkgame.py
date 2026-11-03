@@ -1454,7 +1454,7 @@ def dex_sections(rules, region, mon_slugs, ids, allow, root, text):
     """DEXE and ICON (2.2; GAME_FORMAT.md 3.17, 3.18): what the Dex shows that
     the game doesn't need. Every creature has its record, in MONS order."""
     from PIL import Image
-    from mock_dex import PALM
+    from palm_font import PALM
     dex = region.get("dex") or fail("game_region.json: no \"dex\": the Dex's order and any descriptions of our own")
     if not isinstance(dex, dict) or set(dex) - {"order", "descriptions"}:
         fail("game_region.json: dex: an order, and optionally descriptions")

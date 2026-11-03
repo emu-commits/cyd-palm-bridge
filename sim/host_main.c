@@ -33,6 +33,8 @@
  *   G <area> <x> <y> <facing>  Critters: put the player there (mon_ui_test_place),
  *                   so the tour can reach the towns and the keepers without
  *                   a hundred steps of walking
+ *   D <seen> <caught>  Dex: write a save with these critters marked (stable ids,
+ *                   comma-separated, or "-"); `D -` alone removes the save
  *   F <flag> <coins>  Critters: set a story flag and the purse (mon_ui_test_give),
  *                   so the tour can open what a win opens (the store)
  *   B               remember the heap in use now...
@@ -54,6 +56,7 @@
 #include "sim_heap.h"
 #include "ui.h"
 #include "ui_monster.h"
+#include "ui_dex.h"
 #include "data.h"
 #include "appcfg.h"
 #include "clock.h"
@@ -301,6 +304,12 @@ int main(int argc, char **argv){
             int ga, gx, gy, gf;
             if(sscanf(line + 2, "%d %d %d %d", &ga, &gx, &gy, &gf) != 4){ fprintf(stderr, "script: bad G: %s", line); rc = 1; break; }
             mon_ui_test_place(ga, gx, gy, gf); sim_step(200);
+        }
+        else if(line[0] == 'D' && line[1] == ' '){    /* D <seen ids> <caught ids>: a save with those marks; D - clears it */
+            char seen[256], caught[256];
+            if(sscanf(line + 2, "%255s %255s", seen, caught) == 2) dex_ui_test_save(seen, caught);
+            else dex_ui_test_clear();
+            sim_step(60);
         }
         else if(line[0] == 'F' && line[1] == ' '){
             int fl, coins;

@@ -222,6 +222,8 @@ def main():
         own_refused(lambda d: None, "stranger-sheet.png", "a creature of our own whose sheet isn't <slug>-sheet.png")
 
     # 4. the committed game
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "gen_dex_art.py"), "--check"], capture_output=True, text=True)
+    check(r.returncode == 0, f"firmware/main/dex_art.c: {r.stdout}{r.stderr}")
     game = ROOT / "courses" / "critters" / "game.bin"
     r = subprocess.run([sys.executable, str(MKGAME), "--check", str(game)], capture_output=True, text=True)
     check(r.returncode == 0 and ": ok" in r.stdout, f"courses/critters/game.bin --check: {r.stdout}{r.stderr}")

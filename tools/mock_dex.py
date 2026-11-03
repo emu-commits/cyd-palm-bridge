@@ -11,6 +11,7 @@ import argparse
 import os
 import re
 from PIL import Image, ImageDraw
+from palm_font import PALM, BOLD, BIG
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -34,45 +35,6 @@ HOME, MENU = (169, 1, 211, 20), (214, 1, 238, 20)
 KEYS = ((6, 44, "<"), (50, 118, "List"), (124, 190, "Talk"), (196, 233, ">"))
 
 
-class Font:
-    def __init__(self, name):
-        src = open(os.path.join(ROOT, "firmware/main", name + ".c")).read()
-        body = re.search(r"glyph_bitmap\[\]\s*=\s*\{(.*?)\};", src, re.S).group(1)
-        self.bits = bytes(int(b, 16) for b in re.findall(r"0x[0-9a-fA-F]{2}", body))
-        self.g = [tuple(int(v) for v in m) for m in re.findall(
-            r"\.bitmap_index=(\d+),\.adv_w=(\d+),\.box_w=(\d+),\.box_h=(\d+),\.ofs_x=(-?\d+),\.ofs_y=(-?\d+)", src)]
-        self.h = int(re.search(r"\.line_height=(\d+)", src).group(1))
-        self.base = int(re.search(r"\.base_line=(\d+)", src).group(1))
-
-    def width(self, s):
-        return sum(self.g[ord(c) - 31][1] for c in s) // 16
-
-    def draw(self, im, x, y, s, col=BLACK):
-        p = im.load()
-        for c in s:
-            i, adv, w, h, ox, oy = self.g[ord(c) - 31]
-            top = y + self.h - self.base - h - oy
-            n = i * 8
-            for r in range(h):
-                for k in range(w):
-                    if self.bits[n >> 3] >> (7 - (n & 7)) & 1:
-                        p[x + ox + k, top + r] = col
-                    n += 1
-            x += adv // 16
-
-    def wrap(self, s, w):
-        lines, cur = [], ""
-        for word in s.split():
-            t = (cur + " " + word).strip()
-            if self.width(t) > w:
-                lines.append(cur)
-                cur = word
-            else:
-                cur = t
-        return lines + [cur]
-
-
-PALM, BOLD, BIG = Font("lv_font_palm"), Font("lv_font_palm_bold"), Font("lv_font_palm_bold_2x")
 
 
 def chamfer(d, x0, y0, x1, y1, fill, c=3):
@@ -101,7 +63,7 @@ def bezel():
                 p[x, y] = CREAM if x < 30 else INK if x < 160 else WHITE
     d.line((0, 56, 239, 56), fill=RED_HI)
     chamfer(d, 6, 60, 233, 206, GREY, 4)
-    d.rectangle((14, 65, 225, 194), fill=TV_WELL)
+    d.rounded_rectangle((14, 65, 225, 194), TV_RADIUS + 1, fill=TV_WELL)
     d.rectangle(UPPER, fill=TV)
     d.rectangle((26, 197, 32, 203), fill=(214, 41, 41), outline=BLACK)   # the light
     chamfer(d, 6, 212, 233, 286, GREEN, 3)

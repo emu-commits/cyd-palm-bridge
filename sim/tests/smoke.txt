@@ -2238,6 +2238,99 @@ t 400
 c 195 110
 t 400
 E critters
+# The Dex (docs/DEX_PLAN.md), from the Games folder: the first run with no game
+# played; then a save from `D` (agnite, agnidon, anoleaf, gectile's line and more)
+# for the opening, the list and its pages, caught only, an entry, its back, his
+# Where line, seen and never-seen entries, a tall critter and the menu's TV
+# effect. Leaving must give back every byte and the system's black title bar.
+# Keys: left 25,303; List 84,303; Talk 157,303; right 214,303.
+s dex_folder
+B
+D -
+c 120 170
+t 500
+s dex_no_save
+c 200 12
+t 400
+c 195 110
+t 400
+E dex with no save
+D 1,2,3,5,7,14,15,18,21,22 1,2,5,14,21
+c 120 170
+t 500
+s dex_greet
+c 84 303
+t 300
+s dex_list
+c 214 303
+t 300
+s dex_list_p2
+c 25 303
+t 300
+c 84 303
+t 300
+s dex_list_caught
+c 84 303
+t 300
+c 100 82
+t 300
+s dex_entry_caught
+c 60 130
+t 300
+s dex_entry_back
+c 60 130
+t 300
+c 157 303
+t 500
+s dex_where
+c 157 303
+t 300
+c 214 303
+t 200
+c 214 303
+t 300
+s dex_entry_seen
+c 157 303
+t 300
+s dex_talk_seen
+c 157 303
+t 200
+c 214 303
+t 200
+c 214 303
+t 200
+c 214 303
+t 300
+s dex_entry_never
+c 157 303
+t 300
+s dex_where_never
+c 120 240
+t 200
+c 214 303
+t 200
+c 214 303
+t 200
+c 214 303
+t 200
+c 214 303
+t 200
+c 214 303
+t 300
+s dex_tall
+c 84 303
+t 300
+c 226 12
+t 300
+s dex_menu
+c 226 12
+t 300
+c 200 12
+t 500
+s dex_left
+c 195 110
+t 400
+E the Dex
 # I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.
 # (CI starts on a fresh /sdcard, so the seed + manifest exist here.)
 c 18 225
