@@ -13,11 +13,15 @@
 > subscreens too, so the speech bubble and portrait overlay of Coach and Guru
 > **aren't used**. The owner supplied the speaker's art. §9 has the decisions,
 > all made.
+>
+> **The owner's decision (2026-11-03):** the upper screen is a **TV**: TV blue,
+> with a light CRT effect on that box alone (§2.4). A card on it keeps its own
+> background.
 
 The mock-ups are in `docs/img/dex/`. They're 240×320, the device's size,
 drawn by `tools/mock_dex.py` (a design aid, not product code) with the
-firmware's Palm fonts and the Critters screens' colours. Mock-up 1 is from the
-first design and is still right.
+firmware's Palm fonts and the Critters screens' colours, with the §2.4 effect
+applied. Mock-up 1 is from the first design and is still right.
 
 | | | | |
 |---|---|---|---|
@@ -58,7 +62,7 @@ picture but are drawn our own way. It's a full-screen page like Study and Guru
 | **The title bar, as hardware** | 0–239, 0–23 | Same layout and dimensions as the system's; see below |
 | The top strip: a lens and three lights | 0–239, 24–59 | No text. "No. 001" and the counts moved into the subscreens |
 | The upper bezel, with one red light | 6–233, 60–206 | Grey, with clipped corners |
-| **The upper screen**: cream, in colour | 15–224, 66–193 (**210×128**) | |
+| **The upper screen**: a TV, blue, in colour (§2.4) | 15–224, 66–193 (**210×128**) | |
 | **The lower screen**: green, in one ink colour | 7–232, 213–285 (**226×73**) | Five lines of text |
 | **The four keys** | y 292–314 | **◀ List Talk ▶**, always these labels |
 
@@ -120,7 +124,7 @@ was also a confusing label, since it looks like a way out.
 3. **The list** (mock-up 3).
    - **Upper screen:** rows of 24 px, the icon's height, so **five fit on a
      page**. Each shows the number, the critter's 24×24 icon, the name, and a
-     mark: a filled capture ball for caught, a ring for seen. A Palm scroll bar
+     mark: a solid gold diamond for caught, a hollow one for seen (§2.4). A Palm scroll bar
      shows the position.
    - A seen critter's icon is its silhouette, and its name is ???. A
      never-seen critter has no icon.
@@ -144,8 +148,69 @@ was also a confusing label, since it looks like a way out.
 must fit in the three lines left under the category and the height and weight.
 His lines get all five.
 
-The capture ball and the casing are our drawings. No logo, name or artwork
+The caught and seen marks and the casing are our drawings. No logo, name or artwork
 from the reference picture or the games it shows is used.
+
+### 2.4 The upper screen is a TV
+
+The owner's decision, 2026-11-03: the cream box didn't feel enough like a
+screen. It's now TV blue with a light CRT effect, chosen from the mock-up
+comparison. The lower screen stays a green LCD, so the two read as different
+parts of the gadget.
+
+**The colours**
+
+| What | RGB |
+|---|---|
+| The screen's background | 38, 70, 140 |
+| Its text | 244, 244, 236 |
+| Its dim text ("Front", "Back") | 170, 192, 232 |
+| A seen critter's silhouette | 12, 24, 60 |
+| The dark well round the tube | 36, 36, 40 |
+| The caught mark: a solid diamond, 11×11, with a small white glint | Gold 250, 196, 48, outlined 12, 24, 60 |
+| The seen mark: the same diamond, hollow | Outlined 244, 244, 236 |
+
+**A card keeps its own background, never TV blue.** Today that's the speaker's
+news card (§3): cream (247, 243, 231) with black text, like a printed card held
+up in a broadcast. Any later card follows the same rule.
+
+**The effect** runs on the whole box, cards and portrait included, after
+LVGL has drawn it. Nothing is drawn differently for it.
+
+| Part | Amount |
+|---|---|
+| Sideways glow | Each pixel gains 30% of the average of its left and right neighbours, scaled by how much room it has left below 255 |
+| Scanlines | Every odd row of the box × 0.80 |
+| Dark corners | × (1 − 0.35 × min(dx⁴ + dy⁴, 1)), with dx and dy from −1 to 1 across the box |
+| Black lift | Add 5, 6, 9 to red, green, blue, after the above |
+
+The corners of the box are rounded at radius 7, with the well outside them.
+`tools/mock_dex.py` has the exact sums.
+
+**Where it runs.** In `flush_cb`, on the part of each strip inside the box,
+before the byte swap. Each pixel reads only its own row, so it needs no copy of
+the box and no history across LVGL's 40-row strips.
+
+- **A change in the box redraws the whole box,** or the glow leaves a seam at
+  the edge of a partial redraw. That's 26,880 pixels over about four strips,
+  **speed to be measured in D2**.
+- **The device and the simulator share the filter.** They have separate
+  `flush_cb`s, so it's one function both call, on only while the Dex is open.
+- **It isn't a copy of area512's filter** (`components/area512_hal/gfx/area512_crt.cpp`
+  in `emu-commits/area512`), which we tried first. Its colour fringes made the
+  Palm font hard to read, and its 3-pixel stripes would be about 1.7× coarser on
+  this panel (about 143 pixels per inch against the Cardputer's 241). It also
+  reads neighbouring rows, which would mean holding the box in memory (54 KB) or
+  keeping history across strips.
+
+**Critters on blue.** Measured on the 46 fronts, a median of 11% of a critter's
+edge pixels are under 1.5:1 contrast with the background. The worst are Anoleaf
+(87%) and Fluttaflap (71%), against 0% and 32% at worst on cream. **The mock-ups
+don't show either one's sprite at full size yet; look at them on the panel in D4.**
+
+**The strength is checked on the panel first.** The scanlines are the part most
+likely to look different on the real screen. At the start of D2, a test screen
+shows the box at two or three strengths for the owner to choose from.
 
 ## 3) The speaker
 
@@ -153,16 +218,16 @@ from the reference picture or the games it shows is used.
 dark-skinned man with a moustache in a khaki field vest, with badges and a
 camera. It's pixel art on a grid of about 9.9 px in a 1024 px picture, so it's
 really **102×102**. `docs/img/dex/speaker/colour_102.png` is that grid sampled
-back to its pixels, with the backdrop set to the screen's cream and 24 colours
+back to its pixels, with the backdrop set to the screen's TV blue and 24 colours
 left. **It's in colour by the owner's choice:** a one-ink portrait can't show a
-character who isn't light-skinned. It hasn't been edited by hand, and from now
+character who isn't light-skinned. Only its backdrop has been changed since, and from now
 on that PNG is the art: edit it directly, and don't sample it from the JPEG again.
 
 **His place, whenever he's talking** (mock-ups 2 and 8):
 
 - **Upper screen:** he stands **against the right side**, at 1×, 102×102, on
   the screen's bottom edge. What he's talking about is on a **card to his left,
-  like a news report's**: 103×122, with a red heading band.
+  like a news report's**: 103×122, cream with black text (its own background, §2.4), with a red heading band.
   - Opening: **YOUR DEX**, with the caught and seen counts.
   - On an entry: **FIELD REPORT**, with the critter's sprite at 1× and a caption
     band under it with its name and number. A seen critter shows its silhouette
@@ -300,6 +365,7 @@ the heap is given back, as they do for Study.
 | `firmware/main/monster_play.c`, `.h` | The marks, save version 4, and loading a version 3 save. |
 | `firmware/main/palm_icons.c` | `icon_dex`, from `tools/gen_dex_icon.py`. |
 | `firmware/main/palm_icons.c` | The speaker's portrait: an RGB565 image from a small generator, `tools/gen_dex_speaker.py`, which reads `colour_102.png` 1:1 and is checked in the `dex` gate. |
+| `firmware/main/lvgl_port.c`, `sim/sim_port.c` | Both `flush_cb`s call the one TV filter on the upper screen while the Dex is open (§2.4). |
 | `tools/mock_dex.py` | Draws the mock-ups. Not product code. |
 | `tools/mkgame.py` | Format 2.2: `DEXE` and `ICON`, the `"dex"` order, the description source, and the dump. |
 | `tools/game_region.json` | The `"dex"` order and the 14 written descriptions. |
@@ -344,14 +410,17 @@ the heap is given back, as they do for Study.
   descriptions), save version 4 with the marks, `make -C sim dex` for the
   marks, and the dumps.
 - **D2, the app.** The fixed bezel and keys, `dex.c` and the screens, the Games
-  icon, the smoke shots, and the Where search. His lines are placeholders.
+  icon, the smoke shots, and the Where search. His lines are placeholders. It
+  starts with the TV filter's test screen for the owner (§2.4), and measures a
+  full redraw of the box.
 - **D3, the speaker.** The portrait and the news card, the lines, their fit gate,
   and the measured heap.
 - **D4, the bench.** The owner's `[d]` items: the Dex opens from the folder;
   a caught critter shows in full after a save; a v3 save keeps its party in
   the Dex; the heap is unchanged after closing; ◀ ▶ are fast enough on the
   board; the keys are easy to hit; the portrait and the green clock read well on
-  the panel.
+  the panel; small text is readable through the TV effect; Anoleaf and
+  Fluttaflap hold up on the blue.
 
 Separately, and not part of the Dex: **the owner's new critters.** Built
 2026-11-01 (`tools/game_creatures/README.md`): `tools/mksheet.py` turns a
@@ -377,6 +446,17 @@ and 3 is still open: today they're only wild.
 - **The keys:** ◀ List Talk ▶, so caught-only is a second press of List and
   turning a sprite is a tap (§2.2).
 
+**Decided by the owner, 2026-11-03:**
+
+- **The upper screen is a TV:** TV blue, with the light CRT effect on that box
+  alone (§2.4; panel 4 of the comparison), rather than area512's filter as it is.
+- **A card on it has its own background,** not TV blue. The owner didn't name
+  the colour: the plan uses the old screen cream, to be changed if they prefer.
+
+- **The caught and seen marks are diamonds,** not a ball: the owner's call, because
+  a ball looked too much like existing intellectual property (§2.4). A caught
+  diamond is solid gold, and a seen one hollow.
+
 **Taken on the recommendations, the owner's word, 2026-11-02:**
 
 - **A critter seen but not caught** shows its silhouette, with ??? for everything
@@ -390,4 +470,4 @@ and 3 is still open: today they're only wild.
   older firmware handles: it skips the new sections, and an older save is
   upgraded.
 
-Nothing is open. Building starts at D1 (§8) when the owner asks for it.
+The only thing left to choose is the effect's strength, on the panel (§2.4). Building starts at D1 (§8) when the owner asks for it.

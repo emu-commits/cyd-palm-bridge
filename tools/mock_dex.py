@@ -20,6 +20,10 @@ RED, RED_HI = (123, 28, 41), (156, 48, 60)
 GREY, BLACK, WHITE = (214, 215, 214), (0, 0, 0), (255, 255, 255)
 CREAM, GREEN, INK = (247, 243, 231), (156, 189, 90), (24, 48, 24)
 KEY, KEY_HI = (66, 112, 189), (99, 146, 214)
+# The upper screen is a TV (DEX_PLAN 2.4). Cards on it keep the cream as their own.
+TV, TV_INK, TV_DIM = (38, 70, 140), (244, 244, 236), (170, 192, 232)
+TV_SIL, TV_WELL = (12, 24, 60), (36, 36, 40)
+TV_RADIUS, TV_BLOOM, TV_SCAN, TV_VIGNETTE, TV_LIFT = 7, 0.30, 0.80, 0.35, (5, 6, 9)
 
 # The fixed geometry: x0, y0, x1, y1, inclusive.
 UPPER = (15, 66, 224, 193)   # 210 x 128: the tallest critter at 2x just fits
@@ -97,7 +101,8 @@ def bezel():
                 p[x, y] = CREAM if x < 30 else INK if x < 160 else WHITE
     d.line((0, 56, 239, 56), fill=RED_HI)
     chamfer(d, 6, 60, 233, 206, GREY, 4)
-    d.rectangle((14, 65, 225, 194), fill=CREAM, outline=BLACK)
+    d.rectangle((14, 65, 225, 194), fill=TV_WELL)
+    d.rectangle(UPPER, fill=TV)
     d.rectangle((26, 197, 32, 203), fill=(214, 41, 41), outline=BLACK)   # the light
     chamfer(d, 6, 212, 233, 286, GREEN, 3)
     for x0, x1, label in KEYS:
@@ -113,19 +118,45 @@ def bezel():
     return im, d
 
 
-def ball(d, x, y, caught):
-    d.ellipse((x, y, x + 9, y + 9), fill=WHITE, outline=BLACK)
+def mark(d, x, y, caught):
+    """The Dex's own marks, 11x11: caught is a solid gold diamond, seen a hollow one."""
+    pts = [(x + 5, y), (x + 10, y + 5), (x + 5, y + 10), (x, y + 5)]
     if caught:
-        d.pieslice((x, y, x + 9, y + 9), 180, 360, fill=(214, 41, 41), outline=BLACK)
-        d.line((x, y + 5, x + 9, y + 5), fill=BLACK)
-        d.rectangle((x + 4, y + 4, x + 5, y + 5), fill=WHITE)
+        d.polygon(pts, fill=(250, 196, 48), outline=TV_SIL)
+        d.line((x + 3, y + 4, x + 4, y + 3), fill=WHITE)   # a glint
+    else:
+        d.polygon(pts, fill=TV, outline=TV_INK)
 
 
-def silhouette(s, col=(64, 64, 64)):
+def silhouette(s, col=TV_SIL):
     a = s.getchannel("A").point(lambda v: 255 if v else 0)
     o = Image.new("RGBA", s.size, col + (255,))
     o.putalpha(a)
     return o
+
+
+def tube(im):
+    """The TV effect, on the finished upper screen only: a soft sideways glow,
+    dark odd rows and dark corners, each pixel reading only its own row. Then
+    the tube's rounded corners, with the dark well showing outside them."""
+    w, h = UPPER[2] - UPPER[0] + 1, UPPER[3] - UPPER[1] + 1
+    src = im.crop((UPPER[0], UPPER[1], UPPER[2] + 1, UPPER[3] + 1))
+    a, out = src.load(), Image.new("RGB", (w, h))
+    o = out.load()
+    for y in range(h):
+        scan = TV_SCAN if y % 2 else 1.0
+        dy = (y - (h - 1) / 2) / (h / 2)
+        for x in range(w):
+            dx = (x - (w - 1) / 2) / (w / 2)
+            f = scan * (1 - TV_VIGNETTE * min(dx ** 4 + dy ** 4, 1))
+            lf, rt = a[max(x - 1, 0), y], a[min(x + 1, w - 1), y]
+            o[x, y] = tuple(min(255, int((v + TV_BLOOM * (l + r) / 2 * (255 - v) / 255) * f + k))
+                            for v, l, r, k in zip(a[x, y], lf, rt, TV_LIFT))
+    mask = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, w - 1, h - 1), TV_RADIUS, fill=255)
+    d = ImageDraw.Draw(im)
+    d.rectangle(UPPER, fill=TV_WELL)
+    im.paste(out, UPPER[:2], mask)
 
 
 def lower_text(im, lines, x=None, w=None):
@@ -158,15 +189,15 @@ def list_screen(sheets):
             (4, "anoleaf", "Anoleaf", 2), (5, "agnidon", "???", 1)]
     y = UPPER[1] + 4
     for n, slug, name, state in rows:
-        PALM.draw(im, 19, y + 5, "%03d" % n)
+        PALM.draw(im, 19, y + 5, "%03d" % n, TV_INK)
         if slug:
             ic = sheets(slug).crop((0, 64, 24, 88))
             if state == 1:
                 ic = silhouette(ic)
             im.paste(ic, (44, y), ic)
-        PALM.draw(im, 74, y + 5, name)
+        PALM.draw(im, 74, y + 5, name, TV_INK)
         if state:
-            ball(d, 202, y + 7, state == 2)
+            mark(d, 202, y + 7, state == 2)
         y += 24
     d.rectangle((216, UPPER[1] + 1, 222, UPPER[3] - 1), fill=WHITE, outline=BLACK)
     d.rectangle((217, UPPER[1] + 2, 221, UPPER[1] + 19), fill=BLACK)
@@ -187,20 +218,20 @@ def entry(sheets, slug, x=0, state=2):
         s2 = s.resize((128, 128), Image.NEAREST)
         im.paste(s2, (UPPER[0], UPPER[1]), s2)
     else:
-        BIG.draw(im, 70, 115, "?")
+        BIG.draw(im, 70, 115, "?", TV_INK)
     tx = 147
-    BOLD.draw(im, tx, 74, "No. 001" if state == 2 else "No. 005" if state == 1 else "No. 006")
-    BOLD.draw(im, tx, 90, "Agnite" if state == 2 else "???")
+    BOLD.draw(im, tx, 74, "No. 001" if state == 2 else "No. 005" if state == 1 else "No. 006", TV_INK)
+    BOLD.draw(im, tx, 90, "Agnite" if state == 2 else "???", TV_INK)
     if state == 2:
-        d.rectangle((tx, 108, tx + 32, 123), fill=(224, 96, 48), outline=BLACK)
+        d.rectangle((tx, 108, tx + 32, 123), fill=(224, 96, 48), outline=TV_INK)
         BOLD.draw(im, tx + 4, 109, "FIRE", WHITE)
-        PALM.draw(im, tx, 128, "Lv 24 to")
-        PALM.draw(im, tx, 142, "Agnidon")
-        ball(d, tx, 161, True)
-        PALM.draw(im, tx + 13, 158, "caught")
-        PALM.draw(im, tx, 176, "Back" if x else "Front", (90, 90, 90))
+        PALM.draw(im, tx, 128, "Lv 24 to", TV_INK)
+        PALM.draw(im, tx, 142, "Agnidon", TV_INK)
+        mark(d, tx, 161, True)
+        PALM.draw(im, tx + 13, 158, "caught", TV_INK)
+        PALM.draw(im, tx, 176, "Back" if x else "Front", TV_DIM)
     else:
-        PALM.draw(im, tx, 108, "seen" if state == 1 else "never seen")
+        PALM.draw(im, tx, 108, "seen" if state == 1 else "never seen", TV_INK)
     return im
 
 
@@ -217,7 +248,7 @@ def speaker(im, d, colour, head):
     is on a card to his left, like a news report's. Returns the card's inside."""
     im.paste(colour, (UPPER[2] + 1 - colour.width, UPPER[3] + 1 - colour.height))
     x0, y0, x1, y1 = UPPER[0] + 3, UPPER[1] + 3, UPPER[2] - colour.width - 2, UPPER[3] - 3
-    d.rectangle((x0, y0, x1, y1), fill=WHITE, outline=BLACK)
+    d.rectangle((x0, y0, x1, y1), fill=CREAM, outline=BLACK)   # a card has its own background
     d.rectangle((x0 + 1, y0 + 1, x1 - 1, y0 + 16), fill=RED)
     BOLD.draw(im, (x0 + x1 - BOLD.width(head)) // 2, y0 + 2, head, WHITE)
     return x0 + 1, y0 + 17, x1 - 1, y1 - 1
@@ -241,7 +272,10 @@ def main():
     args = a.parse_args()
     sheets = Sheets(args.tuxemon)
     colour = Image.open(os.path.join(OUT, "speaker/colour_102.png")).convert("RGB")
-    save = lambda im, n: im.save(os.path.join(OUT, n), optimize=True)
+
+    def save(im, n):
+        tube(im)
+        im.save(os.path.join(OUT, n), optimize=True)
 
     im, d = bezel()                                        # opening
     box = speaker(im, d, colour, "YOUR DEX")
