@@ -35,6 +35,7 @@
  *                   a hundred steps of walking
  *   D <seen> <caught>  Dex: write a save with these critters marked (stable ids,
  *                   comma-separated, or "-"); `D -` alone removes the save
+ *   J               Critters: a full party, the longest names (mon_ui_test_full_party)
  *   F <flag> <coins>  Critters: set a story flag and the purse (mon_ui_test_give),
  *                   so the tour can open what a win opens (the store)
  *   B               remember the heap in use now...
@@ -311,6 +312,7 @@ int main(int argc, char **argv){
             else dex_ui_test_clear();
             sim_step(60);
         }
+        else if(line[0] == 'J' && (line[1] == '\n' || !line[1])){ mon_ui_test_full_party(); sim_step(60); }
         else if(line[0] == 'F' && line[1] == ' '){
             int fl, coins;
             if(sscanf(line + 2, "%d %d", &fl, &coins) != 2){ fprintf(stderr, "script: bad F: %s", line); rc = 1; break; }

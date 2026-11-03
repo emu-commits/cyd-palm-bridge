@@ -18,7 +18,8 @@ static struct {
     uint16_t *dx, *dy;          /* one block: (2 x d)^4 in Q8 across the box, then down it */
     int16_t x0, y0, x1, y1;
     uint16_t well;
-    uint8_t radius, strength, on, paused;
+    uint8_t radius, strength, on;
+    int16_t ex1, ey1, ex2, ey2;  /* left alone: ex2 < ex1 for nothing */
     uint8_t inset[CRT_MAX_RADIUS];
 } C = { .strength = CRT_STANDARD };
 
@@ -53,6 +54,7 @@ int crt_on(int x0, int y0, int x1, int y1, int radius, uint16_t well){
     C.x0 = (int16_t)x0; C.y0 = (int16_t)y0; C.x1 = (int16_t)x1; C.y1 = (int16_t)y1;
     C.radius = (uint8_t)radius;
     C.well = well;
+    C.ex1 = C.ey1 = 0; C.ex2 = C.ey2 = -1;
     C.on = 1;
     return 0;
 }
@@ -60,12 +62,17 @@ int crt_on(int x0, int y0, int x1, int y1, int radius, uint16_t well){
 void crt_off(void){
     free(C.dx);
     C.dx = C.dy = NULL;
-    C.on = C.paused = 0;
+    C.on = 0;
+    C.ex1 = C.ey1 = 0; C.ex2 = C.ey2 = -1;
 }
 
 int crt_active(void){ return C.on; }
-void crt_pause(int on){ C.paused = (uint8_t)!!on; }
-int  crt_paused(void){ return C.paused; }
+int crt_exclude(int x1, int y1, int x2, int y2){
+    if(x2 < x1) x1 = y1 = 0, x2 = y2 = -1;
+    if(C.ex1 == x1 && C.ey1 == y1 && C.ex2 == x2 && C.ey2 == y2) return 0;
+    C.ex1 = (int16_t)x1; C.ey1 = (int16_t)y1; C.ex2 = (int16_t)x2; C.ey2 = (int16_t)y2;
+    return 1;
+}
 
 void crt_set_strength(int s){ if(s >= 0 && s < CRT_NSTRENGTHS) C.strength = (uint8_t)s; }
 int  crt_strength(void){ return C.strength; }
@@ -82,7 +89,7 @@ void crt_widen(int *x1, int y1, int *x2, int y2){
 #define B8(v) ((uint32_t)(((v) << 3 & 0xF8) | ((v) >> 2 & 7)))
 
 void crt_flush(int x1, int y1, int x2, int y2, uint16_t *px){
-    if(!C.on || C.paused || y2 < C.y0 || y1 > C.y1 || x2 < C.x0 || x1 > C.x1) return;
+    if(!C.on || y2 < C.y0 || y1 > C.y1 || x2 < C.x0 || x1 > C.x1) return;
     const Set *s = &SETS[C.strength];
     const int ax = x1 > C.x0 ? x1 : C.x0, bx = x2 < C.x1 ? x2 : C.x1;
     const int ay = y1 > C.y0 ? y1 : C.y0, by = y2 < C.y1 ? y2 : C.y1;
@@ -91,6 +98,9 @@ void crt_flush(int x1, int y1, int x2, int y2, uint16_t *px){
     for(int y = ay; y <= by; y++){
         uint16_t *row = px + (y - y1) * stride + (ax - x1);
         int rel = y - C.y0;
+        /* this row's part left alone, as positions in row[]: mb < ma for none */
+        int in_ex = y >= C.ey1 && y <= C.ey2;
+        const int ma = in_ex ? C.ex1 - ax : 0, mb = in_ex ? C.ex2 - ax : -1;
         if(!off){
             const uint32_t scan = rel & 1 ? s->scan : 256, dy = C.dy[rel], dark = s->dark;
             const uint16_t *dxs = C.dx + (ax - C.x0);
@@ -99,6 +109,7 @@ void crt_flush(int x1, int y1, int x2, int y2, uint16_t *px){
             uint32_t mem_l = 0x10000, mem_c = 0, mem_r = 0, br = 0, bg = 0, bb = 0;
             for(int i = 0, n = bx - ax + 1; i < n; i++){
                 uint16_t r = i + 1 < n ? row[i + 1] : cur;
+                if(i >= ma && i <= mb){ l = cur; cur = r; continue; }
                 if(l != mem_l || cur != mem_c || r != mem_r){
                     mem_l = l; mem_c = cur; mem_r = r;
                     uint32_t cr = R8(cur), cg = G8(cur), cb = B8(cur);
@@ -124,7 +135,7 @@ void crt_flush(int x1, int y1, int x2, int y2, uint16_t *px){
         if(j >= 0){
             int in = C.inset[j];
             for(int x = ax; x <= bx; x++)
-                if(x - C.x0 < in || C.x1 - x < in) row[x - ax] = C.well;
+                if((x - C.x0 < in || C.x1 - x < in) && !(x - ax >= ma && x - ax <= mb)) row[x - ax] = C.well;
         }
     }
 }

@@ -5506,9 +5506,11 @@ static void show_discover(void){
 
 /* ------------------------- menu bar ------------------------- */
 static lv_obj_t *g_menu;   /* menu overlay root, or NULL */
+static void crt_sync(void);
 static void menu_close(void){
     if(g_menu){ lv_obj_del(g_menu); g_menu=NULL; }
     g_co_len_lbl = g_co_goal_lbl = NULL;      /* they lived on the sheet */
+    crt_sync();
 }
 static void menu_backdrop_cb(lv_event_t *e){ (void)e; menu_close(); }
 
@@ -6046,6 +6048,7 @@ static void menu_open(void){
         }
         menu_item(panel, "New game", act_mon_new);
         menu_item(panel, "Credits", act_mon_credits);
+        g_tv_lbl = menu_item_lbl(panel, tv_item_text(), act_tv);
     }
     if(data_demo_present())
         menu_item(panel, "Remove demo data", act_remove_demo);
@@ -6053,6 +6056,7 @@ static void menu_open(void){
     menu_item(panel, "Add test events", act_gentest);
 #endif
     menu_item(panel, "About", act_about);
+    crt_sync();
 }
 
 /* ------------------------- Find (global search, silkscreen) -------------
@@ -9497,6 +9501,7 @@ static void show_critters(void){
     lv_label_set_text(title_lbl, "Critters");
     update_cat_trigger();
     mon_ui_show(content);
+    crt_watch(1);
     if(g_mon_wake_auto){ g_mon_wake_auto = 0; mon_ui_set_auto(1); }    /* the lock paused it */
 }
 
@@ -9512,19 +9517,41 @@ static void show_critters(void){
 #define DEX_INK    lv_color_hex(0x183018)
 static lv_obj_t *g_dex_clock;       /* the small green screen behind the clock: set while it's dressed */
 
-/* The TV effect stands aside while anything but a toast is over the screen: the
- * system's menu and alerts aren't part of the tube. A look every tenth of a second
- * while the effect is on: at most a frame or two of them through it. */
+/* The system's menu and alerts aren't part of the tube: the TV effect leaves their
+ * rectangle alone, and keeps the game round them. The menu says so as it opens
+ * and closes, so it's never drawn through the tube; anything else on the top layer
+ * is caught by a look every tenth of a second while the effect is on. */
 static lv_timer_t *g_crt_timer;
-static void crt_watch_cb(lv_timer_t *t){
-    (void)t;
-    int n = (int)lv_obj_get_child_count(lv_layer_top());
-    if(g_toast && lv_obj_get_parent(g_toast) == lv_layer_top()) n--;
-    if(!n == !crt_paused()){
-        crt_pause(n > 0);
-        lv_obj_invalidate(lv_screen_active());
+static void crt_sync(void){
+    if(!crt_active()) return;
+    lv_obj_t *top = lv_layer_top();
+    lv_obj_update_layout(top);
+    /* what's on the top layer: a full-screen root is only a backdrop, so it's what's
+     * in it that counts. One rectangle round the lot. */
+    int x1 = LCD_W, y1 = LCD_H, x2 = -1, y2 = -1;
+    uint32_t n = lv_obj_get_child_count(top);
+    for(uint32_t i = 0; i < n; i++){
+        lv_obj_t *c = lv_obj_get_child(top, (int32_t)i);
+        if(lv_obj_has_flag(c, LV_OBJ_FLAG_HIDDEN)) continue;
+        lv_area_t a;
+        lv_obj_get_coords(c, &a);
+        uint32_t kids = lv_obj_get_child_count(c);
+        int backdrop = lv_area_get_width(&a) >= LCD_W && lv_area_get_height(&a) >= LCD_H && kids;
+        for(uint32_t k = 0; k < (backdrop ? kids : 1); k++){
+            if(backdrop){
+                lv_obj_t *g = lv_obj_get_child(c, (int32_t)k);
+                if(lv_obj_has_flag(g, LV_OBJ_FLAG_HIDDEN)) continue;
+                lv_obj_get_coords(g, &a);
+            }
+            if(a.x1 < x1) x1 = a.x1;
+            if(a.y1 < y1) y1 = a.y1;
+            if(a.x2 > x2) x2 = a.x2;
+            if(a.y2 > y2) y2 = a.y2;
+        }
     }
+    if(crt_exclude(x1, y1, x2, y2)) lv_obj_invalidate(lv_screen_active());
 }
+static void crt_watch_cb(lv_timer_t *t){ (void)t; crt_sync(); }
 static void crt_watch(int on){
     if(on && !g_crt_timer) g_crt_timer = lv_timer_create(crt_watch_cb, 100, NULL);
     if(!on && g_crt_timer){ lv_timer_delete(g_crt_timer); g_crt_timer = NULL; }

@@ -16,6 +16,42 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-03 — Dex, and Critters' TV screen, bezels and party icons
+
+The owner: "build through the DEX_PLAN.md", with rounded corners on the Dex's
+screen, the same effect and a thin bezel on Critters' screen, a thin controller
+bezel, and icons on both party screens. `DEX_PLAN.md` says what was built, §10 the
+Critters part. **Simulator only; nothing has run on the device.**
+
+**Measured:**
+
+| What | Number | How |
+|---|---|---|
+| `game.bin` | 653,980 → 674,156 B | `ls`; `DEXE` 1,104 B and `ICON` 14,724 B, the rest text |
+| Firmware image | 1,812,032 → 1,849,744 B | `idf.py build`, before the Dex app and after everything; 20.8 KB of it the portrait |
+| Static DRAM | 147,468 → 147,580 B (81.66 %) | `idf.py size` |
+| Dex's heap | 28,048 B | smoke32's `dex_list` |
+| Critters' heap, Auto-play with a full party | 77,744 B (63,724 B on the map) | smoke32's `critters_auto_full`, `critters_map` |
+| LVGL pool free | 17,308 B Dex, 15,264 B Critters at its fullest | smoke32 |
+
+**Not measured:** the TV effect's speed on the ESP32. The firmware logs it at debug
+level. Walking in Critters filters about 40,000 pixels a frame, so that's the
+first bench item.
+
+**Lessons:**
+
+- A draw band can't be capped at the draw buffer's *rows*: a narrower strip is
+  taller (45 rows at 210 px). The Dex showed 5 dark rows every 45; Critters' view
+  would have lost one. Cap it by pixels.
+- My first watcher for the system menu had its test backwards, and the shots I
+  called fine had scanlines on the menu; the owner saw them. It also forced a
+  full-screen redraw every 100 ms. The effect now skips the menu's rectangle, and
+  the smoke tour fails on scanlines on a menu or their absence beside one. A
+  picture I've glanced at isn't a check.
+- I committed D1 with a bot check in `monster_test.c` that didn't compile, because I
+  hadn't re-run `make monster` after the last edit; smoke32 caught it before it
+  left the machine. Run the gate on the last edit, not the one before.
+
 ### 2026-11-03 — Critters: the owner's sky line and Rivetron
 
 Four new drawings: **Cirrup**, **Cumulynx**, **Tempyre** (sky) and **Rivetron**

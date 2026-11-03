@@ -75,7 +75,9 @@ Tuxemon. Each one is three files and an allow-list line:
    file is part of the drawing: `--check` refuses a drawing without one.
 3. **Write its rules** in `tools/game_creatures/<slug>.yaml`, copying one of
    the fire fox line's. The keys:
-   - `name`, `description` (the Dex's text), `drawing` (step 1's path);
+   - `name`, `description` (the Dex's text: `mkgame.py` refuses more than three
+     lines of its lower screen), `category`, `height_cm` and `weight_kg` (the Dex's
+     too, and all required), `drawing` (step 1's path);
    - `types`: one or two of Tuxemon's (cosmic, earth, fire, frost, heroic,
      lightning, metal, normal, shadow, sky, venom, water, wood);
    - `shape`: Tuxemon's body shapes set the stats (blob, brute, dragon, flier,

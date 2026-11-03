@@ -258,7 +258,7 @@ build/monster_test: $(MONSTER_SRCS) $(FW)/monster.h $(FW)/monster_play.h $(FW)/m
 	    $(MONSTER_SRCS) -lm -o $@
 
 # ---- dex: what the Dex reads (docs/DEX_PLAN.md section 7), under ASan and UBSan. ----
-DEX_SRCS := tests/dex_test.c $(FW)/dex.c $(FW)/monster.c $(FW)/monster_play.c
+DEX_SRCS := tests/dex_test.c $(FW)/dex.c $(FW)/crt.c $(FW)/monster.c $(FW)/monster_play.c
 dex: build/dex_test
 	./build/dex_test
 	@for g in ../tests/data/game/game.bin ../courses/critters/game.bin; do \
@@ -267,7 +267,7 @@ dex: build/dex_test
 	done
 	@echo "sim dex: OK"
 
-build/dex_test: $(DEX_SRCS) $(FW)/dex.h $(FW)/monster.h $(FW)/monster_play.h $(BR)/safefile.h
+build/dex_test: $(DEX_SRCS) $(FW)/dex.h $(FW)/crt.h $(FW)/monster.h $(FW)/monster_play.h $(BR)/safefile.h
 	@mkdir -p build
 	$(CC) -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all -I$(FW) -I$(BR) \
 	    $(DEX_SRCS) -lm -o $@

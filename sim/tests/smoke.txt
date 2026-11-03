@@ -2227,6 +2227,21 @@ t 300
 s critters_party
 c 150 280
 t 300
+J
+c 226 12
+t 300
+c 60 158
+t 300
+s critters_party_full
+c 150 280
+t 300
+c 226 12
+t 300
+c 60 132
+t 400
+s critters_auto_full
+c 120 100
+t 300
 c 226 12
 t 300
 c 60 210

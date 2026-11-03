@@ -39,6 +39,20 @@ SHOTS = ["dex_no_save", "dex_greet", "dex_list", "dex_list_p2", "dex_list_caught
          "dex_where_never", "dex_tall"]
 
 
+def striped(px, w, x0, x1):
+    """Any column from x0 to x1 going dark, light, dark, light for 8 rows."""
+    for x in range(x0, x1):
+        run = 0
+        for y in range(40, 190):
+            at = [sum(px[((y + k) * w + x) * 3:((y + k) * w + x) * 3 + 3]) for k in range(2)]
+            prev = sum(px[((y - 1) * w + x) * 3:((y - 1) * w + x) * 3 + 3])
+            flip = (at[0] < at[1]) != (prev < at[0]) and at[0] != at[1] and prev != at[0]
+            run = run + 1 if flip else 0
+            if run >= 8:
+                return True
+    return False
+
+
 def main(d):
     d = Path(d)
     w, h, base = ppm(d / (SHOTS[0] + ".ppm"))
@@ -56,6 +70,16 @@ def main(d):
     if left[(2 * w + 60) * 3:(2 * w + 61) * 3] != b"\0\0\0":
         print("dex_regions: the title bar isn't black after leaving")
         fails += 1
+    # the system's menu isn't seen through the tube, and the screen round it still is
+    # a TV; the effect's odd rows are the tell
+    for shot in ("critters_menu", "critters_auto_menu", "dex_menu"):
+        wm, hm, px = ppm(d / (shot + ".ppm"))
+        if striped(px, wm, 12, 148):
+            print(f"dex_regions: {shot}: the menu has scanlines")
+            fails += 1
+        if not striped(px, wm, 160, 222):
+            print(f"dex_regions: {shot}: no scanlines on the screen beside the menu")
+            fails += 1
     if fails:
         sys.exit(1)
     print(f"dex_regions: the case is identical on {len(SHOTS)} shots")

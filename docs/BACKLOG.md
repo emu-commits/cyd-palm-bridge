@@ -22,6 +22,32 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 
 ---
 
+## Dex, and Critters' new screens (built in the simulator 2026-11-03; the bench is next)
+
+`DEX_PLAN.md` is the plan, §8 D4 and §10 what's here. Nothing has run on the device.
+
+- [d] **Walking in Critters with the TV effect on:** the whole picture is filtered
+  every frame (about 40,000 pixels), so this is where it's slowest. Does walking
+  still feel right? If not, try Menu ▸ TV effect ▸ Off to compare. The firmware
+  logs the time at debug level (tag `lvgl`, lines starting `crt:`).
+- [d] **The effect's strength on the panel:** Menu ▸ TV effect cycles Light, Standard,
+  Strong, Off, and is remembered. Is small text readable through it, in the Dex's
+  list and Critters' text box? Which one do you want as the default?
+- [d] Dex opens from the Games folder; a caught critter shows in full after saving
+  in Critters; a save from before this firmware keeps its party in the Dex.
+- [d] Leaving the Dex gives the heap back; the title bar goes back to black.
+- [d] ◀ ▶ are fast enough, and the keys are easy to hit.
+- [d] The portrait and the green clock read well on the panel; Anoleaf and Fluttaflap
+  hold up on the blue.
+- [d] Critters' D-pad and A and B after moving 2 px, in the slightly smaller panel.
+- [d] A party of six: the icons on Party and on Auto-play's panel, and tapping a line
+  of Party (each is now 24 px).
+- For the owner to review, no bench needed: my drafts of his lines (`dex.c`), the shortened descriptions
+  (`game_region.json`, `tools/game_creatures/`), and our critters' categories and
+  sizes.
+
+---
+
 ## A monster-catching game: Critters (G4 and the rooms done 2026-10-16 in the simulator; the bench is next)
 
 `GAME_PLAN.md` is the plan: a C engine in the Games menu, with content from

@@ -1,7 +1,10 @@
-# Dex: plan (proposal, 2026-11-01; redesigned 2026-11-02)
+# Dex: plan (proposal, 2026-11-01; redesigned 2026-11-02; built 2026-11-03)
 
-> **Status: design and plan only.** Nothing here is built. The owner asked
-> (2026-11-01) for a new app in the Games folder, under Critters, named
+> **Status: built in the simulator, 2026-11-03** (phases D1 to D3, and §10's
+> changes to Critters). **Nothing has run on the device yet:** D4, the bench, is
+> the owner's, and the TV effect's speed and strength are measured there. Where
+> the building changed the plan, the sections below say what was built. The
+> owner asked (2026-11-01) for a new app in the Games folder, under Critters, named
 > **Dex**. It works like the creature index in the monster-catching games:
 > it lists every critter in the game, shows the ones the player has caught,
 > and shows **???** for the rest.
@@ -16,7 +19,8 @@
 >
 > **The owner's decision (2026-11-03):** the upper screen is a **TV**: TV blue,
 > with a light CRT effect on that box alone (§2.4). A card on it keeps its own
-> background.
+> background. The same day they added slightly rounded corners on it, and the
+> same effect and bezel for Critters' screen (§10).
 
 The mock-ups are in `docs/img/dex/`. They're 240×320, the device's size,
 drawn by `tools/mock_dex.py` (a design aid, not product code) with the
@@ -184,18 +188,26 @@ LVGL has drawn it. Nothing is drawn differently for it.
 | Dark corners | × (1 − 0.35 × min(dx⁴ + dy⁴, 1)), with dx and dy from −1 to 1 across the box |
 | Black lift | Add 5, 6, 9 to red, green, blue, after the above |
 
-The corners of the box are rounded at radius 7, with the well outside them.
-`tools/mock_dex.py` has the exact sums.
+The corners of the box are rounded at radius 7, and the well round the tube
+follows them at radius 8, so the rounding shows against the grey bezel (the
+owner's ask, 2026-11-03). `tools/mock_dex.py` and `firmware/main/crt.c` have the
+exact sums.
 
 **Where it runs.** In `flush_cb`, on the part of each strip inside the box,
 before the byte swap. Each pixel reads only its own row, so it needs no copy of
 the box and no history across LVGL's 40-row strips.
 
-- **A change in the box redraws the whole box,** or the glow leaves a seam at
-  the edge of a partial redraw. That's 26,880 pixels over about four strips,
-  **speed to be measured in D2**.
-- **The device and the simulator share the filter.** They have separate
-  `flush_cb`s, so it's one function both call, on only while the Dex is open.
+- **A change in the box redraws its whole rows,** or the glow leaves a seam at
+  the edge of a partial redraw. `crt_widen()` does that on the display's
+  `LV_EVENT_INVALIDATE_AREA`, so a key press outside the box costs nothing. A whole
+  box is 26,880 pixels. **Its speed can only be measured on the device:** the
+  firmware logs the time spent at debug level (`crt:` lines, tag `lvgl`).
+- **The device and the simulator share the filter** (`crt.c`). They have separate
+  `flush_cb`s, so it's one function both call, on only while the Dex or Critters
+  is open.
+- **It leaves the system alone.** While the menu or an alert is up, the effect skips
+  the rectangle they cover and keeps the picture round them (the owner's ask,
+  2026-11-03), in the Dex and in Critters.
 - **It isn't a copy of area512's filter** (`components/area512_hal/gfx/area512_crt.cpp`
   in `emu-commits/area512`), which we tried first. Its colour fringes made the
   Palm font hard to read, and its 3-pixel stripes would be about 1.7× coarser on
@@ -208,9 +220,11 @@ edge pixels are under 1.5:1 contrast with the background. The worst are Anoleaf
 (87%) and Fluttaflap (71%), against 0% and 32% at worst on cream. **The mock-ups
 don't show either one's sprite at full size yet; look at them on the panel in D4.**
 
-**The strength is checked on the panel first.** The scanlines are the part most
-likely to look different on the real screen. At the start of D2, a test screen
-shows the box at two or three strengths for the owner to choose from.
+**The strength is checked on the panel.** The scanlines are the part most likely
+to look different on the real screen. Instead of a one-off test screen, the menu
+has **TV effect: Light, Standard, Strong or Off**, in the Dex and in Critters,
+kept on the card (`games/tv.cfg`), so the owner can choose on the panel and keep
+the choice. Standard is the mock-ups' strength. Off also answers "too slow".
 
 ## 3) The speaker
 
@@ -258,8 +272,9 @@ so none is needed, and the card and his lines don't refer to one.
 | Talk, the player's starter | "Yours came from Dr Wren's lab." |
 | Talk, not caught | "Nothing on this one yet." |
 
-About 25 lines in all. They're written in the firmware, like Guru's, because
-they're the speaker's voice, not game data.
+About 16 lines in all, some with the player's numbers and places in them. They're
+written in the firmware (`dex.c`), like Guru's, because they're the speaker's
+voice, not game data. **They're my drafts, for the owner to change.**
 
 ## 4) Data
 
@@ -270,7 +285,8 @@ and then evolved, released or traded no longer appears in either.
 
 - **Two bitsets of 256 bits each** (64 B), *seen* and *caught*, keyed by
   the creature's **stable id** (`ids.tsv`), so that a rebuilt game file
-  keeps the marks. This puts the save at version 4. Creature ids must stay
+  keeps the marks, and the first critter's id, for his "Yours came from Dr
+  Wren's lab" (8 B more; `GAME_FORMAT.md` §7). This puts the save at version 4. Creature ids must stay
   under 256. The format's limit is written in `GAME_FORMAT.md` §5, and the
   builder refuses anything over it.
 - `monster_play.c` sets the marks at these points:
@@ -297,32 +313,32 @@ A 2.1 reader skips both sections, so the game still plays on older
 firmware. A 2.2 Dex shown an older file lists names and sprites and shows
 "no Dex data in this file" in the panel.
 
-- **`DEXE`, one 16 B record per creature, in `MONS` order:**
+- **`DEXE`, one 24 B record per creature, in `MONS` order** (16 B was a slip: a
+  `TEXT` reference is 8 B):
   - the Dex number (u16);
   - the height in cm (u16) and the weight in tenths of a kg (u16, so up to
     6,553.5 kg; Agnigon is 2,000);
   - the category (a `TEXT` reference);
   - the description (a `TEXT` reference);
   - 2 B reserved.
-
-  That's 432 B, and the text adds about 2.5 KB.
 - **`ICON`, the 24×24 list icons:** the sheets' first menu frame, 4-bit with
-  its own 15-colour palette. That's 328 B a creature, about **8.9 KB** for 27.
-  The sheets already have the frames; the builder doesn't take them yet.
+  its own 15-colour palette: 320 B a creature, about **14.7 KB** for 46.
 - **The source.**
   - Height, weight and category come from Tuxemon's monster data.
-  - The description comes from Tuxemon's English text where it has one. It
-    has one for **13 of the 27**. **The other 14 need descriptions written for
-    this project** (CC0, short and in the game's voice). I'll draft them,
-    and the owner reviews them.
+  - The description comes from Tuxemon's English text. **All 27 have one**
+    (the "13 of 27" here earlier was wrong). `mkgame.py` refuses a description
+    past the lower screen's three lines, so **five were shortened** in
+    `game_region.json` (Agnigon, Arthrobolt, Dune Pincher, Nut, Selmatek), and
+    **13 of our own critters' descriptions in `tools/game_creatures/` were cut**
+    to fit. Our critters' categories and sizes are new. All of those are my
+    drafts, for the owner's review.
   - The **Dex order** is a `"dex"` list in `game_region.json`: the starters'
     lines first, then the rest in the order a player meets them. The owner
     controls that order, and new critters are added to it.
 - **Both dumps** (`mkgame.py --dump`, `monster_test.c`) print the new
   sections. The round trip compares them byte for byte, as now.
 
-**Cost: about 12 KB**, 2 % of the 572,000 B file. The partition has about
-400 KB free.
+**Cost: 20,176 B**, 3 % of the 653,980 B file (now 674,156 B).
 
 ### 4.3 Where: worked out, not stored
 
@@ -344,28 +360,34 @@ when the app opens and freed when it closes.** It adds **no static DRAM**.
 | What | Size |
 |---|---|
 | The open game file's directory and the save's header and bitsets | about 1 KB |
-| One entry's sprite, decoded to RGB565 with alpha, drawn at 2× by `lv_image`'s scale (no second buffer) | 12 KB |
-| The page's icons: five at 24×24 RGB565 with alpha | 8.6 KB |
-| The fixed bezel and keys, and the page's labels and rows: **five rows reused** across pages rather than 46 objects | about 3 KB of the LVGL pool (estimate) |
-| The speaker's portrait: RGB565 with no alpha, 20.8 KB of flash, drawn from there | none intended, to be measured in D3 |
-| **Total** | **about 22 KB of heap, 3 KB of the pool** |
+| One entry's sprite, kept 4-bit as it is on the card and scaled as it's composed | 4.1 KB |
+| The page's icons, kept as they are on the card: five at 320 B | 1.6 KB |
+| One band of the upper screen, as Critters' view has (below) | 19.2 KB |
+| The whole gadget: **one LVGL object**, drawing everything itself | under 1 KB of the LVGL pool |
+| The speaker's portrait: RGB565 with no alpha, 20.8 KB of flash, drawn from there | none |
+| The largest area head, only during a Where search or his opening | a few KB, for that moment |
+| **Total, measured in the simulator's tour** | **28,080 B of heap** |
 
-There's about 106 KB of heap free with the SD card mounted, and 11 KB free
-in the LVGL pool. Paging with ◀ and ▶, rather than scrolling 46 rows,
-keeps the Dex within the pool. The smoke tour's `B` and `E` commands prove
-the heap is given back, as they do for Study.
+**Built differently from this plan's first table:** the upper screen has no
+`lv_image`s at all. Each draw composes the band LVGL is drawing into one buffer,
+as Critters does, which is less memory than decoding a sprite and five icons with
+alpha, and adds almost nothing to the pool. There's about 106 KB of heap free with
+the SD card mounted. The smoke tour's `B` and `E` commands prove the heap is given
+back, as they do for Study.
 
 ## 6) Code
 
 | File | What |
 |---|---|
-| `firmware/main/dex.c`, `dex.h` | New. Opening the game and the save read-only; the entry for a number; the Where search (§4.3); the speaker's lines (§3). No LVGL. |
-| `firmware/main/ui.c` | A "Dex" section: the hardware title bar (restyled on opening, put back by `content_clear()`, with `mk_tb_silk` taking the key colour), the bezel and keys built once, and functions that fill the two subscreens for the list, the entry and the speaker. It doesn't use the speech-bubble code. The seventh Games icon. |
+| `firmware/main/dex.c`, `dex.h` | New. Opening the game and the save read-only; the Where search (§4.3); the speaker's lines (§3). No LVGL. |
+| `firmware/main/ui_dex.c`, `ui_dex.h` | New, as `ui_monster.c` is for the game: the gadget and its screens. |
+| `firmware/main/crt.c`, `crt.h` | New. The TV effect (§2.4), which Critters uses too (§10). |
+| `firmware/main/ui.c` | The hardware title bar (restyled on opening, put back by `content_clear()`), the seventh Games icon, and the menu's TV effect item. It doesn't use the speech-bubble code. |
 | `firmware/main/monster.c`, `.h` | Reads `DEXE` and `ICON` (2.2). `mg_dex()` and `mg_icon()`. |
 | `firmware/main/monster_play.c`, `.h` | The marks, save version 4, and loading a version 3 save. |
-| `firmware/main/palm_icons.c` | `icon_dex`, from `tools/gen_dex_icon.py`. |
-| `firmware/main/palm_icons.c` | The speaker's portrait: an RGB565 image from a small generator, `tools/gen_dex_speaker.py`, which reads `colour_102.png` 1:1 and is checked in the `dex` gate. |
-| `firmware/main/lvgl_port.c`, `sim/sim_port.c` | Both `flush_cb`s call the one TV filter on the upper screen while the Dex is open (§2.4). |
+| `firmware/main/dex_art.c` | `icon_dex` and the speaker's portrait, generated by `tools/gen_dex_art.py`, which reads `colour_102.png` 1:1 and is checked by `tests/mkgame_test.py`. |
+| `firmware/main/lvgl_port.c`, `sim/sim_port.c` | Both `flush_cb`s call the one TV filter (§2.4). |
+| `tools/palm_font.py` | The Palm fonts, for the mock-ups, `mkgame.py`'s description check and the fit gate. |
 | `tools/mock_dex.py` | Draws the mock-ups. Not product code. |
 | `tools/mkgame.py` | Format 2.2: `DEXE` and `ICON`, the `"dex"` order, the description source, and the dump. |
 | `tools/game_region.json` | The `"dex"` order and the 14 written descriptions. |
@@ -376,15 +398,15 @@ the heap is given back, as they do for Study.
 - **`make -C sim dex`** (new, in `ci.yml` and CLAUDE.md's list):
   - the marks are set by each event in §4.1;
   - a version 3 save upgrades correctly;
-  - the Where search, for each act, matches a list worked out by hand from
-    `game_region.json`;
+  - the Where search, for each act, matches the answers `tests/dex_check.py`
+    works out from `mkgame.py`'s separate reader of the same file;
   - the speaker's choice of line for each state;
   - **every line fits**: each line and each worked-out Where answer wraps to at
     most five lines of the lower screen in the Palm font, and every description
-    to at most three;
-  - Auto-play's full run ends with every critter it met marked seen and
-    every critter it owned marked caught.
-- **`make -C sim monster`:** the existing bot gate, with save version 4.
+    to at most three.
+- **`make -C sim monster`:** the existing bot gate, with save version 4. Auto-play's
+  full run must end with every critter it met marked seen and every critter it
+  owned marked caught.
 - **`tests/mkgame_test.py`:** `DEXE` and `ICON` on the fixture,
   byte-for-byte rebuilds, and a refusal for a creature id of 256 or more.
 - **Smoke shots:**
@@ -394,28 +416,26 @@ the heap is given back, as they do for Study.
   - `dex_tall`, a critter 64 px tall, to see that it isn't clipped;
   - `dex_no_save`, the first run with no game played.
 
-  Comparing the shots should show the bezel, title bar and keys
-  **pixel-identical** on all of them: `make -C sim dex` compares those regions
-  (bar the clock's digits and a key held down). A further shot, `dex_left`, leaves
-  for another app, and must show the system's own black title bar again.
+  The bezel, title bar and keys are **pixel-identical** on all of them:
+  `sim/tests/dex_regions.py`, at the end of `make -C sim smoke`, compares those
+  regions (bar the clock). A further shot, `dex_left`, leaves for the launcher, and
+  must show the system's own black title bar again.
 
   A smoke command `D <seen-ids> <caught-ids>` will write a save with those
   marks, as the `F` command sets flags and coins.
 - Every gate in CLAUDE.md before each commit, the firmware build, and the
   static DRAM checked unchanged.
 
-## 8) Phases, one commit each
+## 8) Phases
 
-- **D1, the data.** Format 2.2 (`DEXE`, `ICON`, the order, the 14
-  descriptions), save version 4 with the marks, `make -C sim dex` for the
-  marks, and the dumps.
-- **D2, the app.** The fixed bezel and keys, `dex.c` and the screens, the Games
-  icon, the smoke shots, and the Where search. His lines are placeholders. It
-  starts with the TV filter's test screen for the owner (§2.4), and measures a
-  full redraw of the box.
-- **D3, the speaker.** The portrait and the news card, the lines, their fit gate,
-  and the measured heap.
-- **D4, the bench.** The owner's `[d]` items: the Dex opens from the folder;
+- **D1, the data. Done 2026-11-03.** Format 2.2 (`DEXE`, `ICON`, the order, the
+  shortened descriptions), save version 4 with the marks, `make -C sim dex` for
+  the marks, and the dumps.
+- **D2, the app, and D3, the speaker. Done 2026-11-03, in one commit** (the screens
+  and his card share a draw): the fixed bezel and keys, `dex.c` and the screens,
+  the Games icon, the smoke shots, the Where search, the portrait and the news
+  card, the lines, their fit gate, and the measured heap.
+- **D4, the bench. The owner's, not started.** The `[d]` items: the Dex opens from the folder;
   a caught critter shows in full after a save; a v3 save keeps its party in
   the Dex; the heap is unchanged after closing; ◀ ▶ are fast enough on the
   board; the keys are easy to hit; the portrait and the green clock read well on
@@ -470,4 +490,36 @@ and 3 is still open: today they're only wild.
   older firmware handles: it skips the new sections, and an older save is
   upgraded.
 
-The only thing left to choose is the effect's strength, on the panel (§2.4). Building starts at D1 (§8) when the owner asks for it.
+- **The rest of the plan, and §10:** "build through the DEX_PLAN.md", the owner,
+  2026-11-03.
+
+The only thing left to choose is the effect's strength, on the panel (§2.4).
+
+## 10) Critters' screens (the owner's additions, 2026-11-03)
+
+These change the game, not the Dex, and were built with it.
+
+- **Critters' game screen is a TV too.** It has the same effect as the Dex's upper
+  screen (§2.4, `crt.c`, the same strength setting), with a thin retro bezel and
+  slightly rounded corners (radius 6). The bezel is 4 px, so the picture is now
+  **232 × 172**, from 240 × 176: the map shows 8 px less across and 4 px less down,
+  and the battle's layout moved a few pixels to suit. **While walking, the whole
+  picture changes every frame, so the effect costs the most here: about 40,000
+  pixels a frame. That's the first thing to judge on the bench.** Off in the menu
+  is the fallback.
+- **The controller has a thin retro bezel.** A faceplate with rounded corners on a
+  dark body, the colour of the screen's bezel, so the two read as one case. The
+  panel is 116 px high, from 120, which still fits the D-pad at its full size (its
+  centre and A and B moved 2 px); it's at the same place to a finger.
+- **The party screens have the critters' icons,** the 24 × 24 ones of §4.2.
+  - **Party** (and every menu that picks a critter: Swap, and using an item): a
+    line is 24 px, from 14, with the icon beside the name. Six critters and Back
+    just fill the screen.
+  - **Auto-play's panel:** two columns of three, each with the icon, name, level,
+    HP and a bar. Six rows of 24 px wouldn't fit 116 px.
+  - The icons are drawn from 6.9 KB of heap, taken the first time they're shown
+    and freed when the game closes. A file without `ICON` shows the screens
+    without them.
+- **A bug this found:** a band of the view was capped at 40 rows, but a strip
+  narrower than the screen can be taller (45 rows at 210 px). The band is now
+  capped by pixels.

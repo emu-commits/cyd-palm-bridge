@@ -6,12 +6,16 @@
  *   - a version 4 save keeps them, and mp_read_marks() reads what mp_load() does;
  *   - a version 3 save loads with the marks made from its party and box;
  *   - mp_read_marks() refuses what mp_load() refuses;
- *   - the speaker's choice of line, for each state.
+ *   - the speaker's choice of line, for each state;
+ *   - the TV effect (crt.c): it touches only its box, gives the same pixels however
+ *     LVGL cuts the box into strips, darkens odd rows and corners, and leaves the
+ *     system menu's rectangle alone.
  * And for tests/dex_check.py, which works the same answers out from mkgame.py's
  * reading of the file and checks every line fits the lower screen:
  *   dex_test where FILE    every critter's Where answer, act by act
  *   dex_test lines FILE    every line he can say
  * Run from sim/. */
+#include "crt.h"
 #include "dex.h"
 #include "monster.h"
 #include "monster_play.h"
@@ -301,6 +305,112 @@ static void lines(void){
     dx_close(&d);
 }
 
+/* ---- 4. the TV effect ---- */
+
+#define CW 60
+#define CH 30
+static void crt_picture(uint16_t *p){       /* something with edges in it */
+    for(int y = 0; y < CH; y++)
+        for(int x = 0; x < CW; x++)
+            p[y * CW + x] = (x / 7 + y / 5) & 1 ? 0xFFFF : (uint16_t)(0x2000 + x * 64 + y);
+}
+
+static void crt_gate(void){
+    static uint16_t a[CH * CW], b[CH * CW];
+    /* a box inside the 60 x 30 screen */
+    const int X0 = 5, Y0 = 3, X1 = 54, Y1 = 26;
+    CHECK(!crt_on(X0, Y0, X1, Y1, 6, 0x1234), "crt_on");
+    crt_set_strength(CRT_STANDARD);
+    CHECK(crt_active(), "it's on");
+
+    /* outside the box, nothing moves */
+    crt_picture(a);
+    crt_flush(0, 0, CW - 1, CH - 1, a);
+    crt_picture(b);
+    int moved = 0;
+    for(int y = 0; y < CH; y++)
+        for(int x = 0; x < CW; x++)
+            if((x < X0 || x > X1 || y < Y0 || y > Y1) && a[y * CW + x] != b[y * CW + x]) moved++;
+    CHECK(!moved, "%d pixels moved outside the box", moved);
+
+    /* strips of any height give the same picture as one whole flush: LVGL cuts by rows */
+    for(int cut = 1; cut < CH; cut++){
+        crt_picture(b);
+        crt_flush(0, 0, CW - 1, cut - 1, b);
+        crt_flush(0, cut, CW - 1, CH - 1, b + cut * CW);
+        CHECK(!memcmp(a, b, sizeof a), "a strip cut at row %d differs", cut);
+    }
+    /* a strip that's only the box's own width, as crt_widen makes them */
+    crt_picture(b);
+    uint16_t strip[(X1 - X0 + 1) * (Y1 - Y0 + 1)];
+    for(int y = Y0; y <= Y1; y++) memcpy(strip + (y - Y0) * (X1 - X0 + 1), b + y * CW + X0, (X1 - X0 + 1) * 2);
+    crt_flush(X0, Y0, X1, Y1, strip);
+    int differ = 0;
+    for(int y = Y0; y <= Y1; y++)
+        if(memcmp(strip + (y - Y0) * (X1 - X0 + 1), a + y * CW + X0, (X1 - X0 + 1) * 2)) differ++;
+    CHECK(!differ, "%d rows differ flushed at the box's width", differ);
+
+    /* crt_widen: anything touching the box widens to its rows; anything else doesn't */
+    int x1 = 20, x2 = 22;
+    crt_widen(&x1, 10, &x2, 12);
+    CHECK(x1 == X0 && x2 == X1, "widen inside the box: %d %d", x1, x2);
+    x1 = 0; x2 = CW - 1;
+    crt_widen(&x1, 10, &x2, 12);
+    CHECK(x1 == 0 && x2 == CW - 1, "widen keeps a wider area");
+    x1 = 20; x2 = 22;
+    crt_widen(&x1, 27, &x2, 29);
+    CHECK(x1 == 20 && x2 == 22, "widen under the box");
+
+    /* the corners are the well; flat colour: odd rows darker, corners darker */
+    for(size_t i = 0; i < CH * CW; i++) a[i] = 0x4210;      /* mid grey */
+    crt_flush(0, 0, CW - 1, CH - 1, a);
+    CHECK(a[Y0 * CW + X0] == 0x1234 && a[Y1 * CW + X1] == 0x1234 && a[Y0 * CW + X1] == 0x1234, "the corners are the well");
+    int mid = (X0 + X1) / 2, even = Y0 + 12, odd = Y0 + 13;
+    CHECK((a[odd * CW + mid] >> 11) < (a[even * CW + mid] >> 11), "an odd row is darker");
+    CHECK(((a[(Y0 + 6) * CW + X0 + 1] >> 11)) < (a[even * CW + mid] >> 11), "the edge is darker than the middle");
+
+    /* Off: no effect, but still the corners */
+    crt_set_strength(CRT_OFF);
+    crt_picture(a);
+    crt_flush(0, 0, CW - 1, CH - 1, a);
+    crt_picture(b);
+    CHECK(a[Y0 * CW + X0] == 0x1234, "Off keeps the corners");
+    CHECK(a[even * CW + mid] == b[even * CW + mid] && a[odd * CW + mid] == b[odd * CW + mid], "Off leaves the picture");
+    crt_set_strength(CRT_STANDARD);
+
+    /* under the system's menu: its rectangle is left alone, the rest keeps the effect */
+    uint16_t whole[CH * CW];
+    crt_picture(whole);
+    crt_flush(0, 0, CW - 1, CH - 1, whole);
+    CHECK(crt_exclude(0, 0, 20, 15) == 1, "a new rectangle is a change");
+    CHECK(crt_exclude(0, 0, 20, 15) == 0, "the same one isn't");
+    crt_picture(a);
+    crt_flush(0, 0, CW - 1, CH - 1, a);
+    crt_picture(b);
+    int inside = 0, outside = 0;
+    for(int y = 0; y < CH; y++)
+        for(int x = 0; x < CW; x++){
+            if(x <= 20 && y <= 15) inside += a[y * CW + x] != b[y * CW + x];
+            /* one pixel's glow comes from its neighbour, so past its edge by two */
+            else if(x > 21 || y > 15) outside += a[y * CW + x] != whole[y * CW + x];
+        }
+    CHECK(!inside, "%d pixels touched under the menu", inside);
+    CHECK(!outside, "%d pixels differ round the menu", outside);
+    CHECK(crt_exclude(0, 0, -1, -1) == 1, "none is a change");
+    crt_picture(a);
+    crt_flush(0, 0, CW - 1, CH - 1, a);
+    CHECK(!memcmp(a, whole, sizeof a), "with none, the whole box again");
+
+    /* off: nothing, and it can't be turned on with a bad box */
+    crt_off();
+    CHECK(!crt_active(), "it's off");
+    crt_picture(a);
+    crt_picture(b);
+    crt_flush(0, 0, CW - 1, CH - 1, a);
+    CHECK(!memcmp(a, b, sizeof a), "off, nothing is touched");
+    CHECK(crt_on(5, 5, 4, 9, 2, 0) == -1 && crt_on(0, 0, 9, 9, CRT_MAX_RADIUS + 1, 0) == -1 && !crt_active(), "a bad box");
+}
+
 /* ---- for tests/dex_check.py ---- */
 
 /* the acts: no flags, then the steps' flags one more at a time, in their order */
@@ -392,6 +502,7 @@ int main(int argc, char **argv){
     file_part();
     events();
     lines();
+    crt_gate();
     mg_close(&G);
     if(fails){ printf("dex: FAILED (%d failures)\n", fails); return 1; }
     printf("dex: OK\n");

@@ -23,10 +23,10 @@ int  crt_on(int x0, int y0, int x1, int y1, int radius, uint16_t well);
 void crt_off(void);
 int  crt_active(void);
 
-/* While the system's menu or an alert is over the screen: nothing is touched, so
- * they aren't seen through the tube. The caller invalidates the box on a change. */
-void crt_pause(int on);
-int  crt_paused(void);
+/* The system's menu or an alert over the screen isn't part of the tube: the pixels
+ * in this rectangle are left alone, and the picture round it keeps the effect.
+ * x2 < x1 for none. It returns 1 if that's a change, for the caller to invalidate. */
+int  crt_exclude(int x1, int y1, int x2, int y2);
 
 /* How strong (CRT_OFF keeps the rounded corners). */
 void crt_set_strength(int s);

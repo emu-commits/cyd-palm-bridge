@@ -684,6 +684,7 @@ void dex_ui_close(void){
     crt_off();
     if(m->game_ok) dx_close(&m->d);
     g_dx = NULL;
+    lv_image_cache_drop(&m->img);
     free(m->band);
     free(m);
 }
