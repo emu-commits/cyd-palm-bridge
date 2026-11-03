@@ -304,6 +304,7 @@ static int encounter(MpWorld *w, uint16_t table, MpBattle *b, MpLog *log){
     uint8_t level = (uint8_t)(row.lo + mp_below(&w->rng, (uint32_t)row.hi - row.lo + 1));
     MpCreature wild;
     if((r = mp_make(g, &w->rng, row.mon, level, &wild))) return werr(w, r, "%s", g->err);
+    mp_mark_mon(w, row.mon, 0);
     say(log, MP_EV_ENCOUNTER, 1, row.mon, level, 0);
     return mp_battle_start(w, b, &wild);
 }
@@ -438,6 +439,23 @@ void mp_heal_party(MpWorld *w){
     }
 }
 
+/* ---- what the Dex remembers (DEX_PLAN.md 4.1) ---- */
+
+static int mark_get(const uint8_t *set, uint32_t id){
+    return id < MG_MAX_DEX && set[id / 8] >> (id % 8) & 1;
+}
+static void mark_set(uint8_t *set, uint32_t id){
+    if(id < MG_MAX_DEX) set[id / 8] |= (uint8_t)(1u << (id % 8));
+}
+int mp_seen(const MpWorld *w, uint32_t id){ return mark_get(w->seen, id); }
+int mp_caught(const MpWorld *w, uint32_t id){ return mark_get(w->caught, id); }
+void mp_mark_mon(MpWorld *w, uint16_t mon, int caught){
+    MgMon m;
+    if(mg_mon(w->g, mon, &m)) return;
+    mark_set(w->seen, m.id);
+    if(caught) mark_set(w->caught, m.id);
+}
+
 int mp_new(MpWorld *w, MonGame *g, uint8_t *head, uint32_t seed, uint16_t starter){
     uint32_t cap = w->head_cap;
     memset(w, 0, sizeof *w);
@@ -451,6 +469,11 @@ int mp_new(MpWorld *w, MonGame *g, uint8_t *head, uint32_t seed, uint16_t starte
     if((r = mp_make(g, &w->rng, starter, lv, &w->party[0]))) return werr(w, r, "no such creature");
     w->n_party = 1;
     w->money = g->money_start;
+    mp_mark_mon(w, starter, 1);
+    {
+        MgMon first;
+        if(!mg_mon(g, starter, &first)) w->starter_id = first.id;
+    }
     return 0;
 }
 
@@ -534,6 +557,7 @@ static int trainer_battle(MpWorld *w, uint32_t k, MpBattle *b, MpLog *log){
     b->next = 1;
     memcpy(b->team, team, sizeof(MpCreature) * (size_t)n);
     say(log, MP_EV_TRAINER, 0, k, 0, 0);
+    mp_mark_mon(w, team[0].mon, 0);
     say(log, MP_EV_SENDS, 1, team[0].mon, team[0].level, 0);
     return 0;
 }
@@ -661,6 +685,7 @@ static int grow(MpWorld *w, int i, MpLog *log){
             if((r = mp_stats(g, c))) return r;
             c->hp = (uint16_t)(c->hp + (c->stat[MG_HP] > old ? c->stat[MG_HP] - old : 0));
             if(c->hp > c->stat[MG_HP]) c->hp = c->stat[MG_HP];
+            mp_mark_mon(w, c->mon, 1);
             say(log, MP_EV_EVOLVE, 0, (uint32_t)i, c->mon, 0);
         }
     }
@@ -707,6 +732,7 @@ static int resolve(MpWorld *w, MpBattle *b, MpLog *log){
             /* the trainer's next creature; those who fight it share its experience */
             b->wild = b->team[b->next++];
             memset(b->recharge[1], 0, sizeof b->recharge[1]);
+            mp_mark_mon(w, b->wild.mon, 0);
             say(log, MP_EV_SENDS, 1, b->wild.mon, b->wild.level, 0);
             b->fought = (uint8_t)(1u << b->active);
             if(!w->party[b->active].hp){
@@ -755,6 +781,7 @@ static int catch_it(MpWorld *w, MpBattle *b, MpLog *log, int *caught){
         say(log, MP_EV_SHAKE, 1, i, 0, 0);
     }
     uint32_t room = g->rules[7] < MP_PARTY ? g->rules[7] : MP_PARTY;
+    mp_mark_mon(w, b->wild.mon, 1);
     if(w->n_party < room){
         w->party[w->n_party] = b->wild;
         say(log, MP_EV_CAUGHT, 1, w->n_party, 0, 0);
@@ -866,6 +893,7 @@ int mp_turn(MpWorld *w, MpBattle *b, int act_kind, int arg, MpLog *log){
  * 0x24's coins and nothing in the bag. Replaced whole (safefile.h). */
 
 #define BAG_BYTES 80
+#define MARK_BYTES (2 * MP_MARK_BYTES + 8)      /* version 4: seen, caught, the first critter's id, 4 B reserved */
 
 static void put_bag(MpWorld *w, uint8_t *p){
     memset(p, 0, BAG_BYTES);
@@ -878,6 +906,13 @@ static void put_bag(MpWorld *w, uint8_t *p){
         put16(p + 12 + 8 * n, w->bag[i]);
         n++;
     }
+}
+
+static void put_marks(MpWorld *w, uint8_t *p){
+    memset(p, 0, MARK_BYTES);
+    memcpy(p, w->seen, MP_MARK_BYTES);
+    memcpy(p + MP_MARK_BYTES, w->caught, MP_MARK_BYTES);
+    put32(p + 2 * MP_MARK_BYTES, w->starter_id);
 }
 
 static void put_story(MpWorld *w, uint8_t *p){
@@ -906,13 +941,15 @@ static void put_rec(MonGame *g, const MpCreature *c, uint8_t *p){
 }
 
 int mp_save(MpWorld *w, const char *path){
-    uint8_t h[MP_SAVE_HEADER], rec[MP_SAVE_REC], story[MP_SAVE_REC], bag[BAG_BYTES];
+    uint8_t h[MP_SAVE_HEADER], rec[MP_SAVE_REC], story[MP_SAVE_REC], bag[BAG_BYTES], marks[MARK_BYTES];
     uint32_t crc, n = (uint32_t)w->n_party + w->n_box;
     SafeFile sf;
     put_story(w, story);
     put_bag(w, bag);
+    put_marks(w, marks);
     crc = mg_crc32(0, story, MP_SAVE_REC);
     crc = mg_crc32(crc, bag, BAG_BYTES);
+    crc = mg_crc32(crc, marks, MARK_BYTES);
     for(uint32_t i = 0; i < n; i++){
         put_rec(w->g, i < w->n_party ? &w->party[i] : &w->box[i - w->n_party], rec);
         crc = mg_crc32(crc, rec, MP_SAVE_REC);
@@ -930,7 +967,7 @@ int mp_save(MpWorld *w, const char *path){
     FILE *f = sf_open(&sf, path, "wb");
     if(!f) return werr(w, MG_EIO, "can't write the save");
     int ok = fwrite(h, 1, sizeof h, f) == sizeof h && fwrite(story, 1, sizeof story, f) == sizeof story &&
-             fwrite(bag, 1, sizeof bag, f) == sizeof bag;
+             fwrite(bag, 1, sizeof bag, f) == sizeof bag && fwrite(marks, 1, sizeof marks, f) == sizeof marks;
     for(uint32_t i = 0; ok && i < n; i++){
         put_rec(w->g, i < w->n_party ? &w->party[i] : &w->box[i - w->n_party], rec);
         ok = fwrite(rec, 1, MP_SAVE_REC, f) == MP_SAVE_REC;
@@ -1037,11 +1074,25 @@ int mp_load(MpWorld *w, MonGame *g, uint8_t *head, const char *path){
             w->bag[pos] = (uint8_t)le16(s + 4);
         }
     }
+    if(version >= 4){
+        uint8_t marks[MARK_BYTES];
+        if(fread(marks, 1, MARK_BYTES, f) != MARK_BYTES){ werr(w, MG_EBAD, "the save is cut short"); goto out; }
+        crc = mg_crc32(crc, marks, MARK_BYTES);
+        if(le32(marks + 2 * MP_MARK_BYTES + 4)){ werr(w, MG_EBAD, "the save is damaged"); goto out; }
+        memcpy(w->seen, marks, MP_MARK_BYTES);
+        memcpy(w->caught, marks + MP_MARK_BYTES, MP_MARK_BYTES);
+        w->starter_id = le32(marks + 2 * MP_MARK_BYTES);
+    }
     for(uint32_t i = 0; i < nparty + nbox; i++){
         if(fread(rec, 1, MP_SAVE_REC, f) != MP_SAVE_REC){ werr(w, MG_EBAD, "the save is cut short"); goto out; }
         crc = mg_crc32(crc, rec, MP_SAVE_REC);
         if((r = get_rec(w, rec, i < nparty ? &w->party[i] : &w->box[i - nparty]))) goto out;
         r = MG_EBAD;
+        /* an older save: what the player owns now is all it knows of */
+        if(version < 4){
+            mark_set(w->seen, le32(rec));
+            mark_set(w->caught, le32(rec));
+        }
     }
     if(fgetc(f) != EOF){ werr(w, MG_EBAD, "the save is too long"); goto out; }
     if(crc != le32(h + 24)){ werr(w, MG_EBAD, "the save is damaged"); goto out; }
@@ -1062,5 +1113,53 @@ out:
         w->g = g; w->head = head; w->head_cap = cap;
         memcpy(w->err, e, sizeof e);
     }
+    return r;
+}
+
+/* The Dex's reading of a save: everything checked as mp_load does but the
+ * records' meanings, which only matter to a game file that's being played. */
+int mp_read_marks(const char *path, MpMarks *out){
+    uint8_t h[MP_SAVE_HEADER], rec[MP_SAVE_REC];
+    int r = MG_EBAD;
+    memset(out, 0, sizeof *out);
+    sf_recover(path);
+    FILE *f = fopen(path, "rb");
+    if(!f) return MG_EIO;
+    if(fread(h, 1, sizeof h, f) != sizeof h || memcmp(h, "CYDS", 4) || mg_crc32(0, h, 28) != le32(h + 28)) goto out;
+    uint32_t version = le16(h + 4), n = (uint32_t)h[23] + le16(h + 6), crc = 0;
+    if(!version || version > MP_SAVE_VERSION){ r = MG_EVERSION; goto out; }
+    if(!h[23] || h[23] > MP_PARTY || le16(h + 6) > MP_BOX) goto out;
+    out->version = (uint8_t)version;
+    if(version >= 2){
+        if(fread(rec, 1, MP_SAVE_REC, f) != MP_SAVE_REC) goto out;
+        crc = mg_crc32(crc, rec, MP_SAVE_REC);
+        memcpy(out->flags, rec, sizeof out->flags);
+    }
+    if(version >= 3){
+        uint8_t bag[BAG_BYTES];
+        if(fread(bag, 1, BAG_BYTES, f) != BAG_BYTES) goto out;
+        crc = mg_crc32(crc, bag, BAG_BYTES);
+    }
+    if(version >= 4){
+        uint8_t marks[MARK_BYTES];
+        if(fread(marks, 1, MARK_BYTES, f) != MARK_BYTES) goto out;
+        crc = mg_crc32(crc, marks, MARK_BYTES);
+        memcpy(out->seen, marks, MP_MARK_BYTES);
+        memcpy(out->caught, marks + MP_MARK_BYTES, MP_MARK_BYTES);
+        out->starter = le32(marks + 2 * MP_MARK_BYTES);
+    }
+    for(uint32_t i = 0; i < n; i++){
+        if(fread(rec, 1, MP_SAVE_REC, f) != MP_SAVE_REC) goto out;
+        crc = mg_crc32(crc, rec, MP_SAVE_REC);
+        if(version < 4){
+            mark_set(out->seen, le32(rec));
+            mark_set(out->caught, le32(rec));
+        }
+    }
+    if(fgetc(f) != EOF || crc != le32(h + 24)) goto out;
+    r = 0;
+out:
+    fclose(f);
+    if(r){ uint8_t v = out->version; memset(out, 0, sizeof *out); out->version = v; }
     return r;
 }

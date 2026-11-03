@@ -4,6 +4,9 @@ name: Cirrup
 description: >-
   Born with its ruff already full of cloud. It can't quite fly yet, so it runs
   downhill flapping and is delighted every time.
+category: Cloud Chick
+height_cm: 30
+weight_kg: 1.5
 drawing: tools/game_art/src/cirrup.jpg
 types: [sky]
 shape: varmint

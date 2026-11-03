@@ -3,6 +3,9 @@ name: Scorchvix
 description: >-
   Flames lick from the tips of its ears when it's cross, which is often. It
   guards the red stone at its throat above all else.
+category: Fire Fox
+height_cm: 90
+weight_kg: 24
 drawing: tools/game_art/src/scorchvix.jpg
 types: [fire]
 shape: hunter

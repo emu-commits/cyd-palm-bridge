@@ -154,6 +154,8 @@ jobs:
         run: make -C sim srs
       - name: Monster game (reader, rules, saves; round trip with mkgame)
         run: make -C sim monster
+      - name: Dex (the marks, the save, the speaker's lines)
+        run: make -C sim dex
       - name: Build + run the scripted UI tour (real ui.c, screenshots)
         run: make -C sim smoke
       - name: Convert screenshots to PNG

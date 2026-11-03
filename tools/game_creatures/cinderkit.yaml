@@ -4,6 +4,9 @@ name: Cinderkit
 description: >-
   Its tail is a flame it can't put out. It sleeps curled around it to keep
   warm, and wakes when the flame burns low.
+category: Flame Kit
+height_cm: 40
+weight_kg: 6
 drawing: tools/game_art/src/cinderkit.jpg
 types: [fire]
 shape: varmint

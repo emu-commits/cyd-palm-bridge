@@ -1,8 +1,11 @@
 # Fulminax: the lightning line's last stage. The owner's drawing (2026-11-02).
 name: Fulminax
 description: >-
-  Pieces of lightning break from its tail and hang in the air around it. Keepers
-  who see it count the seconds, as they would after a flash.
+  Bits of lightning break from its tail and hang around it. Keepers count
+  the seconds, as after a flash.
+category: Thunderbolt
+height_cm: 190
+weight_kg: 140
 drawing: tools/game_art/src/fulminax.png
 types: [lightning]
 shape: brute

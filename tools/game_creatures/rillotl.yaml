@@ -1,8 +1,11 @@
 # Rillotl: the axolotl line's second stage. The owner's drawing (2026-11-01).
 name: Rillotl
 description: >-
-  Its tail trails a fin of living water that it can't put down. It wears a
-  blue stone it found in a spring and lets no one near it.
+  Its tail trails a fin of living water. It wears a blue stone from a
+  spring and lets no one near it.
+category: Brook Dweller
+height_cm: 80
+weight_kg: 15
 drawing: tools/game_art/src/rillotl.jpg
 types: [water]
 shape: humanoid

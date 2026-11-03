@@ -2,8 +2,11 @@
 # Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
 name: Ossicoil
 description: >-
-  Its hood is ribbed with bone that grew from the skull it once wore. Where it
-  sleeps, the ground stays purple for a season.
+  Its hood is ribbed with bone from the skull it once wore. Where it
+  sleeps, the ground stays purple.
+category: Bone Hood
+height_cm: 170
+weight_kg: 45
 drawing: tools/game_art/src/ossicoil.png
 types: [venom]
 shape: serpent

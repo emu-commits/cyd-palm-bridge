@@ -59,7 +59,7 @@ WRAP_LD := -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free
 LVGL_SRCS := $(shell find lvgl/src -name '*.c' 2>/dev/null)
 LVGL_OBJS := $(patsubst lvgl/src/%.c,build/lvgl/%.o,$(LVGL_SRCS))
 
-.PHONY: host wasm smoke smoke32 secretscan poolparity data graf mines wordie sudoku zip clock coach guru gurupool dash course srs monster games clean lvgl-src
+.PHONY: host wasm smoke smoke32 secretscan poolparity data graf mines wordie sudoku zip clock coach guru gurupool dash course srs monster dex games clean lvgl-src
 
 # LVGL_SRCS is evaluated when make parses this file, so on a clean checkout the
 # source must be fetched BEFORE the build graph is used: the entry points fetch,
@@ -255,6 +255,17 @@ build/monster_test: $(MONSTER_SRCS) $(FW)/monster.h $(FW)/monster_play.h $(FW)/m
 	$(CC) -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all -I$(FW) -I$(BR) \
 	    $(MONSTER_SRCS) -lm -o $@
 
+# ---- dex: what the Dex reads (docs/DEX_PLAN.md section 7), under ASan and UBSan. ----
+DEX_SRCS := tests/dex_test.c $(FW)/monster.c $(FW)/monster_play.c
+dex: build/dex_test
+	./build/dex_test
+	@echo "sim dex: OK"
+
+build/dex_test: $(DEX_SRCS) $(FW)/monster.h $(FW)/monster_play.h $(BR)/safefile.h
+	@mkdir -p build
+	$(CC) -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all -I$(FW) -I$(BR) \
+	    $(DEX_SRCS) -lm -o $@
+
 # ---- sudoku: host gate for the pure Sudoku logic (generation + rules, no LVGL). ----
 sudoku: build/sudoku_test
 	./build/sudoku_test
@@ -336,7 +347,7 @@ build/dash_test: tests/dash_test.c $(BR)/dash.c $(BR)/dash.h
 	$(CC) -O2 -Wall -I$(BR) tests/dash_test.c $(BR)/dash.c -o $@ -lm
 
 # ---- games: every game's logic gate in one go (what CI runs). ----
-games: poolparity mines wordie sudoku zip clock coach guru gurupool dash course srs monster
+games: poolparity mines wordie sudoku zip clock coach guru gurupool dash course srs monster dex
 
 # ---- wasm: everything compiled by emcc in one shot (CI build; no local emcc needed).
 # 32-bit wasm => the TRUE device-sized pool applies (see lv_conf.h). main() boots

@@ -4,6 +4,9 @@ name: Wildbough
 description: >-
   The spiral on its chest glows when the sap runs. Birds nest in its arms and
   it walks slowly so as not to wake them.
+category: Walking Tree
+height_cm: 130
+weight_kg: 90
 drawing: tools/game_art/src/wildbough.png
 types: [wood]
 shape: humanoid

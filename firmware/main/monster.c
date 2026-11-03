@@ -23,15 +23,16 @@
 #define AREA_SIZE  32
 #define ENC_ROW    8
 #define ITEM_SIZE  24
+#define DEXE_SIZE  24
 #define HEAD_FIXED 64
 
 /* the section tags, 4 bytes each in MG_* order, as the section table holds
  * them (one string: tests/nodelete.sh rightly flags a quoted HTTP method name,
  * and one of these tags is spelt like one) */
-static const char TAGS[] = "METATYPESHAPSTATMOVEMONSLRNSENCTAREAADATSPRTTEXTCREDLOOKITEM";
+static const char TAGS[] = "METATYPESHAPSTATMOVEMONSLRNSENCTAREAADATSPRTTEXTCREDLOOKITEMDEXEICON";
 #define TAG(k) (TAGS + 4 * (k))
 /* checked on open: everything small (section 6) */
-#define CRC_ON_OPEN(i) ((i) != MG_ADAT && (i) != MG_SPRT && (i) != MG_CRED && (i) != MG_LOOK)
+#define CRC_ON_OPEN(i) ((i) != MG_ADAT && (i) != MG_SPRT && (i) != MG_CRED && (i) != MG_LOOK && (i) != MG_ICON)
 
 enum { K_TITLE = 0x01, K_SOURCE, K_BUILD, K_START = 0x10, K_LOOKS, K_STARTERS, K_MORE_STARTERS, K_STEPS,
        K_RULES = 0x20, K_CAPTURE, K_GROWTH, K_KEEPER, K_MONEY };
@@ -418,6 +419,21 @@ int mg_item(MonGame *g, uint32_t i, MgItem *it){
     return str_ref(g, b + 12, &it->name);
 }
 
+int mg_dex(MonGame *g, uint32_t i, MgDex *d){
+    uint8_t b[DEXE_SIZE];
+    if(!g->has_dex || i >= g->n_mons) return MG_ERANGE;
+    int r = rds(g, MG_DEXE, i * DEXE_SIZE, b, DEXE_SIZE);
+    if(r) return r;
+    d->number = le16(b); d->height_cm = le16(b + 2); d->weight_tenths = le16(b + 4);
+    if((r = str_ref(g, b + 8, &d->category))) return r;
+    return str_ref(g, b + 16, &d->description);
+}
+
+int mg_icon(MonGame *g, uint32_t i, uint8_t *buf, uint32_t cap){
+    if(!g->has_icons || i >= g->n_mons || cap < MG_ICON_BYTES) return MG_ERANGE;
+    return rds(g, MG_ICON, 4 + i * MG_ICON_BYTES, buf, MG_ICON_BYTES);
+}
+
 int mg_find_item(MonGame *g, uint32_t id, uint16_t *pos){
     for(uint32_t i = 0; i < g->n_items; i++){
         MgItem it;
@@ -609,6 +625,31 @@ static int check_records(MonGame *g){
             if(!mg_find_item(g, le32(e), &at) && at < i) return bad(g, "item %u: its id twice", (unsigned)i);
         }
     }
+    /* DEXE (2.2, may be missing): a record a creature, each Dex number once */
+    if(g->s[MG_DEXE].len){
+        uint8_t used[MG_MAX_DEX / 8];
+        memset(used, 0, sizeof used);
+        if(g->n_mons > MG_MAX_DEX || g->s[MG_DEXE].len != g->n_mons * DEXE_SIZE) return bad(g, "DEXE is the wrong size");
+        for(uint32_t i = 0; i < g->n_mons; i++){
+            uint8_t e[DEXE_SIZE];
+            MgStr s;
+            if((r = rds(g, MG_DEXE, i * DEXE_SIZE, e, DEXE_SIZE))) return r;
+            uint32_t no = le16(e);
+            if(!no || no > g->n_mons || used[(no - 1) / 8] >> ((no - 1) % 8) & 1 || le16(e + 6))
+                return bad(g, "creature %u: its Dex record is out of range", (unsigned)i);
+            used[(no - 1) / 8] |= (uint8_t)(1u << ((no - 1) % 8));
+            if((r = str_check(g, e + 8, &s)) || (r = str_check(g, e + 16, &s))) return r;
+        }
+        g->has_dex = 1;
+    }
+    /* ICON (2.2, may be missing): u16 creatures, u16 size, then their records */
+    if(g->s[MG_ICON].len){
+        if(g->s[MG_ICON].len < 4) return bad(g, "ICON is too short");
+        if((r = rds(g, MG_ICON, 0, b, 4))) return r;
+        if(le16(b) != g->n_mons || le16(b + 2) != MG_ICON_SIZE || g->s[MG_ICON].len != 4u + g->n_mons * MG_ICON_BYTES)
+            return bad(g, "ICON is the wrong size");
+        g->has_icons = 1;
+    }
     /* AREA */
     if(g->s[MG_AREA].len % AREA_SIZE || g->s[MG_AREA].len / AREA_SIZE != g->n_areas || !g->n_areas || g->n_areas > 65535)
         return bad(g, "AREA doesn't hold the header's %u areas", (unsigned)g->n_areas);
@@ -648,7 +689,7 @@ int mg_open_fp(MonGame *g, FILE *f){
     g->minor = le16(h + 6);
     if(le32(h + 8) != g->size){ r = bad(g, "the file is %u bytes, the header says %u", (unsigned)g->size, (unsigned)le32(h + 8)); goto fail; }
     uint32_t nsec = le16(h + 12);
-    if(nsec < MG_NSECT || nsec > MAX_SECTS || le16(h + 14)){ r = bad(g, "%u sections", (unsigned)nsec); goto fail; }
+    if(nsec < MG_NREQUIRED || nsec > MAX_SECTS || le16(h + 14)){ r = bad(g, "%u sections", (unsigned)nsec); goto fail; }
     g->n_mons = le32(h + 16);
     g->n_areas = le32(h + 20);
     g->fingerprint = le32(h + 24);
@@ -674,7 +715,7 @@ int mg_open_fp(MonGame *g, FILE *f){
     if((r = zero_range(g, prev, g->size - prev))) goto fail;
     if(g->size - prev > 3){ r = bad(g, "bytes after the last section"); goto fail; }
     for(int k = 0; k < MG_NSECT; k++){
-        if(!(have & (1u << k)) && k != MG_ITEM){ r = bad(g, "no %.4s section", TAG(k)); goto fail; }
+        if(!(have & (1u << k)) && k < MG_NREQUIRED){ r = bad(g, "no %.4s section", TAG(k)); goto fail; }
         if(!CRC_ON_OPEN(k)) continue;
         uint32_t c;
         if((r = crc_range(g, g->s[k].off, g->s[k].len, &c))) goto fail;

@@ -4,6 +4,9 @@ name: Sprigling
 description: >-
   A stump that woke up curious. It sheds its leaf collar each autumn and sulks
   until the new one comes in.
+category: Stump
+height_cm: 30
+weight_kg: 5
 drawing: tools/game_art/src/sprigling.png
 types: [wood]
 shape: sprite

@@ -1,8 +1,11 @@
 # Nimbolt: the lightning line's second stage. The owner's drawing (2026-11-02).
 name: Nimbolt
 description: >-
-  Its ruff is a small thundercloud, and it won't be parted from it. The last
-  bolt it threw stays curled in its tail until it needs another.
+  Its ruff is a small thundercloud. The last bolt it threw stays curled in
+  its tail until it needs another.
+category: Storm Cloud
+height_cm: 85
+weight_kg: 18
 drawing: tools/game_art/src/nimbolt.png
 types: [lightning]
 shape: hunter

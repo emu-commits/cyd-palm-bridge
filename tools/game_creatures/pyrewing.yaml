@@ -1,8 +1,11 @@
 # Pyrewing: the fire fox line's last stage. The owner's drawing (2026-11-01).
 name: Pyrewing
 description: >-
-  The flames along its back became wings. It wears plates of bronze that no
-  smith made, and no keeper has seen it take them off.
+  The flames along its back became wings. It wears bronze no smith made,
+  and never takes it off.
+category: Blaze Fox
+height_cm: 150
+weight_kg: 70
 drawing: tools/game_art/src/pyrewing.jpg
 types: [fire, sky]
 shape: brute

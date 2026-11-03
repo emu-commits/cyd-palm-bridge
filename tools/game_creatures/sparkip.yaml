@@ -2,8 +2,11 @@
 # Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
 name: Sparkip
 description: >-
-  The little bolt on its tail crackles when it's pleased. Its fur stands on end
-  an hour before a storm, so farmers keep an eye on it.
+  The little bolt on its tail crackles when it's pleased. Its fur stands
+  up an hour before a storm.
+category: Spark
+height_cm: 35
+weight_kg: 4
 drawing: tools/game_art/src/sparkip.png
 types: [lightning]
 shape: varmint

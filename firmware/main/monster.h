@@ -43,6 +43,7 @@
 #define MG_CHAR_H       32
 #define MG_CHAR_FRAMES  12
 #define MG_SPRITE_MAX   (40 + 2048 * 2)     /* a 64 x 64, 4-bit, two-frame record */
+#define MG_MAX_DEX      256                 /* creatures with a Dex number; a save marks ids below this */
 #define MG_NONE8        0xFF
 #define MG_NONE16       0xFFFF
 #define MG_MAX_PEOPLE   32                  /* in one area */
@@ -56,7 +57,10 @@
 #define MG_ERANGE   (-5)    /* the caller asked for something out of range */
 
 enum { MG_META, MG_TYPE, MG_SHAP, MG_STAT, MG_MOVE, MG_MONS, MG_LRNS, MG_ENCT, MG_AREA,
-       MG_ADAT, MG_SPRT, MG_TEXT, MG_CRED, MG_LOOK, MG_ITEM, MG_NSECT };   /* ITEM may be missing */
+       MG_ADAT, MG_SPRT, MG_TEXT, MG_CRED, MG_LOOK, MG_ITEM, MG_DEXE, MG_ICON, MG_NSECT };
+#define MG_NREQUIRED MG_ITEM                /* ITEM (2.1), DEXE and ICON (2.2) may be missing */
+#define MG_ICON_SIZE 24                     /* the Dex's list icons, and the party's */
+#define MG_ICON_BYTES (32 + MG_ICON_SIZE * MG_ICON_SIZE / 2)    /* 16 colours, then 4 bits a pixel */
 
 /* move ranges (GAME_FORMAT.md 3.6) */
 enum { MG_MELEE, MG_TOUCH, MG_RANGED, MG_REACH, MG_RELIABLE, MG_SPECIAL };
@@ -105,6 +109,13 @@ typedef struct {
     uint32_t learn0, sprite_off, sprite_len;
     MgStr    name;
 } MgMon;
+
+/* What the Dex shows that the game doesn't need (DEXE, 2.2). */
+typedef struct {
+    uint16_t number;                        /* 1 .. n_mons, each once: the Dex's order */
+    uint16_t height_cm, weight_tenths;      /* tenths of a kg */
+    MgStr    category, description;
+} MgDex;
 
 typedef struct { uint16_t mon; uint8_t lo, hi; uint16_t rate; } MgEncRow;
 
@@ -168,6 +179,7 @@ typedef struct {
     uint32_t keeper_bonus;  /* experience from a keeper's creatures, percent (100 in a file without 0x23) */
     uint32_t money_start, money_per_level;  /* META 0x24: coins to start with; a keeper's prize per level */
     uint8_t  n_items;       /* ITEM's records (0 without the section) */
+    uint8_t  has_dex, has_icons;            /* DEXE and ICON are there (2.2) */
     uint8_t  n_steps;       /* once flag is set, a zone naming table uses to (in order: a table may step twice) */
     struct { uint16_t flag, table, to; } steps[MG_MAX_STEPS];
 
@@ -205,6 +217,11 @@ int  mg_find_move(MonGame *g, uint32_t id, uint16_t *pos);
 int  mg_find_area(MonGame *g, uint32_t id, uint16_t *pos);
 int  mg_find_item(MonGame *g, uint32_t id, uint16_t *pos);
 int  mg_item(MonGame *g, uint32_t i, MgItem *it);
+/* The Dex's record of creature i: MG_ERANGE in a file without DEXE (g->has_dex 0). */
+int  mg_dex(MonGame *g, uint32_t i, MgDex *d);
+/* Creature i's icon into buf (MG_ICON_BYTES: 16 RGB565 colours, index 0 clear, then
+ * 4 bits a pixel): MG_ERANGE in a file without ICON. Not CRC checked one by one. */
+int  mg_icon(MonGame *g, uint32_t i, uint8_t *buf, uint32_t cap);
 
 /* Enter area i: read and check its head into buf (head_len bytes; MG_HEAD_MAX
  * is always enough), and fill a. The pointers in a point into buf. */

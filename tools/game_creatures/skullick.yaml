@@ -4,6 +4,9 @@ name: Skullick
 description: >-
   It wears the skull of whatever it ate first. The bulb on its tail holds a
   week of venom, and it drools the rest.
+category: Skull Wearer
+height_cm: 40
+weight_kg: 3
 drawing: tools/game_art/src/skullick.png
 types: [venom]
 shape: varmint

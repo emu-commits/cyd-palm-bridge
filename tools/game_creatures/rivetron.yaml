@@ -2,8 +2,11 @@
 # Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
 name: Rivetron
 description: >-
-  Nobody remembers building them, and the Old Keep's records don't say. It winds
-  its own gear each morning and salutes anything taller than it is.
+  Nobody remembers building them. It winds its own gear each morning and
+  salutes anything taller.
+category: Clockwork
+height_cm: 120
+weight_kg: 160
 drawing: tools/game_art/src/rivetron.jpg
 types: [metal]
 shape: humanoid

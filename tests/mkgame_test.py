@@ -131,6 +131,21 @@ def main():
             {"creature": "ghostling", "levels": [2, 3], "rate": 5}), "not in the allow-list",
             "an encounter with a creature not on the allow-list")
         refused(lambda r: r["start"].update(x=15, y=4), "isn't a cell one can stand on", "a start in the pond")
+        refused(lambda r: r["dex"]["order"].pop(), "must list every creature", "a Dex order missing a creature")
+        refused(lambda r: r["dex"]["order"].append("puddlop"), "must list every creature", "a Dex order listing one twice")
+        refused(lambda r: r["dex"]["order"].__setitem__(0, "ghostling"), "must list every creature", "a Dex order with a stranger")
+        refused(lambda r: r.pop("dex"), "no \"dex\"", "a region without a Dex order")
+        refused(lambda r: r["dex"].update(descriptions={"emberkit": "It burns. " * 30}), "wraps to",
+                "a description too long for the Dex")
+        refused(lambda r: r["dex"].update(descriptions={"nobody": "A stranger."}), "descriptions of no creature",
+                "a description of no creature")
+        high = t / "ids_high.tsv"
+        high.write_text((FIX / "ids.tsv").read_text() + "creature\tzz_high\t300\n")
+        hi = high.read_text().splitlines()
+        high.write_text("\n".join(("creature\temberkit\t256" if ln.startswith("creature\temberkit\t") else ln)
+                                  for ln in hi if "zz_high" not in ln) + "\n")
+        r = build(tree, t / "bad.bin", high)
+        check(r.returncode != 0 and "stop at 255" in r.stderr, f"a creature id of 256: {r.returncode} {r.stderr.strip()}")
         refused(lambda r: r["start"].update(area="fixture_elsewhere"), "isn't in the region", "a start outside the region")
         refused(lambda r: r["encounters"]["fixture_meadow"][0].update(levels=[5, 2]), "levels",
                 "an encounter's levels the wrong way round")

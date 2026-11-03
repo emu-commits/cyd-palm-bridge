@@ -2,8 +2,11 @@
 # Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
 name: Banewyrm
 description: >-
-  Two heads that have never agreed on anything but the next meal. Its wings drip
-  as it flies, and nothing grows along the way it went.
+  Two heads that have never agreed on anything but the next meal. Nothing
+  grows where it has flown.
+category: Twin Wyrm
+height_cm: 400
+weight_kg: 380
 drawing: tools/game_art/src/banewyrm.jpg
 types: [venom]
 shape: dragon

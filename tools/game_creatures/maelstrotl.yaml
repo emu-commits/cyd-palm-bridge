@@ -1,8 +1,11 @@
 # Maelstrotl: the axolotl line's last stage. The owner's drawing (2026-11-01).
 name: Maelstrotl
 description: >-
-  Its tail became a whirlpool that never stops turning. Bone spines grew
-  through its skin as it grew, and it's said to drink a lake when angry.
+  Its tail became a whirlpool that never stops turning. It's said to drink
+  a lake when angry.
+category: Whirlpool
+height_cm: 180
+weight_kg: 120
 drawing: tools/game_art/src/maelstrotl.jpg
 types: [water]
 shape: brute

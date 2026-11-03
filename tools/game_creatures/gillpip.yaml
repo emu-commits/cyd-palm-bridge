@@ -2,8 +2,11 @@
 # Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
 name: Gillpip
 description: >-
-  It breathes through the frills on its head and smiles at everything. A
-  lost leg grows back in a week, which makes it braver than it should be.
+  It breathes through its head frills and smiles at everything. A lost leg
+  grows back in a week.
+category: Axolotl
+height_cm: 30
+weight_kg: 2
 drawing: tools/game_art/src/gillpip.jpg
 types: [water]
 shape: polliwog

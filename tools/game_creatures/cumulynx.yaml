@@ -2,8 +2,11 @@
 # Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
 name: Cumulynx
 description: >-
-  Its wings are thunderheads it has talked into staying. On a still day you can
-  hear them mutter, and the flock moves the washing in.
+  Its wings are thunderheads it has talked into staying. On a still day
+  you can hear them mutter.
+category: Thunderhead
+height_cm: 110
+weight_kg: 20
 drawing: tools/game_art/src/cumulynx.jpg
 types: [sky]
 shape: hunter

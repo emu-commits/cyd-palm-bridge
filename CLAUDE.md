@@ -79,7 +79,7 @@ before touching anything.
     `pip install radicale`) whenever `bridge/` changes;
   - `sudo mkdir -p /sdcard && sudo chmod 777 /sdcard`, then `make -C sim`
     with the targets `poolparity nosecrets secretscan data graf mines wordie
-    sudoku zip clock coach guru gurupool dash course srs monster smoke smoke32`;
+    sudoku zip clock coach guru gurupool dash course srs monster dex smoke smoke32`;
   - `python3 tests/mkcourse_test.py` (the course builder; needs the Pillow
     in `tools/requirements-course.txt`, and downloads the pinned font);
   - `python3 tests/mkgame_test.py` (the game converter, on the fixture; needs

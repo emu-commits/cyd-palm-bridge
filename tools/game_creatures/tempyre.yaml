@@ -2,8 +2,11 @@
 # Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
 name: Tempyre
 description: >-
-  Below the waist it is simply weather. Five eyes watch the valley from above the
-  cloud, and the valley has learned to bring things in when they open.
+  Below the waist it is simply weather. When its five eyes open, the
+  valley brings things in.
+category: Storm
+height_cm: 350
+weight_kg: 210
 drawing: tools/game_art/src/tempyre.jpg
 types: [sky]
 shape: dragon

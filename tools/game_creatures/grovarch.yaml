@@ -2,8 +2,11 @@
 # Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
 name: Grovarch
 description: >-
-  Old as the forest it guards. The runes on its chest were not cut by any hand,
-  and each one marks a tree it has outlived.
+  Old as the forest it guards. Each rune on its chest marks a tree it has
+  outlived.
+category: Forest Guard
+height_cm: 320
+weight_kg: 900
 drawing: tools/game_art/src/grovarch.jpg
 types: [wood]
 shape: brute
