@@ -36,7 +36,10 @@ Tuxemon. Each one is three files and an allow-list line:
    sizes with the other lines'. A row or two over the 58 a front may stand
    loses its emptier edge. If a fine drawing at 1/2 comes out nearly black,
    `"ink": 2` beside the scale keeps outline only where it fills half a block,
-   not a quarter.
+   not a quarter. If light armour or a white ruff inside an outline comes out
+   see-through, the tool took it for a gap between an arm and the body: put
+   `"holes": [[x, y], ...]` in the eyes file, a point in the picture inside
+   each real gap, `[]` if there are none. Everything else enclosed then stays.
 
    The front and back share **15 colours**, as every critter in the game
    does, so a drawing with many shades loses some. A drawing already at
@@ -196,3 +199,29 @@ Wing Tip.
 Scales 1/5, 1/5 and 1/2. Banewyrm (a JPEG on white, `"ink": 2`) is the busiest
 drawing yet and the largest, 58 × 58; it's grainy on the torso. Ossicoil's and
 Banewyrm's fronts have magenta eyes drawn in a dark slit.
+
+## The sky line (2026-11-03)
+
+The owner's sixth line: **Cirrup** (sky, varmint) evolves at 16 into **Cumulynx**
+(sky, hunter), which evolves at 32 into **Tempyre** (sky, dragon). Sky only,
+storm wings and all, for the owner to change, as are the names, moves, places
+and Dex text. Moves: Gust, Peck, Whirlwind, Wing Tip, Fledgling and Peregrine,
+with Gnaw, Fluff Up, Battery Discharge, Saber and All In.
+
+| | Act 1 | Act 2 | Act 3 |
+|---|---|---|---|
+| Cirrup | Route 1, 3–5 | Route 1, 12–15 | |
+| Cumulynx | | The Old Keep, 19–22 | Route 1, 22–26 |
+| Tempyre | | | Dragon's Cave once Wyrmkeeper Ashe is beaten, 36–38 |
+
+All at 1/2: 38 × 32, 53 × 53, 57 × 56. Their white ruffs needed `"holes"`.
+Cirrup's eyes and Tempyre's three gold ones are drawn by hand; Cumulynx's came
+through. Both big ones are grainy on the wings.
+
+## Rivetron (2026-11-03)
+
+**Rivetron** (metal, humanoid) is one critter on its own, `stage: basic` with no
+evolution, all ours to change but the drawing. Moves: Slice, Blade, Bullet,
+Perfect Cut, Saber, Steel Jaws, Needle and Adamantine. It lives in Cotton Tunnel,
+17–20, and The Old Keep, 28–32. 1/2 with `"ink": 2`, 35 × 48. Its back is cut
+off at the waist, as drawn.

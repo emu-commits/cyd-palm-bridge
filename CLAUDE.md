@@ -48,7 +48,7 @@ before touching anything.
   rules are `tools/game_creatures/<slug>.yaml` with an "ours" allow-list
   line. Each drawing has a `<slug>.eyes.json` beside it: halving ruins eyes,
   so they're drawn again by hand (the README there; the first build drafts it). The first are the fire fox line (Cinderkit, Scorchvix, Pyrewing) and
-  the water axolotl line (Gillpip, Rillotl, Maelstrotl), the lightning line (Sparkip, Nimbolt, Fulminax), the wood line (Sprigling, Wildbough, Grovarch) and the venom line (Skullick, Ossicoil, Banewyrm).
+  the water axolotl line (Gillpip, Rillotl, Maelstrotl), the lightning line (Sparkip, Nimbolt, Fulminax), the wood line (Sprigling, Wildbough, Grovarch) the venom line (Skullick, Ossicoil, Banewyrm), the sky line (Cirrup, Cumulynx, Tempyre) and Rivetron (metal).
 - `docs/DEX_PLAN.md`: **Dex**, the critter index (Games folder, under
   Critters), a fixed hardware-like gadget: its bezel, title bar and keys never
   change, and all other text and the speaker come through its subscreens (no

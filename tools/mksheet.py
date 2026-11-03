@@ -133,8 +133,9 @@ class Transparent:
         return False
 
 
-def open_drawing(src):
-    """The picture's RGB pixels, its size, what its background is and which pixels are it."""
+def open_drawing(src, holes=None):
+    """The picture's RGB pixels, its size, what its background is and which pixels are it.
+    `holes`: see background()."""
     from PIL import Image
     im = Image.open(src)
     w, h = im.size
@@ -144,11 +145,13 @@ def open_drawing(src):
         return list(im.convert("RGB").get_flattened_data()), w, h, Transparent(), bytearray(a < 128 for a in alpha)
     px = list(im.convert("RGB").get_flattened_data())
     bd = Backdrop(px, w, h)
-    return px, w, h, bd, background(px, w, h, bd)
+    return px, w, h, bd, background(px, w, h, bd, holes)
 
 
-def background(px, w, h, bd):
-    """1 where the pixel is background: the backdrop's greys, connected to the picture's edge."""
+def background(px, w, h, bd, holes=None):
+    """1 where the pixel is background: the backdrop's greys, connected to the picture's edge.
+    `holes`, a list of [x, y] in the picture, says which enclosed patches are see-through:
+    silver armour or a white ruff inside an outline looks just like one to the guess below."""
     bgish = bd.bgish
     bg = bytearray(w * h)
     q = deque()
@@ -177,6 +180,8 @@ def background(px, w, h, bd):
     # (both its tones) or is too big to be an eye's white or a highlight.
     seen = bytearray(bg)
     big = w * h // 2000
+    listed = None if holes is None else {y * w + x for x, y in holes}
+    found = set()
     for start in range(w * h):
         if seen[start] or not bgish(px[start]):
             continue
@@ -190,10 +195,19 @@ def background(px, w, h, bd):
                 if ok and not seen[j] and bgish(px[j]):
                     seen[j] = 1
                     q.append(j)
+        if listed is not None:
+            if listed.intersection(hole):
+                found.update(listed.intersection(hole))
+                for i in hole:
+                    bg[i] = 1
+            continue
         light, grey = bd.checker([px[i] for i in hole])
         if len(hole) >= big or (len(hole) >= 64 and min(light, grey) >= len(hole) // 6):
             for i in hole:
                 bg[i] = 1
+    if listed is not None and listed - found:
+        fail(f"these holes aren't enclosed patches of the background's greys: "
+             f"{sorted([i % w, i // w] for i in listed - found)}")
     return bg
 
 
@@ -621,7 +635,7 @@ def eyes_path(src):
 
 
 def write_eyes(path, eyes):
-    lines = [f'  {json.dumps(key)}: {eyes[key]}' for key in ("scale", "ink") if eyes.get(key)]
+    lines = [f'  {json.dumps(key)}: {eyes[key]}' for key in ("scale", "ink", "holes") if eyes.get(key) is not None]
     for part in PARTS:
         rows = [json.dumps(e) for e in eyes[part]]
         body = "[\n    " + ",\n    ".join(rows) + "\n  ]" if rows else "[]"
@@ -631,8 +645,8 @@ def write_eyes(path, eyes):
 
 def read_eyes(path):
     eyes = json.loads(Path(path).read_text())
-    if set(eyes) - {"scale", "ink"} != set(PARTS):
-        fail(f"{path}: want exactly the parts {PARTS}, and may have a scale and an ink")
+    if set(eyes) - {"scale", "ink", "holes"} != set(PARTS):
+        fail(f"{path}: want exactly the parts {PARTS}, and may have a scale, an ink and holes")
     if not isinstance(eyes.get("scale", 1), int) or eyes.get("scale", 1) < 1:
         fail(f"{path}: the scale is a whole number: {eyes['scale']}")
     for part in PARTS:
@@ -666,10 +680,10 @@ def build(src, notes, scale=None, draft=False):
     """The sheet. `draft`: a drawing with no eyes file gets one written, from what it can
     find; otherwise that's an error, because the sheet can't be known without it."""
     from PIL import Image
-    px, w, h, bd, bg = open_drawing(src)
-    notes.append(f"the background: {bd.tones}")
     path = eyes_path(src)
     saved = read_eyes(path) if path.exists() else None
+    px, w, h, bd, bg = open_drawing(src, saved.get("holes") if saved else None)
+    notes.append(f"the background: {bd.tones}")
     if saved is None and not draft:
         fail(f"{path} is missing (a first build writes a draft: run mksheet.py {src} -o OUT)")
     if scale is None and saved:
@@ -704,7 +718,8 @@ def build(src, notes, scale=None, draft=False):
     arts = []
     for name, box, m, (sx, sy) in zip(names, boxes, masks, sigs):
         gx, gy = phase(sx, p), phase(sy, p)
-        rows = sample(px, m, w, h, box, (gx[2], gx[1]), (gy[2], gy[1]), bd)
+        # with the holes listed, what's left of the light cells is the drawing's: nothing to peel
+        rows = sample(px, m, w, h, box, (gx[2], gx[1]), (gy[2], gy[1]), Transparent() if saved and "holes" in saved else bd)
         arts.append(rows)
         notes.append(f"{name}: at ({box[0]},{box[1]})-({box[2]},{box[3]}), its pixel {gx[2]:.3f} x {gy[2]:.3f}, "
                      f"{len(rows[0])} x {len(rows)}")

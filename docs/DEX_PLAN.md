@@ -124,7 +124,7 @@ was also a confusing label, since it looks like a way out.
      shows the position.
    - A seen critter's icon is its silhouette, and its name is ???. A
      never-seen critter has no icon.
-   - **Lower screen:** the counts (**SEEN 11  CAUGHT 6 / 42**), the filter and
+   - **Lower screen:** the counts (**SEEN 11  CAUGHT 6 / 46**), the filter and
      page ("Showing all, page 1 of 7"), and what to do next.
 4. **An entry** (mock-ups 4 and 5).
    - **Upper screen:** the sprite at 2×, and beside it the number, the name,
@@ -281,12 +281,12 @@ when the app opens and freed when it closes.** It adds **no static DRAM**.
 | The open game file's directory and the save's header and bitsets | about 1 KB |
 | One entry's sprite, decoded to RGB565 with alpha, drawn at 2× by `lv_image`'s scale (no second buffer) | 12 KB |
 | The page's icons: five at 24×24 RGB565 with alpha | 8.6 KB |
-| The fixed bezel and keys, and the page's labels and rows: **five rows reused** across pages rather than 42 objects | about 3 KB of the LVGL pool (estimate) |
+| The fixed bezel and keys, and the page's labels and rows: **five rows reused** across pages rather than 46 objects | about 3 KB of the LVGL pool (estimate) |
 | The speaker's portrait: RGB565 with no alpha, 20.8 KB of flash, drawn from there | none intended, to be measured in D3 |
 | **Total** | **about 22 KB of heap, 3 KB of the pool** |
 
 There's about 106 KB of heap free with the SD card mounted, and 11 KB free
-in the LVGL pool. Paging with ◀ and ▶, rather than scrolling 42 rows,
+in the LVGL pool. Paging with ◀ and ▶, rather than scrolling 46 rows,
 keeps the Dex within the pool. The smoke tour's `B` and `E` commands prove
 the heap is given back, as they do for Study.
 
@@ -359,7 +359,7 @@ drawing into its sheet, and a creature of our own has its rules in
 `tools/game_creatures/<slug>.yaml` and an allow-list line with status
 "ours". The first are the fire fox line (Cinderkit, Scorchvix, Pyrewing) and
 the axolotl line (Gillpip, Rillotl, Maelstrotl), then the lightning line
-(Sparkip, Nimbolt, Fulminax), and the wood and venom lines (Sprigling, Wildbough, Grovarch; Skullick, Ossicoil, Banewyrm), so the game has **42** critters now, not the 27 counted below; their
+(Sparkip, Nimbolt, Fulminax), and the wood and venom lines (Sprigling, Wildbough, Grovarch; Skullick, Ossicoil, Banewyrm), the sky line (Cirrup, Cumulynx, Tempyre) and Rivetron, so the game has **46** critters now, not the 27 counted below; their
 descriptions are in their rules, ready for the Dex. Who uses them in Acts 2
 and 3 is still open: today they're only wild.
 
@@ -381,7 +381,7 @@ and 3 is still open: today they're only wild.
 
 - **A critter seen but not caught** shows its silhouette, with ??? for everything
   else, as in the games.
-- **The list has the 24×24 icons**, about 14 KB in the file for 42 critters.
+- **The list has the 24×24 icons**, about 15 KB in the file for 46 critters.
 - **The Dex order:** the starters' lines first, then in the order a player meets
   them.
 - **The missing descriptions:** I draft them for the owner's review. They must fit

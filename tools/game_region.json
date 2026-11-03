@@ -425,7 +425,8 @@
       {"creature": "anoleaf",   "levels": [2, 4], "rate": 15},
       {"creature": "noctula",   "levels": [3, 5], "rate": 15},
       {"creature": "zunna",     "levels": [3, 5], "rate": 20},
-      {"creature": "sparkip",   "levels": [3, 5], "rate": 10}
+      {"creature": "sparkip",   "levels": [3, 5], "rate": 10},
+      {"creature": "cirrup",   "levels": [3, 5], "rate": 10}
     ],
     "brideswood": [
       {"creature": "noctula",   "levels": [4, 7], "rate": 25},
@@ -464,7 +465,8 @@
       {"creature": "selmatek",     "levels": [19, 23], "rate": 15},
       {"creature": "cateye",       "levels": [20, 24], "rate": 10},
       {"creature": "dune_pincher", "levels": [20, 24], "rate": 10},
-      {"creature": "nimbolt",      "levels": [19, 22], "rate": 10}
+      {"creature": "nimbolt",      "levels": [19, 22], "rate": 10},
+      {"creature": "cumulynx",   "levels": [19, 22], "rate": 10}
     ],
     "dragons_cave": [
       {"creature": "agnidon",      "levels": [30, 33], "rate": 15},
@@ -485,7 +487,8 @@
       {"creature": "fluttaflap", "levels": [13, 16], "rate": 15},
       {"creature": "arthrobolt", "levels": [13, 16], "rate": 10},
       {"creature": "cinderkit",  "levels": [12, 15], "rate": 10},
-      {"creature": "skullick",   "levels": [12, 15], "rate": 10}
+      {"creature": "skullick",   "levels": [12, 15], "rate": 10},
+      {"creature": "cirrup",   "levels": [12, 15], "rate": 10}
     ],
     "brideswood_b": [
       {"creature": "noctula",    "levels": [14, 17], "rate": 20},
@@ -504,7 +507,8 @@
       {"creature": "noctalo",      "levels": [18, 20], "rate": 20},
       {"creature": "djinnbo",      "levels": [17, 20], "rate": 15},
       {"creature": "scorchvix",  "levels": [17, 20], "rate": 10},
-      {"creature": "ossicoil",   "levels": [17, 20], "rate": 10}
+      {"creature": "ossicoil",   "levels": [17, 20], "rate": 10},
+      {"creature": "rivetron",   "levels": [17, 20], "rate": 10}
     ],
     "route1_c": [
       {"creature": "cardiwing",  "levels": [22, 26], "rate": 20},
@@ -513,7 +517,8 @@
       {"creature": "noctalo",    "levels": [22, 26], "rate": 15},
       {"creature": "zunna",      "levels": [22, 26], "rate": 20},
       {"creature": "fluttaflap", "levels": [22, 26], "rate": 15},
-      {"creature": "rillotl",    "levels": [22, 26], "rate": 10}
+      {"creature": "rillotl",    "levels": [22, 26], "rate": 10},
+      {"creature": "cumulynx",   "levels": [22, 26], "rate": 10}
     ],
     "brideswood_c": [
       {"creature": "noctalo",  "levels": [24, 28], "rate": 20},
@@ -551,7 +556,8 @@
       {"creature": "cateye",       "levels": [29, 33], "rate": 10},
       {"creature": "dune_pincher", "levels": [29, 33], "rate": 10},
       {"creature": "agnidon",      "levels": [30, 34], "rate": 15},
-      {"creature": "ossicoil",   "levels": [28, 32], "rate": 10}
+      {"creature": "ossicoil",   "levels": [28, 32], "rate": 10},
+      {"creature": "rivetron",   "levels": [28, 32], "rate": 10}
     ],
     "keep_d": [
       {"creature": "eyesore",    "levels": [30, 34], "rate": 15},
@@ -575,7 +581,8 @@
       {"creature": "velocitile", "levels": [36, 38], "rate": 8},
       {"creature": "agnigon",    "levels": [36, 38], "rate": 9},
       {"creature": "pyrewing",     "levels": [36, 38], "rate": 8},
-      {"creature": "banewyrm",   "levels": [36, 38], "rate": 8}
+      {"creature": "banewyrm",   "levels": [36, 38], "rate": 8},
+      {"creature": "tempyre",   "levels": [36, 38], "rate": 8}
     ]
   }
 }

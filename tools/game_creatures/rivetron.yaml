@@ -1,0 +1,24 @@
+# Rivetron: a metal critter on its own. The owner's drawing (2026-11-03).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Rivetron
+description: >-
+  Nobody remembers building them, and the Old Keep's records don't say. It winds
+  its own gear each morning and salutes anything taller than it is.
+drawing: tools/game_art/src/rivetron.jpg
+types: [metal]
+shape: humanoid
+stage: basic
+experience_group: default
+catch_rate: 45
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: slice}
+- {level_learned: 1, technique: blade}
+- {level_learned: 9, technique: bullet}
+- {level_learned: 14, technique: perfect_cut}
+- {level_learned: 20, technique: saber}
+- {level_learned: 26, technique: steel_jaws}
+- {level_learned: 32, technique: needle}
+- {level_learned: 38, technique: adamantine}

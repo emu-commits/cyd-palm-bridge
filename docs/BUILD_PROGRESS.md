@@ -16,6 +16,18 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-03 — Critters: the owner's sky line and Rivetron
+
+Four new drawings: **Cirrup**, **Cumulynx**, **Tempyre** (sky) and **Rivetron**
+(metal), so 46 critters; `courses/critters/game.bin` 636,676 → 653,980 B, from
+`ls`. Five new moves are played: Adamantine, Fledgling, Gust, Peck, Steel Jaws.
+
+`tools/mksheet.py` guessed that any big enclosed light patch was a see-through
+gap, which erased Rivetron's armour and the sky line's white ruffs. A new
+`"holes"` key in the eyes file lists the real gaps by a point in the picture, and
+a drawing with that key isn't peeled for light fringe either. The 15 earlier
+sheets have no such key and still pass `--check` to the byte.
+
 ### 2026-11-02 — Critters: the owner's wood and venom lines
 
 Six new drawings: **Sprigling**, **Wildbough**, **Grovarch** (wood) and

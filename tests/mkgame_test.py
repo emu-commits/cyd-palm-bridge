@@ -294,6 +294,21 @@ def main():
     blacks = lambda im: sum(c[:3] == (0, 0, 0) for c in im.get_flattened_data())
     check(blacks(mksheet.shrink(rows, 2)) == 1, "1/2: a speck of ink didn't hold")
     check(blacks(mksheet.shrink(rows, 2, None, 2)) == 0, "1/2, ink 2: a speck darkened the block")
+    white = (255, 255, 255)                                             # the eyes file's "holes": an outlined white patch
+    px = [white] * 1600
+    for i in range(10, 30):
+        for j in (i * 40 + 10, i * 40 + 29, 10 * 40 + i, 29 * 40 + i):
+            px[j] = (0, 0, 0)
+    bd = mksheet.Backdrop(px, 40, 40)
+    inside = 20 * 40 + 20
+    check(mksheet.background(px, 40, 40, bd)[inside] == 1, "an enclosed white patch isn't guessed a hole")
+    check(mksheet.background(px, 40, 40, bd, [])[inside] == 0, "no holes listed: an enclosed white patch went")
+    check(mksheet.background(px, 40, 40, bd, [[20, 20]])[inside] == 1, "a listed hole stayed")
+    try:
+        mksheet.background(px, 40, 40, bd, [[10, 20]])                  # the outline, not a patch
+        check(False, "a hole that isn't one was taken")
+    except SystemExit:
+        pass
     tall = __import__("PIL.Image").Image.new("RGBA", (4, 6))
     tall.putpixel((1, 0), (9, 9, 9, 255))                               # a row over: the emptier edge goes, not a middle row
     for x in range(4):
