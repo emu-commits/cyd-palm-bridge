@@ -16,6 +16,24 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-02 — Critters: the owner's wood and venom lines
+
+Six new drawings: **Sprigling**, **Wildbough**, **Grovarch** (wood) and
+**Skullick**, **Ossicoil**, **Banewyrm** (venom), so 42 critters;
+`courses/critters/game.bin` 610,696 → 636,676 B, from `ls`. Rules, places and
+Dex text are in `tools/game_creatures/`, and its README has the tables. Eight new
+moves are played: Blossom, Caustic Spray, Spiky Strike, Staff Smash, Stick,
+Sting, Viper, Woodsmash.
+
+`tools/mksheet.py` gained two things, and the nine earlier sheets still pass
+`--check` to the byte:
+
+- `"ink": 2` in the eyes file. At 1/2 any one cell of outline darkened a block, and
+  Grovarch and Banewyrm, the first drawings fine enough at 1/2 for it to matter,
+  went nearly black.
+- A front a row or two too tall loses its emptier edge row. It lost a row from the
+  middle, which would have cut Banewyrm across the torso.
+
 ### 2026-11-02 — Critters: the owner's lightning line
 
 Three new drawings, **Sparkip**, **Nimbolt** and **Fulminax** (36 critters;

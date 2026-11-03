@@ -289,6 +289,17 @@ def main():
             sheet = Image.open(Path(tmp) / "o.png").convert("RGBA")
             check(max(c[0] for c in sheet.get_flattened_data() if c[3]) > 200, "a transparent drawing lost its white")
             check(sheet.crop((0, 0, 64, 64)).getchannel("A").getbbox() is not None, "a transparent drawing has no front")
+    rows = [[(200, 200, 200)] * 6 for _ in range(6)]                    # the eyes file's "ink": a speck needs half a block
+    rows[2][2] = (0, 0, 0)
+    blacks = lambda im: sum(c[:3] == (0, 0, 0) for c in im.get_flattened_data())
+    check(blacks(mksheet.shrink(rows, 2)) == 1, "1/2: a speck of ink didn't hold")
+    check(blacks(mksheet.shrink(rows, 2, None, 2)) == 0, "1/2, ink 2: a speck darkened the block")
+    tall = __import__("PIL.Image").Image.new("RGBA", (4, 6))
+    tall.putpixel((1, 0), (9, 9, 9, 255))                               # a row over: the emptier edge goes, not a middle row
+    for x in range(4):
+        tall.putpixel((x, 5), (9, 9, 9, 255))
+    trimmed = mksheet.fit(tall, 4, 5, "tall", [])
+    check(trimmed.size == (4, 5) and trimmed.getpixel((0, 4))[3] == 255, f"a row over: {trimmed.size}")
     rows = [[(0, 0, 0)] + [(200, 200, 200)] * 3 for _ in range(4)]      # one cell of ink in a 4 x 4 block isn't a line
     check(mksheet.shrink(rows, 4).getpixel((0, 0))[:3] == (200, 200, 200), "1/4: a corner of ink darkened the block")
     rows = [[(0, 0, 0), (200, 200, 200)] for _ in range(2)]             # a line at 1/2 still holds

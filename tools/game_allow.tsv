@@ -74,6 +74,12 @@ creature	maelstrotl	CC0 1.0	CYD Palm	tools/game_art/maelstrotl-sheet.png	ours
 creature	sparkip	CC0 1.0	CYD Palm	tools/game_art/sparkip-sheet.png	ours
 creature	nimbolt	CC0 1.0	CYD Palm	tools/game_art/nimbolt-sheet.png	ours
 creature	fulminax	CC0 1.0	CYD Palm	tools/game_art/fulminax-sheet.png	ours
+creature	sprigling	CC0 1.0	CYD Palm	tools/game_art/sprigling-sheet.png	ours
+creature	wildbough	CC0 1.0	CYD Palm	tools/game_art/wildbough-sheet.png	ours
+creature	grovarch	CC0 1.0	CYD Palm	tools/game_art/grovarch-sheet.png	ours
+creature	skullick	CC0 1.0	CYD Palm	tools/game_art/skullick-sheet.png	ours
+creature	ossicoil	CC0 1.0	CYD Palm	tools/game_art/ossicoil-sheet.png	ours
+creature	banewyrm	CC0 1.0	CYD Palm	tools/game_art/banewyrm-sheet.png	ours
 
 # The townspeople are Tuxemon's sheets (mods/tuxemon/sprites/<slug>.png), each
 # credited under "Character Front Sprites" in ATTRIBUTIONS.md, which names who

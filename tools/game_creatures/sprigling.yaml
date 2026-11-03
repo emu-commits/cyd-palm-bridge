@@ -1,0 +1,23 @@
+# Sprigling: the wood line's first stage. The owner's drawing (2026-11-02).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Sprigling
+description: >-
+  A stump that woke up curious. It sheds its leaf collar each autumn and sulks
+  until the new one comes in.
+drawing: tools/game_art/src/sprigling.png
+types: [wood]
+shape: sprite
+stage: basic
+experience_group: default
+catch_rate: 100
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: stick}
+- {level_learned: 1, technique: gnaw}
+- {level_learned: 5, technique: fluff_up}
+- {level_learned: 9, technique: spiky_strike}
+- {level_learned: 13, technique: staff_smash}
+evolutions:
+- {at_level: 16, monster_slug: wildbough}

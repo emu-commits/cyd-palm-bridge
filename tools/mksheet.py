@@ -420,9 +420,9 @@ def dark(c):
     return lum(c) < 8 * 48 and max(c) < 96
 
 
-def shrink(rows, k, where=None):
+def shrink(rows, k, where=None, ink_share=4):
     """The drawing at 1/k: each k x k block becomes its medoid (the one of its own
-    colours closest to the rest, the darker on a tie), its darkest ink if a quarter of
+    colours closest to the rest, the darker on a tie), its darkest ink if 1/ink_share of
     it or more is ink (so outlines and eyes hold), or clear if most of it is. Of the k x k ways to lay the blocks, the one whose blocks are most
     alike. Returns an RGBA image cropped to what's drawn. `where`, a list, gets (ox, oy, left,
     top): a drawing's pixel (x, y) is the result's ((x + ox) // k - left, (y + oy) // k - top)."""
@@ -442,7 +442,7 @@ def shrink(rows, k, where=None):
                         out.append((0, 0, 0, 0))
                         continue
                     ink = [c for c in cs if dark(c)]
-                    if 4 * len(ink) < k * k:    # a corner of an outline, in a big block, isn't a line
+                    if ink_share * len(ink) < k * k:    # a corner of an outline, in a big block, isn't a line
                         ink = []
                     m = min(ink or cs, key=lambda c: (sum(wdist(c, d) for d in cs), lum(c), c))
                     spread += sum(wdist(m, d) for d in cs)
@@ -621,7 +621,7 @@ def eyes_path(src):
 
 
 def write_eyes(path, eyes):
-    lines = [f'  "scale": {eyes["scale"]}'] if eyes.get("scale") else []
+    lines = [f'  {json.dumps(key)}: {eyes[key]}' for key in ("scale", "ink") if eyes.get(key)]
     for part in PARTS:
         rows = [json.dumps(e) for e in eyes[part]]
         body = "[\n    " + ",\n    ".join(rows) + "\n  ]" if rows else "[]"
@@ -631,8 +631,8 @@ def write_eyes(path, eyes):
 
 def read_eyes(path):
     eyes = json.loads(Path(path).read_text())
-    if set(eyes) - {"scale"} != set(PARTS):
-        fail(f"{path}: want exactly the parts {PARTS}, and may have a scale")
+    if set(eyes) - {"scale", "ink"} != set(PARTS):
+        fail(f"{path}: want exactly the parts {PARTS}, and may have a scale and an ink")
     if not isinstance(eyes.get("scale", 1), int) or eyes.get("scale", 1) < 1:
         fail(f"{path}: the scale is a whole number: {eyes['scale']}")
     for part in PARTS:
@@ -648,6 +648,13 @@ def fit(im, w, h, what, notes):
     """`im` shrunk (nearest, whole steps of the art) if it doesn't fit w x h."""
     from PIL import Image
     if im.width <= w and im.height <= h:
+        return im
+    if im.width <= w and im.height - h <= 2:     # a row or two over: lose the emptier edge, not a row of the middle
+        while im.height > h:
+            top = sum(a > 0 for a in im.crop((0, 0, im.width, 1)).getchannel("A").get_flattened_data())
+            foot = sum(a > 0 for a in im.crop((0, im.height - 1, im.width, im.height)).getchannel("A").get_flattened_data())
+            im = im.crop((0, 1, im.width, im.height)) if top <= foot else im.crop((0, 0, im.width, im.height - 1))
+        notes.append(f"{what}: its emptier edge row trimmed to fit {h} tall")
         return im
     s = min(w / im.width, h / im.height)
     nw, nh = max(1, int(im.width * s)), max(1, int(im.height * s))
@@ -717,7 +724,8 @@ def build(src, notes, scale=None, draft=False):
         scales[2:] = [k, k]
         notes.append(f"the icons: 1/{k}")
     wheres = [[] for _ in arts]
-    shrunk = [shrink(r, k, wh) for r, k, wh in zip(arts, scales, wheres)]
+    ink_share = saved.get("ink", 4) if saved else 4
+    shrunk = [shrink(r, k, wh, ink_share) for r, k, wh in zip(arts, scales, wheres)]
     front = fit(shrunk[0], *room[0], "the front", notes)
     back = fit(shrunk[1], *room[1], "the back", notes)
     if len(shrunk) == 4:

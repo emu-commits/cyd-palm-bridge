@@ -33,7 +33,10 @@ Tuxemon. Each one is three files and an allow-list line:
    so big icons can shrink the front, and a line's stages can come out in the
    wrong order of size. Put `"scale": N` at the top of the eyes file (below) to
    set the front and back at 1/N; the icons then fit themselves. Compare the
-   sizes with the other lines'.
+   sizes with the other lines'. A row or two over the 58 a front may stand
+   loses its emptier edge. If a fine drawing at 1/2 comes out nearly black,
+   `"ink": 2` beside the scale keeps outline only where it fills half a block,
+   not a quarter.
 
    The front and back share **15 colours**, as every critter in the game
    does, so a drawing with many shades loses some. A drawing already at
@@ -157,3 +160,39 @@ Static Field all need effects the game doesn't play yet (flinching, exhausted,
 blinded, sniping, charging), so the line's stronger attacks are Whirlwind,
 Saber, Radiance, All In and Energy Beam. Battery Discharge, at 1.5, is their
 strongest lightning move.
+
+## The wood line (2026-11-02)
+
+The owner's fourth line: **Sprigling** (wood, sprite) evolves at 16 into
+**Wildbough** (wood, humanoid), which evolves at 32 into **Grovarch** (wood,
+brute). As with the venom line, the names, moves, places and Dex text are ours
+for the owner to change. Moves: Stick, Spiky Strike, Staff Smash, Blossom and
+Woodsmash, with Gnaw, Fluff Up, Saber and All In. Cutting Leaves, Pollen Blast,
+Splinter and Thorn Burst need effects the game doesn't play yet.
+
+| | Act 1 | Act 2 | Act 3 |
+|---|---|---|---|
+| Sprigling | Brideswood, 5–7 | Brideswood, 14–17 | |
+| Wildbough | | Route 2, 17–20 | Brideswood, 24–28 |
+| Grovarch | | | The Old Keep once Wyrmkeeper Ashe is beaten, 34–36 |
+
+Scales 1/5, 1/4 and 1/2. Grovarch is a JPEG on a checkerboard with a real
+5 px grid, set `"ink": 2`; its left eye was lost, so both are drawn in green.
+
+## The venom line (2026-11-02)
+
+The owner's fifth line: **Skullick** (venom, varmint) evolves at 16 into
+**Ossicoil** (venom, serpent), which evolves at 32 into **Banewyrm** (venom,
+dragon). Wings and all, Banewyrm is venom only, for the owner to change. Moves:
+Spit Poison, Acid, Sting, Muck, Caustic Spray and Viper, with Gnaw, Saber and
+Wing Tip.
+
+| | Act 1 | Act 2 | Act 3 |
+|---|---|---|---|
+| Skullick | Cotton Tunnel, 6–8 | Route 1, 12–15 | |
+| Ossicoil | | Cotton Tunnel, 17–20 | The Old Keep, 28–32 |
+| Banewyrm | | | Dragon's Cave once Wyrmkeeper Ashe is beaten, 36–38 |
+
+Scales 1/5, 1/5 and 1/2. Banewyrm (a JPEG on white, `"ink": 2`) is the busiest
+drawing yet and the largest, 58 × 58; it's grainy on the torso. Ossicoil's and
+Banewyrm's fronts have magenta eyes drawn in a dark slit.
