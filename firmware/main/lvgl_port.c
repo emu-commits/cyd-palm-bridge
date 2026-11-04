@@ -284,8 +284,11 @@ void lvgl_port_run(void){
              * the fast path below, so the one extra pass costs a frame, not 120 ms. */
             vTaskDelay(pdMS_TO_TICKS(120));
         } else {
+            /* at least a tick: at 100 Hz anything under 10 ms converts to 0 ticks, which
+             * doesn't block, so the loop spun and IDLE never ran (BUILD_PROGRESS.md) */
             if(next > 30) next = 30;
-            vTaskDelay(pdMS_TO_TICKS(next ? next : 5));
+            TickType_t ticks = pdMS_TO_TICKS(next);
+            vTaskDelay(ticks ? ticks : 1);
         }
     }
 }

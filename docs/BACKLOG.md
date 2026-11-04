@@ -26,14 +26,16 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 
 `DEX_PLAN.md` is the plan, §8 D4 and §10 what's here. On the board since 2026-11-03: the first report is in `BUILD_PROGRESS.md`.
 
-- [d] **Walking in Critters:** smooth, with no visible drawing down the screen (33 ms a
-  frame, measured; it was 94). **The panel at 40 MHz:** no speckle, wrong colours or
+- [d] **Walking in Critters:** smooth, with no visible drawing down the screen (40 ms a
+  frame at 160 MHz, measured; it was 94). **The panel at 40 MHz:** no speckle, wrong colours or
   shifted lines anywhere, in any app. If there are, `clock_speed_hz` in `display.c`.
-- [d] Critters and the Dex open within about a third of a second of the tap (measured:
-  345 and 375 ms), and Wi-Fi and a sync still work (the SD card changed SPI host).
+- [d] Critters and the Dex open within about half a second of the tap (measured at
+  160 MHz: 419 and 438 ms to first paint), and Wi-Fi and a sync still work (the SD card changed SPI host).
 - [d] The fade is very slight on the Dex's Talk page, at every strength,
   and the Dex's bezel has no dark square corners.
-- [d] Battery life at 240 MHz: the CPU was at 160, and it's not measured.
+- [d] At 160 MHz (it was 240 for a day) and with the loop sleeping at least a tick
+  (`lvgl_port_run()`), does walking still feel smooth? It went from 33 to 40 ms a frame.
+  The battery gain isn't measured: `power.log` can A/B it.
 - [d] **The effect's strength on the panel:** Menu ▸ TV effect cycles Light, Standard,
   Strong, Off, and is remembered. Is small text readable through it, in the Dex's
   list? Which one do you want as the default? (Critters has given the effect up.)

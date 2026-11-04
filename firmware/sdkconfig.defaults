@@ -6,10 +6,12 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # --- build for size (no PSRAM: RAM and flash are both tight) ---
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 
-# --- speed: the CPU's top clock. MEASURED in Critters, walking: 94 ms a frame at 160
-# with the TV effect, 56 without. Costs some battery while awake; the idle path below
-# is unchanged. ---
-CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+# --- speed: 160 MHz, not 240. CONFIG_PM_ENABLE is off (below), so this clock holds all
+# the time the board is awake, screen off too, and 240 also raises the core voltage
+# (1.10 V to 1.25 V) and the PLL (320 to 480 MHz). MEASURED in Critters, walking: 34.5 ms
+# a frame here, 33.0 at 240, before the main loop's sleep fix; most of a frame is the SPI
+# send, which doesn't follow the CPU clock (BUILD_PROGRESS.md, 2026-11-04). ---
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
 
 # --- TLS: Mozilla CA bundle so *.icloud.com verifies without bundled certs ---
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y

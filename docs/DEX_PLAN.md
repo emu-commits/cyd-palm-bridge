@@ -209,7 +209,7 @@ the box and no history across LVGL's 40-row strips.
 - **A change in the box redraws its whole rows,** or the glow leaves a seam at
   the edge of a partial redraw. `crt_widen()` does that on the display's
   `LV_EVENT_INVALIDATE_AREA`, so a key press outside the box costs nothing. A whole
-  box is 26,880 pixels: about 9 ms at 240 MHz, measured (`BUILD_PROGRESS.md`), which
+  box is 26,880 pixels: about 14 ms at 160 MHz, computed from 82 cycles a pixel (`BUILD_PROGRESS.md`), which
   is nothing on a screen that doesn't animate.
 - **Critters doesn't have the effect** (§10): `crt_plain()` keeps the rounded corners
   and leaves out everything else, with no widening.

@@ -16,6 +16,64 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-04 — Back to 160 MHz
+
+The owner asked why the CPU went to 240 MHz, and whether it was still needed. It went up
+on 2026-11-03 for a walking frame of 94 ms at 160 (56 without the TV effect), with the
+panel at 20 MHz. Since then the panel went to 40 MHz, the read-ahead and `-O2` came in,
+and Critters gave up the effect, which was 38 of the 94 ms. All of those stay.
+
+Measured **on the board**, with two throwaway builds of `096dc9e` that differ only in the
+clock (not committed; they save nothing to the card). Auto-play ran for two minutes, from
+the same save, on USB:
+
+| What | 240 MHz | 160 MHz |
+|---|---|---|
+| A walking frame, the time between frames (median), before the sleep below | 33.0 ms | **34.5 ms** |
+| ...the time 95% of them are within | 36.7 ms | 39.4 ms |
+| ...its work (median) | 30.3 ms | 33.4 ms |
+| ...the send to the panel | 17.5 ms | 18.1 ms |
+| One tile's walk (median) | 132 ms | 142 ms |
+| A battle frame's work (mean) | 39.6 ms | 43.8 ms |
+| Opening Critters, the call to first paint | 368 ms | 419 ms |
+| Opening the Dex, the call to first paint | 382 ms | 438 ms |
+
+These are one run each, 256 walking frames in each. The opening times aren't comparable
+with the 345 and 375 ms below, which were measured from the tap in another build.
+
+- **Why it hardly matters:** over half a frame is the SPI send, whose clock comes from
+  the 80 MHz APB and not the CPU. So the CPU's 1.5x buys 7% on a walking tile.
+- **The Dex's effect** should go from about 9 ms a screenful to about 14 (computed from 82
+  cycles a pixel, not timed), on a screen that doesn't animate.
+- **The battery isn't measured.** There's no meter on this bench and it needs a discharge.
+  The case is from the ESP-IDF source and the config: 240 uses 1.25 V and the 480 MHz PLL,
+  160 uses 1.10 V and the 320 MHz PLL at this 40 MHz flash speed. With `CONFIG_PM_ENABLE`
+  off the clock never drops, so the comment here that said idle was unaffected was wrong.
+- **Lesson:** the first runs read 84 ms a frame and tripped the task watchdog, at both
+  clocks. The board boots to the lock screen, and the script had opened the game under
+  it, so LVGL was repainting the dashboard over the game. It can't happen in use: the lock
+  closes the game. A per-stage breakdown showed it (the game's draw callback ran 0 times a
+  frame), and a run that matched the 33 ms measured earlier confirmed the fix. Unlock
+  first, and check a timing build against a known number.
+- **The loop now sleeps at least a tick.** `lvgl_port_run()` called
+  `vTaskDelay(pdMS_TO_TICKS(next))`, and at `CONFIG_FREERTOS_HZ=100` anything under 10 ms
+  is 0 ticks, which doesn't block, so the loop spun and IDLE didn't run. Measured the same
+  way, at 160 MHz, one run each:
+
+  | What | Spinning | At least a tick |
+  |---|---|---|
+  | The loop asleep: Critters open, standing still | 46.9% | **95.3%** |
+  | ...the launcher | 84.1% | 95.5% |
+  | ...the lock screen | 83.7% | 95.7% |
+  | ...Auto-play, walking and battles | 36.9% | 72.8% |
+  | ...Auto-play, a battle window | 48.2% | 88.0% |
+  | A walking frame, the time between frames (median) | 34.5 ms | **40.0 ms** |
+  | One tile's walk (median) | 142 ms | 160 ms |
+
+  The cost is the walk: a frame now waits for a 10 ms tick boundary. The idle numbers
+  before the fix vary between runs. The current drawn isn't measured. Whether 40 ms is
+  acceptable is the owner's bench check.
+
 ### 2026-11-03 — Critters and the Dex made fast, from the first bench report
 
 **Later the same day, from the bench: Critters gives the effect up.** Performance was
@@ -58,7 +116,8 @@ with a throwaway build that timed each stage and wrote nothing (not committed).
   40 MHz, not 20. The sending time halved as computed. **The panel's picture at 40 MHz
   is a bench check.**
 - **240 MHz, not 160,** and `-O2` for LVGL, `crt.c`, `ui_monster.c`, `lvgl_port.c`.
-  It costs some battery while awake, not measured.
+  It costs some battery while awake, not measured. (The clock went back to 160 on
+  2026-11-04, above; `-O2` stays. The "After" column here is at 240.)
 - **The view answers `LV_EVENT_COVER_CHECK`,** so nothing behind it is painted first.
 - **The effect:** three channels in one word took it from 151 cycles a pixel to 82, and
   that's as far as it goes. A load costs 7 cycles here (a store 4, a multiply 2) and
