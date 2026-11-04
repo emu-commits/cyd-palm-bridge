@@ -3,6 +3,63 @@
   "note": "The first region (G3, 2026-10-16): Larkhollow, Route 1, Brideswood, Cotton Tunnel and Kestrel. Route 1, Brideswood and the tunnel are Tuxemon's Spyder maps from clean tilesets; the two towns are laid out for this game (tools/game_maps/) from the clean sheets. Route 1's east half doesn't reach Brideswood on foot in Tuxemon's map, so the way on is its open north edge. The story and every line of dialogue are ours.",
   "player": ["player", "player_green", "player_orange", "player_olive", "player_violet", "player_rose"],
   "start": {"area": "larkhollow", "x": 6, "y": 10, "facing": "down"},
+  "dex": {
+    "order": [
+      "agnite",
+      "agnidon",
+      "agnigon",
+      "anoleaf",
+      "gectile",
+      "velocitile",
+      "cardiling",
+      "cardiwing",
+      "cardinale",
+      "vamporm",
+      "dracune",
+      "fluttaflap",
+      "nut",
+      "bolt",
+      "arthrobolt",
+      "zunna",
+      "noctula",
+      "noctalo",
+      "sparkip",
+      "nimbolt",
+      "fulminax",
+      "cirrup",
+      "cumulynx",
+      "tempyre",
+      "eyenemy",
+      "eyesore",
+      "selket",
+      "selmatek",
+      "pigabyte",
+      "gillpip",
+      "rillotl",
+      "maelstrotl",
+      "sprigling",
+      "wildbough",
+      "grovarch",
+      "cateye",
+      "dune_pincher",
+      "djinnbo",
+      "cinderkit",
+      "scorchvix",
+      "pyrewing",
+      "skullick",
+      "ossicoil",
+      "banewyrm",
+      "propellercat",
+      "rivetron"
+    ],
+    "descriptions": {
+      "agnigon": "It's called a false dragon: it looks like a dragon, but evolved from a different line of reptiles.",
+      "arthrobolt": "It hates commanding its fellow NUT and BOLT, and usually runs away. Then no one instructs them.",
+      "dune_pincher": "It wraps itself in whatever is closest. In the desert, that's the shrouds of long-dead pharaohs.",
+      "nut": "In great ocean ships, thousands of NUT and BOLT provide power and hold the steel plates together.",
+      "selmatek": "Ancient desert kings kept SELMATEK as watchdogs and hunting companions. Now they guard the tombs."
+    }
+  },
   "starters": ["agnite", "anoleaf", "cardiling", "vamporm", "nut"],
   "items": ["potion", "super_potion", "mega_potion", "revive", "cureall"],
   "money": {"start": 300, "per_level": 15},
@@ -424,21 +481,27 @@
       {"creature": "vamporm",   "levels": [2, 4], "rate": 20},
       {"creature": "anoleaf",   "levels": [2, 4], "rate": 15},
       {"creature": "noctula",   "levels": [3, 5], "rate": 15},
-      {"creature": "zunna",     "levels": [3, 5], "rate": 20}
+      {"creature": "zunna",     "levels": [3, 5], "rate": 20},
+      {"creature": "sparkip",   "levels": [3, 5], "rate": 10},
+      {"creature": "cirrup",   "levels": [3, 5], "rate": 10}
     ],
     "brideswood": [
       {"creature": "noctula",   "levels": [4, 7], "rate": 25},
       {"creature": "zunna",     "levels": [4, 7], "rate": 25},
       {"creature": "eyenemy",   "levels": [5, 7], "rate": 20},
       {"creature": "selket",    "levels": [5, 7], "rate": 20},
-      {"creature": "pigabyte",  "levels": [6, 8], "rate": 10}
+      {"creature": "pigabyte",  "levels": [6, 8], "rate": 10},
+      {"creature": "gillpip",   "levels": [5, 7], "rate": 10},
+      {"creature": "sprigling",  "levels": [5, 7], "rate": 10}
     ],
     "cotton_tunnel": [
       {"creature": "nut",          "levels": [6, 8], "rate": 30},
       {"creature": "cateye",       "levels": [6, 8], "rate": 20},
       {"creature": "dune_pincher", "levels": [6, 9], "rate": 20},
       {"creature": "noctula",      "levels": [6, 8], "rate": 20},
-      {"creature": "djinnbo",      "levels": [7, 9], "rate": 10}
+      {"creature": "djinnbo",      "levels": [7, 9], "rate": 10},
+      {"creature": "cinderkit",    "levels": [6, 8], "rate": 10},
+      {"creature": "skullick",   "levels": [6, 8], "rate": 10}
     ],
     "spyder_route4": [
       {"creature": "noctula",      "levels": [14, 17], "rate": 20},
@@ -447,7 +510,9 @@
       {"creature": "pigabyte",     "levels": [15, 18], "rate": 15},
       {"creature": "noctalo",      "levels": [18, 20], "rate": 10},
       {"creature": "selmatek",     "levels": [18, 20], "rate": 10},
-      {"creature": "djinnbo",      "levels": [16, 19], "rate": 10}
+      {"creature": "djinnbo",      "levels": [16, 19], "rate": 10},
+      {"creature": "sparkip",      "levels": [14, 17], "rate": 10},
+      {"creature": "wildbough",  "levels": [17, 20], "rate": 10}
     ],
     "spyder_routea": [
       {"creature": "eyesore",      "levels": [18, 22], "rate": 20},
@@ -456,7 +521,9 @@
       {"creature": "noctalo",      "levels": [19, 23], "rate": 15},
       {"creature": "selmatek",     "levels": [19, 23], "rate": 15},
       {"creature": "cateye",       "levels": [20, 24], "rate": 10},
-      {"creature": "dune_pincher", "levels": [20, 24], "rate": 10}
+      {"creature": "dune_pincher", "levels": [20, 24], "rate": 10},
+      {"creature": "nimbolt",      "levels": [19, 22], "rate": 10},
+      {"creature": "cumulynx",   "levels": [19, 22], "rate": 10}
     ],
     "dragons_cave": [
       {"creature": "agnidon",      "levels": [30, 33], "rate": 15},
@@ -465,7 +532,8 @@
       {"creature": "noctalo",      "levels": [30, 33], "rate": 15},
       {"creature": "eyesore",      "levels": [30, 34], "rate": 15},
       {"creature": "djinnbo",      "levels": [31, 34], "rate": 15},
-      {"creature": "selmatek",     "levels": [30, 34], "rate": 10}
+      {"creature": "selmatek",     "levels": [30, 34], "rate": 10},
+      {"creature": "scorchvix",    "levels": [30, 32], "rate": 10}
     ],
     "route1_b": [
       {"creature": "cardiling",  "levels": [12, 15], "rate": 15},
@@ -474,7 +542,10 @@
       {"creature": "noctula",    "levels": [12, 15], "rate": 15},
       {"creature": "zunna",      "levels": [13, 16], "rate": 20},
       {"creature": "fluttaflap", "levels": [13, 16], "rate": 15},
-      {"creature": "arthrobolt", "levels": [13, 16], "rate": 10}
+      {"creature": "arthrobolt", "levels": [13, 16], "rate": 10},
+      {"creature": "cinderkit",  "levels": [12, 15], "rate": 10},
+      {"creature": "skullick",   "levels": [12, 15], "rate": 10},
+      {"creature": "cirrup",   "levels": [12, 15], "rate": 10}
     ],
     "brideswood_b": [
       {"creature": "noctula",    "levels": [14, 17], "rate": 20},
@@ -482,14 +553,19 @@
       {"creature": "eyenemy",    "levels": [14, 17], "rate": 15},
       {"creature": "selket",     "levels": [14, 17], "rate": 15},
       {"creature": "pigabyte",   "levels": [15, 18], "rate": 15},
-      {"creature": "fluttaflap", "levels": [15, 18], "rate": 15}
+      {"creature": "fluttaflap", "levels": [15, 18], "rate": 15},
+      {"creature": "gillpip",    "levels": [14, 17], "rate": 10},
+      {"creature": "sprigling",  "levels": [14, 17], "rate": 10}
     ],
     "tunnel_b": [
       {"creature": "arthrobolt",   "levels": [16, 20], "rate": 25},
       {"creature": "cateye",       "levels": [16, 20], "rate": 20},
       {"creature": "dune_pincher", "levels": [16, 20], "rate": 20},
       {"creature": "noctalo",      "levels": [18, 20], "rate": 20},
-      {"creature": "djinnbo",      "levels": [17, 20], "rate": 15}
+      {"creature": "djinnbo",      "levels": [17, 20], "rate": 15},
+      {"creature": "scorchvix",  "levels": [17, 20], "rate": 10},
+      {"creature": "ossicoil",   "levels": [17, 20], "rate": 10},
+      {"creature": "rivetron",   "levels": [17, 20], "rate": 10}
     ],
     "route1_c": [
       {"creature": "cardiwing",  "levels": [22, 26], "rate": 20},
@@ -497,7 +573,9 @@
       {"creature": "agnidon",    "levels": [24, 26], "rate": 10},
       {"creature": "noctalo",    "levels": [22, 26], "rate": 15},
       {"creature": "zunna",      "levels": [22, 26], "rate": 20},
-      {"creature": "fluttaflap", "levels": [22, 26], "rate": 15}
+      {"creature": "fluttaflap", "levels": [22, 26], "rate": 15},
+      {"creature": "rillotl",    "levels": [22, 26], "rate": 10},
+      {"creature": "cumulynx",   "levels": [22, 26], "rate": 10}
     ],
     "brideswood_c": [
       {"creature": "noctalo",  "levels": [24, 28], "rate": 20},
@@ -505,14 +583,17 @@
       {"creature": "eyesore",  "levels": [24, 28], "rate": 20},
       {"creature": "selmatek", "levels": [24, 28], "rate": 20},
       {"creature": "pigabyte", "levels": [24, 28], "rate": 15},
-      {"creature": "agnidon",  "levels": [24, 28], "rate": 10}
+      {"creature": "agnidon",  "levels": [24, 28], "rate": 10},
+      {"creature": "rillotl",  "levels": [24, 28], "rate": 10},
+      {"creature": "wildbough",  "levels": [24, 28], "rate": 10}
     ],
     "tunnel_c": [
       {"creature": "arthrobolt",   "levels": [26, 30], "rate": 25},
       {"creature": "cateye",       "levels": [26, 30], "rate": 20},
       {"creature": "dune_pincher", "levels": [26, 30], "rate": 20},
       {"creature": "noctalo",      "levels": [26, 30], "rate": 20},
-      {"creature": "djinnbo",      "levels": [27, 30], "rate": 15}
+      {"creature": "djinnbo",      "levels": [27, 30], "rate": 15},
+      {"creature": "nimbolt",      "levels": [26, 30], "rate": 10}
     ],
     "route2_c": [
       {"creature": "noctalo",      "levels": [26, 30], "rate": 20},
@@ -520,7 +601,8 @@
       {"creature": "propellercat", "levels": [26, 30], "rate": 15},
       {"creature": "pigabyte",     "levels": [26, 30], "rate": 15},
       {"creature": "fluttaflap",   "levels": [26, 30], "rate": 15},
-      {"creature": "djinnbo",      "levels": [27, 30], "rate": 15}
+      {"creature": "djinnbo",      "levels": [27, 30], "rate": 15},
+      {"creature": "scorchvix",   "levels": [26, 30], "rate": 10}
     ],
     "keep_c": [
       {"creature": "eyesore",      "levels": [28, 32], "rate": 15},
@@ -530,7 +612,9 @@
       {"creature": "selmatek",     "levels": [28, 32], "rate": 10},
       {"creature": "cateye",       "levels": [29, 33], "rate": 10},
       {"creature": "dune_pincher", "levels": [29, 33], "rate": 10},
-      {"creature": "agnidon",      "levels": [30, 34], "rate": 15}
+      {"creature": "agnidon",      "levels": [30, 34], "rate": 15},
+      {"creature": "ossicoil",   "levels": [28, 32], "rate": 10},
+      {"creature": "rivetron",   "levels": [28, 32], "rate": 10}
     ],
     "keep_d": [
       {"creature": "eyesore",    "levels": [30, 34], "rate": 15},
@@ -539,7 +623,10 @@
       {"creature": "selmatek",   "levels": [30, 34], "rate": 15},
       {"creature": "agnidon",    "levels": [31, 35], "rate": 15},
       {"creature": "arthrobolt", "levels": [31, 35], "rate": 15},
-      {"creature": "djinnbo",    "levels": [32, 36], "rate": 10}
+      {"creature": "djinnbo",    "levels": [32, 36], "rate": 10},
+      {"creature": "maelstrotl", "levels": [34, 36], "rate": 8},
+      {"creature": "fulminax",   "levels": [34, 36], "rate": 8},
+      {"creature": "grovarch",   "levels": [34, 36], "rate": 8}
     ],
     "cave_d": [
       {"creature": "agnidon",    "levels": [32, 35], "rate": 15},
@@ -549,7 +636,10 @@
       {"creature": "djinnbo",    "levels": [33, 37], "rate": 15},
       {"creature": "cardinale",  "levels": [36, 38], "rate": 8},
       {"creature": "velocitile", "levels": [36, 38], "rate": 8},
-      {"creature": "agnigon",    "levels": [36, 38], "rate": 9}
+      {"creature": "agnigon",    "levels": [36, 38], "rate": 9},
+      {"creature": "pyrewing",     "levels": [36, 38], "rate": 8},
+      {"creature": "banewyrm",   "levels": [36, 38], "rate": 8},
+      {"creature": "tempyre",   "levels": [36, 38], "rate": 8}
     ]
   }
 }

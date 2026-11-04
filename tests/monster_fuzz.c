@@ -187,6 +187,9 @@ static void walk(MonGame *g){
         if(mg_area_dir(g, i, &d)) continue;
         uint8_t *head = malloc(d.head_len >= 64 && d.head_len <= MG_HEAD_MAX ? d.head_len : 64);
         MgArea a;
+        MgArea lists;       /* the Dex's short way in: hostile counts stay inside the buffer */
+        if(!mg_area_lists(g, i, &lists, head, d.head_len >= 64 && d.head_len <= MG_HEAD_MAX ? d.head_len : 64))
+            for(uint32_t k = 0; k < lists.n_zones; k++){ MgZone zn; mg_zone(&lists, k, &zn); }
         if(mg_area_open(g, i, &a, head, d.head_len >= 64 && d.head_len <= MG_HEAD_MAX ? d.head_len : 64)){ free(head); continue; }
         for(uint32_t k = 0; k <= a.colours + 2u; k++) walked += mg_palette(&a, k);
         for(uint32_t k = 0; k < a.n_warps; k++){ MgWarp x; mg_warp(&a, k, &x); walked += x.to; }

@@ -131,6 +131,21 @@ def main():
             {"creature": "ghostling", "levels": [2, 3], "rate": 5}), "not in the allow-list",
             "an encounter with a creature not on the allow-list")
         refused(lambda r: r["start"].update(x=15, y=4), "isn't a cell one can stand on", "a start in the pond")
+        refused(lambda r: r["dex"]["order"].pop(), "must list every creature", "a Dex order missing a creature")
+        refused(lambda r: r["dex"]["order"].append("puddlop"), "must list every creature", "a Dex order listing one twice")
+        refused(lambda r: r["dex"]["order"].__setitem__(0, "ghostling"), "must list every creature", "a Dex order with a stranger")
+        refused(lambda r: r.pop("dex"), "no \"dex\"", "a region without a Dex order")
+        refused(lambda r: r["dex"].update(descriptions={"emberkit": "It burns. " * 30}), "wraps to",
+                "a description too long for the Dex")
+        refused(lambda r: r["dex"].update(descriptions={"nobody": "A stranger."}), "descriptions of no creature",
+                "a description of no creature")
+        high = t / "ids_high.tsv"
+        high.write_text((FIX / "ids.tsv").read_text() + "creature\tzz_high\t300\n")
+        hi = high.read_text().splitlines()
+        high.write_text("\n".join(("creature\temberkit\t256" if ln.startswith("creature\temberkit\t") else ln)
+                                  for ln in hi if "zz_high" not in ln) + "\n")
+        r = build(tree, t / "bad.bin", high)
+        check(r.returncode != 0 and "stop at 255" in r.stderr, f"a creature id of 256: {r.returncode} {r.stderr.strip()}")
         refused(lambda r: r["start"].update(area="fixture_elsewhere"), "isn't in the region", "a start outside the region")
         refused(lambda r: r["encounters"]["fixture_meadow"][0].update(levels=[5, 2]), "levels",
                 "an encounter's levels the wrong way round")
@@ -167,8 +182,48 @@ def main():
         r = build(tree, t / "bad.bin", ids, allow=bad_allow)
         check(r.returncode != 0 and "tools/game_art/stranger.png" in r.stderr,
               f"an 'ours' sheet that isn't in tools/game_art: {r.stderr.strip()}")
+        bad_allow.write_text((FIX / "allow.tsv").read_text().replace("\tconfirmed\n", "\tedited\n", 1))
+        r = build(tree, t / "bad.bin", ids, allow=bad_allow)
+        check(r.returncode != 0 and "-sheet.png" in r.stderr and "edited" in r.stderr,
+              f"an 'edited' sheet that isn't in tools/game_art: {r.stderr.strip()}")
+
+        # a creature of our own: its rules are checked (the fixture's own moves and types)
+        own = t / "own"
+        own.mkdir()
+        good = {"name": "Stranger", "description": "Not from around here.", "types": ["fire"],
+                "shape": "blob", "stage": "basic", "catch_rate": 100,
+                "moveset": [{"level_learned": 1, "technique": "scratch"}], "evolutions": []}
+        own_allow = t / "allow_own.tsv"
+        own_allow.write_text((FIX / "allow.tsv").read_text() +
+                             "creature\tstranger\tCC0 1.0\tus\ttools/game_art/stranger-sheet.png\tours\n")
+
+        def own_refused(change, words, what, write=True):
+            d = json.loads(json.dumps(good))
+            change(d)
+            if write:
+                (own / "stranger.yaml").write_text(json.dumps(d))     # JSON is YAML
+            r = subprocess.run([sys.executable, str(MKGAME), "--tuxemon", str(tree), "--unpinned", SOURCE,
+                                "--allow", str(own_allow), "--region", str(FIX / "region.json"), "--ids", str(ids),
+                                "--creatures", str(own), "-o", str(t / "bad.bin")], capture_output=True, text=True)
+            check(r.returncode != 0 and words in r.stderr, f"{what}: {r.returncode} {r.stderr.strip()}")
+        own_refused(lambda d: d.update(types=["plasma"]), "types", "a creature of our own with a type no one has")
+        own_refused(lambda d: d.update(shape="cube"), "shape", "a creature of our own with an unknown shape")
+        own_refused(lambda d: d.pop("name"), "name", "a creature of our own with no name")
+        own_refused(lambda d: d.update(colour="red"), "want", "a creature of our own with a key no one reads")
+        own_refused(lambda d: d["moveset"].append({"level_learned": 3, "technique": "moonbeam"}),
+                    "technique moonbeam", "a creature of our own with a move Tuxemon doesn't have")
+        own_refused(lambda d: d.update(evolutions=[{"at_level": 9, "monster_slug": "ghostling"}]),
+                    "isn't in the allow-list", "a creature of our own evolving into one not listed")
+        own_refused(lambda d: None, "stranger-sheet.png", "a creature of our own with no sheet")
+        (own / "stranger.yaml").unlink()
+        own_refused(lambda d: None, "doesn't exist", "a creature of our own with no rules", write=False)
+        own_allow.write_text((FIX / "allow.tsv").read_text() +
+                             "creature\tstranger\tCC0 1.0\tus\ttools/game_art/stranger.png\tours\n")
+        own_refused(lambda d: None, "stranger-sheet.png", "a creature of our own whose sheet isn't <slug>-sheet.png")
 
     # 4. the committed game
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "gen_dex_art.py"), "--check"], capture_output=True, text=True)
+    check(r.returncode == 0, f"firmware/main/dex_art.c: {r.stdout}{r.stderr}")
     game = ROOT / "courses" / "critters" / "game.bin"
     r = subprocess.run([sys.executable, str(MKGAME), "--check", str(game)], capture_output=True, text=True)
     check(r.returncode == 0 and ": ok" in r.stdout, f"courses/critters/game.bin --check: {r.stdout}{r.stderr}")
@@ -191,6 +246,98 @@ def main():
                        capture_output=True, text=True)
     check(r.returncode == 0, f"tools/game_art/player*.png: {r.stdout}{r.stderr}")
     check("interior: CYD Palm (CC0 1.0)" in cred, "the committed game's rooms aren't our tileset")
+    check("Fluttaflap: Spalding004, CYD Palm (back) (CC-BY-SA 4.0)" in cred,
+          "the committed game's Fluttaflap isn't the sheet with the owner's back")
+    import yaml
+    for s, v in allow["creature"].items():
+        if v["status"] in ("edited", "ours"):
+            from PIL import Image
+            im = Image.open(ROOT / v["source"])
+            check(im.size == (128, 88) and im.mode == "RGBA", f"{v['source']}: {im.size} {im.mode}")
+        if v["status"] == "ours":       # the sheet is what the drawing builds, to the byte
+            d = yaml.safe_load((ROOT / "tools" / "game_creatures" / f"{s}.yaml").read_text())
+            check(f"{d['name']}: {v['authors']} ({v['licence']})" in cred, f"the credits don't name {d['name']}")
+            r = subprocess.run([sys.executable, str(ROOT / "tools" / "mksheet.py"), "--check",
+                                str(ROOT / d["drawing"]), str(ROOT / v["source"])], capture_output=True, text=True)
+            check(r.returncode == 0, f"{v['source']}: {r.stdout}{r.stderr}")
+    sys.path.insert(0, str(ROOT / "tools"))     # the eyes step: palette only, no file no sheet
+    import mksheet
+    from PIL import Image
+    pal = [(10, 10, 10), (120, 120, 120), (240, 240, 240)]
+    im = Image.new("RGBA", (7, 7), pal[1] + (255,))
+    im.putpixel((3, 3), pal[0] + (255,))
+    im.putpixel((0, 0), pal[0] + (255,))
+    im.putpixel((6, 0), (0, 0, 0, 0))
+    im.putpixel((5, 0), pal[0] + (255,))
+    eyed = mksheet.apply_eyes(im, [{"wipe": [0, 0, 6, 6], "at": [1, 4], "draw": ["DH", ".D"]}], pal, "test")
+    check(eyed.getpixel((3, 3)) == pal[1] + (255,), "the eyes step left the old eye")
+    check(eyed.getpixel((5, 0)) == pal[0] + (255,), "the eyes step wiped an outline, a pixel beside the clear")
+    check([eyed.getpixel(p)[:3] for p in ((1, 4), (2, 4), (2, 5), (1, 5))] == [pal[0], pal[2], pal[0], pal[1]],
+          "the eyes step drew the wrong thing")
+    check({c[:3] for c in eyed.get_flattened_data() if c[3]} <= set(pal), "the eyes step added a colour")
+    eyed = mksheet.apply_eyes(im, [{"wipe": [0, 0, 0, 0], "at": [1, 4], "draw": ["Y"], "colors": {"Y": [130, 130, 130]}}],
+                              pal, "test")
+    check(eyed.getpixel((1, 4))[:3] == pal[1], "an eye's named colour isn't the palette's nearest")
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "bare.jpg"
+        shutil.copy(ROOT / "tools" / "game_art" / "src" / "cinderkit.jpg", src)
+        r = subprocess.run([sys.executable, str(ROOT / "tools" / "mksheet.py"), "--check", str(src),
+                            str(ROOT / "tools" / "game_art" / "cinderkit-sheet.png")], capture_output=True, text=True)
+        check(r.returncode != 0 and "eyes.json is missing" in r.stderr, f"--check took a drawing with no eyes file: {r.stderr}")
+        check(not src.with_suffix(".eyes.json").exists(), "--check wrote an eyes file")
+        r = subprocess.run([sys.executable, str(ROOT / "tools" / "mksheet.py"), str(src), "-o", str(Path(tmp) / "o.png")],
+                           capture_output=True, text=True)
+        check(r.returncode == 0 and "DRAFT" in r.stdout and src.with_suffix(".eyes.json").exists(),
+              f"a first build wrote no draft of the eyes: {r.stdout}{r.stderr}")
+    with tempfile.TemporaryDirectory() as tmp:      # a transparent picture, and a scale kept with the eyes
+        pic = Image.new("RGBA", (960, 600), (0, 0, 0, 0))
+        for x0, size in ((60, 240), (560, 240)):
+            pic.paste((10, 10, 10, 255), (x0, 60, x0 + size, 60 + size))
+            pic.paste((250, 250, 250, 255), (x0 + 30, 90, x0 + size - 30, 30 + size))  # white fur: not background
+        src = Path(tmp) / "clear.png"
+        pic.save(src)
+        (Path(tmp) / "clear.eyes.json").write_text(
+            '{"scale": 1, "front": [], "back": [], "icon1": [], "icon2": []}')
+        r = subprocess.run([sys.executable, str(ROOT / "tools" / "mksheet.py"), str(src), "-o", str(Path(tmp) / "o.png")],
+                           capture_output=True, text=True)
+        check(r.returncode == 0 and "the background: transparent" in r.stdout and "scale: 1/1 as set" in r.stdout,
+              f"a transparent drawing with a set scale: {r.stdout}{r.stderr}")
+        if r.returncode == 0:
+            sheet = Image.open(Path(tmp) / "o.png").convert("RGBA")
+            check(max(c[0] for c in sheet.get_flattened_data() if c[3]) > 200, "a transparent drawing lost its white")
+            check(sheet.crop((0, 0, 64, 64)).getchannel("A").getbbox() is not None, "a transparent drawing has no front")
+    rows = [[(200, 200, 200)] * 6 for _ in range(6)]                    # the eyes file's "ink": a speck needs half a block
+    rows[2][2] = (0, 0, 0)
+    blacks = lambda im: sum(c[:3] == (0, 0, 0) for c in im.get_flattened_data())
+    check(blacks(mksheet.shrink(rows, 2)) == 1, "1/2: a speck of ink didn't hold")
+    check(blacks(mksheet.shrink(rows, 2, None, 2)) == 0, "1/2, ink 2: a speck darkened the block")
+    white = (255, 255, 255)                                             # the eyes file's "holes": an outlined white patch
+    px = [white] * 1600
+    for i in range(10, 30):
+        for j in (i * 40 + 10, i * 40 + 29, 10 * 40 + i, 29 * 40 + i):
+            px[j] = (0, 0, 0)
+    bd = mksheet.Backdrop(px, 40, 40)
+    inside = 20 * 40 + 20
+    check(mksheet.background(px, 40, 40, bd)[inside] == 1, "an enclosed white patch isn't guessed a hole")
+    check(mksheet.background(px, 40, 40, bd, [])[inside] == 0, "no holes listed: an enclosed white patch went")
+    check(mksheet.background(px, 40, 40, bd, [[20, 20]])[inside] == 1, "a listed hole stayed")
+    try:
+        mksheet.background(px, 40, 40, bd, [[10, 20]])                  # the outline, not a patch
+        check(False, "a hole that isn't one was taken")
+    except SystemExit:
+        pass
+    tall = __import__("PIL.Image").Image.new("RGBA", (4, 6))
+    tall.putpixel((1, 0), (9, 9, 9, 255))                               # a row over: the emptier edge goes, not a middle row
+    for x in range(4):
+        tall.putpixel((x, 5), (9, 9, 9, 255))
+    trimmed = mksheet.fit(tall, 4, 5, "tall", [])
+    check(trimmed.size == (4, 5) and trimmed.getpixel((0, 4))[3] == 255, f"a row over: {trimmed.size}")
+    rows = [[(0, 0, 0)] + [(200, 200, 200)] * 3 for _ in range(4)]      # one cell of ink in a 4 x 4 block isn't a line
+    check(mksheet.shrink(rows, 4).getpixel((0, 0))[:3] == (200, 200, 200), "1/4: a corner of ink darkened the block")
+    rows = [[(0, 0, 0), (200, 200, 200)] for _ in range(2)]             # a line at 1/2 still holds
+    check(mksheet.shrink(rows, 2).getpixel((0, 0))[:3] == (0, 0, 0), "1/2: a line didn't survive")
+    ours = [s for s, v in allow["creature"].items() if v["status"] == "ours"]
+    check(len(ours) >= 3, f"the owner's fire fox line isn't in the game: {ours}")
     r = subprocess.run([sys.executable, str(ROOT / "tools" / "gen_interior_sheet.py"), "--check"],
                        capture_output=True, text=True)
     check(r.returncode == 0, f"tools/game_art/interior.png: {r.stdout}{r.stderr}")

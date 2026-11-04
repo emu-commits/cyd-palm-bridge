@@ -1,0 +1,27 @@
+# Fulminax: the lightning line's last stage. The owner's drawing (2026-11-02).
+name: Fulminax
+description: >-
+  Bits of lightning break from its tail and hang around it. Keepers count
+  the seconds, as after a flash.
+category: Thunderbolt
+height_cm: 190
+weight_kg: 140
+drawing: tools/game_art/src/fulminax.png
+types: [lightning]
+shape: brute
+stage: stage2
+experience_group: default
+catch_rate: 35
+lower_catch_resistance: 0.85
+upper_catch_resistance: 1.1
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: gnaw}
+- {level_learned: 1, technique: lightning_spheres}
+- {level_learned: 1, technique: whirlwind}
+- {level_learned: 12, technique: battery_discharge}
+- {level_learned: 20, technique: saber}
+- {level_learned: 25, technique: radiance}
+- {level_learned: 30, technique: all_in}
+- {level_learned: 34, technique: energy_beam}
+evolutions: []

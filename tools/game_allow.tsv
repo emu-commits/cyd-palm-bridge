@@ -16,7 +16,14 @@
 #            confirmed:  checked by hand against the source link (G3)
 #            ours:       drawn for this project, CC0, at tools/game_art/<slug>.png
 #                        (characters and tilesets: tools/gen_player_sheet.py draws the
-#                        player, tools/gen_interior_sheet.py the rooms indoors)
+#                        player, tools/gen_interior_sheet.py the rooms indoors); a
+#                        creature of our own has its sheet at tools/game_art/<slug>-sheet.png,
+#                        made by tools/mksheet.py from the drawing, and its rules in
+#                        tools/game_creatures/<slug>.yaml (see the README there)
+#            edited:     a creature's Tuxemon sheet with a part redrawn for this
+#                        project, at tools/game_art/<slug>-sheet.png (128 x 88);
+#                        it keeps the original's licence (CC BY-SA asks that),
+#                        and the authors add who redrew what
 #
 # Left out on purpose (section 10): anything under the "XYG Open Source
 # License" (Kelvin Shadewing's sets, and core_buildings, core_set pieces,
@@ -38,7 +45,7 @@ creature	cardiwing	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?t
 creature	cardinale	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Cardinale	credited
 creature	vamporm	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Vamporm	credited
 creature	dracune	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Dracune	credited
-creature	fluttaflap	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Fluttaflap	credited
+creature	fluttaflap	CC-BY-SA 4.0	Spalding004; CYD Palm (back)	tools/game_art/fluttaflap-sheet.png	edited
 creature	anoleaf	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Anoleaf	credited
 creature	gectile	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Gectile	credited
 creature	velocitile	CC-BY-SA 4.0	Spalding004	https://wiki.tuxemon.org/index.php?title=Velocitile	credited
@@ -57,6 +64,26 @@ creature	cateye	CC-BY-SA 4.0	Cavalcadeur	ATTRIBUTIONS.md "Cateye" (https://forum
 creature	dune_pincher	CC-BY-SA 4.0	tamashihoshi	ATTRIBUTIONS.md "Dune Pincher" (https://forum.tuxemon.org/viewtopic.php?pid=519#p519)	credited
 creature	djinnbo	CC-BY-SA 4.0	Cavalcadeur; rsg167	ATTRIBUTIONS.md "Djinnbo" (http://forum.tuxemon.org/viewtopic.php?id=43)	credited
 creature	propellercat	CC-BY-SA 4.0	tamashihoshi	ATTRIBUTIONS.md "Propellercat" (https://forum.tuxemon.org/viewtopic.php?id=74)	credited
+# The owner's critters (2026-11-01): the fire fox line, drawn for this project.
+creature	cinderkit	CC0 1.0	CYD Palm	tools/game_art/cinderkit-sheet.png	ours
+creature	scorchvix	CC0 1.0	CYD Palm	tools/game_art/scorchvix-sheet.png	ours
+creature	pyrewing	CC0 1.0	CYD Palm	tools/game_art/pyrewing-sheet.png	ours
+creature	gillpip	CC0 1.0	CYD Palm	tools/game_art/gillpip-sheet.png	ours
+creature	rillotl	CC0 1.0	CYD Palm	tools/game_art/rillotl-sheet.png	ours
+creature	maelstrotl	CC0 1.0	CYD Palm	tools/game_art/maelstrotl-sheet.png	ours
+creature	sparkip	CC0 1.0	CYD Palm	tools/game_art/sparkip-sheet.png	ours
+creature	nimbolt	CC0 1.0	CYD Palm	tools/game_art/nimbolt-sheet.png	ours
+creature	fulminax	CC0 1.0	CYD Palm	tools/game_art/fulminax-sheet.png	ours
+creature	sprigling	CC0 1.0	CYD Palm	tools/game_art/sprigling-sheet.png	ours
+creature	wildbough	CC0 1.0	CYD Palm	tools/game_art/wildbough-sheet.png	ours
+creature	grovarch	CC0 1.0	CYD Palm	tools/game_art/grovarch-sheet.png	ours
+creature	skullick	CC0 1.0	CYD Palm	tools/game_art/skullick-sheet.png	ours
+creature	ossicoil	CC0 1.0	CYD Palm	tools/game_art/ossicoil-sheet.png	ours
+creature	banewyrm	CC0 1.0	CYD Palm	tools/game_art/banewyrm-sheet.png	ours
+creature	cirrup	CC0 1.0	CYD Palm	tools/game_art/cirrup-sheet.png	ours
+creature	cumulynx	CC0 1.0	CYD Palm	tools/game_art/cumulynx-sheet.png	ours
+creature	tempyre	CC0 1.0	CYD Palm	tools/game_art/tempyre-sheet.png	ours
+creature	rivetron	CC0 1.0	CYD Palm	tools/game_art/rivetron-sheet.png	ours
 
 # The townspeople are Tuxemon's sheets (mods/tuxemon/sprites/<slug>.png), each
 # credited under "Character Front Sprites" in ATTRIBUTIONS.md, which names who

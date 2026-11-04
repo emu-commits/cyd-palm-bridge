@@ -1,0 +1,15 @@
+{
+  "front": [
+    {"wipe": [3, 7, 6, 12], "at": [4, 8], "draw": [".DD.", "DHDD", "DDDD", ".DD."]},
+    {"wipe": [9, 8, 13, 12], "at": [10, 9], "draw": [".DD.", "DHDD", "DDDD", ".DD."]}
+  ],
+  "back": [],
+  "icon1": [
+    {"wipe": [2, 7, 5, 11], "at": [2, 8], "draw": [".DD.", "DHDD", "DDDD", ".DD."]},
+    {"wipe": [8, 7, 12, 11], "at": [9, 8], "draw": [".DD.", "DHDD", "DDDD", ".DD."]}
+  ],
+  "icon2": [
+    {"wipe": [1, 7, 4, 11], "at": [2, 8], "draw": [".DD.", "DHDD", ".DD."]},
+    {"wipe": [7, 8, 10, 13], "at": [7, 9], "draw": [".DD.", "DHDD", "DDDD", ".DD."]}
+  ]
+}

@@ -45,6 +45,9 @@ void ui_mon_auto_changed(int on);
 void mon_ui_test_place(int area, int x, int y, int facing);
 /* ...and set story flag f and the purse */
 void mon_ui_test_give(int flag, int coins);
+/* ...and fill the party: the six longest names at level 99, the second fainted:
+ * the most its screens must fit */
+void mon_ui_test_full_party(void);
 #endif
 
 #endif

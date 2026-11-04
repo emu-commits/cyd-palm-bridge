@@ -1,0 +1,28 @@
+# Tempyre: the sky line's last stage. The owner's drawing (2026-11-03).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Tempyre
+description: >-
+  Below the waist it is simply weather. When its five eyes open, the
+  valley brings things in.
+category: Storm
+height_cm: 350
+weight_kg: 210
+drawing: tools/game_art/src/tempyre.jpg
+types: [sky]
+shape: dragon
+stage: stage2
+experience_group: default
+catch_rate: 30
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: gust}
+- {level_learned: 1, technique: peck}
+- {level_learned: 12, technique: whirlwind}
+- {level_learned: 16, technique: wing_tip}
+- {level_learned: 20, technique: fledgling}
+- {level_learned: 25, technique: battery_discharge}
+- {level_learned: 28, technique: saber}
+- {level_learned: 32, technique: peregrine}
+- {level_learned: 36, technique: all_in}

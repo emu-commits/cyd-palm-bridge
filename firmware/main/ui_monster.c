@@ -3,7 +3,8 @@
  * The rules are monster_play.c's and the file is monster.c's; this file only
  * turns their events into pictures and words, and the buttons into calls.
  *
- * THE VIEW (240 x 176) has no canvas. Its draw event composes the part of the
+ * THE VIEW (232 x 172, in a thin bezel, its corners rounded by crt.c, with none of
+ * the TV effect: DEX_PLAN.md 10) has no canvas. Its draw event composes the part of the
  * view LVGL is drawing (at most one draw-buffer band, 40 rows) into a band
  * buffer, from a cache of 8-bit tiles and the area's palette, and hands that
  * to LVGL as ONE RGB565 image. So a frame costs one draw task per band, not
@@ -13,11 +14,11 @@
  * an area are drawn from the same cache: each frame is two cache entries, its
  * top and bottom halves, read from the card when first drawn.
  *
- * THE CONTROLS (240 x 120) are one object that draws its own D-pad and A and
- * B buttons. A press acts at once; holding a direction keeps walking. The
+ * THE CONTROLS (240 x 116) are one object that draws its own faceplate, D-pad
+ * and A and B buttons. A press acts at once; holding a direction keeps walking. The
  * panel registers one touch at a time, so there are no combinations. While
  * Auto-play is on, the same object shows the party instead: each critter's
- * name, level and HP, as the battle shows them.
+ * icon, name, level and HP, as the battle shows them.
  *
  * MEMORY: one block, allocated when the game opens and freed when it closes
  * (about 60 KB, plus the largest area head in the file). If it can't be had,
@@ -46,23 +47,33 @@
 #if !(LVGL_VERSION_MAJOR == 9 && LVGL_VERSION_MINOR < 3)
 #include "src/misc/cache/instance/lv_image_cache.h"   /* lvgl.h no longer exports it */
 #endif
+#include "crt.h"
 #include "lv_font_palm.h"
 #include "monster.h"
 #include "monster_bot.h"
 #include "monster_play.h"
 #include "power.h"
+#include "ui_dex.h"
 
 #define MON_FILE  MON_DIR "/game.bin"
 #define MON_SAVE  MON_DIR "/save.dat"
 #define MON_PAUSE MON_DIR "/pause.dat"
 
-#define VW         240
-#define VH         176
-#define PAD_H      120
-#define BAND_ROWS  40               /* the display's draw buffer: lvgl_port.c BUF_ROWS */
+#define VW         232
+#define VH         172
+#define BEZEL      4                /* the view's bezel, on all four sides */
+#define FRAME_H    (VH + 2 * BEZEL)
+#define PAD_H      116
+#define SCREEN_R   6                /* the view's rounded corners */
+#define C_BEZEL    0x2C2C34         /* the screen's bezel and the controller's body */
+#define C_FACE     0xD6D6D6         /* the controller's faceplate */
+#define BAND_PX    (240 * 40)       /* the display's draw buffer, lvgl_port.c: a narrower strip is taller */
+#define ICON_PX    (MG_ICON_SIZE * MG_ICON_SIZE)
+#define ICON_ROW   24               /* a party menu's lines, for the icons */
 #define NCACHE     96               /* tiles kept: Kestrel shows 60, and the people take two each */
 #define TICK_MS    30
 #define STEP_TICKS 4                /* a step: four frames of 4 px */
+#define BURST_TICKS 3               /* the timer runs before the refresh: past the first paint */
 #define TURN_HOLD  5                /* ticks a turn waits before a held press walks */
 #define LINE_H     14               /* lv_font_palm's line height */
 #define MENU_MAX   8
@@ -88,6 +99,7 @@ typedef struct {
 
     uint8_t  scene, ui, menu, sel, nmenu, menu_back;
     uint8_t  started;               /* a game is under way (made or loaded) */
+    uint8_t  burst_ticks;           /* ticks until the opening's read-ahead is given back */
     uint8_t  card_next, card_ticks;
     char     err[96];
 
@@ -130,6 +142,14 @@ typedef struct {
     uint16_t plut[256];                             /* the looks' palette (LOOK's own) */
     uint16_t *band;                 /* VW x BAND_ROWS; malloc's 8-byte alignment is LVGL's 4 and more */
     lv_image_dsc_t img;
+
+    /* the party's icons: each composed on what it's drawn over (an opaque image
+     * is cheaper to draw than one with alpha), in their own block, once needed */
+    uint16_t (*ic)[ICON_PX];
+    lv_image_dsc_t ic_img[MP_PARTY];
+    uint16_t ic_mon[MP_PARTY], ic_bg[MP_PARTY];
+    uint8_t  ic_ok[MP_PARTY];
+    uint8_t  row_h;                 /* the menu's line height: LINE_H, or ICON_ROW with the icons */
 
     /* a menu's lines, and the text the box shows them as */
     char     lines[MENU_MAX][48];
@@ -408,25 +428,26 @@ static void card(Mon *m, const Rect *c, int bw, int x, int y, int w, int h, int 
     }
 }
 
-#define FOE_SPR_X  166
+#define FOE_SPR_X  164
 #define FOE_SPR_Y  0
 #define ME_SPR_X   14
-#define ME_GROUND  94                /* the top of the player's ground: its creature's feet are on it */
+#define ME_GROUND  92                /* the top of the player's ground: its creature's feet are on it */
 #define FOE_CARD_X 6
 #define FOE_CARD_Y 8
-#define ME_CARD_X  92
-#define ME_CARD_Y  57
+#define ME_CARD_X  90
+#define ME_CARD_Y  55
+#define ME_CARD_H  45
 #define CARD_W     140
 
 static void compose_battle(Mon *m, const Rect *c, int bw){
     fill(m->band, bw, c, 0, 0, VW, VH, rgb(0xF4F1E4));
-    /* laid out above a four-line menu (the box's top is at y 104): the other
+    /* laid out above a four-line menu (the box's top is at y 100): the other
      * side's creature top right with its card to its left, the player's
      * bottom left with its card to its right */
     fill(m->band, bw, c, FOE_SPR_X - 8, 54, 80, 8, rgb(0xC9D8A8));     /* the ground they stand on */
     fill(m->band, bw, c, ME_SPR_X - 6, ME_GROUND, 80, 8, rgb(0xC9D8A8));
     card(m, c, bw, FOE_CARD_X, FOE_CARD_Y, CARD_W, 36, +1);
-    card(m, c, bw, ME_CARD_X, ME_CARD_Y, CARD_W, 46, -1);
+    card(m, c, bw, ME_CARD_X, ME_CARD_Y, CARD_W, ME_CARD_H, -1);
     if(!m->sh_wild_gone && m->spr_mon[1] != MG_NONE16) blit_sprite(m->band, bw, c, FOE_SPR_X, FOE_SPR_Y, SPR(m, 1), 0, 1);
     if(!m->sh_me_gone && m->spr_mon[0] != MG_NONE16) blit_sprite(m->band, bw, c, ME_SPR_X, ME_GROUND - 1 - m->spr_foot, SPR(m, 0), 1, 1);
     MpCreature *me = &m->w.party[m->sh_active];
@@ -464,9 +485,9 @@ static void view_draw_cb(lv_event_t *e){
     if(a.x2 > va.x2) a.x2 = va.x2;
     if(a.y2 > va.y2) a.y2 = va.y2;
     if(a.x1 > a.x2 || a.y1 > a.y2) return;
-    /* a band taller than the draw buffer can't happen on the device; drawn
+    /* a band bigger than the draw buffer can't happen on the device; drawn
      * a band at a time it would need a buffer per band, so it's cut */
-    if(a.y2 - a.y1 + 1 > BAND_ROWS) a.y2 = a.y1 + BAND_ROWS - 1;
+    if((a.y2 - a.y1 + 1) * (a.x2 - a.x1 + 1) > BAND_PX) a.y2 = a.y1 + BAND_PX / (a.x2 - a.x1 + 1) - 1;
     Rect c = { a.x1 - va.x1, a.y1 - va.y1, a.x2 - va.x1, a.y2 - va.y1 };
     int bw = c.x2 - c.x1 + 1, bh = c.y2 - c.y1 + 1;
     switch(m->scene){
@@ -490,15 +511,40 @@ static void view_draw_cb(lv_event_t *e){
     lv_draw_image(layer, &d, &a);
 }
 
+/* the view paints every pixel of itself, so LVGL needn't paint what's behind it first */
+static void view_cover_cb(lv_event_t *e){
+    lv_obj_t *obj = lv_event_get_current_target(e);
+    lv_area_t va;
+    lv_obj_get_coords(obj, &va);
+    const lv_area_t *c = lv_event_get_cover_area(e);
+    if(c->x1 >= va.x1 && c->y1 >= va.y1 && c->x2 <= va.x2 && c->y2 <= va.y2)
+        lv_event_set_cover_res(e, LV_COVER_RES_COVER);
+}
+
 static void redraw(void){ if(g_mon && g_mon->view) lv_obj_invalidate(g_mon->view); }
 
 /* ---- the text box: a message, or a menu with a cursor ---- */
+
+/* the box's lines: a line of text a line, or a critter's icon a line */
+static void box_rows(Mon *m, int icons, int back){
+    m->row_h = icons ? ICON_ROW : LINE_H;
+    lv_obj_set_style_pad_top(m->box, icons ? 1 : 5, 0);
+    /* with icons the last line, if it's a critter's, needs its icon's whole height */
+    lv_obj_set_style_pad_bottom(m->box, !icons ? 5 : back ? 1 : (ICON_ROW - LINE_H) / 2 + 1, 0);
+    lv_obj_set_style_text_line_space(m->text, icons ? ICON_ROW - LINE_H : 0, 0);
+    lv_obj_set_pos(m->text, icons ? 12 + MG_ICON_SIZE + 2 : 12, icons ? (ICON_ROW - LINE_H) / 2 : 0);
+    lv_obj_set_width(m->text, VW - 4 - 14 - (icons ? 12 + MG_ICON_SIZE + 2 : 12));
+}
+static int cursor_y(Mon *m, int line){
+    return line * m->row_h + (m->row_h - LINE_H) / 2;
+}
 
 static void box_hide(Mon *m){
     lv_obj_add_flag(m->box, LV_OBJ_FLAG_HIDDEN);
     m->ui = UI_NONE;
 }
 static void box_say(Mon *m, const char *t){
+    box_rows(m, 0, 0);
     lv_label_set_long_mode(m->text, LV_LABEL_LONG_WRAP);
     lv_label_set_text(m->text, t);
     lv_obj_add_flag(m->cursor, LV_OBJ_FLAG_HIDDEN);
@@ -506,7 +552,12 @@ static void box_say(Mon *m, const char *t){
     m->ui = UI_TEXT;
 }
 
+static int party_kind(int kind){
+    return kind == MN_SWAP || kind == MN_PARTY || kind == MN_ITEM_WHO || kind == MN_BAG_WHO;
+}
+
 static void menu_show(Mon *m, int kind, const char *const *lines, int n, int back){
+    box_rows(m, party_kind(kind), back);
     char *p = m->menu_txt;
     size_t room = sizeof m->menu_txt;
     p[0] = 0;
@@ -522,14 +573,14 @@ static void menu_show(Mon *m, int kind, const char *const *lines, int n, int bac
     if(m->sel >= m->nmenu) m->sel = 0;
     m->menu_back = (uint8_t)back;
     lv_obj_clear_flag(m->cursor, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_y(m->cursor, m->sel * LINE_H);
+    lv_obj_set_y(m->cursor, cursor_y(m, m->sel));
     lv_obj_clear_flag(m->box, LV_OBJ_FLAG_HIDDEN);
     m->ui = UI_MENU;
 }
 static void menu_cursor(Mon *m, int d){
     if(!m->nmenu) return;
     m->sel = (uint8_t)((m->sel + m->nmenu + d) % m->nmenu);
-    lv_obj_set_y(m->cursor, m->sel * LINE_H);
+    lv_obj_set_y(m->cursor, cursor_y(m, m->sel));
 }
 
 /* ---- battles: the labels, the script ---- */
@@ -649,6 +700,62 @@ static void shop_menu(Mon *m){
     menu_show(m, MN_SHOP, ptr, n, 1);
 }
 
+/* Party member i's icon, composed on `bg` (RGB), ready to draw: 0 if there's none
+ * (a file without ICON, or no memory: the screens simply go without). Reads the
+ * card only when the critter or the background changes. */
+static int icon_ready(Mon *m, int i, uint16_t mon, uint32_t bg){
+    uint16_t col = rgb(bg);
+    if(!m->g.has_icons) return 0;
+    if(!m->ic){
+        m->ic = malloc(MP_PARTY * sizeof *m->ic);
+        if(!m->ic) return 0;
+        memset(m->ic_ok, 0, sizeof m->ic_ok);
+    }
+    if(m->ic_ok[i] && m->ic_mon[i] == mon && m->ic_bg[i] == col) return 1;
+    uint8_t rec[MG_ICON_BYTES];
+    m->ic_ok[i] = 0;
+    if(mg_icon(&m->g, mon, rec, sizeof rec)) return 0;
+    uint16_t *d = m->ic[i];
+    const uint8_t *px = rec + 32;
+    for(int j = 0; j < MG_ICON_SIZE; j++)
+        for(int k = 0; k < MG_ICON_SIZE; k++){
+            int v = k & 1 ? px[j * MG_ICON_SIZE / 2 + k / 2] & 15 : px[j * MG_ICON_SIZE / 2 + k / 2] >> 4;
+            *d++ = v ? (uint16_t)(rec[2 * v] | rec[2 * v + 1] << 8) : col;
+        }
+    lv_image_dsc_t *im = &m->ic_img[i];
+    lv_image_cache_drop(im);
+    memset(im, 0, sizeof *im);
+    im->header.magic = LV_IMAGE_HEADER_MAGIC;
+    im->header.cf = LV_COLOR_FORMAT_RGB565;
+    im->header.w = MG_ICON_SIZE;
+    im->header.h = MG_ICON_SIZE;
+    im->header.stride = MG_ICON_SIZE * 2;
+    im->data = (const uint8_t *)m->ic[i];
+    im->data_size = ICON_PX * 2;
+    m->ic_mon[i] = mon; m->ic_bg[i] = col; m->ic_ok[i] = 1;
+    return 1;
+}
+
+static void icon_draw(Mon *m, lv_layer_t *layer, int i, int x, int y){
+    if(!m->ic || !m->ic_ok[i]) return;
+    lv_draw_image_dsc_t d;
+    lv_draw_image_dsc_init(&d);
+    d.src = &m->ic_img[i];
+    lv_area_t a = { x, y, x + MG_ICON_SIZE - 1, y + MG_ICON_SIZE - 1 };
+    lv_draw_image(layer, &d, &a);
+}
+
+/* a party menu's icons: under the box's text, beside its lines */
+static void box_draw_cb(lv_event_t *e){
+    Mon *m = g_mon;
+    if(!m || m->ui != UI_MENU || !party_kind(m->menu)) return;
+    lv_area_t a;
+    lv_obj_get_coords(m->text, &a);
+    int y0 = a.y1 - (ICON_ROW - LINE_H) / 2;
+    for(int i = 0; i < m->w.n_party; i++)
+        icon_draw(m, lv_event_get_layer(e), i, a.x1 - MG_ICON_SIZE - 2, y0 + i * ICON_ROW);
+}
+
 static void party_menu(Mon *m, int kind, int back){
     char (*lines)[48] = m->lines;
     const char *ptr[MP_PARTY + 1];
@@ -656,9 +763,10 @@ static void party_menu(Mon *m, int kind, int back){
     int n = 0;
     for(int i = 0; i < m->w.n_party; i++, n++){
         MpCreature *c = &m->w.party[i];
-        snprintf(lines[n], 48, "%s  Lv %u  HP %u/%u%s", mon_name(m, c->mon, a), c->level,
-                 c->hp, c->stat[MG_HP], c->hp ? "" : "  fainted");
+        if(c->hp) snprintf(lines[n], 48, "%s  Lv %u  HP %u/%u", mon_name(m, c->mon, a), c->level, c->hp, c->stat[MG_HP]);
+        else snprintf(lines[n], 48, "%s  Lv %u  fainted", mon_name(m, c->mon, a), c->level);
         ptr[n] = lines[n];
+        icon_ready(m, n, c->mon, 0xFFFFFF);
     }
     if(back){ snprintf(lines[n], sizeof lines[n], "Back"); ptr[n] = lines[n]; n++; }
     m->sel = 0;
@@ -1354,18 +1462,22 @@ static void auto_set(Mon *m, int on){
     ui_mon_auto_changed(m->autoplay);
 }
 
+#define PP_ACTIVE 0xF4F1E4          /* behind the critter in the battle */
+
 /* the party panel's values now: in a battle, the HP its script has shown so
  * far (the rules are ahead of it); else the party's. Redrawn when they change. */
 static void party_watch(Mon *m){
     int bt = m->scene == SC_BATTLE, changed = m->pp_n != m->w.n_party || m->pp_active != (bt ? m->sh_active : 0xFF);
     m->pp_n = m->w.n_party;
     m->pp_active = bt ? m->sh_active : 0xFF;
+    int active = m->pp_active;
     for(int i = 0; i < m->w.n_party; i++){
         const MpCreature *c = &m->w.party[i];
         uint16_t mon = bt ? m->sh_mon[i] : c->mon, hp = bt ? m->sh_hp[i] : c->hp;
         if(mon != m->pp_mon[i] || !m->pp_name[i][0]){ mon_name(m, mon, m->pp_name[i]); changed = 1; }
         if(mon != m->pp_mon[i] || hp != m->pp_hp[i] || c->level != m->pp_lv[i] || c->stat[MG_HP] != m->pp_max[i]) changed = 1;
         m->pp_mon[i] = mon; m->pp_hp[i] = hp; m->pp_lv[i] = c->level; m->pp_max[i] = c->stat[MG_HP];
+        icon_ready(m, i, mon, i == active ? PP_ACTIVE : C_FACE);
     }
     if(changed) lv_obj_invalidate(m->pad);
 }
@@ -1442,6 +1554,7 @@ static void tick_cb(lv_timer_t *t){
     (void)t;
     Mon *m = g_mon;
     if(!m) return;
+    if(m->burst_ticks && !--m->burst_ticks) mg_burst_end(&m->g);
     if(m->scene == SC_CARD){
         if(m->card_ticks) m->card_ticks--;
         else card_end(m);
@@ -1471,8 +1584,12 @@ static void tick_cb(lv_timer_t *t){
 
 /* ---- the controls ---- */
 
-#define PP_TOP  20                  /* the party panel: a title, then a row a critter */
-#define PP_ROW  16
+/* the party panel: a title, then three rows of two critters, each its icon, its
+ * name, its level and HP, and a bar */
+#define PP_TOP   21
+#define PP_ROW   30
+#define PP_COL   114
+#define PP_LEFT  5
 
 static void pp_text(lv_layer_t *layer, const lv_font_t *f, uint32_t col, lv_text_align_t al,
                     int x1, int y1, int x2, const char *s){
@@ -1487,49 +1604,50 @@ static void pp_text(lv_layer_t *layer, const lv_font_t *f, uint32_t col, lv_text
 }
 
 static void party_draw(Mon *m, lv_layer_t *layer, int ox, int oy){
-    pp_text(layer, &lv_font_palm_bold, 0x000000, LV_TEXT_ALIGN_LEFT, ox + 6, oy + 3, ox + VW - 7, "Auto-play");
-    pp_text(layer, &lv_font_palm, 0x404040, LV_TEXT_ALIGN_RIGHT, ox + 6, oy + 3, ox + VW - 7, "Touch to take over");
+    pp_text(layer, &lv_font_palm_bold, 0x000000, LV_TEXT_ALIGN_LEFT, ox + 8, oy + 5, ox + VW, "Auto-play");
+    pp_text(layer, &lv_font_palm, 0x404040, LV_TEXT_ALIGN_RIGHT, ox + 8, oy + 5, ox + 231, "Touch to take over");
     lv_draw_rect_dsc_t r;
     lv_area_t k;
     for(int i = 0; i < m->pp_n && i < MP_PARTY; i++){
-        int y = oy + PP_TOP + i * PP_ROW, out = !m->pp_hp[i];
+        int x = ox + PP_LEFT + (i % 2) * (PP_COL + 2), y = oy + PP_TOP + (i / 2) * PP_ROW, out = !m->pp_hp[i];
         uint32_t col = out ? 0x808080 : 0x000000;
         char t[16];
         if(i == m->pp_active){      /* in battle now */
             lv_draw_rect_dsc_init(&r);
-            r.bg_color = lv_color_hex(0xF4F1E4);
+            r.bg_color = lv_color_hex(PP_ACTIVE);
             r.radius = 3;
-            k.x1 = ox + 2; k.x2 = ox + VW - 3; k.y1 = y - 1; k.y2 = y + PP_ROW - 2;
+            k.x1 = x; k.x2 = x + PP_COL - 1; k.y1 = y; k.y2 = y + PP_ROW - 1;
             lv_draw_rect(layer, &r, &k);
         }
-        pp_text(layer, i == m->pp_active ? &lv_font_palm_bold : &lv_font_palm, col, LV_TEXT_ALIGN_LEFT,
-                ox + 6, y, ox + 99, m->pp_name[i]);
+        icon_draw(m, layer, i, x + 1, y + 3);
+        int tx = x + MG_ICON_SIZE + 3, tr = x + PP_COL - 3;
+        pp_text(layer, i == m->pp_active ? &lv_font_palm_bold : &lv_font_palm, col, LV_TEXT_ALIGN_LEFT, tx, y, tr, m->pp_name[i]);
         snprintf(t, sizeof t, "Lv %u", m->pp_lv[i]);
-        pp_text(layer, &lv_font_palm, col, LV_TEXT_ALIGN_LEFT, ox + 102, y, ox + 137, t);
+        pp_text(layer, &lv_font_palm, col, LV_TEXT_ALIGN_LEFT, tx, y + 13, tr, t);
+        snprintf(t, sizeof t, "%u/%u", m->pp_hp[i], m->pp_max[i]);
+        pp_text(layer, &lv_font_palm, col, LV_TEXT_ALIGN_RIGHT, tx, y + 13, tr, t);
         /* the bar: dark, then green, amber or red as it empties */
         uint32_t max = m->pp_max[i] ? m->pp_max[i] : 1, hp = m->pp_hp[i] < max ? m->pp_hp[i] : max;
-        int bw = 40, fw = (int)((hp * (uint32_t)bw + max - 1) / max);
+        int bw = tr - tx + 1 - 2, fw = (int)((hp * (uint32_t)bw + max - 1) / max);
         lv_draw_rect_dsc_init(&r);
         r.bg_color = lv_color_hex(0x404040);
-        k.x1 = ox + 140; k.x2 = k.x1 + bw + 1; k.y1 = y + 4; k.y2 = k.y1 + 5;
+        k.x1 = tx; k.x2 = tr; k.y1 = y + 26; k.y2 = y + 29;
         lv_draw_rect(layer, &r, &k);
         if(fw){
             r.bg_color = lv_color_hex(hp * 2 > max ? 0x2E8B3A : hp * 5 > max ? 0xD08A00 : 0xC0282D);
             k.x1++; k.x2 = k.x1 + fw - 1; k.y1++; k.y2--;
             lv_draw_rect(layer, &r, &k);
         }
-        snprintf(t, sizeof t, "%u/%u", m->pp_hp[i], m->pp_max[i]);
-        pp_text(layer, &lv_font_palm, col, LV_TEXT_ALIGN_RIGHT, ox + 184, y, ox + VW - 7, t);
     }
 }
 
 #define DPAD_X 64
-#define DPAD_Y 60
+#define DPAD_Y 58
 #define KEY    36
 #define A_X    204
-#define A_Y    46
+#define A_Y    44
 #define B_X    150
-#define B_Y    80
+#define B_Y    78
 #define AB_R   24
 
 static int pad_hit(lv_obj_t *pad){
@@ -1583,10 +1701,18 @@ static void pad_draw_cb(lv_event_t *e){
     lv_area_t a;
     lv_obj_get_coords(pad, &a);
     int ox = a.x1, oy = a.y1;
+    /* a retro controller's faceplate, inside the body the pad's background is */
+    lv_draw_rect_dsc_t r;
+    lv_draw_rect_dsc_init(&r);
+    r.bg_color = lv_color_hex(C_FACE);
+    r.radius = 6;
+    r.border_color = lv_color_hex(0x000000);
+    r.border_width = 1;
+    lv_area_t fp = { ox + 2, oy + 1, ox + VW + BEZEL * 2 - 3, oy + PAD_H - 3 };
+    lv_draw_rect(layer, &r, &fp);
     if(m && m->autoplay){ party_draw(m, layer, ox, oy); return; }
     int pressed = m ? m->pressed : BT_NONE;
 
-    lv_draw_rect_dsc_t r;
     lv_draw_rect_dsc_init(&r);
     r.bg_color = lv_color_hex(0x404040);
     r.radius = 4;
@@ -1654,11 +1780,12 @@ static void box_click_cb(lv_event_t *e){
     if(!in) return;
     lv_indev_get_point(in, &p);
     lv_obj_get_coords(m->text, &a);
-    int line = (p.y - a.y1) / LINE_H;
+    /* a line's whole height, its icon's included, is its target */
+    int line = (p.y - a.y1 + (m->row_h - LINE_H) / 2) / m->row_h;
     (void)e;
     if(line < 0 || line >= m->nmenu) return;
     m->sel = (uint8_t)line;
-    lv_obj_set_y(m->cursor, m->sel * LINE_H);
+    lv_obj_set_y(m->cursor, cursor_y(m, m->sel));
     choose(m);
 }
 
@@ -1677,12 +1804,22 @@ static lv_obj_t *label(lv_obj_t *par, const lv_font_t *f, lv_color_t col){
 }
 
 static void build(Mon *m, lv_obj_t *parent){
+    /* a thin bezel round the screen, the colour of the controller's body */
+    lv_obj_t *frame = lv_obj_create(parent);
+    lv_obj_remove_style_all(frame);
+    lv_obj_set_size(frame, VW + 2 * BEZEL, FRAME_H);
+    lv_obj_set_pos(frame, 0, 0);
+    lv_obj_set_style_bg_color(frame, lv_color_hex(C_BEZEL), 0);
+    lv_obj_set_style_bg_opa(frame, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(frame, LV_OBJ_FLAG_CLICKABLE);
+
     m->view = lv_obj_create(parent);
     lv_obj_remove_style_all(m->view);
     lv_obj_set_size(m->view, VW, VH);
-    lv_obj_set_pos(m->view, 0, 0);
+    lv_obj_set_pos(m->view, BEZEL, BEZEL);
     lv_obj_clear_flag(m->view, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(m->view, view_draw_cb, LV_EVENT_DRAW_MAIN, NULL);
+    lv_obj_add_event_cb(m->view, view_cover_cb, LV_EVENT_COVER_CHECK, NULL);
     lv_obj_add_flag(m->view, LV_OBJ_FLAG_CLICKABLE);           /* a touch on the picture stops Auto-play */
     lv_obj_add_event_cb(m->view, view_press_cb, LV_EVENT_PRESSED, NULL);
 
@@ -1695,7 +1832,7 @@ static void build(Mon *m, lv_obj_t *parent){
     m->me = label(m->view, &lv_font_palm_bold, lv_color_hex(0x000000));
     lv_obj_set_pos(m->me, ME_CARD_X + 6, ME_CARD_Y + 4);
     m->mehp = label(m->view, &lv_font_palm, lv_color_hex(0x000000));
-    lv_obj_set_pos(m->mehp, ME_CARD_X + 6, ME_CARD_Y + 29);
+    lv_obj_set_pos(m->mehp, ME_CARD_X + 6, ME_CARD_Y + 28);
 
     m->box = lv_obj_create(m->view);
     lv_obj_remove_style_all(m->box);
@@ -1711,6 +1848,7 @@ static void build(Mon *m, lv_obj_t *parent){
     lv_obj_clear_flag(m->box, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(m->box, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(m->box, box_click_cb, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(m->box, box_draw_cb, LV_EVENT_DRAW_MAIN_END, NULL);
     m->cursor = label(m->box, &lv_font_palm_bold, lv_color_hex(0x000000));
     lv_label_set_text(m->cursor, ">");
     lv_obj_set_pos(m->cursor, 0, 0);
@@ -1718,13 +1856,14 @@ static void build(Mon *m, lv_obj_t *parent){
     lv_obj_set_pos(m->text, 12, 0);
     lv_obj_set_width(m->text, VW - 4 - 14 - 12);
     lv_label_set_long_mode(m->text, LV_LABEL_LONG_WRAP);
+    m->row_h = LINE_H;
     box_hide(m);
 
     m->pad = lv_obj_create(parent);
     lv_obj_remove_style_all(m->pad);
-    lv_obj_set_size(m->pad, VW, PAD_H);
-    lv_obj_set_pos(m->pad, 0, VH);
-    lv_obj_set_style_bg_color(m->pad, lv_color_hex(0xD6D6D6), 0);
+    lv_obj_set_size(m->pad, VW + 2 * BEZEL, PAD_H);
+    lv_obj_set_pos(m->pad, 0, FRAME_H);
+    lv_obj_set_style_bg_color(m->pad, lv_color_hex(C_BEZEL), 0);
     lv_obj_set_style_bg_opa(m->pad, LV_OPA_COVER, 0);
     lv_obj_clear_flag(m->pad, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(m->pad, LV_OBJ_FLAG_CLICKABLE);
@@ -1756,7 +1895,7 @@ void mon_ui_show(lv_obj_t *parent){
         if(!n){ mg_close(&m->g); free(m); no_memory(parent); return; }
         m = n;
     }
-    m->band = malloc(VW * BAND_ROWS * sizeof *m->band);
+    m->band = malloc(BAND_PX * sizeof *m->band);
     m->tiles = malloc(NCACHE * sizeof *m->tiles);
     m->frames = malloc(MG_CHAR_FRAMES * sizeof *m->frames);
     if(!m->band || !m->tiles || !m->frames){
@@ -1771,6 +1910,12 @@ void mon_ui_show(lv_obj_t *parent){
     cache_clear(m);
     build(m, parent);
     m->timer = lv_timer_create(tick_cb, TICK_MS, NULL);
+    /* in the screen's coordinates: the content area starts under the title bar */
+    lv_obj_update_layout(m->view);
+    lv_area_t tube;
+    lv_obj_get_coords(m->view, &tube);
+    crt_on(tube.x1, tube.y1, tube.x2, tube.y2, SCREEN_R, rgb(C_BEZEL), rgb(C_BEZEL));
+    crt_plain(1);                   /* only the corners: the effect made the text unreadable */
 
     if(r){
         char why[sizeof m->g.err];
@@ -1785,6 +1930,9 @@ void mon_ui_show(lv_obj_t *parent){
     mkdir("/sdcard/games", 0777);
     mkdir(MON_DIR, 0777);
     m->w.head_cap = cap;
+    /* the map's first paint is a screenful of tiles from the card too: tick_cb ends it */
+    mg_burst_begin(&m->g);
+    m->burst_ticks = BURST_TICKS;
     r = mp_load(&m->w, &m->g, m->head, MON_SAVE);
     if(r == MG_EIO){ scene_pick(m); return; }
     if(r){
@@ -1817,12 +1965,15 @@ void mon_ui_close(void){
     Mon *m = g_mon;
     if(!m) return;
     mon_ui_checkpoint();
+    crt_off();
     if(m->timer) lv_timer_delete(m->timer);
     if(m->bot){ mb_free(m->bot); free(m->bot); }
     free(m->cred);
     mg_close(&m->g);
     g_mon = NULL;
-    free(m->band); free(m->tiles); free(m->frames);
+    lv_image_cache_drop(&m->img);
+    for(int i = 0; i < MP_PARTY; i++) if(m->ic_ok[i]) lv_image_cache_drop(&m->ic_img[i]);
+    free(m->band); free(m->tiles); free(m->frames); free(m->ic);
     free(m);
 }
 
@@ -1883,6 +2034,28 @@ void mon_ui_test_place(int area, int x, int y, int facing){
         return;
     }
     scene_map(m);
+}
+
+void mon_ui_test_full_party(void){
+    Mon *m = g_mon;
+    if(!m || !m->started) return;
+    uint8_t used[256] = { 0 };
+    m->w.n_party = 0;
+    for(int i = 0; i < MP_PARTY && i < (int)m->g.n_mons; i++){
+        int best = -1, bl = -1;
+        for(uint32_t k = 0; k < m->g.n_mons && k < 256; k++){
+            MgMon r;
+            if(used[k] || mg_mon(&m->g, k, &r)) continue;
+            if(r.name.len > bl){ bl = r.name.len; best = (int)k; }
+        }
+        if(best < 0 || mp_make(&m->g, &m->w.rng, (uint16_t)best, 99, &m->w.party[i])) break;
+        used[best] = 1;
+        m->w.n_party = (uint8_t)(i + 1);
+    }
+    if(m->w.n_party > 1) m->w.party[1].hp = 0;
+    if(m->w.n_party > 2) m->w.party[2].hp /= 3;
+    m->pp_n = 0xFF;
+    redraw();
 }
 
 void mon_ui_test_give(int flag, int coins){

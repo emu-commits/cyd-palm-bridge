@@ -1,0 +1,29 @@
+# Cumulynx: the sky line's second stage. The owner's drawing (2026-11-03).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Cumulynx
+description: >-
+  Its wings are thunderheads it has talked into staying. On a still day
+  you can hear them mutter.
+category: Thunderhead
+height_cm: 110
+weight_kg: 20
+drawing: tools/game_art/src/cumulynx.jpg
+types: [sky]
+shape: hunter
+stage: stage1
+experience_group: default
+catch_rate: 60
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: gust}
+- {level_learned: 1, technique: peck}
+- {level_learned: 5, technique: fluff_up}
+- {level_learned: 12, technique: whirlwind}
+- {level_learned: 16, technique: wing_tip}
+- {level_learned: 20, technique: fledgling}
+- {level_learned: 25, technique: battery_discharge}
+- {level_learned: 28, technique: saber}
+evolutions:
+- {at_level: 32, monster_slug: tempyre}

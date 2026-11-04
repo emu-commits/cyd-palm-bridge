@@ -16,6 +16,397 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-04 — Back to 160 MHz
+
+The owner asked why the CPU went to 240 MHz, and whether it was still needed. It went up
+on 2026-11-03 for a walking frame of 94 ms at 160 (56 without the TV effect), with the
+panel at 20 MHz. Since then the panel went to 40 MHz, the read-ahead and `-O2` came in,
+and Critters gave up the effect, which was 38 of the 94 ms. All of those stay.
+
+Measured **on the board**, with two throwaway builds of `096dc9e` that differ only in the
+clock (not committed; they save nothing to the card). Auto-play ran for two minutes, from
+the same save, on USB:
+
+| What | 240 MHz | 160 MHz |
+|---|---|---|
+| A walking frame, the time between frames (median), before the sleep below | 33.0 ms | **34.5 ms** |
+| ...the time 95% of them are within | 36.7 ms | 39.4 ms |
+| ...its work (median) | 30.3 ms | 33.4 ms |
+| ...the send to the panel | 17.5 ms | 18.1 ms |
+| One tile's walk (median) | 132 ms | 142 ms |
+| A battle frame's work (mean) | 39.6 ms | 43.8 ms |
+| Opening Critters, the call to first paint | 368 ms | 419 ms |
+| Opening the Dex, the call to first paint | 382 ms | 438 ms |
+
+These are one run each, 256 walking frames in each. The opening times aren't comparable
+with the 345 and 375 ms below, which were measured from the tap in another build.
+
+- **Why it hardly matters:** over half a frame is the SPI send, whose clock comes from
+  the 80 MHz APB and not the CPU. So the CPU's 1.5x buys 7% on a walking tile.
+- **The Dex's effect** should go from about 9 ms a screenful to about 14 (computed from 82
+  cycles a pixel, not timed), on a screen that doesn't animate.
+- **The battery isn't measured.** There's no meter on this bench and it needs a discharge.
+  The case is from the ESP-IDF source and the config: 240 uses 1.25 V and the 480 MHz PLL,
+  160 uses 1.10 V and the 320 MHz PLL at this 40 MHz flash speed. With `CONFIG_PM_ENABLE`
+  off the clock never drops, so the comment here that said idle was unaffected was wrong.
+- **Lesson:** the first runs read 84 ms a frame and tripped the task watchdog, at both
+  clocks. The board boots to the lock screen, and the script had opened the game under
+  it, so LVGL was repainting the dashboard over the game. It can't happen in use: the lock
+  closes the game. A per-stage breakdown showed it (the game's draw callback ran 0 times a
+  frame), and a run that matched the 33 ms measured earlier confirmed the fix. Unlock
+  first, and check a timing build against a known number.
+- **The loop now sleeps at least a tick.** `lvgl_port_run()` called
+  `vTaskDelay(pdMS_TO_TICKS(next))`, and at `CONFIG_FREERTOS_HZ=100` anything under 10 ms
+  is 0 ticks, which doesn't block, so the loop spun and IDLE didn't run. Measured the same
+  way, at 160 MHz, one run each:
+
+  | What | Spinning | At least a tick |
+  |---|---|---|
+  | The loop asleep: Critters open, standing still | 46.9% | **95.3%** |
+  | ...the launcher | 84.1% | 95.5% |
+  | ...the lock screen | 83.7% | 95.7% |
+  | ...Auto-play, walking and battles | 36.9% | 72.8% |
+  | ...Auto-play, a battle window | 48.2% | 88.0% |
+  | A walking frame, the time between frames (median) | 34.5 ms | **40.0 ms** |
+  | One tile's walk (median) | 142 ms | 160 ms |
+
+  The cost is the walk: a frame now waits for a 10 ms tick boundary. The idle numbers
+  before the fix vary between runs. The current drawn isn't measured. Whether 40 ms is
+  acceptable is the owner's bench check.
+
+### 2026-11-03 — Critters and the Dex made fast, from the first bench report
+
+**Later the same day, from the bench: Critters gives the effect up.** Performance was
+good with `crt_fast()`, but the game's text was unreadable through it (the Dex's isn't),
+and the owner chose to drop it rather than tune it. `crt_fast()` is gone; `crt_plain()`
+keeps the view's rounded corners and nothing else, Critters' menu has no TV effect item,
+and the Dex's strength setting no longer touches the game. The table below still has the
+timings as measured with `crt_fast()`.
+
+The owner, on PR #70 on the board: walking felt slow and you could see the screen
+draw; Critters took about 2 s to open and the Dex 3 s; the fade was far too strong; the
+Dex's bezel had dark square corners. Everything below was measured **on the board**,
+with a throwaway build that timed each stage and wrote nothing (not committed).
+
+| What | Before | After |
+|---|---|---|
+| A walking frame in Critters, with the effect | 94 ms | **33 ms** |
+| ...its effect | 38 ms | 2.2 ms (`crt_fast`) |
+| ...sending it to the panel | 33 ms | 16.6 ms |
+| ...the byte swap | 3.9 ms | 1.0 ms |
+| ...composing it | 7.2 ms | 3.5 ms |
+| Opening Critters, tap to painted | 1,750 ms | **345 ms** |
+| Opening the Dex, tap to painted | 2,800 ms | **375 ms** |
+| `mg_open`, the 674 KB game | 1,260 ms | 121 ms |
+| The Dex's greeting | 1,255 ms | 81 ms |
+| A Talk page in the Dex | not measured | 85 ms + 54 ms to paint |
+| App size | 1,853 KB | 1,946 KB (of 3 MB) |
+| DRAM, static / IRAM | 147,636 B / 99,435 B | the same |
+
+**What did it, and what didn't:**
+
+- **The read-ahead** (`mg_burst_begin`): checking a game file made a card read per
+  record, because stdio discards its buffer on every seek. Four 1 KB blocks, 4 KB of
+  heap for the moment of opening, took the check from 1,134 ms to 57 ms. It's also
+  used entering an area and by the Dex's searches.
+- **One pass for the greeting:** it searched every area once per unseen critter.
+  `mg_area_lists()` reads only an area's zones and people, not its whole head.
+- **The panel's bus:** the panel and the SD card were on each other's SPI hosts, both
+  through the GPIO matrix. Swapped, both use their own pins, and the panel runs at
+  40 MHz, not 20. The sending time halved as computed. **The panel's picture at 40 MHz
+  is a bench check.**
+- **240 MHz, not 160,** and `-O2` for LVGL, `crt.c`, `ui_monster.c`, `lvgl_port.c`.
+  It costs some battery while awake, not measured. (The clock went back to 160 on
+  2026-11-04, above; `-O2` stays. The "After" column here is at 240.)
+- **The view answers `LV_EVENT_COVER_CHECK`,** so nothing behind it is painted first.
+- **The effect:** three channels in one word took it from 151 cycles a pixel to 82, and
+  that's as far as it goes. A load costs 7 cycles here (a store 4, a multiply 2) and
+  the loop needs more registers than Xtensa has, so it spills. So Critters has
+  `crt_fast()`: 13 cycles a pixel averaged over the rows (dropped since, above). The Dex keeps the whole effect
+  (about 9 ms per screenful, computed from 82 cycles): it doesn't animate.
+- **Tried, no gain:** IRAM for the loops (the same cycles as cached flash: it's the data,
+  not the code). **Tried, worse:** `setvbuf(_IONBF)`, 3 to 4 times slower to open.
+- **Lesson:** I'd assumed the effect's cost was the instruction count. Timing raw loads,
+  stores and multiplies took one run and explained it.
+
+**The look:** the fade is d², not d⁴, and 4/6/9% at a side's edge, not 25/35/45%, with
+checkerboard rounding so it doesn't band. Corners: `crt_on()` takes the well's colour and
+what's outside it, softened, as the box's square corners were all painted the well's.
+
+### 2026-11-03 — Dex, and Critters' TV screen, bezels and party icons
+
+The owner: "build through the DEX_PLAN.md", with rounded corners on the Dex's
+screen, the same effect and a thin bezel on Critters' screen, a thin controller
+bezel, and icons on both party screens. `DEX_PLAN.md` says what was built, §10 the
+Critters part. **Simulator only; nothing has run on the device.**
+
+**Measured:**
+
+| What | Number | How |
+|---|---|---|
+| `game.bin` | 653,980 → 674,156 B | `ls`; `DEXE` 1,104 B and `ICON` 14,724 B, the rest text |
+| Firmware image | 1,812,032 → 1,849,744 B | `idf.py build`, before the Dex app and after everything; 20.8 KB of it the portrait |
+| Static DRAM | 147,468 → 147,580 B (81.66 %) | `idf.py size` |
+| Dex's heap | 28,048 B | smoke32's `dex_list` |
+| Critters' heap, Auto-play with a full party | 77,744 B (63,724 B on the map) | smoke32's `critters_auto_full`, `critters_map` |
+| LVGL pool free | 17,308 B Dex, 15,264 B Critters at its fullest | smoke32 |
+
+**Not measured:** the TV effect's speed on the ESP32. The firmware logs it at debug
+level. Walking in Critters filters about 40,000 pixels a frame, so that's the
+first bench item.
+
+**Lessons:**
+
+- A draw band can't be capped at the draw buffer's *rows*: a narrower strip is
+  taller (45 rows at 210 px). The Dex showed 5 dark rows every 45; Critters' view
+  would have lost one. Cap it by pixels.
+- My first watcher for the system menu had its test backwards, and the shots I
+  called fine had scanlines on the menu; the owner saw them. It also forced a
+  full-screen redraw every 100 ms. The effect now skips the menu's rectangle, and
+  the smoke tour fails on scanlines on a menu or their absence beside one. A
+  picture I've glanced at isn't a check.
+- I committed D1 with a bot check in `monster_test.c` that didn't compile, because I
+  hadn't re-run `make monster` after the last edit; smoke32 caught it before it
+  left the machine. Run the gate on the last edit, not the one before.
+
+### 2026-11-03 — Critters: the owner's sky line and Rivetron
+
+Four new drawings: **Cirrup**, **Cumulynx**, **Tempyre** (sky) and **Rivetron**
+(metal), so 46 critters; `courses/critters/game.bin` 636,676 → 653,980 B, from
+`ls`. Five new moves are played: Adamantine, Fledgling, Gust, Peck, Steel Jaws.
+
+`tools/mksheet.py` guessed that any big enclosed light patch was a see-through
+gap, which erased Rivetron's armour and the sky line's white ruffs. A new
+`"holes"` key in the eyes file lists the real gaps by a point in the picture, and
+a drawing with that key isn't peeled for light fringe either. The 15 earlier
+sheets have no such key and still pass `--check` to the byte.
+
+### 2026-11-02 — Critters: the owner's wood and venom lines
+
+Six new drawings: **Sprigling**, **Wildbough**, **Grovarch** (wood) and
+**Skullick**, **Ossicoil**, **Banewyrm** (venom), so 42 critters;
+`courses/critters/game.bin` 610,696 → 636,676 B, from `ls`. Rules, places and
+Dex text are in `tools/game_creatures/`, and its README has the tables. Eight new
+moves are played: Blossom, Caustic Spray, Spiky Strike, Staff Smash, Stick,
+Sting, Viper, Woodsmash.
+
+`tools/mksheet.py` gained two things, and the nine earlier sheets still pass
+`--check` to the byte:
+
+- `"ink": 2` in the eyes file. At 1/2 any one cell of outline darkened a block, and
+  Grovarch and Banewyrm, the first drawings fine enough at 1/2 for it to matter,
+  went nearly black.
+- A front a row or two too tall loses its emptier edge row. It lost a row from the
+  middle, which would have cut Banewyrm across the torso.
+
+### 2026-11-02 — Critters: the owner's lightning line
+
+Three new drawings, **Sparkip**, **Nimbolt** and **Fulminax** (36 critters;
+`courses/critters/game.bin` 597,844 → 610,696 B, from `ls`). The rules, places
+and Dex text are in `tools/game_creatures/`, and its README has the table.
+
+These drawings differ from the first six, and `mksheet.py` needed three changes.
+All six older sheets still pass `--check`, so they're the same to the byte:
+
+- **Real transparency.** The drawings are RGBA PNGs. Dropping the alpha would
+  put them on black, which is the colour of their outlines. A transparent
+  picture's background is now its alpha, with no guessing from colour.
+- **A big block's ink.** A block turned dark if any of it was ink. At 1/2 that's
+  one cell in four and right, but these drawings shrink by 1/4 or 1/5, where it's
+  one in 16 or 25: outlines swelled and Fulminax's head was black noise. Ink now
+  has to be a quarter of the block, the same rule at 1/2.
+- **A kept scale.** The automatic scale let big icons decide the front's size, so
+  Nimbolt came out smaller than Sparkip. `"scale"` in the eyes file sets the front
+  and back's, and the icons fit themselves.
+
+Most lightning moves need effects the game doesn't play, so the line has only two
+lightning attacks of its own (the README). Giving it more means playing flinching
+or exhausted, which is firmware work and wasn't done.
+
+### 2026-11-02 — Critters: eyes drawn again after the shrink
+
+The owner's verdict on the six drawings: at the game's size only the eyes are
+wrong, the rest is forgivable. `mksheet.py`'s halving draws a block dark if any
+of it is dark, which holds outlines but makes pupils swell and loses their
+highlights. An AI redraw of the whole sprite (SD 1.5, SDXL, Z-Image, on the
+local GPU) was tried first and rejected by the owner.
+
+- **`mksheet.py` step 8:** after the colours are reduced, each part's eyes are
+  wiped and drawn from `tools/game_art/src/<slug>.eyes.json`, in colours the
+  part already has, so the 15-colour budget holds. A first build drafts the
+  file from the dark blobs in the drawing; `--look` shows the parts at 10x with
+  a ruler to correct it by; `--check` refuses a drawing without one.
+- **The draft is a guess.** Round eyes came out right as drafted (Gillpip,
+  Cinderkit, Rillotl). It put Scorchvix's front eyes on its necklace and found
+  none on Pyrewing's front or on its second icon: slanted eyes need placing by hand.
+  The foxes' fronts got yellow eyes under a dark brow, after a pale highlight
+  read poorly at the game's size (`colors` in the eyes file).
+- **Applied to all six.** Fronts and icons changed, except Maelstrotl's front,
+  which the owner called good as it was. Backs are the same pixels.
+  The game stores only the fronts and backs: `mkgame.py` never reads a sheet's
+  icons, so the icons' new eyes are in the sheets but not on the device.
+  Same size game.bin (597,844 B); `mkgame_test` and `make -C sim monster` pass.
+
+### 2026-11-01 — Critters: the owner's water axolotl line
+
+The owner sent three more drawings (basic, stage 1, stage 2): a water
+axolotl. They came in through `tools/game_creatures/README.md`'s steps.
+`mksheet.py` needed two fixes first; the fire foxes' sheets are the same to
+the byte after both (`--check`).
+
+- **A dark checkerboard.** These drawings sit on greys of about 30 and 85,
+  and the tool knew only light backgrounds ("found 1 drawings"). The
+  background's greys are now learnt from the picture's border (`Backdrop`):
+  if the border's median grey is light, the old rule holds unchanged;
+  if it's dark, the background is the neutral greys from the border's 10th
+  centile less 12 to its 90th plus 16 (18..104 here), and the hole and
+  fringe rules use the same two tones.
+- **Drawings whose boxes overlap.** Maelstrotl's tornado and its back's
+  tail swirl come within a few pixels, so the front and back joined into one
+  drawing. Now two big pieces (a quarter of the biggest or more) are never
+  joined; a loose piece (a splash, a bubble) goes with the big piece whose
+  *pixels* are nearest, found by one breadth-first pass out from the big
+  pieces (box distance gave the tornado's splashes to the back). Each
+  drawing then samples only its own pieces, since the front's box now runs
+  27 px into the back's.
+- **Measured** (1248 or 1264 × 848 JPEGs): the pixel is 5.26, 5.30 and 5.24
+  picture pixels, so all three were halved again. Gillpip: front 34 × 38,
+  back 34 × 40. Rillotl: 44 × 42 and 42 × 41. Maelstrotl: 56 × 48 and
+  48 × 48. Icons 17–21 px. Each front and back uses 15 colours.
+  Maelstrotl is the busiest drawing yet, and its spines come out grainy.
+- **The line:** Gillpip (water, polliwog) evolves at 16 into Rillotl (water,
+  humanoid), at 32 into Maelstrotl (water, brute). Their moves: Bubbles,
+  Water Bullet, Font, Water Blast, Kraken and Tsunami, with Gnaw, Fluff Up,
+  Saber and All In. Hook, Blood Bond and Wallow were tried first; the build
+  report showed their effects aren't played, so they were swapped. New move
+  numbers 40–43 (Bubbles, Tsunami, Water Blast, Water Bullet), creatures
+  31–33.
+- **Wild only, rare** (rate 10, Maelstrotl 8): Brideswood in acts 1 and 2,
+  Route 1 and Brideswood in act 3, the Old Keep once Ashe is beaten.
+- **`game.bin`: 584,844 → 597,844 B** (+13,000). The `game` partition is
+  983,040 B.
+- **Seen in the simulator** (a scratch build only: Gillpip as the first
+  starter, Route 1 nothing but Maelstrotl). The pick screen, a battle, the
+  move list and the party all draw right.
+- **Gates:** make test, make ftest, the sim list (smoke included), smoke32,
+  mkcourse_test and mkgame_test all pass; mkgame_test's `--check` of every
+  "ours" sheet now covers the dark checkerboard. In `make -C sim monster`,
+  Auto-play still beats all 32 keepers with each of the five starters. The
+  firmware is unchanged: 0x1ba270 B, DRAM 147,468 B (81.59 %). wasm wasn't
+  run (no emsdk).
+
+### 2026-11-01 — Critters: critters of our own, and the owner's fire fox line
+
+The owner sent three drawings (basic, stage 1, stage 2) of a new fire type and
+asked for a standard way to bring in many more. `tools/game_creatures/README.md`
+is that way, step by step.
+
+- **`tools/mksheet.py`** turns a drawing into the 128 × 88 sheet. The
+  drawing can be any size, on white or a checkerboard, and needn't be on an
+  exact grid. The steps are in its docstring. In short:
+  - The background is the light grey reaching the edge, plus holes that show
+    the checkerboard or are too big for an eye's white.
+  - The four drawings are the groups that are left.
+  - The drawing's pixel size comes from where the colour changes, across
+    all four together. Each drawing gets its own offset.
+  - Each pixel is the median of the middle of its cell, and light fringe is
+    peeled off the edges.
+  - The art is then halved until it fits. Each 2 × 2 block becomes its
+    medoid, or its outline colour if it has one. Without that, the outlines
+    and the faces were lost.
+  - The front and back are placed centred, 6 px and 1 px from the bottom.
+  - They are reduced together to 15 colours: median cut to 64, then the
+    closest pair is merged, with the distance scaled by the smaller pair's
+    size so eyes and gems last. Two rounds of Lloyd follow.
+  - Pure Pillow, about 3 s a drawing, and the same to the byte each time.
+- **Measured on the three drawings** (1264 × 848 JPEGs):
+  - The pixel is 5.30 picture pixels in all three, and each drawing's own fit
+    is within 0.3 % of that. They were drawn at twice the game's size, so the
+    tool halved them.
+  - Cinderkit: front 29 × 33, back 30 × 40. Scorchvix: 37 × 42 and 37 × 42.
+    Pyrewing: 50 × 49 and 51 × 48. The icons are 16–19 px.
+  - Each one's front and back use 15 colours. mkgame reduces nothing further
+    ("10 reduced to 15 colours", as before).
+  - The first try took the pixel size per drawing and picked multiples
+    (10.6, 15.9, 36.8). Scoring each size by how much *more* of the change
+    falls on one phase than chance would (not by the share alone) fixed that.
+- **Creatures of our own in `mkgame.py`.**
+  - An allow-list line `creature <slug> … tools/game_art/<slug>-sheet.png
+    ours` takes its rules from `tools/game_creatures/<slug>.yaml`, which has
+    Tuxemon's keys plus `name`, `description` (for the Dex) and `drawing`.
+  - Before anything is built, the rules are checked: the keys, the types,
+    the shape, the stage, the experience group, that each move is in
+    Tuxemon, that each evolution's target is on the list, and the ranges.
+    A missing sheet fails too.
+  - Our creatures sort after Tuxemon's (no Tuxemon number, so `txmn 0`).
+    New numbers are 28–30 in `game_ids.tsv`.
+- **The fire fox line:**
+  - **Cinderkit** (fire, varmint) evolves at 16 into **Scorchvix** (fire,
+    hunter), which evolves at 32 into **Pyrewing** (fire and sky, brute).
+  - Their moves are Tuxemon's: Gnaw, Tinder, Fire Claw, Fluff Up, Magma,
+    Breathe Fire, Saber, Flamethrower and All In, plus Wing Tip and
+    Peregrine for Pyrewing. All of them were already in the game.
+  - They're rare in the wild: in six tables, at rate 10 (Pyrewing 8) beside
+    the others' 10–30. README's table lists them.
+  - Credited "CYD Palm (CC0 1.0)" like the rest of our art. The drawings
+    are kept in `tools/game_art/src/` (575 KB) so the sheets can be made
+    again.
+- **`game.bin`: 572,016 → 584,844 B** (+12,828: three 4,136 B sprites, the
+  names, credits and tables). The `game` partition is 983,040 B.
+- **Seen in the simulator** (a scratch build only: Cinderkit as the first
+  starter, Route 1 nothing but Pyrewing). The pick screen, a battle with
+  Cinderkit's back against Pyrewing's front, the move list and the party
+  all draw right.
+- **`mkgame_test`** refuses nine bad creatures of our own (a type no one
+  has, an unknown shape, no name, an unread key, an unknown move, an
+  unlisted evolution, no sheet, no rules, a sheet with the wrong name). On
+  the committed game, every "ours" sheet must be what `mksheet.py --check`
+  builds from its drawing, and the credits must name it.
+- **Gates:** make test, make ftest, the sim list (smoke included), smoke32,
+  mkcourse_test and mkgame_test all pass. In `make -C sim monster`, Auto-play
+  still beats all 32 keepers with each of the five starters. Nothing in the
+  firmware changed: 0x1ba270 B, DRAM 147,468 B (81.59 %), as before. wasm
+  wasn't run (no emsdk).
+
+### 2026-11-01 — Critters: Fluttaflap's new back (the owner's drawing)
+
+Tuxemon's Fluttaflap sheet had a red moth-bat front and a green butterfly
+back. The owner redrew the back to match the front and sent the sheet as a
+1233 × 848 JPEG. It's now `tools/game_art/fluttaflap-sheet.png` (128 × 88,
+RGBA, the usual layout), and `game.bin` uses it.
+
+- **Conversion.** The JPEG is the whole sheet at 9.716×. Fitting the
+  front's 64 × 64 pixels against Tuxemon's front gave the scale and offset
+  (7.7 levels mean error a channel). The back was pasted about a third of a
+  pixel off that grid, so it got its own fit, chosen by the least colour
+  spread inside each cell (4.5× less than on the front's grid). Each pixel
+  is the median of the 5 × 5 source pixels at its centre. Near-white is
+  transparent. Then 10 colours, and the browns within 18 levels of the
+  front's own browns were snapped to them.
+- **Only the back is new.** The front and both icons are Tuxemon's,
+  pixel for pixel, before the colour step.
+- **15 colours for front and back together, chosen here, not by mkgame.**
+  With the 25 colours left to mkgame's median cut, the back's large coral
+  areas took the palette, and the front lost its pink fluff (to tan), its
+  eye whites and its yellow wing lines. The closest pair was merged
+  instead, until 15 were left. The back's four big colours were kept; the
+  commoner colour stood each time, so no new blends. The front keeps all
+  three. Its wing red is now the back's coral, so the two match. mkgame
+  then reduces nothing ("10 reduced to 15 colours", was 11).
+- **`game_allow.tsv` status `edited`.** A creature's Tuxemon sheet with a
+  part redrawn, at `tools/game_art/<slug>-sheet.png`. It keeps the licence
+  (CC BY-SA 4.0) and names who redrew what: "Spalding004; CYD Palm
+  (back)". mkgame reads that sheet instead of Tuxemon's, and refuses one
+  that isn't 128 × 88. The credits and `courses/critters/README.md` say so.
+- **`mkgame_test`** refuses an `edited` line that isn't in `tools/game_art`.
+  It also checks that the committed game credits the new back and that the
+  sheet is 128 × 88 RGBA.
+
+Measured: `game.bin` 572,000 → 572,016 B (the longer credit line; the
+sprite record is 4,136 B as before). Rebuilding the old allow-list with
+the pinned Pillow 12.3.0 gave the committed file to the byte first. No C
+changed: the firmware is 1,811,056 B, static DRAM unchanged.
+
 ### 2026-10-31 — Critters: Acts 2 and 3, and the finale
 
 The content of `GAME_LENGTH_PLAN.md`, on the engine, areas and store built

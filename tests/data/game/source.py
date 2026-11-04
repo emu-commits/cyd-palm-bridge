@@ -103,6 +103,10 @@ NAMES = {
     "emberkit": "Emberkit", "blazecat": "Blazecat", "puddlop": "Puddlop", "thornet": "Thornet",
     "rustmole": "Rustmole", "ghostling": "Ghostling",
     "tonic": "Tonic", "revival": "Revival",
+    "cat_fixture": "Test Creature",
+    "emberkit_description": "It sets small fires by accident.", "blazecat_description": "It sets larger ones on purpose.",
+    "puddlop_description": "It is mostly puddle.", "thornet_description": "It is mostly thorns.",
+    "rustmole_description": "It digs through old iron.", "ghostling_description": "It may not be there at all.",
     "fixture_sign_meadow": "Meadow. The burrow is east, past the trees.",
     "fixture_sign_burrow": "“Mind the moles” — the keeper",
 }
@@ -387,7 +391,8 @@ def main(out):
         d = {"slug": s, "moveset": [{"level_learned": lv, "technique": t} for lv, t in learn],
              "evolutions": [{"at_level": lv, "monster_slug": to} for to, lv in evo],
              "shape": shape, "stage": stage, "types": ty, "txmn_id": txmn, "catch_rate": float(cr),
-             "lower_catch_resistance": lo, "upper_catch_resistance": hi}
+             "lower_catch_resistance": lo, "upper_catch_resistance": hi,
+             "species": "fixture", "height": 40 + txmn % 900, "weight": 1.5 + txmn % 900}
         if grp != "default":
             d["experience_group"] = grp
         write(db / "monster" / f"{s}.yaml", yaml_dump(d) + "\n")

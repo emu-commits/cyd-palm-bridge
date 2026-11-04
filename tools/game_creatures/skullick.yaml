@@ -1,0 +1,26 @@
+# Skullick: the venom line's first stage. The owner's drawing (2026-11-02).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Skullick
+description: >-
+  It wears the skull of whatever it ate first. The bulb on its tail holds a
+  week of venom, and it drools the rest.
+category: Skull Wearer
+height_cm: 40
+weight_kg: 3
+drawing: tools/game_art/src/skullick.png
+types: [venom]
+shape: varmint
+stage: basic
+experience_group: default
+catch_rate: 100
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: gnaw}
+- {level_learned: 1, technique: spit_poison}
+- {level_learned: 5, technique: acid}
+- {level_learned: 9, technique: sting}
+- {level_learned: 13, technique: muck}
+evolutions:
+- {at_level: 16, monster_slug: ossicoil}

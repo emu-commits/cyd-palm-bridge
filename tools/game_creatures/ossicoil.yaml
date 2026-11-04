@@ -1,0 +1,28 @@
+# Ossicoil: the venom line's second stage. The owner's drawing (2026-11-02).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Ossicoil
+description: >-
+  Its hood is ribbed with bone from the skull it once wore. Where it
+  sleeps, the ground stays purple.
+category: Bone Hood
+height_cm: 170
+weight_kg: 45
+drawing: tools/game_art/src/ossicoil.png
+types: [venom]
+shape: serpent
+stage: stage1
+experience_group: default
+catch_rate: 60
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: spit_poison}
+- {level_learned: 1, technique: acid}
+- {level_learned: 9, technique: sting}
+- {level_learned: 13, technique: muck}
+- {level_learned: 20, technique: caustic_spray}
+- {level_learned: 25, technique: saber}
+- {level_learned: 30, technique: viper}
+evolutions:
+- {at_level: 32, monster_slug: banewyrm}

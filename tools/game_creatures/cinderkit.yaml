@@ -1,0 +1,27 @@
+# Cinderkit: the fire fox line's first stage. The owner's drawing (2026-11-01).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Cinderkit
+description: >-
+  Its tail is a flame it can't put out. It sleeps curled around it to keep
+  warm, and wakes when the flame burns low.
+category: Flame Kit
+height_cm: 40
+weight_kg: 6
+drawing: tools/game_art/src/cinderkit.jpg
+types: [fire]
+shape: varmint
+stage: basic
+experience_group: default
+catch_rate: 100
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: gnaw}
+- {level_learned: 1, technique: tinder}
+- {level_learned: 5, technique: fire_claw}
+- {level_learned: 9, technique: fluff_up}
+- {level_learned: 12, technique: magma}
+- {level_learned: 15, technique: breathe_fire}
+evolutions:
+- {at_level: 16, monster_slug: scorchvix}

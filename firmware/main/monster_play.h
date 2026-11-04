@@ -30,6 +30,7 @@
 #define MP_BAG       MG_MAX_ITEMS
 #define MP_BAG_MAX   99         /* of one item */
 #define MP_MONEY_MAX 999999
+#define MP_MARK_BYTES (MG_MAX_DEX / 8)      /* the Dex's seen and caught sets */
 
 /* a creature, as the rules hold it (positions in the file, not ids) */
 typedef struct {
@@ -139,6 +140,8 @@ typedef struct {
     uint8_t    look;                         /* which of the player's looks (below g->looks) */
     uint32_t   money;
     uint8_t    bag[MP_BAG];                  /* how many of each of ITEM's items */
+    uint8_t    seen[MP_MARK_BYTES], caught[MP_MARK_BYTES];   /* the Dex's marks, by stable id */
+    uint32_t   starter_id;                   /* the first critter's stable id; 0 unknown (an old save) */
     uint16_t   respawn_area;
     uint8_t    pface[MG_MAX_PEOPLE];         /* the area's people's facing now (they turn to talk) */
     char       err[80];
@@ -208,10 +211,29 @@ int  mp_wild_choice(MpWorld *w, MpBattle *b);
 /* ---- the save ---- */
 #define MP_SAVE_HEADER 32
 #define MP_SAVE_REC    40
-#define MP_SAVE_VERSION 3       /* 2 added the story's flags and the respawn, 3 the money and the bag */
+#define MP_SAVE_VERSION 4       /* 2 added the story's flags and the respawn, 3 the money and the bag,
+                                   4 what the Dex remembers */
 int  mp_save(MpWorld *w, const char *path);
 /* Load into a world made with mp_new's arguments' game; refuses a damaged
  * file, and one naming creatures, moves or areas this game file doesn't have. */
 int  mp_load(MpWorld *w, MonGame *g, uint8_t *head, const char *path);
+
+/* ---- what the Dex reads ---- */
+/* The creature with stable id `id` is marked seen or caught, for good: evolving,
+ * releasing or trading it doesn't take the mark back. */
+int  mp_seen(const MpWorld *w, uint32_t id);
+int  mp_caught(const MpWorld *w, uint32_t id);
+/* mp_mark_mon: what the rules call at each event of DEX_PLAN.md 4.1; public for
+ * the smoke tour's made-up saves. */
+void mp_mark_mon(MpWorld *w, uint16_t mon, int caught);
+typedef struct {
+    uint8_t  version;                 /* the file's: below 4, the marks were made from the party and box */
+    uint32_t starter;                 /* the first critter's stable id; 0 if the save doesn't know */
+    uint8_t  flags[MG_FLAGS / 8];     /* the story, for which encounter tables apply */
+    uint8_t  seen[MP_MARK_BYTES], caught[MP_MARK_BYTES];
+} MpMarks;
+/* Read only what the Dex needs from a save, without a world or a game file:
+ * MG_EIO if there's no save, MG_EBAD or MG_EVERSION as mp_load. Never writes. */
+int  mp_read_marks(const char *path, MpMarks *out);
 
 #endif

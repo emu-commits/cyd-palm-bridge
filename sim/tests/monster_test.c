@@ -201,6 +201,15 @@ static int dump(const char *path){
         printf("  cells crc %08x move crc %08x overlays %u\n", (unsigned)cc, (unsigned)mc, a.n_overlays);
     }
     printf("credits %08x\n", (unsigned)g.s[MG_CRED].crc);
+    for(uint32_t i = 0; g.has_dex && i < g.n_mons; i++){
+        MgDex d;
+        char cat[64];
+        mg_dex(&g, i, &d);
+        text(&g, d.category, cat);
+        text(&g, d.description, t);
+        printf("dex %u no %u height %u weight %u %s | %s\n", (unsigned)i, d.number, d.height_cm, d.weight_tenths, cat, t);
+    }
+    if(g.has_icons) printf("icons %u %08x\n", (unsigned)g.n_mons, (unsigned)g.s[MG_ICON].crc);
     free(scratch);
     mg_close(&g);
     return 0;
@@ -821,8 +830,8 @@ static void saves(MpWorld *w){
         CHECK(!memcmp(&v->box[i], &w->box[i], sizeof w->box[i]), "box %d after a round trip", i);
     long n;
     uint8_t *good = slurp(SAVE, &n);
-    const long BAG = 80;
-    CHECK(n == MP_SAVE_HEADER + MP_SAVE_REC * (1 + w->n_party + w->n_box) + BAG, "the save is %ld bytes", n);
+    const long BAG = 80, MARKS = 72;
+    CHECK(n == MP_SAVE_HEADER + MP_SAVE_REC * (1 + w->n_party + w->n_box) + BAG + MARKS, "the save is %ld bytes", n);
     /* every truncation, and every flipped bit, refused */
     int took = 0;
     for(long k = 0; k < n; k++){
@@ -842,7 +851,7 @@ static void saves(MpWorld *w){
     printf("  save: %ld bytes; %ld truncations and %ld flipped bits refused\n", n, n, n * 8);
     /* a creature this file doesn't have (the CRCs fixed, so the id is what's checked) */
     memcpy(bad, good, (size_t)n);
-    bad[MP_SAVE_HEADER + MP_SAVE_REC + BAG] = 77;
+    bad[MP_SAVE_HEADER + MP_SAVE_REC + BAG + MARKS] = 77;
     uint32_t crc = mg_crc32(0, bad + MP_SAVE_HEADER, (uint32_t)(n - MP_SAVE_HEADER));
     for(int i = 0; i < 4; i++) bad[24 + i] = (uint8_t)(crc >> (8 * i));
     crc = mg_crc32(0, bad, 28);
@@ -875,9 +884,9 @@ static void saves(MpWorld *w){
     spit(SAVE, bad, n);
     CHECK(mp_load(v, &G, head2, SAVE) == MG_EBAD && strstr(v->err, "item"), "an unknown item: %s", v->err);
     /* a version 2 save (before the bag) loads with the starting money and nothing in the bag */
-    long n2 = n - BAG;
+    long n2 = n - BAG - MARKS;
     memcpy(bad, good, MP_SAVE_HEADER + MP_SAVE_REC);
-    memcpy(bad + MP_SAVE_HEADER + MP_SAVE_REC, good + MP_SAVE_HEADER + MP_SAVE_REC + BAG,
+    memcpy(bad + MP_SAVE_HEADER + MP_SAVE_REC, good + MP_SAVE_HEADER + MP_SAVE_REC + BAG + MARKS,
            (size_t)(n2 - MP_SAVE_HEADER - MP_SAVE_REC));
     bad[4] = 2; bad[5] = 0;
     crc = mg_crc32(0, bad + MP_SAVE_HEADER, (uint32_t)(n2 - MP_SAVE_HEADER));
@@ -888,9 +897,9 @@ static void saves(MpWorld *w){
     CHECK(mp_load(v, &G, head2, SAVE) == 0 && v->money == G.money_start && !v->bag[1] && mp_flag(v, 2),
           "a version 2 save: %s", v->err);
     /* a version 1 save (before the story's record) still loads, with no flags */
-    long n1 = n - MP_SAVE_REC - BAG;
+    long n1 = n - MP_SAVE_REC - BAG - MARKS;
     memcpy(bad, good, MP_SAVE_HEADER);
-    memcpy(bad + MP_SAVE_HEADER, good + MP_SAVE_HEADER + MP_SAVE_REC + BAG, (size_t)(n1 - MP_SAVE_HEADER));
+    memcpy(bad + MP_SAVE_HEADER, good + MP_SAVE_HEADER + MP_SAVE_REC + BAG + MARKS, (size_t)(n1 - MP_SAVE_HEADER));
     bad[4] = 1; bad[5] = 0;
     crc = mg_crc32(0, bad + MP_SAVE_HEADER, (uint32_t)(n1 - MP_SAVE_HEADER));
     for(int i = 0; i < 4; i++) bad[24 + i] = (uint8_t)(crc >> (8 * i));
@@ -929,6 +938,7 @@ static int bot_plays(MonGame *g, int pick, uint32_t seed){
     MpLog log;
     long n, battles = 0, keepers = 0, lost = 0, lost_k = 0, caught = 0, stuck = 0, learnt = 0, bought = 0, used = 0;
     int ok = 0;
+    uint8_t met[32] = { 0 };        /* the creatures it has met, by position */
     char who[32] = "?";
     w->head_cap = cap;
     uint16_t starter = g->n_starters ? g->starters[pick % g->n_starters] : 0;
@@ -960,6 +970,7 @@ static int bot_plays(MonGame *g, int pick, uint32_t seed){
         for(int i = 0; i < log.n; i++){
             const MpEvent *e = &log.ev[i];
             if(e->kind == MP_EV_ENCOUNTER || e->kind == MP_EV_TRAINER) battles++;
+            if((e->kind == MP_EV_ENCOUNTER || e->kind == MP_EV_SENDS) && e->a < 256) met[e->a / 8] |= (uint8_t)(1u << (e->a % 8));
             if(e->kind == MP_EV_BEATEN) keepers++;
             if(e->kind == MP_EV_LOSE){ lost++; lost_k += bt.trainer != 0; }
             if(getenv("BOT_VERBOSE") && (e->kind == MP_EV_LOSE || e->kind == MP_EV_BEATEN)){
@@ -991,6 +1002,17 @@ static int bot_plays(MonGame *g, int pick, uint32_t seed){
         if(mg_mon(g, w->party[i].mon, &m) || mg_text(g, m.name, t, sizeof t) < 0) snprintf(t, sizeof t, "?");
         size_t l = strlen(party);
         snprintf(party + l, sizeof party - l, "%s%s %u", i ? ", " : "", t, w->party[i].level);
+    }
+    /* the Dex's marks after a whole game: all it met seen, all it owns caught */
+    for(uint32_t i = 0; i < g->n_mons && i < 256; i++){
+        MgMon m;
+        if(mg_mon(g, i, &m)) continue;
+        if(met[i / 8] >> (i % 8) & 1) CHECK(mp_seen(w, m.id), "bot: met creature %u, not marked seen", (unsigned)i);
+    }
+    for(int i = 0; i < w->n_party + w->n_box; i++){
+        MgMon m;
+        if(!mg_mon(g, i < w->n_party ? w->party[i].mon : w->box[i - w->n_party].mon, &m))
+            CHECK(mp_caught(w, m.id) && mp_seen(w, m.id), "bot: owns creature %u, not marked caught", (unsigned)m.id);
     }
     int main_lv = w->party[0].level;
     for(int i = 1; i < w->n_party; i++) if(w->party[i].level > main_lv) main_lv = w->party[i].level;

@@ -38,7 +38,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mkcourse import fold, latin_fallback  # noqa: E402  (one set of text rules)
 
-FORMAT_MAJOR, FORMAT_MINOR = 2, 1      # 2.0: the player's looks once, in LOOK; 2.1 items, money and shops
+FORMAT_MAJOR, FORMAT_MINOR = 2, 2      # 2.0: the player's looks once, in LOOK; 2.1 items, money and shops; 2.2 the Dex
 MAGIC = b"CYDG"
 
 TUXEMON_URL = "https://github.com/Tuxemon/Tuxemon.git"
@@ -49,6 +49,7 @@ TOOLS = Path(__file__).resolve().parent
 ALLOW = TOOLS / "game_allow.tsv"
 REGION = TOOLS / "game_region.json"
 IDS = TOOLS / "game_ids.tsv"
+CREATURES = TOOLS / "game_creatures"   # critters of our own: their rules (tools/game_creatures/README.md)
 
 TILE = 16
 CHUNK = 16                    # cells per chunk side: a screen spans at most 2 x 2 (GAME_FORMAT.md 3.11)
@@ -65,9 +66,14 @@ I_HEAL, I_HEAL_PCT, I_CURE, I_REVIVE = 1, 2, 4, 8
 MAX_ITEMS = 9
 
 SECTIONS = [b"META", b"TYPE", b"SHAP", b"STAT", b"MOVE", b"MONS", b"LRNS",
-            b"ENCT", b"AREA", b"ADAT", b"SPRT", b"TEXT", b"CRED", b"LOOK", b"ITEM"]
+            b"ENCT", b"AREA", b"ADAT", b"SPRT", b"TEXT", b"CRED", b"LOOK", b"ITEM", b"DEXE", b"ICON"]
 CRC_ON_OPEN = {b"META", b"TYPE", b"SHAP", b"STAT", b"MOVE", b"MONS", b"LRNS",
-               b"ENCT", b"AREA", b"TEXT", b"ITEM"}
+               b"ENCT", b"AREA", b"TEXT", b"ITEM", b"DEXE"}
+OPTIONAL_SECTIONS = {b"ITEM", b"DEXE", b"ICON"}      # 2.1's and 2.2's: an older file has none of them
+ICON_SIZE = 24                # the list icons: the sheet's first menu frame, at (0, 64)
+ICON_REC = 32 + ICON_SIZE * ICON_SIZE // 2           # its 16 colours, then 4 bits a pixel
+MAX_CREATURE_ID = 255         # the save's seen and caught sets hold 256 bits (GAME_FORMAT.md 5)
+DEX_TEXT_W, DEX_TEXT_LINES = 216, 3                  # a description in the Dex's lower screen
 
 # META keys (GAME_FORMAT.md 3.2)
 K_TITLE, K_SOURCE, K_BUILD = 0x01, 0x02, 0x03
@@ -215,10 +221,14 @@ def load_allow(path=ALLOW):
         if not line.strip() or line.startswith("#"):
             continue
         f = line.split("\t")
-        if len(f) != 6 or f[0] not in allow or f[5] not in ("credited", "unverified", "confirmed", "ours"):
+        if len(f) != 6 or f[0] not in allow or f[5] not in ("credited", "unverified", "confirmed", "ours", "edited"):
             fail(f"{path}:{n}: want kind, slug, licence, authors, source, status")
-        if f[5] == "ours" and (f[0] == "creature" or f[4] != f"tools/game_art/{f[1]}.png"):
-            fail(f"{path}:{n}: a sheet of our own is a character or a tileset at tools/game_art/{f[1]}.png")
+        if f[5] == "ours" and f[0] == "creature" and f[4] != f"tools/game_art/{f[1]}-sheet.png":
+            fail(f"{path}:{n}: a creature of our own has its sheet at tools/game_art/{f[1]}-sheet.png")
+        if f[5] == "ours" and f[0] != "creature" and f[4] != f"tools/game_art/{f[1]}.png":
+            fail(f"{path}:{n}: a sheet of our own is at tools/game_art/{f[1]}.png")
+        if f[5] == "edited" and (f[0] != "creature" or f[4] != f"tools/game_art/{f[1]}-sheet.png"):
+            fail(f"{path}:{n}: an edited sheet is a creature's, at tools/game_art/{f[1]}-sheet.png")
         allow[f[0]][f[1]] = {"licence": f[2], "authors": f[3], "source": f[4], "status": f[5]}
     return allow
 
@@ -252,8 +262,47 @@ def save_ids(ids, path=IDS):
 
 # ---------------------------------------------------------------- the rules
 
+OWN_KEYS = {"name", "description", "drawing", "types", "shape", "stage", "experience_group", "moveset",
+            "evolutions", "catch_rate", "lower_catch_resistance", "upper_catch_resistance",
+            "category", "height_cm", "weight_kg"}
+
+
+def own_creature(path, slug, techs_dir, types, shapes, text_check=True):
+    """A creature of our own (status "ours"): its rules in Tuxemon's shape, with its
+    name and Dex text, checked here so a typo fails the build, not the game."""
+    yaml = need_yaml()
+    if not path.exists():
+        fail(f"creature {slug} is ours, but {path} doesn't exist")
+    d = yaml.safe_load(open(path, encoding="utf-8"))
+    where = f"{path.name}"
+    if not isinstance(d, dict) or set(d) - OWN_KEYS or {"name", "types", "shape", "stage", "moveset"} - set(d):
+        fail(f"{where}: want {', '.join(sorted(OWN_KEYS))} "
+             f"(name, types, shape, stage and moveset at least)")
+    text_ok(d["name"], f"{where}: name")
+    if d.get("description") is not None:
+        text_ok(d["description"], f"{where}: description")
+    if not 1 <= len(d["types"]) <= 2 or set(d["types"]) - set(types):
+        fail(f"{where}: types: one or two of {', '.join(types)}")
+    if d["shape"] not in shapes:
+        fail(f"{where}: shape: one of {', '.join(sorted(shapes))}")
+    if d["stage"] not in STAGES or d.get("experience_group", "default") not in EXP_GROUPS:
+        fail(f"{where}: stage one of {', '.join(STAGES)}; experience_group one of {', '.join(EXP_GROUPS)}")
+    for mv in d["moveset"]:
+        if set(mv) != {"level_learned", "technique"} or not 1 <= int(mv["level_learned"]) <= 100:
+            fail(f"{where}: moveset: each a level_learned (1 to 100) and a technique")
+        if not (techs_dir / f"{mv['technique']}.yaml").exists():
+            fail(f"{where}: technique {mv['technique']} isn't in Tuxemon")
+    for e in d.get("evolutions") or []:
+        if set(e) != {"at_level", "monster_slug"} or not 1 < int(e["at_level"]) <= 100:
+            fail(f"{where}: evolutions: each an at_level (2 to 100) and a monster_slug")
+    for k in ("catch_rate", "lower_catch_resistance", "upper_catch_resistance"):
+        if k in d and not 0 <= float(d[k]) <= 255:
+            fail(f"{where}: {k} out of range")
+    return d
+
+
 class Rules:
-    def __init__(self, root, allow, region, report):
+    def __init__(self, root, allow, region, report, creatures=CREATURES):
         yaml = need_yaml()
         self.root = root
         db = root / "mods" / "tuxemon" / "db"
@@ -284,11 +333,22 @@ class Rules:
             self.statuses[slug] = y(db / "status" / f"{slug}.yaml")
 
         self.mons = {}
+        self.own_names = {}
         for slug in sorted(allow["creature"]):
+            if allow["creature"][slug]["status"] == "ours":
+                d = own_creature(Path(creatures) / f"{slug}.yaml", slug, db / "technique", self.types,
+                                 self.shape_ix)
+                self.own_names[slug] = d["name"]
+                self.mons[slug] = d
+                continue
             p = db / "monster" / f"{slug}.yaml"
             if not p.exists():
                 fail(f"game_allow.tsv: creature {slug} isn't in Tuxemon")
             self.mons[slug] = y(p)
+        for slug, d in self.mons.items():
+            for e in d.get("evolutions") or []:
+                if allow["creature"][slug]["status"] == "ours" and e["monster_slug"] not in self.mons:
+                    fail(f"creature {slug} evolves into {e['monster_slug']}, which isn't in the allow-list")
         self.techs = {}
         unsupported = {}
         for slug in sorted(self.mons):
@@ -373,6 +433,8 @@ class Rules:
         return eff, amount, int(d.get("cost", 0))
 
     def name(self, slug):
+        if slug in self.own_names:
+            return self.own_names[slug]
         return self.po.get(slug, slug.replace("_", " ").title())
 
 
@@ -978,7 +1040,7 @@ def region_events(a, ar, mv, area_ix, rules, ids, flag_names):
 
 
 def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=True,
-          source=f"Tuxemon {TUXEMON_COMMIT}"):
+          source=f"Tuxemon {TUXEMON_COMMIT}", creatures=CREATURES):
     """`source` names where the content came from: the pinned commit, or, for
     the test fixture (--unpinned), what the caller says."""
     from PIL import Image
@@ -988,7 +1050,7 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
         bad = [f"{k} {s}" for k, d in allow.items() for s, v in d.items() if v["status"] == "unverified"]
         if bad:
             fail("unverified allow-list lines: " + ", ".join(bad))
-    rules = Rules(root, allow, region, report)
+    rules = Rules(root, allow, region, report, creatures)
     text = Text()
 
     # types, shapes, statuses
@@ -1079,7 +1141,15 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
         lo = round(float(d.get("lower_catch_resistance", 1)) * 100)
         hi = round(float(d.get("upper_catch_resistance", 1)) * 100)
         # sprite: front at (0,0), back at (64,0) of the 128x88 sheet
-        sheet = Image.open(root / "mods" / "tuxemon" / "gfx" / "sprites" / "battle" / f"{s}-sheet.png").convert("RGBA")
+        # (an "edited" line's sheet is in tools/game_art: Tuxemon's with a part redrawn;
+        # an "ours" line's is ours, made by tools/mksheet.py from the drawing)
+        sp = (TOOLS / "game_art" / f"{s}-sheet.png" if allow["creature"][s]["status"] in ("edited", "ours") else
+              root / "mods" / "tuxemon" / "gfx" / "sprites" / "battle" / f"{s}-sheet.png")
+        if not sp.exists():
+            fail(f"creature {s}: no sheet at {sp}")
+        sheet = Image.open(sp).convert("RGBA")
+        if sheet.size != (2 * SPRITE_W, 88):
+            fail(f"creature {s}: its sheet is {sheet.size[0]} x {sheet.size[1]}; want 128 x 88")
         front = sheet.crop((0, 0, SPRITE_W, SPRITE_H))
         back = sheet.crop((SPRITE_W, 0, 2 * SPRITE_W, SPRITE_H))
         pal = make_palette([front, back], 15)
@@ -1362,9 +1432,11 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
     shops = sum(1 for a in region["areas"] for pe in a.get("people", []) if pe.get("kind") == "shop")
     if shops and not any(price for _, _, price in rules.items.values()):
         fail("game_region.json: a shop, but no item with a price")
+    DEXE, ICON = dex_sections(rules, region, mon_slugs, ids, allow, root, text)
     secs = {b"META": META, b"TYPE": TYPE, b"SHAP": SHAP, b"STAT": STAT, b"MOVE": MOVE, b"MONS": MONS,
             b"LRNS": LRNS, b"ENCT": ENCT, b"AREA": AREA, b"ADAT": bytes(ADAT), b"SPRT": bytes(SPRT),
-            b"TEXT": bytes(text.b), b"CRED": CRED, b"LOOK": LOOK, b"ITEM": ITEM}
+            b"TEXT": bytes(text.b), b"CRED": CRED, b"LOOK": LOOK, b"ITEM": ITEM,
+            b"DEXE": DEXE, b"ICON": ICON}
     off = 32 + 16 * len(SECTIONS)
     table, body = b"", b""
     for tag in SECTIONS:
@@ -1376,6 +1448,53 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
                               len(mon_slugs), len(region["areas"])) + struct.pack("<I", crc32(table))
     hdr += struct.pack("<I", crc32(hdr))
     return hdr + table + body
+
+
+def dex_sections(rules, region, mon_slugs, ids, allow, root, text):
+    """DEXE and ICON (2.2; GAME_FORMAT.md 3.17, 3.18): what the Dex shows that
+    the game doesn't need. Every creature has its record, in MONS order."""
+    from PIL import Image
+    from palm_font import PALM
+    dex = region.get("dex") or fail("game_region.json: no \"dex\": the Dex's order and any descriptions of our own")
+    if not isinstance(dex, dict) or set(dex) - {"order", "descriptions"}:
+        fail("game_region.json: dex: an order, and optionally descriptions")
+    order, written = dex.get("order", []), dex.get("descriptions", {})
+    if sorted(order) != sorted(mon_slugs):
+        missing, extra = set(mon_slugs) - set(order), set(order) - set(mon_slugs)
+        fail(f"game_region.json: dex: the order must list every creature once "
+             f"(missing {sorted(missing)}, not creatures {sorted(extra)}, {len(order)} listed)")
+    if set(written) - set(mon_slugs):
+        fail(f"game_region.json: dex: descriptions of no creature: {sorted(set(written) - set(mon_slugs))}")
+    DEXE, icons = b"", []
+    for s in mon_slugs:
+        d, ours = rules.mons[s], allow["creature"][s]["status"] == "ours"
+        if assign_id(ids, "creature", s) > MAX_CREATURE_ID:
+            fail(f"creature {s}: id {assign_id(ids, 'creature', s)}; a save's seen and caught sets stop at {MAX_CREATURE_ID}")
+        if ours:
+            cat, ht, wt = d.get("category"), d.get("height_cm"), d.get("weight_kg")
+            desc = d.get("description")
+        else:
+            cat = rules.po.get("cat_" + str(d.get("species")))
+            ht, wt = d.get("height"), d.get("weight")
+            desc = rules.po.get(s + "_description")
+        desc = written.get(s, desc)
+        if not cat or ht is None or wt is None or not desc:
+            fail(f"creature {s}: the Dex wants a category, height, weight and description")
+        tenths = round(float(wt) * 10)
+        if not 0 < float(ht) <= 65535 or not 0 < tenths <= 65535:
+            fail(f"creature {s}: height {ht} cm or weight {wt} kg out of range")
+        lines = PALM.wrap(text_ok(desc, f"creature {s}: description"), DEX_TEXT_W)
+        if len(lines) > DEX_TEXT_LINES:
+            fail(f"creature {s}: its description wraps to {len(lines)} lines of the Dex; at most {DEX_TEXT_LINES}: {desc}")
+        DEXE += struct.pack("<HHH", order.index(s) + 1, round(float(ht)), tenths) + b"\0" * 2 + \
+            text.ref(text_ok(cat, f"creature {s}: category")) + text.ref(desc)
+        sp = (TOOLS / "game_art" / f"{s}-sheet.png" if allow["creature"][s]["status"] in ("edited", "ours") else
+              root / "mods" / "tuxemon" / "gfx" / "sprites" / "battle" / f"{s}-sheet.png")
+        ic = Image.open(sp).convert("RGBA").crop((0, SPRITE_H, ICON_SIZE, SPRITE_H + ICON_SIZE))
+        pal = make_palette([ic], 15)
+        icons.append(palette_bytes(pal, 4) + pack_pixels(index_image(ic, pal, {}), 4))
+    ICON = struct.pack("<HH", len(icons), ICON_SIZE) + b"".join(icons)
+    return DEXE, ICON
 
 
 # ---------------------------------------------------------------- reading
@@ -1412,9 +1531,11 @@ class Game:
                 fail(f"section {tag.decode()} CRC")
             self.sec[tag] = b
         for t in SECTIONS:
-            if t not in self.sec and t != b"ITEM":          # ITEM (2.1) may be missing
+            if t not in self.sec and t not in OPTIONAL_SECTIONS:
                 fail(f"no {t.decode()} section")
         self.sec.setdefault(b"ITEM", struct.pack("<HH", 0, 0))
+        self.sec.setdefault(b"DEXE", b"")
+        self.sec.setdefault(b"ICON", b"")
         self.text = self.sec[b"TEXT"]
 
     def s(self, b, o):
@@ -1630,6 +1751,11 @@ def dump(g):
         out.append(f"  cells crc {crc32(cells):08x} "
                    f"move crc {crc32(bytes(a['move'])):08x} overlays {len(a['overlays'])}")
     out.append("credits " + f"{crc32(g.sec[b'CRED']):08x}")
+    for i, r in enumerate(g.records(b"DEXE", 24)):
+        no, ht, wt = struct.unpack_from("<HHH", r)
+        out.append(f"dex {i} no {no} height {ht} weight {wt} {g.s(r, 8)} | {g.s(r, 16)}")
+    if g.sec[b"ICON"]:
+        out.append("icons " + f"{struct.unpack_from('<H', g.sec[b'ICON'])[0]} {crc32(g.sec[b'ICON']):08x}")
     return "\n".join(out) + "\n"
 
 
@@ -1726,6 +1852,7 @@ def main(argv=None):
     ap.add_argument("--allow", default=str(ALLOW))
     ap.add_argument("--region", default=str(REGION))
     ap.add_argument("--ids", default=str(IDS))
+    ap.add_argument("--creatures", default=str(CREATURES), help="the rules of our own creatures")
     ap.add_argument("--check", action="store_true", help="validate files and print sizes")
     ap.add_argument("--dump", action="store_true", help="print the canonical dump")
     ap.add_argument("--preview", metavar="DIR", help="draw each file's areas and sprites into DIR")
@@ -1750,7 +1877,7 @@ def main(argv=None):
             report = []
             ids = load_ids(args.ids)
             data = build(root, args.bpp, report, ids, args.allow, args.region, spike=not args.strict,
-                         source=source)
+                         source=source, creatures=args.creatures)
             save_ids(ids, args.ids)
             Path(args.output).write_bytes(data)
             Game(data)

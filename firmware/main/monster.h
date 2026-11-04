@@ -43,6 +43,7 @@
 #define MG_CHAR_H       32
 #define MG_CHAR_FRAMES  12
 #define MG_SPRITE_MAX   (40 + 2048 * 2)     /* a 64 x 64, 4-bit, two-frame record */
+#define MG_MAX_DEX      256                 /* creatures with a Dex number; a save marks ids below this */
 #define MG_NONE8        0xFF
 #define MG_NONE16       0xFFFF
 #define MG_MAX_PEOPLE   32                  /* in one area */
@@ -56,7 +57,10 @@
 #define MG_ERANGE   (-5)    /* the caller asked for something out of range */
 
 enum { MG_META, MG_TYPE, MG_SHAP, MG_STAT, MG_MOVE, MG_MONS, MG_LRNS, MG_ENCT, MG_AREA,
-       MG_ADAT, MG_SPRT, MG_TEXT, MG_CRED, MG_LOOK, MG_ITEM, MG_NSECT };   /* ITEM may be missing */
+       MG_ADAT, MG_SPRT, MG_TEXT, MG_CRED, MG_LOOK, MG_ITEM, MG_DEXE, MG_ICON, MG_NSECT };
+#define MG_NREQUIRED MG_ITEM                /* ITEM (2.1), DEXE and ICON (2.2) may be missing */
+#define MG_ICON_SIZE 24                     /* the Dex's list icons, and the party's */
+#define MG_ICON_BYTES (32 + MG_ICON_SIZE * MG_ICON_SIZE / 2)    /* 16 colours, then 4 bits a pixel */
 
 /* move ranges (GAME_FORMAT.md 3.6) */
 enum { MG_MELEE, MG_TOUCH, MG_RANGED, MG_REACH, MG_RELIABLE, MG_SPECIAL };
@@ -105,6 +109,13 @@ typedef struct {
     uint32_t learn0, sprite_off, sprite_len;
     MgStr    name;
 } MgMon;
+
+/* What the Dex shows that the game doesn't need (DEXE, 2.2). */
+typedef struct {
+    uint16_t number;                        /* 1 .. n_mons, each once: the Dex's order */
+    uint16_t height_cm, weight_tenths;      /* tenths of a kg */
+    MgStr    category, description;
+} MgDex;
 
 typedef struct { uint16_t mon; uint8_t lo, hi; uint16_t rate; } MgEncRow;
 
@@ -168,6 +179,7 @@ typedef struct {
     uint32_t keeper_bonus;  /* experience from a keeper's creatures, percent (100 in a file without 0x23) */
     uint32_t money_start, money_per_level;  /* META 0x24: coins to start with; a keeper's prize per level */
     uint8_t  n_items;       /* ITEM's records (0 without the section) */
+    uint8_t  has_dex, has_icons;            /* DEXE and ICON are there (2.2) */
     uint8_t  n_steps;       /* once flag is set, a zone naming table uses to (in order: a table may step twice) */
     struct { uint16_t flag, table, to; } steps[MG_MAX_STEPS];
 
@@ -177,6 +189,9 @@ typedef struct {
     MgStatus statuses[MG_MAX_STATUSES];
     uint32_t n_moves, n_learn, n_tables, n_enc_rows, enc_rows0;
 
+    void    *ra;            /* the read-ahead, during a burst (mg_burst_begin) */
+    uint8_t  ra_depth;
+
     char     err[80];
 } MonGame;
 
@@ -185,6 +200,13 @@ int  mg_open(MonGame *g, const char *path);
 /* The same on a stream already open (the fuzz gate's fmemopen); g owns it. */
 int  mg_open_fp(MonGame *g, FILE *f);
 void mg_close(MonGame *g);
+
+/* A burst of small reads, as opening a file or an area is: between these, reads are
+ * served from a few blocks of the file kept in the heap (4 KB, given back by the
+ * end). Each small read would otherwise go to the card by itself: stdio throws its
+ * buffer away on every seek. Without the memory it just reads as usual. They nest. */
+void mg_burst_begin(MonGame *g);
+void mg_burst_end(MonGame *g);
 
 int  mg_move(MonGame *g, uint32_t i, MgMove *m);
 int  mg_mon(MonGame *g, uint32_t i, MgMon *m);
@@ -205,10 +227,19 @@ int  mg_find_move(MonGame *g, uint32_t id, uint16_t *pos);
 int  mg_find_area(MonGame *g, uint32_t id, uint16_t *pos);
 int  mg_find_item(MonGame *g, uint32_t id, uint16_t *pos);
 int  mg_item(MonGame *g, uint32_t i, MgItem *it);
+/* The Dex's record of creature i: MG_ERANGE in a file without DEXE (g->has_dex 0). */
+int  mg_dex(MonGame *g, uint32_t i, MgDex *d);
+/* Creature i's icon into buf (MG_ICON_BYTES: 16 RGB565 colours, index 0 clear, then
+ * 4 bits a pixel): MG_ERANGE in a file without ICON. Not CRC checked one by one. */
+int  mg_icon(MonGame *g, uint32_t i, uint8_t *buf, uint32_t cap);
 
 /* Enter area i: read and check its head into buf (head_len bytes; MG_HEAD_MAX
  * is always enough), and fill a. The pointers in a point into buf. */
 int  mg_area_open(MonGame *g, uint32_t i, MgArea *a, uint8_t *buf, uint32_t cap);
+/* An area's zones and people alone, for a search through the whole game: only those
+ * two lists are read into buf, and only their place is checked (mg_area_open checks
+ * the rest, its CRC included, when the area is entered). Nothing else in `a` is set. */
+int  mg_area_lists(MonGame *g, uint32_t i, MgArea *a, uint8_t *buf, uint32_t cap);
 void mg_warp(const MgArea *a, uint32_t i, MgWarp *w);
 void mg_zone(const MgArea *a, uint32_t i, MgZone *z);
 void mg_sign(const MgArea *a, uint32_t i, MgSign *s);

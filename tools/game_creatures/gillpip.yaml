@@ -1,0 +1,27 @@
+# Gillpip: the axolotl line's first stage. The owner's drawing (2026-11-01).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Gillpip
+description: >-
+  It breathes through its head frills and smiles at everything. A lost leg
+  grows back in a week.
+category: Axolotl
+height_cm: 30
+weight_kg: 2
+drawing: tools/game_art/src/gillpip.jpg
+types: [water]
+shape: polliwog
+stage: basic
+experience_group: default
+catch_rate: 100
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: gnaw}
+- {level_learned: 1, technique: bubbles}
+- {level_learned: 5, technique: water_bullet}
+- {level_learned: 9, technique: font}
+- {level_learned: 12, technique: fluff_up}
+- {level_learned: 15, technique: water_blast}
+evolutions:
+- {at_level: 16, monster_slug: rillotl}

@@ -1,0 +1,28 @@
+# Maelstrotl: the axolotl line's last stage. The owner's drawing (2026-11-01).
+name: Maelstrotl
+description: >-
+  Its tail became a whirlpool that never stops turning. It's said to drink
+  a lake when angry.
+category: Whirlpool
+height_cm: 180
+weight_kg: 120
+drawing: tools/game_art/src/maelstrotl.jpg
+types: [water]
+shape: brute
+stage: stage2
+experience_group: default
+catch_rate: 35
+lower_catch_resistance: 0.85
+upper_catch_resistance: 1.1
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: gnaw}
+- {level_learned: 1, technique: bubbles}
+- {level_learned: 1, technique: water_bullet}
+- {level_learned: 12, technique: fluff_up}
+- {level_learned: 15, technique: water_blast}
+- {level_learned: 20, technique: kraken}
+- {level_learned: 25, technique: saber}
+- {level_learned: 30, technique: all_in}
+- {level_learned: 34, technique: tsunami}
+evolutions: []

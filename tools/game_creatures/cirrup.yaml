@@ -1,0 +1,26 @@
+# Cirrup: the sky line's first stage. The owner's drawing (2026-11-03).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Cirrup
+description: >-
+  Born with its ruff already full of cloud. It can't quite fly yet, so it runs
+  downhill flapping and is delighted every time.
+category: Cloud Chick
+height_cm: 30
+weight_kg: 1.5
+drawing: tools/game_art/src/cirrup.jpg
+types: [sky]
+shape: varmint
+stage: basic
+experience_group: default
+catch_rate: 100
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: gnaw}
+- {level_learned: 1, technique: gust}
+- {level_learned: 5, technique: fluff_up}
+- {level_learned: 9, technique: peck}
+- {level_learned: 12, technique: whirlwind}
+evolutions:
+- {at_level: 16, monster_slug: cumulynx}

@@ -42,6 +42,19 @@ before touching anything.
   Auto-play that shops and heals; `make -C sim monster` checks it finishes
   with its first critter at 36 or more. The Tuxemon checkout
   never enters the repo.
+- `tools/game_creatures/README.md`: **critters of our own** (2026-11-01):
+  `tools/mksheet.py` turns the owner's drawing (any size, on white or a
+  checkerboard; kept in `tools/game_art/src/`) into the 128×88 sheet, and the
+  rules are `tools/game_creatures/<slug>.yaml` with an "ours" allow-list
+  line. Each drawing has a `<slug>.eyes.json` beside it: halving ruins eyes,
+  so they're drawn again by hand (the README there; the first build drafts it). The first are the fire fox line (Cinderkit, Scorchvix, Pyrewing) and
+  the water axolotl line (Gillpip, Rillotl, Maelstrotl), the lightning line (Sparkip, Nimbolt, Fulminax), the wood line (Sprigling, Wildbough, Grovarch) the venom line (Skullick, Ossicoil, Banewyrm), the sky line (Cirrup, Cumulynx, Tempyre) and Rivetron (metal).
+- `docs/DEX_PLAN.md`: **Dex**, the critter index (Games folder, under
+  Critters), a fixed hardware-like gadget: its bezel, title bar and keys never
+  change, and all other text and the speaker come through its subscreens (no
+  Coach or Guru bubble). **Built in the sim 2026-11-03** (`ui_dex.c`, `dex.c`, the
+  TV effect in `crt.c`; game format 2.2, save version 4; gate `make -C sim dex`);
+  its bench items are the owner's. §9 holds the owner's decisions.
 - `docs/APP_PLATFORM_PLAN.md`: native C apps loaded from the SD card.
   **On hold since 2026-09-29**; don't build any of it without the user's yes.
 
@@ -66,7 +79,7 @@ before touching anything.
     `pip install radicale`) whenever `bridge/` changes;
   - `sudo mkdir -p /sdcard && sudo chmod 777 /sdcard`, then `make -C sim`
     with the targets `poolparity nosecrets secretscan data graf mines wordie
-    sudoku zip clock coach guru gurupool dash course srs monster smoke smoke32`;
+    sudoku zip clock coach guru gurupool dash course srs monster dex smoke smoke32`;
   - `python3 tests/mkcourse_test.py` (the course builder; needs the Pillow
     in `tools/requirements-course.txt`, and downloads the pinned font);
   - `python3 tests/mkgame_test.py` (the game converter, on the fixture; needs

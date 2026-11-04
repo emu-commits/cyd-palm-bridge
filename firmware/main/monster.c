@@ -23,15 +23,16 @@
 #define AREA_SIZE  32
 #define ENC_ROW    8
 #define ITEM_SIZE  24
+#define DEXE_SIZE  24
 #define HEAD_FIXED 64
 
 /* the section tags, 4 bytes each in MG_* order, as the section table holds
  * them (one string: tests/nodelete.sh rightly flags a quoted HTTP method name,
  * and one of these tags is spelt like one) */
-static const char TAGS[] = "METATYPESHAPSTATMOVEMONSLRNSENCTAREAADATSPRTTEXTCREDLOOKITEM";
+static const char TAGS[] = "METATYPESHAPSTATMOVEMONSLRNSENCTAREAADATSPRTTEXTCREDLOOKITEMDEXEICON";
 #define TAG(k) (TAGS + 4 * (k))
 /* checked on open: everything small (section 6) */
-#define CRC_ON_OPEN(i) ((i) != MG_ADAT && (i) != MG_SPRT && (i) != MG_CRED && (i) != MG_LOOK)
+#define CRC_ON_OPEN(i) ((i) != MG_ADAT && (i) != MG_SPRT && (i) != MG_CRED && (i) != MG_LOOK && (i) != MG_ICON)
 
 enum { K_TITLE = 0x01, K_SOURCE, K_BUILD, K_START = 0x10, K_LOOKS, K_STARTERS, K_MORE_STARTERS, K_STEPS,
        K_RULES = 0x20, K_CAPTURE, K_GROWTH, K_KEEPER, K_MONEY };
@@ -65,16 +66,60 @@ static int bad(MonGame *g, const char *fmt, ...){
     return MG_EBAD;
 }
 
-/* read len bytes at off; anything past the end of the file is damage */
-static int rd(MonGame *g, uint32_t off, void *buf, uint32_t len){
-    if(!len) return 0;
-    if(!g->f) return MG_EIO;
-    if(off > g->size || len > g->size - off) return bad(g, "a read past the end of the file");
+static int rd_raw(MonGame *g, uint32_t off, void *buf, uint32_t len){
     if(fseek(g->f, (long)off, SEEK_SET) != 0 || fread(buf, 1, len, g->f) != len){
         snprintf(g->err, sizeof g->err, "the card couldn't be read");
         return MG_EIO;
     }
     return 0;
+}
+
+/* The read-ahead (monster.h): checking a file hops between a section's records and
+ * the names in TEXT, so one block would be thrown away on every hop. MEASURED on the
+ * board, 674 KB game: 1,134 ms for the records alone, one card read each. */
+#define RA_WAYS  4
+#define RA_BLOCK 1024
+typedef struct {
+    uint32_t tag[RA_WAYS], age[RA_WAYS], clock;     /* tag: block number + 1, 0 for empty */
+    uint8_t  data[RA_WAYS][RA_BLOCK];
+} ReadAhead;
+
+void mg_burst_begin(MonGame *g){
+    if(!g->ra_depth++) g->ra = calloc(1, sizeof(ReadAhead));
+}
+
+void mg_burst_end(MonGame *g){
+    if(g->ra_depth && !--g->ra_depth){ free(g->ra); g->ra = NULL; }
+}
+
+static int rd_ahead(MonGame *g, uint32_t off, uint8_t *buf, uint32_t len){
+    ReadAhead *ra = g->ra;
+    while(len){
+        uint32_t blk = off / RA_BLOCK, at = off % RA_BLOCK, n = RA_BLOCK - at < len ? RA_BLOCK - at : len;
+        int w = 0;
+        for(int i = 0; i < RA_WAYS; i++){
+            if(ra->tag[i] == blk + 1){ w = i; goto hit; }
+            if(ra->age[i] < ra->age[w]) w = i;
+        }
+        ra->tag[w] = 0;
+        uint32_t start = blk * RA_BLOCK, want = g->size - start < RA_BLOCK ? g->size - start : RA_BLOCK;
+        int r = rd_raw(g, start, ra->data[w], want);
+        if(r) return r;
+        ra->tag[w] = blk + 1;
+    hit:
+        ra->age[w] = ++ra->clock;
+        memcpy(buf, ra->data[w] + at, n);
+        buf += n; off += n; len -= n;
+    }
+    return 0;
+}
+
+/* read len bytes at off; anything past the end of the file is damage */
+static int rd(MonGame *g, uint32_t off, void *buf, uint32_t len){
+    if(!len) return 0;
+    if(!g->f) return MG_EIO;
+    if(off > g->size || len > g->size - off) return bad(g, "a read past the end of the file");
+    return g->ra && len < RA_BLOCK ? rd_ahead(g, off, buf, len) : rd_raw(g, off, buf, len);
 }
 
 static int inside(uint32_t off, uint32_t len, uint32_t slen){
@@ -418,6 +463,21 @@ int mg_item(MonGame *g, uint32_t i, MgItem *it){
     return str_ref(g, b + 12, &it->name);
 }
 
+int mg_dex(MonGame *g, uint32_t i, MgDex *d){
+    uint8_t b[DEXE_SIZE];
+    if(!g->has_dex || i >= g->n_mons) return MG_ERANGE;
+    int r = rds(g, MG_DEXE, i * DEXE_SIZE, b, DEXE_SIZE);
+    if(r) return r;
+    d->number = le16(b); d->height_cm = le16(b + 2); d->weight_tenths = le16(b + 4);
+    if((r = str_ref(g, b + 8, &d->category))) return r;
+    return str_ref(g, b + 16, &d->description);
+}
+
+int mg_icon(MonGame *g, uint32_t i, uint8_t *buf, uint32_t cap){
+    if(!g->has_icons || i >= g->n_mons || cap < MG_ICON_BYTES) return MG_ERANGE;
+    return rds(g, MG_ICON, 4 + i * MG_ICON_BYTES, buf, MG_ICON_BYTES);
+}
+
 int mg_find_item(MonGame *g, uint32_t id, uint16_t *pos){
     for(uint32_t i = 0; i < g->n_items; i++){
         MgItem it;
@@ -609,6 +669,31 @@ static int check_records(MonGame *g){
             if(!mg_find_item(g, le32(e), &at) && at < i) return bad(g, "item %u: its id twice", (unsigned)i);
         }
     }
+    /* DEXE (2.2, may be missing): a record a creature, each Dex number once */
+    if(g->s[MG_DEXE].len){
+        uint8_t used[MG_MAX_DEX / 8];
+        memset(used, 0, sizeof used);
+        if(g->n_mons > MG_MAX_DEX || g->s[MG_DEXE].len != g->n_mons * DEXE_SIZE) return bad(g, "DEXE is the wrong size");
+        for(uint32_t i = 0; i < g->n_mons; i++){
+            uint8_t e[DEXE_SIZE];
+            MgStr s;
+            if((r = rds(g, MG_DEXE, i * DEXE_SIZE, e, DEXE_SIZE))) return r;
+            uint32_t no = le16(e);
+            if(!no || no > g->n_mons || used[(no - 1) / 8] >> ((no - 1) % 8) & 1 || le16(e + 6))
+                return bad(g, "creature %u: its Dex record is out of range", (unsigned)i);
+            used[(no - 1) / 8] |= (uint8_t)(1u << ((no - 1) % 8));
+            if((r = str_check(g, e + 8, &s)) || (r = str_check(g, e + 16, &s))) return r;
+        }
+        g->has_dex = 1;
+    }
+    /* ICON (2.2, may be missing): u16 creatures, u16 size, then their records */
+    if(g->s[MG_ICON].len){
+        if(g->s[MG_ICON].len < 4) return bad(g, "ICON is too short");
+        if((r = rds(g, MG_ICON, 0, b, 4))) return r;
+        if(le16(b) != g->n_mons || le16(b + 2) != MG_ICON_SIZE || g->s[MG_ICON].len != 4u + g->n_mons * MG_ICON_BYTES)
+            return bad(g, "ICON is the wrong size");
+        g->has_icons = 1;
+    }
     /* AREA */
     if(g->s[MG_AREA].len % AREA_SIZE || g->s[MG_AREA].len / AREA_SIZE != g->n_areas || !g->n_areas || g->n_areas > 65535)
         return bad(g, "AREA doesn't hold the header's %u areas", (unsigned)g->n_areas);
@@ -632,6 +717,7 @@ int mg_open_fp(MonGame *g, FILE *f){
     g->f = f;
     if(!f){ snprintf(g->err, sizeof g->err, "the file couldn't be opened"); return MG_EIO; }
     int r = MG_EBAD;
+    mg_burst_begin(g);
     if(fseek(f, 0, SEEK_END) != 0){ r = MG_EIO; goto fail; }
     long sz = ftell(f);
     if(sz < 0 || (unsigned long)sz > 0xFFFFFFFFul){ r = bad(g, "the file's size can't be read"); goto fail; }
@@ -648,7 +734,7 @@ int mg_open_fp(MonGame *g, FILE *f){
     g->minor = le16(h + 6);
     if(le32(h + 8) != g->size){ r = bad(g, "the file is %u bytes, the header says %u", (unsigned)g->size, (unsigned)le32(h + 8)); goto fail; }
     uint32_t nsec = le16(h + 12);
-    if(nsec < MG_NSECT || nsec > MAX_SECTS || le16(h + 14)){ r = bad(g, "%u sections", (unsigned)nsec); goto fail; }
+    if(nsec < MG_NREQUIRED || nsec > MAX_SECTS || le16(h + 14)){ r = bad(g, "%u sections", (unsigned)nsec); goto fail; }
     g->n_mons = le32(h + 16);
     g->n_areas = le32(h + 20);
     g->fingerprint = le32(h + 24);
@@ -674,7 +760,7 @@ int mg_open_fp(MonGame *g, FILE *f){
     if((r = zero_range(g, prev, g->size - prev))) goto fail;
     if(g->size - prev > 3){ r = bad(g, "bytes after the last section"); goto fail; }
     for(int k = 0; k < MG_NSECT; k++){
-        if(!(have & (1u << k)) && k != MG_ITEM){ r = bad(g, "no %.4s section", TAG(k)); goto fail; }
+        if(!(have & (1u << k)) && k < MG_NREQUIRED){ r = bad(g, "no %.4s section", TAG(k)); goto fail; }
         if(!CRC_ON_OPEN(k)) continue;
         uint32_t c;
         if((r = crc_range(g, g->s[k].off, g->s[k].len, &c))) goto fail;
@@ -689,8 +775,10 @@ int mg_open_fp(MonGame *g, FILE *f){
     free(m);
     if(r) goto fail;
     if((r = check_records(g))) goto fail;
+    mg_burst_end(g);
     return 0;
 fail:
+    mg_burst_end(g);
     if(g->f) fclose(g->f);
     g->f = NULL;
     return r;
@@ -701,6 +789,9 @@ int mg_open(MonGame *g, const char *path){
 }
 
 void mg_close(MonGame *g){
+    free(g->ra);
+    g->ra = NULL;
+    g->ra_depth = 0;
     if(g->f) fclose(g->f);
     g->f = NULL;
 }
@@ -816,9 +907,36 @@ static int area_open(MonGame *g, uint32_t i, MgArea *a, uint8_t *buf, uint32_t c
 
 /* a refused area is left empty: no list a later call could walk into */
 int mg_area_open(MonGame *g, uint32_t i, MgArea *a, uint8_t *buf, uint32_t cap){
+    mg_burst_begin(g);
     int r = area_open(g, i, a, buf, cap);
+    mg_burst_end(g);
     if(r) memset(a, 0, sizeof *a);
     return r;
+}
+
+int mg_area_lists(MonGame *g, uint32_t i, MgArea *a, uint8_t *buf, uint32_t cap){
+    uint8_t f[24];
+    int r;
+    memset(a, 0, sizeof *a);
+    if((r = mg_area_dir(g, i, &a->dir))) return r;
+    const MgAreaDir *d = &a->dir;
+    if(d->head_len > cap || d->head_len < HEAD_FIXED || !inside(d->off, d->head_len, g->s[MG_ADAT].len))
+        return bad(g, "area %u's head doesn't fit", (unsigned)d->id);
+    if((r = rds(g, MG_ADAT, d->off, f, sizeof f))) return r;
+    /* the lists' order is area_open's: palette, flags, warps, zones, signs, overlays, people */
+    uint32_t nz = le16(f + 14), np = le16(f + 22);
+    uint32_t zo = HEAD_FIXED + ((2u * (f[5] + 1u) + 3) & ~3u) + (((uint32_t)le16(f + 6) + 1 + 3) & ~3u) + 12u * le16(f + 12);
+    uint32_t po = zo + 8 * nz + 16u * le16(f + 16) + 4u * le16(f + 18);
+    if(np > MG_MAX_PEOPLE || po + 48 * np > d->head_len) return bad(g, "area %u: its lists overrun the head", (unsigned)d->id);
+    if((r = rds(g, MG_ADAT, d->off + zo, buf, 8 * nz)) || (r = rds(g, MG_ADAT, d->off + po, buf + 8 * nz, 48 * np))){
+        memset(a, 0, sizeof *a);
+        return r;
+    }
+    a->index = (uint16_t)i;
+    a->w = le16(f); a->h = le16(f + 2);
+    a->n_zones = (uint16_t)nz; a->n_people = (uint16_t)np;
+    a->zones = buf; a->people = buf + 8 * nz;
+    return 0;
 }
 
 void mg_person(const MgArea *a, uint32_t i, MgPerson *q){

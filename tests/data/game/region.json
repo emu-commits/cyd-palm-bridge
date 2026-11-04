@@ -237,6 +237,9 @@
       }
     ]
   },
+  "dex": {
+    "order": ["puddlop", "emberkit", "blazecat", "thornet", "rustmole"]
+  },
   "starters": [
     "emberkit",
     "puddlop",

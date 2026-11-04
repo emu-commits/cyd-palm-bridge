@@ -22,6 +22,38 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 
 ---
 
+## Dex, and Critters' new screens (built in the simulator 2026-11-03; the bench is next)
+
+`DEX_PLAN.md` is the plan, §8 D4 and §10 what's here. On the board since 2026-11-03: the first report is in `BUILD_PROGRESS.md`.
+
+- [d] **Walking in Critters:** smooth, with no visible drawing down the screen (40 ms a
+  frame at 160 MHz, measured; it was 94). **The panel at 40 MHz:** no speckle, wrong colours or
+  shifted lines anywhere, in any app. If there are, `clock_speed_hz` in `display.c`.
+- [d] Critters and the Dex open within about half a second of the tap (measured at
+  160 MHz: 419 and 438 ms to first paint), and Wi-Fi and a sync still work (the SD card changed SPI host).
+- [d] The fade is very slight on the Dex's Talk page, at every strength,
+  and the Dex's bezel has no dark square corners.
+- [d] At 160 MHz (it was 240 for a day) and with the loop sleeping at least a tick
+  (`lvgl_port_run()`), does walking still feel smooth? It went from 33 to 40 ms a frame.
+  The battery gain isn't measured: `power.log` can A/B it.
+- [d] **The effect's strength on the panel:** Menu ▸ TV effect cycles Light, Standard,
+  Strong, Off, and is remembered. Is small text readable through it, in the Dex's
+  list? Which one do you want as the default? (Critters has given the effect up.)
+- [d] Dex opens from the Games folder; a caught critter shows in full after saving
+  in Critters; a save from before this firmware keeps its party in the Dex.
+- [d] Leaving the Dex gives the heap back; the title bar goes back to black.
+- [d] ◀ ▶ are fast enough, and the keys are easy to hit.
+- [d] The portrait and the green clock read well on the panel; Anoleaf and Fluttaflap
+  hold up on the blue.
+- [d] Critters' D-pad and A and B after moving 2 px, in the slightly smaller panel.
+- [d] A party of six: the icons on Party and on Auto-play's panel, and tapping a line
+  of Party (each is now 24 px).
+- For the owner to review, no bench needed: my drafts of his lines (`dex.c`), the shortened descriptions
+  (`game_region.json`, `tools/game_creatures/`), and our critters' categories and
+  sizes.
+
+---
+
 ## A monster-catching game: Critters (G4 and the rooms done 2026-10-16 in the simulator; the bench is next)
 
 `GAME_PLAN.md` is the plan: a C engine in the Games menu, with content from
@@ -115,6 +147,78 @@ open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
 - [d] Install from the web page with "Also install Critters" ticked: the
   board starts, `games/monster/game.bin` is on the card, and Critters opens.
   An install without the box leaves the card's game alone.
+
+### Critters: release, Auto-play's party rule, the map review, the end-game (requested 2026-11-04, NOT approved for build)
+
+- [ ] **Release a party member.** Nothing in the game lets the player let a
+  critter go (no menu, no `mp_` call). Needed: a Release item on the Party
+  menu with a confirm, and a box screen to see and release from. Today a full
+  party (6) and a full box (30) make catching refuse (`MG_ERANGE`), and nothing
+  frees a box slot. Releasing keeps the Dex's marks (`DEX_PLAN.md` §4.1), so
+  the Dex must not drop a species after a release.
+- [ ] **Auto-play releases when the party is full.** When the party is full and
+  a member is under-levelled against the average level of the battle
+  encounters, the bot releases the weakest to the box. Open: how "average" is
+  taken (the last N encounters, or the area's table), and whether it may ever
+  release the starter or the last member of a line.
+- [ ] **Map review: less maze.** Review every area for:
+  1. dead-ends and forced-path walk-arounds, to remove;
+  2. one-tile passages, to widen to at least two tiles;
+  3. shortcuts that open as the far areas open (Dark Souls style), e.g. a way
+     back from Kestrel to Larkhollow once Ivy is beaten. Today the only way
+     back is the tunnel's walk;
+  4. Constraint: Route 1, the Brideswood, the Tunnel, Route 2, the Old Keep and
+     Dragon's Cave are Tuxemon's Spyder maps (`courses/critters/README.md`); the
+     checkout never enters the repo. Changing them means our own layouts (as
+     `tools/game_maps/` has for the towns), recorded in the credits.
+- [ ] **End-game area and Auto-play's hunt.** A big open area after Dr Wren
+  that spawns every critter in the game, where Auto-play goes to level its
+  party and fill the Dex. Auto-play stops only when the Dex is full, which
+  means every species has been caught once (the Dex's *caught* mark, not
+  *seen*). Open: whether a release (above) can take a species back out of
+  "caught" for the count, which the Dex's marks already keep (`DEX_PLAN.md`
+  §4.1), so the answer is probably no.
+- [ ] **Story: fix the loose threads** (from the storyline map, 2026-11-04):
+  1. The north-passage rockfall (Digger Bram, Cotton Tunnel) is text only. Check
+     whether the warp is blocked by a tile or a flag; if not, gate it on
+     `beat_ivy` in the engine and say so in the dialogue.
+  2. Pip's "fire critter" and Mum's "Heard the news" letter point at events the
+     game never shows. Either show them (a sighting, a reason for the news) or
+     cut the lines.
+  3. Ashe's "she'll want to see this" has no clear referent. Name who it is
+     (Wren or Ivy) and make Wren's and Ivy's lines agree with it.
+  4. The plate motif: the Rest House gap and the home note "NOT YET" are the
+     only plate threads. Either the other plates appear as something the player
+     collects, or the motif is cut back to the Larkhollow plate.
+- [ ] **Story: at least two sources point to every next task.** Each open
+  objective (the next town, the next gate, the rematch, the cave, the finale)
+  must be named by at least two separate sources, e.g. an NPC and a sign, or two
+  NPCs in different towns. Audit every area; a gate with one source gets a second
+  one. Check it with a lint over `tools/game_region.json` (a source count per
+  gate flag) so it stays true.
+- [ ] **Story: overarching urgency and a resolution.** Every line of dialogue
+  should move the player forward, and the story needs a thread that runs through
+  it. Proposed: a clear threat or a stake (why the Ring and the cave matter,
+  e.g. the Warden's Ring is failing, or Wren needs a plate complete before a
+  deadline), reached in stages the player can see. Each Warden, captain and
+  delver line names the next place to go. The story ends with a resolution: a
+  final scene after Wren's battle that answers the threat and closes Mum's and
+  Wren's threads. Open for the owner: what the threat is, and whether the ending
+  is a single scene or a choice.
+- [ ] **Dragon's Cave: the opening behind Wyrmkeeper Ashe is walled off.** A cave
+  opening shows behind Ashe, but the player can't walk into it. Find the cause
+  (a solid tile, a missing warp or a wrong zone in `spyder_dragonscave`) and make
+  the opening walkable, or remove it if it isn't meant to be an exit. Check the
+  ending's route (Ashe, then Wren) still works after the fix.
+  Found (2026-11-04): the cause is the map's `tuxemon_events: false` plus a solid
+  collision at the cave's top edge, cell (16,0). Tuxemon's map has a teleport
+  event on cell (16,1), directly behind Ashe, to Cotton Tunnel; it's gated on the
+  rare Drokoro's variable (`dragonscavedrokoro`). Our area drops all of
+  Tuxemon's events, so the cell is a dead end. Intent: a loop back to the Cotton
+  Tunnel north. Decide: add a warp from (16,1) to the tunnel's north passage,
+  gated on a flag the story sets (e.g. `beat_ashe`), or cut the opening. The
+  Tuxemon target spot (3,16) in the tunnel doesn't match our tunnel layout, so
+  pick the target in our map.
 
 ## RESUME HERE — Palm behaviours from the archive review (approved 2026-10-15)
 

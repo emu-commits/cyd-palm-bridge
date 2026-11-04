@@ -5,6 +5,7 @@
 #include <string.h>
 #include "ui.h"             /* ui_discrete_taps()                          */
 #include "tapsplit.h"       /* the device's fast-tap recovery, run here too */
+#include "crt.h"            /* the device's TV effect, run here too */
 
 /* ---- rendered output: full RGBA framebuffer the frontends read ---- */
 static uint8_t s_fb[SIM_W * SIM_H * 4];
@@ -39,6 +40,7 @@ static uint8_t s_draw_buf[SIM_W * BUF_ROWS * 2];
 /* flush: RGB565 little-endian -> RGBA8888 into the frontend framebuffer.
  * (The device swaps to big-endian for the ILI9341 wire; the sim keeps LE.) */
 static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map){
+    crt_flush(area->x1, area->y1, area->x2, area->y2, (uint16_t *)px_map);
     const uint16_t *src = (const uint16_t *)px_map;
     for(int y = area->y1; y <= area->y2; y++){
         uint8_t *dst = s_fb + (y * SIM_W + area->x1) * 4;
@@ -54,6 +56,13 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
     lv_display_flush_ready(disp);
 }
 
+static void invalidate_cb(lv_event_t *e){      /* as the device */
+    lv_area_t *a = lv_event_get_param(e);
+    int x1 = a->x1, x2 = a->x2;
+    crt_widen(&x1, a->y1, &x2, a->y2);
+    a->x1 = x1; a->x2 = x2;
+}
+
 void sim_init(void){
     lv_init();
     lv_tick_set_cb(tick_cb);
@@ -62,6 +71,7 @@ void sim_init(void){
     lv_display_set_buffers(disp, s_draw_buf, NULL, sizeof s_draw_buf,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(disp, flush_cb);
+    lv_display_add_event_cb(disp, invalidate_cb, LV_EVENT_INVALIDATE_AREA, NULL);
 
     lv_indev_t *indev = lv_indev_create();
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);

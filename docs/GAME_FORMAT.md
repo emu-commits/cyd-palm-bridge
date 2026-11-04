@@ -21,7 +21,10 @@
 > with and a keeper's prize) and a shopkeeper kind of person. A 2.0 reader
 > skips the section and the key but refuses an area with a shopkeeper; a 2.1
 > reader takes a file without `ITEM` as one with no items. Saves are version
-> 3 from here (§7).
+> 3 from here (§7). **2.2** added what the Dex shows: `DEXE` (§3.17) and
+> `ICON` (§3.18). A 2.1 reader skips both, so the game plays the same; a 2.2
+> reader takes a file without them as one with no Dex data. Saves are version
+> 4 from here.
 
 `game.bin` holds everything the monster game reads from the card: the
 rules' numbers, the creatures, their moves and battle sprites, the areas
@@ -283,7 +286,7 @@ folded with the course builder's rules (curly quotes to straight, dashes to
 ```
 header         32 B
 section table  16 B x 15
-META TYPE SHAP STAT MOVE MONS LRNS ENCT AREA ADAT SPRT TEXT CRED LOOK ITEM   (in this order)
+META TYPE SHAP STAT MOVE MONS LRNS ENCT AREA ADAT SPRT TEXT CRED LOOK ITEM DEXE ICON   (in this order)
 ```
 
 **Header (32 B, at 0):**
@@ -302,7 +305,7 @@ META TYPE SHAP STAT MOVE MONS LRNS ENCT AREA ADAT SPRT TEXT CRED LOOK ITEM   (in
 | 28 | 4 | CRC-32 of bytes 0–27 |
 
 **Section table (16 B per section):** tag, u32 offset, u32 length, u32
-CRC-32 of the section's bytes. All are required but `ITEM` (2.1). A reader skips a tag
+CRC-32 of the section's bytes. All are required but `ITEM` (2.1), `DEXE` and `ICON` (2.2). A reader skips a tag
 it doesn't know.
 
 ### 3.2 `META`
@@ -609,6 +612,34 @@ An item is used on one creature, in a battle (it takes the turn, and the
 other side still acts) or from the bag. It can't be used where it would do
 nothing: no healing at full HP, no revive for a creature still standing.
 
+### 3.17 `DEXE`: the Dex's records (2.2, 24 B each)
+
+One record per creature, in `MONS` order, checked on open.
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 2 | Dex number: 1 to the creature count, each once. It's the `"dex"` `"order"` in `game_region.json`: the owner's to change |
+| 2 | 2 | Height in cm |
+| 4 | 2 | Weight in tenths of a kg |
+| 6 | 2 | 0 |
+| 8 | 8 | Category, for example "False Dragon" |
+| 16 | 8 | Description |
+
+`mkgame.py` refuses a description that wraps to more than three lines of the
+Dex's lower screen (216 px of the Palm font). It takes the text from the
+`"dex"` `"descriptions"` in `game_region.json` first, then from a creature of
+our own's rules (which also hold `category`, `height_cm` and `weight_kg`), then
+from Tuxemon (`<slug>_description`, `cat_<species>`, `height`, `weight`).
+
+### 3.18 `ICON`: the 24 x 24 icons (2.2)
+
+u16 creature count, u16 24, then one 320 B record per creature in `MONS` order:
+16 RGB565 colours (index 0 clear), then 288 B at 4 bits a pixel. Each is the
+first menu frame of the creature's sheet, at (0, 64), with its own palette. The
+section's CRC is checked by `mg_verify()`, not on open or per record: a damaged
+icon can only be the wrong colours. The Dex's list and the game's party screens
+use them.
+
 ## 4) Colour: 8 bits for maps, 4 for creatures
 
 **This settles `GAME_PLAN.md` §13 Q4, subject to the owner's review.** The
@@ -651,6 +682,7 @@ and column scrolling in, was 34 (Route 1) and 13 (Brideswood), so a cache of
 | Tiles in an area | 4,095 | u16 in a cell; the top 4 bits are kept for animation later |
 | Colours in an area | 255 (8 bits) or 15 (4 bits) | Index 0 is transparent |
 | Creatures, moves, areas | 65,535 each | u16 positions |
+| Creatures with a Dex record | 256, with ids under 256 | The save's seen and caught sets are 256 bits each; `mkgame.py` refuses an id past them |
 | Learnset | 255 entries | u8 length |
 | Effects per move | 3 | |
 | Text field | 65,535 B | u16 length |
@@ -688,16 +720,19 @@ and picture checks.
 
 ## 7) The save
 
-`save.dat` (`monster_play.c`, through `safefile.h`), **version 3**: a
+`save.dat` (`monster_play.c`, through `safefile.h`), **version 4**: a
 32-byte header (`CYDS`, the version, the box count, the game file's
 fingerprint, the generator, the area id, x, y, facing, the party count, the
 records' CRC, the header's CRC); then a 40-byte record of the story (the
 flags, 32 B; the area id, x, y and facing a loss comes back to, 0 for the
 start; the player's look); then 80 bytes of money and bag (the coins, then
-up to nine items by id with their counts); then 40 bytes per creature, by
-stable ids. A version 1 save, from before G3, loads with no flags set and
-the first look; a version 1 or 2 save starts with the file's starting coins
-and an empty bag.
+up to nine items by id with their counts); then 72 bytes the Dex reads (32 B
+of creatures seen and 32 B caught, one bit per stable id; the first critter's
+stable id; 4 B of 0); then 40 bytes per creature, by stable ids. A version 1
+save, from before G3, loads with no flags set and the first look; a version 1
+or 2 save starts with the file's starting coins and an empty bag; a save before
+version 4 loads with its party and box marked both seen and caught, and no
+first critter. `mp_read_marks()` reads the Dex's part without a game file.
 
 ## 8) Changing the format
 
