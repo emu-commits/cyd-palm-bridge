@@ -3,8 +3,8 @@
  * The rules are monster_play.c's and the file is monster.c's; this file only
  * turns their events into pictures and words, and the buttons into calls.
  *
- * THE VIEW (232 x 172, in a thin bezel, and a TV like the Dex's upper screen:
- * crt.c, DEX_PLAN.md 10) has no canvas. Its draw event composes the part of the
+ * THE VIEW (232 x 172, in a thin bezel, its corners rounded by crt.c, with none of
+ * the TV effect: DEX_PLAN.md 10) has no canvas. Its draw event composes the part of the
  * view LVGL is drawing (at most one draw-buffer band, 40 rows) into a band
  * buffer, from a cache of 8-bit tiles and the area's palette, and hands that
  * to LVGL as ONE RGB565 image. So a frame costs one draw task per band, not
@@ -1914,9 +1914,8 @@ void mon_ui_show(lv_obj_t *parent){
     lv_obj_update_layout(m->view);
     lv_area_t tube;
     lv_obj_get_coords(m->view, &tube);
-    tv_strength_load();
     crt_on(tube.x1, tube.y1, tube.x2, tube.y2, SCREEN_R, rgb(C_BEZEL), rgb(C_BEZEL));
-    crt_fast(1);                    /* every frame of a walk goes through it */
+    crt_plain(1);                   /* only the corners: the effect made the text unreadable */
 
     if(r){
         char why[sizeof m->g.err];

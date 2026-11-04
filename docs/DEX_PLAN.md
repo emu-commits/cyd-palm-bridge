@@ -20,7 +20,7 @@
 > **The owner's decision (2026-11-03):** the upper screen is a **TV**: TV blue,
 > with a light CRT effect on that box alone (§2.4). A card on it keeps its own
 > background. The same day they added slightly rounded corners on it, and the
-> same effect and bezel for Critters' screen (§10).
+> same effect and bezel for Critters' screen (§10; Critters later gave up the effect).
 
 The mock-ups are in `docs/img/dex/`. They're 240×320, the device's size,
 drawn by `tools/mock_dex.py` (a design aid, not product code) with the
@@ -211,14 +211,14 @@ the box and no history across LVGL's 40-row strips.
   `LV_EVENT_INVALIDATE_AREA`, so a key press outside the box costs nothing. A whole
   box is 26,880 pixels: about 9 ms at 240 MHz, measured (`BUILD_PROGRESS.md`), which
   is nothing on a screen that doesn't animate.
-- **Critters can't afford that** (§10): `crt_fast()` keeps the odd rows' darkening
-  and the fade, on the odd rows only, and leaves out the glow and the even rows.
+- **Critters doesn't have the effect** (§10): `crt_plain()` keeps the rounded corners
+  and leaves out everything else, with no widening.
 - **The device and the simulator share the filter** (`crt.c`). They have separate
   `flush_cb`s, so it's one function both call, on only while the Dex or Critters
-  is open.
+  is open (Critters for its corners).
 - **It leaves the system alone.** While the menu or an alert is up, the effect skips
   the rectangle they cover and keeps the picture round them (the owner's ask,
-  2026-11-03), in the Dex and in Critters.
+  2026-11-03).
 - **It isn't a copy of area512's filter** (`components/area512_hal/gfx/area512_crt.cpp`
   in `emu-commits/area512`), which we tried first. Its colour fringes made the
   Palm font hard to read, and its 3-pixel stripes would be about 1.7× coarser on
@@ -233,7 +233,7 @@ don't show either one's sprite at full size yet; look at them on the panel in D4
 
 **The strength is checked on the panel.** The scanlines are the part most likely
 to look different on the real screen. Instead of a one-off test screen, the menu
-has **TV effect: Light, Standard, Strong or Off**, in the Dex and in Critters,
+has **TV effect: Light, Standard, Strong or Off**, in the Dex,
 kept on the card (`games/tv.cfg`), so the owner can choose on the panel and keep
 the choice. Standard is the mock-ups' strength. Off also answers "too slow".
 
@@ -392,7 +392,7 @@ back, as they do for Study.
 |---|---|
 | `firmware/main/dex.c`, `dex.h` | New. Opening the game and the save read-only; the Where search (§4.3); the speaker's lines (§3). No LVGL. |
 | `firmware/main/ui_dex.c`, `ui_dex.h` | New, as `ui_monster.c` is for the game: the gadget and its screens. |
-| `firmware/main/crt.c`, `crt.h` | New. The TV effect (§2.4), which Critters uses too (§10). |
+| `firmware/main/crt.c`, `crt.h` | New. The TV effect (§2.4); Critters uses only its corners (§10). |
 | `firmware/main/ui.c` | The hardware title bar (restyled on opening, put back by `content_clear()`), the seventh Games icon, and the menu's TV effect item. It doesn't use the speech-bubble code. |
 | `firmware/main/monster.c`, `.h` | Reads `DEXE` and `ICON` (2.2). `mg_dex()` and `mg_icon()`. |
 | `firmware/main/monster_play.c`, `.h` | The marks, save version 4, and loading a version 3 save. |
@@ -510,17 +510,16 @@ The only thing left to choose is the effect's strength, on the panel (§2.4).
 
 These change the game, not the Dex, and were built with it.
 
-- **Critters' game screen is a TV too.** It has the fast form of the Dex's effect
-  (§2.4, `crt_fast()`, the same strength setting): scanlines and the fade, no glow.
-  The full one was 17 ms of every walking frame even after rewriting it, and the
-  owner's order was to optimise it, else replace it with something cheaper, else
-  drop it from Critters. The fast form is 2 ms. It has a thin retro bezel and
-  slightly rounded corners (radius 6). The bezel is 4 px, so the picture is now
-  **232 × 172**, from 240 × 176: the map shows 8 px less across and 4 px less down,
-  and the battle's layout moved a few pixels to suit. **While walking, the whole
-  picture changes every frame, so the effect costs the most here: about 40,000
-  pixels a frame. That's the first thing to judge on the bench.** Off in the menu
-  is the fallback.
+- **Critters' game screen has a thin retro bezel and slightly rounded corners**
+  (radius 6). The bezel is 4 px, so the picture is now **232 × 172**, from 240 × 176:
+  the map shows 8 px less across and 4 px less down, and the battle's layout moved a
+  few pixels to suit.
+- **It has no TV effect: given up, on the bench** (the owner, 2026-11-03). Their order
+  was to optimise it, else replace it with something cheaper, else drop it from
+  Critters. The full effect cost 17 ms of every walking frame even after rewriting it;
+  a cheaper form (scanlines and the fade, no glow, 2 ms) ran well on the board, but
+  the game's text was unreadable through it, which the Dex's text isn't. So Critters
+  keeps only the corners (`crt_plain()`), and has no TV effect item in its menu.
 - **The controller has a thin retro bezel.** A faceplate with rounded corners on a
   dark body, the colour of the screen's bezel, so the two read as one case. The
   panel is 116 px high, from 120, which still fits the D-pad at its full size (its

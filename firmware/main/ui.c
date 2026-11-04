@@ -5941,7 +5941,7 @@ static void act_mon_bag(lv_event_t *e){ (void)e; menu_close(); mon_ui_set_auto(0
 static void act_mon_new(lv_event_t *e){ (void)e; menu_close(); mon_ui_set_auto(0); mon_ui_new_game(); }
 static void act_mon_credits(lv_event_t *e){ (void)e; menu_close(); mon_ui_set_auto(0); mon_ui_credits(); }
 static void act_mon_auto(lv_event_t *e){ (void)e; menu_close(); mon_ui_set_auto(!mon_ui_auto()); }
-/* the menu's TV effect item, in the Dex and Critters: on the panel it may want
+/* the menu's TV effect item, in the Dex: on the panel it may want
  * to be stronger or lighter than the mock-ups showed (DEX_PLAN.md 2.4) */
 static lv_obj_t *g_tv_lbl;
 static const char *tv_item_text(void){
@@ -6048,7 +6048,6 @@ static void menu_open(void){
         }
         menu_item(panel, "New game", act_mon_new);
         menu_item(panel, "Credits", act_mon_credits);
-        g_tv_lbl = menu_item_lbl(panel, tv_item_text(), act_tv);
     }
     if(data_demo_present())
         menu_item(panel, "Remove demo data", act_remove_demo);

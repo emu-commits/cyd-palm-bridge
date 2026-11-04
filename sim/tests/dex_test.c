@@ -459,53 +459,50 @@ static void crt_gate(void){
     {
         enum { W = 210, H = 8 };
         static uint16_t cream[H * W];
-        for(int fast = 0; fast < 2; fast++){
-            CHECK(!crt_on(0, 0, W - 1, H - 1, 0, 0, 0), "crt_on");
-            crt_fast(fast);
-            crt_set_strength(CRT_LIGHT);
-            for(int i = 0; i < H * W; i++) cream[i] = 0xF79C;
-            crt_flush(0, 0, W - 1, H - 1, cream);
-            int y = fast ? 3 : 4;           /* fast: only the odd rows have it */
-            int mid = (cream[y * W + W / 2] >> 11) + (cream[y * W + W / 2 + 1] >> 11);
-            int edge = (cream[y * W] >> 11) + (cream[y * W + 1] >> 11);
-            CHECK(edge < mid || fast == 0, "fast: the edge is darker");
-            CHECK(mid - edge <= 2 * 2, "the edge is %d levels down, %s", (mid - edge) / 2, fast ? "fast" : "whole");
-            for(int x = 0; x + 3 < W; x += 2){
-                int p = (cream[y * W + x] >> 11) + (cream[y * W + x + 1] >> 11);
-                int q = (cream[y * W + x + 2] >> 11) + (cream[y * W + x + 3] >> 11);
-                CHECK(abs(p - q) <= 1, "a jump at x %d: %d to %d", x, p, q);
-            }
-            crt_off();
+        CHECK(!crt_on(0, 0, W - 1, H - 1, 0, 0, 0), "crt_on");
+        crt_set_strength(CRT_LIGHT);
+        for(int i = 0; i < H * W; i++) cream[i] = 0xF79C;
+        crt_flush(0, 0, W - 1, H - 1, cream);
+        int y = 4;
+        int mid = (cream[y * W + W / 2] >> 11) + (cream[y * W + W / 2 + 1] >> 11);
+        int edge = (cream[y * W] >> 11) + (cream[y * W + 1] >> 11);
+        CHECK(mid - edge <= 2 * 2, "the edge is %d levels down", (mid - edge) / 2);
+        for(int x = 0; x + 3 < W; x += 2){
+            int p = (cream[y * W + x] >> 11) + (cream[y * W + x + 1] >> 11);
+            int q = (cream[y * W + x + 2] >> 11) + (cream[y * W + x + 3] >> 11);
+            CHECK(abs(p - q) <= 1, "a jump at x %d: %d to %d", x, p, q);
         }
+        crt_off();
     }
 
-    /* for a moving picture: even rows untouched, odd rows only darker; cut anywhere; no widening */
+    /* Critters: the corners and nothing else, at any strength, cut anywhere; no widening */
     CHECK(!crt_on(X0, Y0, X1, Y1, 6, 0x1234, 0x5678), "crt_on");
-    crt_fast(1);
-    crt_set_strength(CRT_STANDARD);
+    crt_plain(1);
+    crt_set_strength(CRT_STRONG);
     crt_picture(a);
     crt_flush(0, 0, CW - 1, CH - 1, a);
     crt_picture(b);
     {
-        int bad_even = 0, bad_odd = 0;
-        for(int y = Y0 + 6; y <= Y1 - 6; y++)
-            for(int x = X0; x <= X1; x++){
-                uint16_t got = a[y * CW + x], was = b[y * CW + x];
-                if(!((y - Y0) & 1)) bad_even += got != was;
-                else bad_odd += (got >> 11) > (was >> 11) || ((got >> 5) & 63) > ((was >> 5) & 63) || (got & 31) > (was & 31);
+        int changed = 0, corners = 0;
+        for(int y = 0; y < CH; y++)
+            for(int x = 0; x < CW; x++){
+                if(a[y * CW + x] == b[y * CW + x]) continue;
+                int in_corner = (y < Y0 + 6 || y > Y1 - 6) && (x < X0 + 6 || x > X1 - 6)
+                                && x >= X0 && x <= X1 && y >= Y0 && y <= Y1;
+                if(in_corner) corners++; else changed++;
             }
-        CHECK(!bad_even, "%d even-row pixels changed", bad_even);
-        CHECK(!bad_odd, "%d odd-row pixels got brighter", bad_odd);
+        CHECK(!changed, "plain: %d pixels changed outside the corners", changed);
+        CHECK(corners > 0, "plain: the corners weren't rounded");
     }
     for(int cut = 1; cut < CH; cut += 3){
         crt_picture(b);
         crt_flush(0, 0, CW - 1, cut - 1, b);
         crt_flush(0, cut, CW - 1, CH - 1, b + cut * CW);
-        CHECK(!memcmp(a, b, sizeof a), "fast: a strip cut at row %d differs", cut);
+        CHECK(!memcmp(a, b, sizeof a), "plain: a strip cut at row %d differs", cut);
     }
     x1 = 20; x2 = 22;
     crt_widen(&x1, 10, &x2, 12);
-    CHECK(x1 == 20 && x2 == 22, "fast: no widening");
+    CHECK(x1 == 20 && x2 == 22, "plain: no widening");
     CHECK(crt_exclude(0, 0, 20, 15) == 1, "a new rectangle");
     crt_picture(a);
     crt_flush(0, 0, CW - 1, CH - 1, a);
@@ -513,13 +510,13 @@ static void crt_gate(void){
     {
         int inside = 0;
         for(int y = 0; y <= 15; y++) for(int x = 0; x <= 20; x++) inside += a[y * CW + x] != b[y * CW + x];
-        CHECK(!inside, "fast: %d pixels touched under the menu", inside);
+        CHECK(!inside, "plain: %d pixels touched under the menu", inside);
     }
     crt_off();
     CHECK(!crt_on(X0, Y0, X1, Y1, 6, 0x1234, 0x5678), "crt_on");
     x1 = 20; x2 = 22;
     crt_widen(&x1, 10, &x2, 12);
-    CHECK(x1 == X0 && x2 == X1, "crt_off ended fast mode");
+    CHECK(x1 == X0 && x2 == X1, "crt_off ended plain mode");
     crt_set_strength(CRT_STANDARD);
 
     /* off: nothing, and it can't be turned on with a bad box */

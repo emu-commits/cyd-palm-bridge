@@ -72,7 +72,13 @@ def main(d):
         fails += 1
     # the system's menu isn't seen through the tube, and the screen round it still is
     # a TV; the effect's odd rows are the tell
-    for shot in ("critters_menu", "critters_auto_menu", "dex_menu"):
+    for shot in ("critters_menu", "critters_auto_menu"):
+        # Critters gave the effect up: no scanlines anywhere, menu or game (DEX_PLAN.md 10)
+        wm, hm, px = ppm(d / (shot + ".ppm"))
+        if striped(px, wm, 12, 148) or striped(px, wm, 160, 222):
+            print(f"dex_regions: {shot}: Critters has scanlines")
+            fails += 1
+    for shot in ("dex_menu",):
         wm, hm, px = ppm(d / (shot + ".ppm"))
         if striped(px, wm, 12, 148):
             print(f"dex_regions: {shot}: the menu has scanlines")

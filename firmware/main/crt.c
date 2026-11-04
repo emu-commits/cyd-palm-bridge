@@ -6,8 +6,8 @@
  * The glow's "(255 - v)" is the pixel's green rather than each channel's own, a small
  * error on saturated colours, which is what makes one multiply do for all three. That
  * is about 100 cycles a pixel, still 17 ms a frame at 240 MHz: most of it is loads
- * (7 cycles each, here), so crt_fast() does away with most of them. Moving the loop
- * to IRAM made no difference: it's the data, not the code. */
+ * (7 cycles each, here). Moving the loop to IRAM made no difference: it's the data,
+ * not the code. That's why the effect is for screens that don't animate. */
 #include "crt.h"
 
 #include <stdlib.h>
@@ -28,7 +28,7 @@ static struct {
     uint8_t *dx, *dy;           /* one block: what each column and row loses, of 256, at this strength */
     uint16_t *corner;           /* ...and the corners' colours: radius x radius, the top left's */
     int16_t x0, y0, x1, y1;
-    uint8_t radius, strength, on, fast;
+    uint8_t radius, strength, on, plain;
     int16_t ex1, ey1, ex2, ey2;  /* left alone: ex2 < ex1 for nothing */
     uint8_t inset[CRT_MAX_RADIUS];
 } C = { .strength = CRT_STANDARD };
@@ -38,7 +38,6 @@ static struct {
 static void tables(void){
     if(!C.on) return;
     int w = C.x1 - C.x0 + 1, h = C.y1 - C.y0 + 1, side = SETS[C.strength].side;
-    if(C.fast) side *= 2;               /* only every other row has it: the same on average */
     for(int k = 0; k < 2; k++){
         int n = k ? h : w;
         uint8_t *t = k ? C.dy : C.dx;
@@ -101,14 +100,11 @@ void crt_off(void){
     C.corner = NULL;
     C.dx = C.dy = NULL;
     C.on = 0;
-    C.fast = 0;
+    C.plain = 0;
     C.ex1 = C.ey1 = 0; C.ex2 = C.ey2 = -1;
 }
 
-void crt_fast(int on){
-    C.fast = (uint8_t)!!on;
-    tables();
-}
+void crt_plain(int on){ C.plain = (uint8_t)!!on; }
 
 int crt_active(void){ return C.on; }
 int crt_exclude(int x1, int y1, int x2, int y2){
@@ -127,7 +123,7 @@ int  crt_strength(void){ return C.strength; }
 const char *crt_strength_name(int s){ return s >= 0 && s < CRT_NSTRENGTHS ? NAMES[s] : "?"; }
 
 void crt_widen(int *x1, int y1, int *x2, int y2){
-    if(!C.on || C.fast || y2 < C.y0 || y1 > C.y1 || *x2 < C.x0 || *x1 > C.x1) return;
+    if(!C.on || C.plain || y2 < C.y0 || y1 > C.y1 || *x2 < C.x0 || *x1 > C.x1) return;
     if(*x1 > C.x0) *x1 = C.x0;
     if(*x2 < C.x1) *x2 = C.x1;
 }
@@ -167,23 +163,12 @@ static void row_effect(uint16_t *row, int a, int b, int n, const uint8_t *dxs, u
     }
 }
 
-/* row[a..b] with only the darkening: one load for the pixel and one for the fade */
-static void row_dim(uint16_t *row, int a, int b, const uint8_t *dxs, uint32_t base, int parity){
-    uint32_t rb_round = ROUND_RB(parity), g_round = ROUND_G(parity);
-    for(int i = a; i <= b; i++){
-        const uint32_t p = row[i], f = (base - dxs[i]) >> 2;
-        row[i] = (uint16_t)((((p & 0xF81F) * f + rb_round) >> 6 & 0xF81F) | (((p & 0x07E0) * f + g_round) >> 6 & 0x07E0));
-        rb_round ^= FLIP_RB;
-        g_round ^= FLIP_G;
-    }
-}
-
 void crt_flush(int x1, int y1, int x2, int y2, uint16_t *px){
     if(!C.on || y2 < C.y0 || y1 > C.y1 || x2 < C.x0 || x1 > C.x1) return;
     const Set *s = &SETS[C.strength];
     const int ax = x1 > C.x0 ? x1 : C.x0, bx = x2 < C.x1 ? x2 : C.x1;
     const int ay = y1 > C.y0 ? y1 : C.y0, by = y2 < C.y1 ? y2 : C.y1;
-    const int stride = x2 - x1 + 1, off = C.strength == CRT_OFF, n = bx - ax + 1;
+    const int stride = x2 - x1 + 1, off = C.plain || C.strength == CRT_OFF, n = bx - ax + 1;
     const uint32_t lift = (uint32_t)s->lift_g << 21 | (uint32_t)s->lift_r << 11 | s->lift_b;
     const uint8_t *dxs = C.dx + (ax - C.x0);
     for(int y = ay; y <= by; y++){
@@ -198,16 +183,8 @@ void crt_flush(int x1, int y1, int x2, int y2, uint16_t *px){
             const uint32_t scan = rel & 1 ? s->scan : 256, base = scan * (256 - C.dy[rel]) >> 8;
             /* up to two parts, round what's left alone (whose pixels are neighbours, unwritten) */
             const int a1 = mb < ma ? n - 1 : ma - 1, a2 = mb < ma ? n : mb + 1;
-            if(C.fast){
-                if(rel & 1){
-                    if(a1 >= 0) row_dim(row, 0, a1, dxs, base, (rel ^ ax) & 1);
-                    if(a2 < n) row_dim(row, a2, n - 1, dxs, base, (rel ^ ax ^ a2) & 1);
-                }
-            }
-            else{
-                if(a1 >= 0) row_effect(row, 0, a1, n, dxs, base, s->glow, lift, (rel ^ ax) & 1);
-                if(a2 < n) row_effect(row, a2, n - 1, n, dxs, base, s->glow, lift, (rel ^ ax ^ a2) & 1);
-            }
+            if(a1 >= 0) row_effect(row, 0, a1, n, dxs, base, s->glow, lift, (rel ^ ax) & 1);
+            if(a2 < n) row_effect(row, a2, n - 1, n, dxs, base, s->glow, lift, (rel ^ ax ^ a2) & 1);
         }
         /* the corners, after the effect: they're the well, not the picture */
         const int j = rel < C.radius ? rel : C.y1 - y < C.radius ? C.y1 - y : -1;

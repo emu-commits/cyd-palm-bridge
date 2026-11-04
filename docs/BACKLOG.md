@@ -31,12 +31,12 @@ someone looked at the glass. **The user runs the bench checks — never tick a
   shifted lines anywhere, in any app. If there are, `clock_speed_hz` in `display.c`.
 - [d] Critters and the Dex open within about a third of a second of the tap (measured:
   345 and 375 ms), and Wi-Fi and a sync still work (the SD card changed SPI host).
-- [d] The fade is very slight in a battle and on the Dex's Talk page, at every strength,
+- [d] The fade is very slight on the Dex's Talk page, at every strength,
   and the Dex's bezel has no dark square corners.
 - [d] Battery life at 240 MHz: the CPU was at 160, and it's not measured.
 - [d] **The effect's strength on the panel:** Menu ▸ TV effect cycles Light, Standard,
   Strong, Off, and is remembered. Is small text readable through it, in the Dex's
-  list and Critters' text box? Which one do you want as the default?
+  list? Which one do you want as the default? (Critters has given the effect up.)
 - [d] Dex opens from the Games folder; a caught critter shows in full after saving
   in Critters; a save from before this firmware keeps its party in the Dex.
 - [d] Leaving the Dex gives the heap back; the title bar goes back to black.

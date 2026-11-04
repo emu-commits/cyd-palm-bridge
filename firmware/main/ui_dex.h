@@ -14,7 +14,7 @@ void dex_ui_show(lv_obj_t *parent);
 void dex_ui_close(void);
 int  dex_ui_open(void);
 
-/* The TV effect's strength, which the Dex and Critters share (crt.h): the
+/* The TV effect's strength (crt.h): the
  * choice is kept on the card, in its own file. */
 void tv_strength_load(void);
 void tv_strength_next(void);        /* the menu's item: Light, Standard, Strong, Off */

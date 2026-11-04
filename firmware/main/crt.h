@@ -25,9 +25,9 @@ int  crt_on(int x0, int y0, int x1, int y1, int radius, uint16_t well, uint16_t 
 void crt_off(void);
 int  crt_active(void);
 
-/* For a picture that moves: the odd rows' darkening and the fade, and nothing on the
- * even rows, so no glow and no widening. A sixth of the cost (BUILD_PROGRESS.md). Until crt_off(). */
-void crt_fast(int on);
+/* The rounded corners and nothing else, whatever the strength, and no widening: for
+ * Critters, whose text the effect made unreadable on the panel. Until crt_off(). */
+void crt_plain(int on);
 
 /* The system's menu or an alert over the screen isn't part of the tube: the pixels
  * in this rectangle are left alone, and the picture round it keeps the effect.

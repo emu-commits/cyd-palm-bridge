@@ -18,6 +18,13 @@ longer than a changelog needs to be.
 
 ### 2026-11-03 — Critters and the Dex made fast, from the first bench report
 
+**Later the same day, from the bench: Critters gives the effect up.** Performance was
+good with `crt_fast()`, but the game's text was unreadable through it (the Dex's isn't),
+and the owner chose to drop it rather than tune it. `crt_fast()` is gone; `crt_plain()`
+keeps the view's rounded corners and nothing else, Critters' menu has no TV effect item,
+and the Dex's strength setting no longer touches the game. The table below still has the
+timings as measured with `crt_fast()`.
+
 The owner, on PR #70 on the board: walking felt slow and you could see the screen
 draw; Critters took about 2 s to open and the Dex 3 s; the fade was far too strong; the
 Dex's bezel had dark square corners. Everything below was measured **on the board**,
@@ -56,7 +63,7 @@ with a throwaway build that timed each stage and wrote nothing (not committed).
 - **The effect:** three channels in one word took it from 151 cycles a pixel to 82, and
   that's as far as it goes. A load costs 7 cycles here (a store 4, a multiply 2) and
   the loop needs more registers than Xtensa has, so it spills. So Critters has
-  `crt_fast()`: 13 cycles a pixel averaged over the rows. The Dex keeps the whole effect
+  `crt_fast()`: 13 cycles a pixel averaged over the rows (dropped since, above). The Dex keeps the whole effect
   (about 9 ms per screenful, computed from 82 cycles): it doesn't animate.
 - **Tried, no gain:** IRAM for the loops (the same cycles as cached flash: it's the data,
   not the code). **Tried, worse:** `setvbuf(_IONBF)`, 3 to 4 times slower to open.
