@@ -46,6 +46,16 @@ static int g_wake_pending = 0;
 
 static uint32_t tick_cb(void){ return (uint32_t)(esp_timer_get_time() / 1000); }
 
+/* LE render -> BE for the ILI9341, two pixels a word */
+static void swap565(uint8_t *px, uint32_t n){
+    uint32_t *w = (uint32_t *)px;           /* LVGL's draw buffer is aligned to 4 */
+    for(; n >= 2; n -= 2, w++){
+        uint32_t v = *w;
+        *w = (v & 0x00FF00FFu) << 8 | (v & 0xFF00FF00u) >> 8;
+    }
+    if(n){ uint16_t *p = (uint16_t *)w; *p = (uint16_t)(*p << 8 | *p >> 8); }
+}
+
 static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map){
     int w = area->x2 - area->x1 + 1;
     int h = area->y2 - area->y1 + 1;
@@ -64,7 +74,7 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
             since = t1; spent = 0; pixels = 0;
         }
     }
-    lv_draw_sw_rgb565_swap(px_map, (uint32_t)w * h);   /* LE render -> BE for ILI9341 */
+    swap565(px_map, (uint32_t)w * h);
     display_blit(area->x1, area->y1, w, h, px_map);
     lv_display_flush_ready(disp);
 }

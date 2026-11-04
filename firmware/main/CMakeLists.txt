@@ -8,6 +8,10 @@ idf_component_register(
              lvgl esp_timer esp_driver_ledc esp_pm esp_adc esp_app_format esp_partition
 )
 
+# The size build (sdkconfig.defaults) is right for most of the firmware. These
+# touch every pixel of every frame, and the difference is measured (BUILD_PROGRESS.md).
+set_source_files_properties(crt.c ui_monster.c lvgl_port.c PROPERTIES COMPILE_OPTIONS "-O2")
+
 # Developer hooks (UI_DEVTOOLS) are a menuconfig option, OFF by default
 # (Kconfig.projbuild: CYD_DEVTOOLS). This line used to switch them on for every
 # build, behind a comment asking for it to be removed before a release.

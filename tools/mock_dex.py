@@ -24,7 +24,7 @@ KEY, KEY_HI = (66, 112, 189), (99, 146, 214)
 # The upper screen is a TV (DEX_PLAN 2.4). Cards on it keep the cream as their own.
 TV, TV_INK, TV_DIM = (38, 70, 140), (244, 244, 236), (170, 192, 232)
 TV_SIL, TV_WELL = (12, 24, 60), (36, 36, 40)
-TV_RADIUS, TV_BLOOM, TV_SCAN, TV_VIGNETTE, TV_LIFT = 7, 0.30, 0.80, 0.35, (5, 6, 9)
+TV_RADIUS, TV_BLOOM, TV_SCAN, TV_VIGNETTE, TV_LIFT = 7, 0.30, 0.80, 0.06, (5, 6, 9)
 
 # The fixed geometry: x0, y0, x1, y1, inclusive.
 UPPER = (15, 66, 224, 193)   # 210 x 128: the tallest critter at 2x just fits
@@ -100,7 +100,8 @@ def silhouette(s, col=TV_SIL):
 def tube(im):
     """The TV effect, on the finished upper screen only: a soft sideways glow,
     dark odd rows and dark corners, each pixel reading only its own row. Then
-    the tube's rounded corners, with the dark well showing outside them."""
+    the tube's rounded corners, with the well's ring and then the grey bezel
+    showing outside them."""
     w, h = UPPER[2] - UPPER[0] + 1, UPPER[3] - UPPER[1] + 1
     src = im.crop((UPPER[0], UPPER[1], UPPER[2] + 1, UPPER[3] + 1))
     a, out = src.load(), Image.new("RGB", (w, h))
@@ -110,14 +111,12 @@ def tube(im):
         dy = (y - (h - 1) / 2) / (h / 2)
         for x in range(w):
             dx = (x - (w - 1) / 2) / (w / 2)
-            f = scan * (1 - TV_VIGNETTE * min(dx ** 4 + dy ** 4, 1))
+            f = scan * (1 - TV_VIGNETTE * (dx ** 2 + dy ** 2))
             lf, rt = a[max(x - 1, 0), y], a[min(x + 1, w - 1), y]
             o[x, y] = tuple(min(255, int((v + TV_BLOOM * (l + r) / 2 * (255 - v) / 255) * f + k))
                             for v, l, r, k in zip(a[x, y], lf, rt, TV_LIFT))
     mask = Image.new("L", (w, h), 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, w - 1, h - 1), TV_RADIUS, fill=255)
-    d = ImageDraw.Draw(im)
-    d.rectangle(UPPER, fill=TV_WELL)
     im.paste(out, UPPER[:2], mask)
 
 

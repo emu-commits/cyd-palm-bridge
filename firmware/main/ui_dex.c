@@ -671,7 +671,7 @@ void dex_ui_show(lv_obj_t *parent){
     lv_obj_add_event_cb(m->obj, press_cb, LV_EVENT_PRESS_LOST, NULL);
 
     tv_strength_load();
-    crt_on(TV_X0, TV_Y0, TV_X1, TV_Y1, TV_RADIUS, rgb(C_WELL));
+    crt_on(TV_X0, TV_Y0, TV_X1, TV_Y1, TV_RADIUS, rgb(C_WELL), rgb(C_GREY));
     m->view = V_LIST;
     if(m->game_ok) load_list(m);
     speak(m);                       /* the opening: his line, over the list */

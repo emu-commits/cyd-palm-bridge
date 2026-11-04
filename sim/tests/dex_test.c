@@ -91,6 +91,55 @@ static void file_part(void){
     CHECK(mg_dex(&G, G.n_mons, &d) == MG_ERANGE && mg_icon(&G, G.n_mons, ic, sizeof ic) == MG_ERANGE, "past the last creature");
 }
 
+/* the read-ahead and the short way into an area change how a file is read, never what:
+ * every read the same inside a burst as out of one, and each area's lists as its opening's */
+static void reading(void){
+    static uint8_t a[4096], b[4096];
+    uint32_t seed = 12345;
+    mg_burst_begin(&G);
+    mg_burst_begin(&G);
+    mg_burst_end(&G);
+    CHECK(G.ra != NULL || G.ra_depth == 1, "a nested end keeps the burst");
+    for(int i = 0; i < 2000; i++){
+        seed = seed * 1103515245u + 12345u;
+        int sect = (int)((seed >> 8) % MG_NSECT);
+        uint32_t len = (seed >> 12) % 3 ? (seed >> 16) % 300 + 1 : (seed >> 16) % 4096 + 1;
+        if(G.s[sect].len < len) continue;
+        seed = seed * 1103515245u + 12345u;
+        uint32_t off = (seed >> 4) % (G.s[sect].len - len + 1);
+        int r = mg_read(&G, sect, off, a, len);
+        void *ra = G.ra;
+        G.ra = NULL;                    /* the same read, straight from the file */
+        int q = mg_read(&G, sect, off, b, len);
+        G.ra = ra;
+        CHECK(!r && !q && !memcmp(a, b, len), "section %d, %u bytes at %u", sect, (unsigned)len, (unsigned)off);
+    }
+    CHECK(mg_read(&G, MG_META, G.s[MG_META].len, a, 1) != 0, "past a section's end");
+    mg_burst_end(&G);
+    CHECK(G.ra == NULL && !G.ra_depth, "the last end gives the memory back");
+    mg_burst_end(&G);
+    CHECK(!G.ra_depth, "an end too many does nothing");
+
+    uint32_t cap = 0;
+    for(uint32_t i = 0; i < G.n_areas; i++){
+        MgAreaDir d;
+        CHECK(!mg_area_dir(&G, i, &d), "area %u", (unsigned)i);
+        if(d.head_len > cap) cap = d.head_len;
+    }
+    uint8_t *h1 = malloc(cap), *h2 = malloc(cap);
+    for(uint32_t i = 0; i < G.n_areas; i++){
+        MgArea x, y;
+        CHECK(!mg_area_open(&G, i, &x, h1, cap) && !mg_area_lists(&G, i, &y, h2, cap), "area %u opens both ways", (unsigned)i);
+        CHECK(x.n_zones == y.n_zones && x.n_people == y.n_people && x.w == y.w && x.h == y.h && y.index == i, "area %u's counts", (unsigned)i);
+        CHECK(!memcmp(x.zones, y.zones, 8u * x.n_zones), "area %u's zones", (unsigned)i);
+        CHECK(!memcmp(x.people, y.people, 48u * x.n_people), "area %u's people", (unsigned)i);
+    }
+    MgArea z;
+    CHECK(mg_area_lists(&G, G.n_areas, &z, h2, cap) != 0, "no such area");
+    CHECK(mg_area_lists(&G, 0, &z, h2, 8) != 0, "a buffer too small");
+    free(h1); free(h2);
+}
+
 /* ---- 2. the marks, event by event (DEX_PLAN.md 4.1) ---- */
 static void events(void){
     MpWorld *w = calloc(1, sizeof *w);
@@ -319,7 +368,7 @@ static void crt_gate(void){
     static uint16_t a[CH * CW], b[CH * CW];
     /* a box inside the 60 x 30 screen */
     const int X0 = 5, Y0 = 3, X1 = 54, Y1 = 26;
-    CHECK(!crt_on(X0, Y0, X1, Y1, 6, 0x1234), "crt_on");
+    CHECK(!crt_on(X0, Y0, X1, Y1, 6, 0x1234, 0x5678), "crt_on");
     crt_set_strength(CRT_STANDARD);
     CHECK(crt_active(), "it's on");
 
@@ -361,10 +410,13 @@ static void crt_gate(void){
     crt_widen(&x1, 27, &x2, 29);
     CHECK(x1 == 20 && x2 == 22, "widen under the box");
 
-    /* the corners are the well; flat colour: odd rows darker, corners darker */
-    for(size_t i = 0; i < CH * CW; i++) a[i] = 0x4210;      /* mid grey */
+    /* the box's very corners are what's round it, and just inside them is the well's
+     * ring (the owner saw square dark corners when it was all well); flat colour: odd
+     * rows darker, edges darker */
+    for(size_t i = 0; i < CH * CW; i++) a[i] = 0xC618;      /* light grey */
     crt_flush(0, 0, CW - 1, CH - 1, a);
-    CHECK(a[Y0 * CW + X0] == 0x1234 && a[Y1 * CW + X1] == 0x1234 && a[Y0 * CW + X1] == 0x1234, "the corners are the well");
+    CHECK(a[Y0 * CW + X0] == 0x5678 && a[Y1 * CW + X1] == 0x5678 && a[Y0 * CW + X1] == 0x5678 && a[Y1 * CW + X0] == 0x5678, "the corners show what's round the box");
+    CHECK(a[(Y0 + 1) * CW + X0 + 1] == 0x1234 && a[(Y1 - 1) * CW + X1 - 1] == 0x1234, "inside them, the well's ring");
     int mid = (X0 + X1) / 2, even = Y0 + 12, odd = Y0 + 13;
     CHECK((a[odd * CW + mid] >> 11) < (a[even * CW + mid] >> 11), "an odd row is darker");
     CHECK(((a[(Y0 + 6) * CW + X0 + 1] >> 11)) < (a[even * CW + mid] >> 11), "the edge is darker than the middle");
@@ -374,7 +426,7 @@ static void crt_gate(void){
     crt_picture(a);
     crt_flush(0, 0, CW - 1, CH - 1, a);
     crt_picture(b);
-    CHECK(a[Y0 * CW + X0] == 0x1234, "Off keeps the corners");
+    CHECK(a[Y0 * CW + X0] == 0x5678 && a[(Y0 + 1) * CW + X0 + 1] == 0x1234, "Off keeps the corners");
     CHECK(a[even * CW + mid] == b[even * CW + mid] && a[odd * CW + mid] == b[odd * CW + mid], "Off leaves the picture");
     crt_set_strength(CRT_STANDARD);
 
@@ -401,6 +453,75 @@ static void crt_gate(void){
     crt_flush(0, 0, CW - 1, CH - 1, a);
     CHECK(!memcmp(a, whole, sizeof a), "with none, the whole box again");
 
+    /* the fade is very slight and gradual (the owner, from the bench): on a wide box in
+     * bright cream, at Light, a side's edge is within two of the 32 levels of the middle,
+     * and no step between neighbours on a row, averaged over the checkerboard, is a jump */
+    {
+        enum { W = 210, H = 8 };
+        static uint16_t cream[H * W];
+        for(int fast = 0; fast < 2; fast++){
+            CHECK(!crt_on(0, 0, W - 1, H - 1, 0, 0, 0), "crt_on");
+            crt_fast(fast);
+            crt_set_strength(CRT_LIGHT);
+            for(int i = 0; i < H * W; i++) cream[i] = 0xF79C;
+            crt_flush(0, 0, W - 1, H - 1, cream);
+            int y = fast ? 3 : 4;           /* fast: only the odd rows have it */
+            int mid = (cream[y * W + W / 2] >> 11) + (cream[y * W + W / 2 + 1] >> 11);
+            int edge = (cream[y * W] >> 11) + (cream[y * W + 1] >> 11);
+            CHECK(edge < mid || fast == 0, "fast: the edge is darker");
+            CHECK(mid - edge <= 2 * 2, "the edge is %d levels down, %s", (mid - edge) / 2, fast ? "fast" : "whole");
+            for(int x = 0; x + 3 < W; x += 2){
+                int p = (cream[y * W + x] >> 11) + (cream[y * W + x + 1] >> 11);
+                int q = (cream[y * W + x + 2] >> 11) + (cream[y * W + x + 3] >> 11);
+                CHECK(abs(p - q) <= 1, "a jump at x %d: %d to %d", x, p, q);
+            }
+            crt_off();
+        }
+    }
+
+    /* for a moving picture: even rows untouched, odd rows only darker; cut anywhere; no widening */
+    CHECK(!crt_on(X0, Y0, X1, Y1, 6, 0x1234, 0x5678), "crt_on");
+    crt_fast(1);
+    crt_set_strength(CRT_STANDARD);
+    crt_picture(a);
+    crt_flush(0, 0, CW - 1, CH - 1, a);
+    crt_picture(b);
+    {
+        int bad_even = 0, bad_odd = 0;
+        for(int y = Y0 + 6; y <= Y1 - 6; y++)
+            for(int x = X0; x <= X1; x++){
+                uint16_t got = a[y * CW + x], was = b[y * CW + x];
+                if(!((y - Y0) & 1)) bad_even += got != was;
+                else bad_odd += (got >> 11) > (was >> 11) || ((got >> 5) & 63) > ((was >> 5) & 63) || (got & 31) > (was & 31);
+            }
+        CHECK(!bad_even, "%d even-row pixels changed", bad_even);
+        CHECK(!bad_odd, "%d odd-row pixels got brighter", bad_odd);
+    }
+    for(int cut = 1; cut < CH; cut += 3){
+        crt_picture(b);
+        crt_flush(0, 0, CW - 1, cut - 1, b);
+        crt_flush(0, cut, CW - 1, CH - 1, b + cut * CW);
+        CHECK(!memcmp(a, b, sizeof a), "fast: a strip cut at row %d differs", cut);
+    }
+    x1 = 20; x2 = 22;
+    crt_widen(&x1, 10, &x2, 12);
+    CHECK(x1 == 20 && x2 == 22, "fast: no widening");
+    CHECK(crt_exclude(0, 0, 20, 15) == 1, "a new rectangle");
+    crt_picture(a);
+    crt_flush(0, 0, CW - 1, CH - 1, a);
+    crt_picture(b);
+    {
+        int inside = 0;
+        for(int y = 0; y <= 15; y++) for(int x = 0; x <= 20; x++) inside += a[y * CW + x] != b[y * CW + x];
+        CHECK(!inside, "fast: %d pixels touched under the menu", inside);
+    }
+    crt_off();
+    CHECK(!crt_on(X0, Y0, X1, Y1, 6, 0x1234, 0x5678), "crt_on");
+    x1 = 20; x2 = 22;
+    crt_widen(&x1, 10, &x2, 12);
+    CHECK(x1 == X0 && x2 == X1, "crt_off ended fast mode");
+    crt_set_strength(CRT_STANDARD);
+
     /* off: nothing, and it can't be turned on with a bad box */
     crt_off();
     CHECK(!crt_active(), "it's off");
@@ -408,7 +529,7 @@ static void crt_gate(void){
     crt_picture(b);
     crt_flush(0, 0, CW - 1, CH - 1, a);
     CHECK(!memcmp(a, b, sizeof a), "off, nothing is touched");
-    CHECK(crt_on(5, 5, 4, 9, 2, 0) == -1 && crt_on(0, 0, 9, 9, CRT_MAX_RADIUS + 1, 0) == -1 && !crt_active(), "a bad box");
+    CHECK(crt_on(5, 5, 4, 9, 2, 0, 0) == -1 && crt_on(0, 0, 9, 9, CRT_MAX_RADIUS + 1, 0, 0) == -1 && !crt_active(), "a bad box");
 }
 
 /* ---- for tests/dex_check.py ---- */
@@ -500,6 +621,7 @@ int main(int argc, char **argv){
     if(argc == 3 && !strcmp(argv[1], "lines")) return dump_lines(argv[2]);
     if(mg_open(&G, GAME)){ printf("FAIL: %s: %s\n", GAME, G.err); return 1; }
     file_part();
+    reading();
     events();
     lines();
     crt_gate();

@@ -189,6 +189,9 @@ typedef struct {
     MgStatus statuses[MG_MAX_STATUSES];
     uint32_t n_moves, n_learn, n_tables, n_enc_rows, enc_rows0;
 
+    void    *ra;            /* the read-ahead, during a burst (mg_burst_begin) */
+    uint8_t  ra_depth;
+
     char     err[80];
 } MonGame;
 
@@ -197,6 +200,13 @@ int  mg_open(MonGame *g, const char *path);
 /* The same on a stream already open (the fuzz gate's fmemopen); g owns it. */
 int  mg_open_fp(MonGame *g, FILE *f);
 void mg_close(MonGame *g);
+
+/* A burst of small reads, as opening a file or an area is: between these, reads are
+ * served from a few blocks of the file kept in the heap (4 KB, given back by the
+ * end). Each small read would otherwise go to the card by itself: stdio throws its
+ * buffer away on every seek. Without the memory it just reads as usual. They nest. */
+void mg_burst_begin(MonGame *g);
+void mg_burst_end(MonGame *g);
 
 int  mg_move(MonGame *g, uint32_t i, MgMove *m);
 int  mg_mon(MonGame *g, uint32_t i, MgMon *m);
@@ -226,6 +236,10 @@ int  mg_icon(MonGame *g, uint32_t i, uint8_t *buf, uint32_t cap);
 /* Enter area i: read and check its head into buf (head_len bytes; MG_HEAD_MAX
  * is always enough), and fill a. The pointers in a point into buf. */
 int  mg_area_open(MonGame *g, uint32_t i, MgArea *a, uint8_t *buf, uint32_t cap);
+/* An area's zones and people alone, for a search through the whole game: only those
+ * two lists are read into buf, and only their place is checked (mg_area_open checks
+ * the rest, its CRC included, when the area is entered). Nothing else in `a` is set. */
+int  mg_area_lists(MonGame *g, uint32_t i, MgArea *a, uint8_t *buf, uint32_t cap);
 void mg_warp(const MgArea *a, uint32_t i, MgWarp *w);
 void mg_zone(const MgArea *a, uint32_t i, MgZone *z);
 void mg_sign(const MgArea *a, uint32_t i, MgSign *s);

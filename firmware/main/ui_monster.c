@@ -73,6 +73,7 @@
 #define NCACHE     96               /* tiles kept: Kestrel shows 60, and the people take two each */
 #define TICK_MS    30
 #define STEP_TICKS 4                /* a step: four frames of 4 px */
+#define BURST_TICKS 3               /* the timer runs before the refresh: past the first paint */
 #define TURN_HOLD  5                /* ticks a turn waits before a held press walks */
 #define LINE_H     14               /* lv_font_palm's line height */
 #define MENU_MAX   8
@@ -98,6 +99,7 @@ typedef struct {
 
     uint8_t  scene, ui, menu, sel, nmenu, menu_back;
     uint8_t  started;               /* a game is under way (made or loaded) */
+    uint8_t  burst_ticks;           /* ticks until the opening's read-ahead is given back */
     uint8_t  card_next, card_ticks;
     char     err[96];
 
@@ -507,6 +509,16 @@ static void view_draw_cb(lv_event_t *e){
     lv_draw_image_dsc_init(&d);
     d.src = &m->img;
     lv_draw_image(layer, &d, &a);
+}
+
+/* the view paints every pixel of itself, so LVGL needn't paint what's behind it first */
+static void view_cover_cb(lv_event_t *e){
+    lv_obj_t *obj = lv_event_get_current_target(e);
+    lv_area_t va;
+    lv_obj_get_coords(obj, &va);
+    const lv_area_t *c = lv_event_get_cover_area(e);
+    if(c->x1 >= va.x1 && c->y1 >= va.y1 && c->x2 <= va.x2 && c->y2 <= va.y2)
+        lv_event_set_cover_res(e, LV_COVER_RES_COVER);
 }
 
 static void redraw(void){ if(g_mon && g_mon->view) lv_obj_invalidate(g_mon->view); }
@@ -1542,6 +1554,7 @@ static void tick_cb(lv_timer_t *t){
     (void)t;
     Mon *m = g_mon;
     if(!m) return;
+    if(m->burst_ticks && !--m->burst_ticks) mg_burst_end(&m->g);
     if(m->scene == SC_CARD){
         if(m->card_ticks) m->card_ticks--;
         else card_end(m);
@@ -1806,6 +1819,7 @@ static void build(Mon *m, lv_obj_t *parent){
     lv_obj_set_pos(m->view, BEZEL, BEZEL);
     lv_obj_clear_flag(m->view, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(m->view, view_draw_cb, LV_EVENT_DRAW_MAIN, NULL);
+    lv_obj_add_event_cb(m->view, view_cover_cb, LV_EVENT_COVER_CHECK, NULL);
     lv_obj_add_flag(m->view, LV_OBJ_FLAG_CLICKABLE);           /* a touch on the picture stops Auto-play */
     lv_obj_add_event_cb(m->view, view_press_cb, LV_EVENT_PRESSED, NULL);
 
@@ -1901,7 +1915,8 @@ void mon_ui_show(lv_obj_t *parent){
     lv_area_t tube;
     lv_obj_get_coords(m->view, &tube);
     tv_strength_load();
-    crt_on(tube.x1, tube.y1, tube.x2, tube.y2, SCREEN_R, rgb(C_BEZEL));
+    crt_on(tube.x1, tube.y1, tube.x2, tube.y2, SCREEN_R, rgb(C_BEZEL), rgb(C_BEZEL));
+    crt_fast(1);                    /* every frame of a walk goes through it */
 
     if(r){
         char why[sizeof m->g.err];
@@ -1916,6 +1931,9 @@ void mon_ui_show(lv_obj_t *parent){
     mkdir("/sdcard/games", 0777);
     mkdir(MON_DIR, 0777);
     m->w.head_cap = cap;
+    /* the map's first paint is a screenful of tiles from the card too: tick_cb ends it */
+    mg_burst_begin(&m->g);
+    m->burst_ticks = BURST_TICKS;
     r = mp_load(&m->w, &m->g, m->head, MON_SAVE);
     if(r == MG_EIO){ scene_pick(m); return; }
     if(r){

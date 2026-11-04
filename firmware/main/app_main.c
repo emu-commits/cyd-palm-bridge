@@ -42,7 +42,7 @@ static const char *TAG = "app";
 #define SD_PIN_MISO 19
 #define SD_PIN_SCLK 18
 #define SD_PIN_CS    5
-#define SD_SPI_HOST SPI2_HOST
+#define SD_SPI_HOST SPI3_HOST
 
 /* Wi-Fi, the clock and sync live in hotsync.c, on a background task, from
  * config.ini: lvgl_port_run() below never returns, so nothing after it runs. */

@@ -24,12 +24,16 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 
 ## Dex, and Critters' new screens (built in the simulator 2026-11-03; the bench is next)
 
-`DEX_PLAN.md` is the plan, §8 D4 and §10 what's here. Nothing has run on the device.
+`DEX_PLAN.md` is the plan, §8 D4 and §10 what's here. On the board since 2026-11-03: the first report is in `BUILD_PROGRESS.md`.
 
-- [d] **Walking in Critters with the TV effect on:** the whole picture is filtered
-  every frame (about 40,000 pixels), so this is where it's slowest. Does walking
-  still feel right? If not, try Menu ▸ TV effect ▸ Off to compare. The firmware
-  logs the time at debug level (tag `lvgl`, lines starting `crt:`).
+- [d] **Walking in Critters:** smooth, with no visible drawing down the screen (33 ms a
+  frame, measured; it was 94). **The panel at 40 MHz:** no speckle, wrong colours or
+  shifted lines anywhere, in any app. If there are, `clock_speed_hz` in `display.c`.
+- [d] Critters and the Dex open within about a third of a second of the tap (measured:
+  345 and 375 ms), and Wi-Fi and a sync still work (the SD card changed SPI host).
+- [d] The fade is very slight in a battle and on the Dex's Talk page, at every strength,
+  and the Dex's bezel has no dark square corners.
+- [d] Battery life at 240 MHz: the CPU was at 160, and it's not measured.
 - [d] **The effect's strength on the panel:** Menu ▸ TV effect cycles Light, Standard,
   Strong, Off, and is remembered. Is small text readable through it, in the Dex's
   list and Critters' text box? Which one do you want as the default?

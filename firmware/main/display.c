@@ -22,7 +22,9 @@ static const char *TAG = "lcd";
 #define PIN_CS   15
 #define PIN_RST  -1        /* not wired on typical CYD; use software reset */
 #define PIN_BL   21
-#define LCD_HOST SPI3_HOST
+/* SPI2's own pins (IOMUX), and the SD card is on SPI3's: the other way round both
+ * went through the GPIO matrix, which capped this bus. */
+#define LCD_HOST SPI2_HOST
 
 /* portrait 240x320; flip bits here if orientation/color is wrong */
 #define MADCTL_VAL 0x48    /* MV=0 (portrait), MX=1, BGR=1 */
@@ -110,9 +112,9 @@ void display_init(void){
     ESP_ERROR_CHECK(spi_bus_initialize(LCD_HOST, &bus, SPI_DMA_CH_AUTO));
 
     spi_device_interface_config_t dev = {
-        /* TFT pins route via the GPIO matrix on SPI3 (they're SPI2's IOMUX pins),
-         * which caps SPI at ~26.7 MHz. 20 MHz is safe and ample for the UI. */
-        .clock_speed_hz = 20*1000*1000,
+        /* Direct through the IOMUX, write only. MEASURED in Critters: at 20 MHz sending
+         * a walking frame took 33 ms of the 56, and it's the sending you can see. */
+        .clock_speed_hz = 40*1000*1000,
         .mode = 0,
         .spics_io_num = PIN_CS,
         .queue_size = 4,

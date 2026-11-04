@@ -19,6 +19,7 @@ int dx_open(Dex *d, const char *game, const char *save){
     d->caught = d->mon + d->n;
     d->state = (uint8_t *)(d->caught + d->n);
     d->has_save = !mp_read_marks(save, &d->marks);
+    mg_burst_begin(&d->g);
     for(uint32_t i = 0; i < d->n; i++) d->mon[i] = (uint16_t)i;     /* a file without DEXE: MONS' order */
     for(uint32_t i = 0; d->g.has_dex && i < d->n; i++){
         MgDex x;
@@ -38,11 +39,12 @@ int dx_open(Dex *d, const char *game, const char *save){
         if((r = mg_area_dir(&d->g, i, &a))) goto fail;
         if(a.head_len > d->head_cap) d->head_cap = a.head_len;
     }
+    mg_burst_end(&d->g);
     return 0;
 fail:
     free(d->mon);
     d->mon = NULL;
-    mg_close(&d->g);
+    mg_close(&d->g);            /* the burst goes with it */
     return r;
 }
 
@@ -66,13 +68,13 @@ static uint16_t table_now(const Dex *d, uint16_t table){
     return table;
 }
 
-int dx_where(Dex *d, uint16_t mon, DxWhere *w, uint8_t *head){
+static int where_scan(Dex *d, uint16_t mon, DxWhere *w, uint8_t *head){
     MonGame *g = &d->g;
     memset(w, 0, sizeof *w);
     w->lo = 255;
     for(uint32_t i = 0; i < g->n_areas; i++){
         MgArea a;
-        int r = mg_area_open(g, i, &a, head, d->head_cap);
+        int r = mg_area_lists(g, i, &a, head, d->head_cap);
         if(r) return r;
         int here = 0;
         for(uint32_t z = 0; z < a.n_zones; z++){
@@ -113,6 +115,13 @@ int dx_where(Dex *d, uint16_t mon, DxWhere *w, uint8_t *head){
         }
     }
     return 0;
+}
+
+int dx_where(Dex *d, uint16_t mon, DxWhere *w, uint8_t *head){
+    mg_burst_begin(&d->g);
+    int r = where_scan(d, mon, w, head);
+    mg_burst_end(&d->g);
+    return r;
 }
 
 /* ---- his words ---- */
@@ -164,17 +173,39 @@ static const char *type_word(MonGame *g, const MgMon *m){
     return "strange";
 }
 
-/* the first critter in Dex order not yet seen that the act's tables can give */
+/* the first critter in Dex order not yet seen that the act's tables can give, and
+ * the first area it's in: one pass over the areas, not one for every critter (that
+ * was 1,255 ms on the board with 23 unseen) */
 static int hint(Dex *d, uint8_t *head, char *word, size_t wcap, char *area, size_t acap){
-    for(int p = 0; p < d->n; p++){
-        MgMon m;
-        DxWhere w;
-        if(d->state[p] || mg_mon(&d->g, d->mon[p], &m) || dx_where(d, d->mon[p], &w, head) || !w.n_areas) continue;
-        snprintf(word, wcap, "%s", type_word(&d->g, &m));
-        snprintf(area, acap, "%s", w.area[0]);
-        return 1;
+    MonGame *g = &d->g;
+    int best = d->n, where = -1;
+    for(uint32_t i = 0; i < g->n_areas; i++){
+        MgArea a;
+        if(mg_area_lists(g, i, &a, head, d->head_cap)) return 0;
+        for(uint32_t z = 0; z < a.n_zones; z++){
+            MgZone zn;
+            uint16_t rows;
+            mg_zone(&a, z, &zn);
+            uint16_t t = table_now(d, zn.table);
+            if(mg_enc_rows(g, t, &rows)) return 0;
+            for(uint32_t j = 0; j < rows; j++){
+                MgEncRow row;
+                if(mg_enc_row(g, t, j, &row)) return 0;
+                if(!row.rate) continue;
+                for(int p = 0; p < best; p++)
+                    if(d->mon[p] == row.mon){
+                        if(!d->state[p]){ best = p; where = (int)i; }
+                        break;
+                    }
+            }
+        }
     }
-    return 0;
+    MgMon m;
+    MgAreaDir ad;
+    if(where < 0 || mg_mon(g, d->mon[best], &m) || mg_area_dir(g, (uint32_t)where, &ad)) return 0;
+    snprintf(word, wcap, "%s", type_word(g, &m));
+    if(mg_text(g, ad.name, area, (uint32_t)(acap < DX_NAME ? acap : DX_NAME)) < 0) area[0] = 0;
+    return 1;
 }
 
 /* a line with one left to find: a caught critter whose evolution isn't caught,
@@ -199,7 +230,9 @@ void dx_greeting(Dex *d, char *out, size_t cap, uint8_t *head){
     lower_first(all);
     if(d->n_caught >= d->n){ snprintf(out, cap, "%s of %s. I've nothing left to teach you.", have, all); return; }
     if(d->n_seen >= d->n){ snprintf(out, cap, "You've met them all. Catching them is another thing."); return; }
+    mg_burst_begin(&d->g);
     int short_one = line_short_one(d, name, sizeof name), has_hint = head && hint(d, head, word, sizeof word, area, sizeof area);
+    mg_burst_end(&d->g);
     if(short_one && (!has_hint || d->n_caught % 2)){ snprintf(out, cap, "Your %s's line has one left to find.", name); return; }
     if(has_hint){
         const char *tail = d->n_caught * 4 < d->n ? "Have a look." : d->n_caught * 2 < d->n ? "Worth the walk." : "Not many left now.";

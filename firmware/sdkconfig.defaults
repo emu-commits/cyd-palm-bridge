@@ -6,6 +6,11 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # --- build for size (no PSRAM: RAM and flash are both tight) ---
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 
+# --- speed: the CPU's top clock. MEASURED in Critters, walking: 94 ms a frame at 160
+# with the TV effect, 56 without. Costs some battery while awake; the idle path below
+# is unchanged. ---
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
 # --- TLS: Mozilla CA bundle so *.icloud.com verifies without bundled certs ---
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y

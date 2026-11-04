@@ -5,8 +5,8 @@
  * only its own row. The device and the simulator both call it from their
  * flush_cb, before anything else touches the buffer.
  *
- * Pure C, no LVGL. The memory (two small tables, under 1 KB) is heap, taken
- * by crt_on() and given back by crt_off(). */
+ * Pure C, no LVGL. The memory (small tables, under 1 KB) is heap, taken by
+ * crt_on() and given back by crt_off(). */
 #ifndef CRT_H
 #define CRT_H
 
@@ -15,13 +15,19 @@
 enum { CRT_OFF, CRT_LIGHT, CRT_STANDARD, CRT_STRONG, CRT_NSTRENGTHS };
 
 /* Treat x0..x1, y0..y1 (inclusive, screen coordinates) as the tube, with corners
- * rounded at `radius` (at most CRT_MAX_RADIUS) showing `well` (RGB565) outside
- * them. The caller invalidates the box. 0, or -1 if the tables can't be had: the
- * screen then simply has no effect. */
+ * rounded at `radius` (at most CRT_MAX_RADIUS). Outside them, a ring of `well` one
+ * pixel wide, and beyond that `outside`: the box's corners are squares, and whatever
+ * is round the box has to show in them (RGB565 both). The caller draws the rest of
+ * the ring, at radius + 1, one pixel outside the box. The caller invalidates the box.
+ * 0, or -1 if the tables can't be had: the screen then simply has no effect. */
 #define CRT_MAX_RADIUS 12
-int  crt_on(int x0, int y0, int x1, int y1, int radius, uint16_t well);
+int  crt_on(int x0, int y0, int x1, int y1, int radius, uint16_t well, uint16_t outside);
 void crt_off(void);
 int  crt_active(void);
+
+/* For a picture that moves: the odd rows' darkening and the fade, and nothing on the
+ * even rows, so no glow and no widening. A sixth of the cost (BUILD_PROGRESS.md). Until crt_off(). */
+void crt_fast(int on);
 
 /* The system's menu or an alert over the screen isn't part of the tube: the pixels
  * in this rectangle are left alone, and the picture round it keeps the effect.

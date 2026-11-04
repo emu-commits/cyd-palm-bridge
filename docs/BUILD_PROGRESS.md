@@ -16,6 +16,57 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-03 — Critters and the Dex made fast, from the first bench report
+
+The owner, on PR #70 on the board: walking felt slow and you could see the screen
+draw; Critters took about 2 s to open and the Dex 3 s; the fade was far too strong; the
+Dex's bezel had dark square corners. Everything below was measured **on the board**,
+with a throwaway build that timed each stage and wrote nothing (not committed).
+
+| What | Before | After |
+|---|---|---|
+| A walking frame in Critters, with the effect | 94 ms | **33 ms** |
+| ...its effect | 38 ms | 2.2 ms (`crt_fast`) |
+| ...sending it to the panel | 33 ms | 16.6 ms |
+| ...the byte swap | 3.9 ms | 1.0 ms |
+| ...composing it | 7.2 ms | 3.5 ms |
+| Opening Critters, tap to painted | 1,750 ms | **345 ms** |
+| Opening the Dex, tap to painted | 2,800 ms | **375 ms** |
+| `mg_open`, the 674 KB game | 1,260 ms | 121 ms |
+| The Dex's greeting | 1,255 ms | 81 ms |
+| A Talk page in the Dex | not measured | 85 ms + 54 ms to paint |
+| App size | 1,853 KB | 1,946 KB (of 3 MB) |
+| DRAM, static / IRAM | 147,636 B / 99,435 B | the same |
+
+**What did it, and what didn't:**
+
+- **The read-ahead** (`mg_burst_begin`): checking a game file made a card read per
+  record, because stdio discards its buffer on every seek. Four 1 KB blocks, 4 KB of
+  heap for the moment of opening, took the check from 1,134 ms to 57 ms. It's also
+  used entering an area and by the Dex's searches.
+- **One pass for the greeting:** it searched every area once per unseen critter.
+  `mg_area_lists()` reads only an area's zones and people, not its whole head.
+- **The panel's bus:** the panel and the SD card were on each other's SPI hosts, both
+  through the GPIO matrix. Swapped, both use their own pins, and the panel runs at
+  40 MHz, not 20. The sending time halved as computed. **The panel's picture at 40 MHz
+  is a bench check.**
+- **240 MHz, not 160,** and `-O2` for LVGL, `crt.c`, `ui_monster.c`, `lvgl_port.c`.
+  It costs some battery while awake, not measured.
+- **The view answers `LV_EVENT_COVER_CHECK`,** so nothing behind it is painted first.
+- **The effect:** three channels in one word took it from 151 cycles a pixel to 82, and
+  that's as far as it goes. A load costs 7 cycles here (a store 4, a multiply 2) and
+  the loop needs more registers than Xtensa has, so it spills. So Critters has
+  `crt_fast()`: 13 cycles a pixel averaged over the rows. The Dex keeps the whole effect
+  (about 9 ms per screenful, computed from 82 cycles): it doesn't animate.
+- **Tried, no gain:** IRAM for the loops (the same cycles as cached flash: it's the data,
+  not the code). **Tried, worse:** `setvbuf(_IONBF)`, 3 to 4 times slower to open.
+- **Lesson:** I'd assumed the effect's cost was the instruction count. Timing raw loads,
+  stores and multiplies took one run and explained it.
+
+**The look:** the fade is d², not d⁴, and 4/6/9% at a side's edge, not 25/35/45%, with
+checkerboard rounding so it doesn't band. Corners: `crt_on()` takes the well's colour and
+what's outside it, softened, as the box's square corners were all painted the well's.
+
 ### 2026-11-03 — Dex, and Critters' TV screen, bezels and party icons
 
 The owner: "build through the DEX_PLAN.md", with rounded corners on the Dex's

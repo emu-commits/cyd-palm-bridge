@@ -183,15 +183,24 @@ LVGL has drawn it. Nothing is drawn differently for it.
 
 | Part | Amount |
 |---|---|
-| Sideways glow | Each pixel gains 30% of the average of its left and right neighbours, scaled by how much room it has left below 255 |
+| Sideways glow | Each pixel gains 30% of the average of its left and right neighbours, scaled by how much room its green has left |
 | Scanlines | Every odd row of the box × 0.80 |
-| Dark corners | × (1 − 0.35 × min(dx⁴ + dy⁴, 1)), with dx and dy from −1 to 1 across the box |
-| Black lift | Add 5, 6, 9 to red, green, blue, after the above |
+| A slight fade | × (1 − 0.06 × (dx² + dy²)), with dx and dy from −1 to 1 across the box: 6% down at a side's edge, 12% in a corner, in a checkerboard of rounding so it shows no bands |
+| Black lift | One step of green and blue |
+
+**The fade was 35% and d⁴ until the owner's bench report (2026-11-03):** "too much
+brightness fade to the sides", worst on bright pictures (a battle, the Talk page's
+card). It must be very subtle and gradual. A gate holds it: at Light, on cream, a
+side's edge is within 2 of the 32 levels of the middle, with no jumps.
+
+The strengths are Light (scan 0.90, 4%), Standard (0.80, 6%), Strong (0.70, 9%).
 
 The corners of the box are rounded at radius 7, and the well round the tube
 follows them at radius 8, so the rounding shows against the grey bezel (the
-owner's ask, 2026-11-03). `tools/mock_dex.py` and `firmware/main/crt.c` have the
-exact sums.
+owner's ask, 2026-11-03). `crt_on()` is told both colours: the box's own corners
+are squares, and painting them all in the well's colour left square dark corners
+poking out of the rounded well (the owner, from the bench).
+`firmware/main/crt.c` has the exact sums; `tools/mock_dex.py` the ideal ones.
 
 **Where it runs.** In `flush_cb`, on the part of each strip inside the box,
 before the byte swap. Each pixel reads only its own row, so it needs no copy of
@@ -200,8 +209,10 @@ the box and no history across LVGL's 40-row strips.
 - **A change in the box redraws its whole rows,** or the glow leaves a seam at
   the edge of a partial redraw. `crt_widen()` does that on the display's
   `LV_EVENT_INVALIDATE_AREA`, so a key press outside the box costs nothing. A whole
-  box is 26,880 pixels. **Its speed can only be measured on the device:** the
-  firmware logs the time spent at debug level (`crt:` lines, tag `lvgl`).
+  box is 26,880 pixels: about 9 ms at 240 MHz, measured (`BUILD_PROGRESS.md`), which
+  is nothing on a screen that doesn't animate.
+- **Critters can't afford that** (§10): `crt_fast()` keeps the odd rows' darkening
+  and the fade, on the odd rows only, and leaves out the glow and the even rows.
 - **The device and the simulator share the filter** (`crt.c`). They have separate
   `flush_cb`s, so it's one function both call, on only while the Dex or Critters
   is open.
@@ -499,8 +510,11 @@ The only thing left to choose is the effect's strength, on the panel (§2.4).
 
 These change the game, not the Dex, and were built with it.
 
-- **Critters' game screen is a TV too.** It has the same effect as the Dex's upper
-  screen (§2.4, `crt.c`, the same strength setting), with a thin retro bezel and
+- **Critters' game screen is a TV too.** It has the fast form of the Dex's effect
+  (§2.4, `crt_fast()`, the same strength setting): scanlines and the fade, no glow.
+  The full one was 17 ms of every walking frame even after rewriting it, and the
+  owner's order was to optimise it, else replace it with something cheaper, else
+  drop it from Critters. The fast form is 2 ms. It has a thin retro bezel and
   slightly rounded corners (radius 6). The bezel is 4 px, so the picture is now
   **232 × 172**, from 240 × 176: the map shows 8 px less across and 4 px less down,
   and the battle's layout moved a few pixels to suit. **While walking, the whole
