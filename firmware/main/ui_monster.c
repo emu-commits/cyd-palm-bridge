@@ -1642,9 +1642,11 @@ static void bot_tick(Mon *m){
     if(k < 0){ fail(m, "The map couldn't be read.", m->g.err); return; }
     if(k == MB_DONE){
         auto_set(m, 0);
-        box_say(m, "Every keeper in the region is beaten. Auto-play hands the game back to you.");
+        box_say(m, mb_dex_left(m->bot, &m->w) ? "Every keeper is beaten, and nothing left in reach to catch. Auto-play hands the game back to you."
+                                              : "Every keeper is beaten and the Dex is full. Auto-play hands the game back to you.");
         return;
     }
+    if(k == MB_TIDY){ box_say(m, m->bot->why); m->bot_wait = AUTO_TEXT; return; }
     if(k == MB_TALK){ press_a(m); m->bot_wait = AUTO_TALK; }
     else walk(m, d);
 }

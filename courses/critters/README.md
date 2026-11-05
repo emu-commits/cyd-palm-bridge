@@ -37,6 +37,10 @@ word (2026-10-16); they're marked "per Tuxemon" below.
     python3 tools/mkgame.py --fetch                       # Tuxemon at the pinned commit
     python3 tools/mkgame.py --strict -o courses/critters/game.bin
 
+Five of Tuxemon's maps are changed for this game (Route 1, the Brideswood, the Cotton Tunnel, Route 2, the Old Keep;
+the "edits" in `tools/game_region.json`: walls opened and dead ends planted over, each cell copied from elsewhere on
+the same map, so the same licences apply). The Reach is a layout of our own from the clean sheets.
+
 `tools/game_allow.tsv` says what may go in, `tools/game_region.json` which
 maps and who stands in them, `tools/game_maps/` the towns and the rooms, and
 `tools/game_ids.tsv` keeps the numbers a save refers to. The

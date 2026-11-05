@@ -954,6 +954,49 @@ def meta_entry(key, value):
     return struct.pack("<HH", key, len(value)) + value
 
 
+def apply_edits(a, ar, mv, hop, below, above):
+    """Cells of a Tuxemon map changed for this game (the map review, 2026-11-04;
+    credited in courses/critters/README.md). An edit paints the rect "at" with the
+    cells of the rect "like", repeating it, pictures and walkability both, so a
+    wall can be opened or a dead end planted over without the checkout changing."""
+    where = f"game_region.json: {ar.slug}"
+    edits = a.get("edits", [])
+    for e in edits:
+        x, y, w, h = e["at"]
+        like = e["like"]
+        sx, sy = like[:2]
+        sw, sh = (like[2:] + [1, 1])[:2] if len(like) > 2 else (1, 1)
+        if not (0 <= x and 0 <= y and x + w <= ar.w and y + h <= ar.h and 0 <= sx and 0 <= sy and
+                sx + sw <= ar.w and sy + sh <= ar.h):
+            fail(f"{where}: an edit {e} isn't inside the area")
+        src = {}
+        for j in range(sh):
+            for i in range(sw):
+                k = (sy + j) * ar.w + sx + i
+                src[(i, j)] = (below[k], above[k], mv[k], k in hop)
+        for j in range(h):
+            for i in range(w):
+                k = (y + j) * ar.w + x + i
+                below[k], above[k], mv[k], hopping = src[(i % sw, j % sh)]
+                if hopping:
+                    hop.add(k)
+                else:
+                    hop.discard(k)
+                if mv[k] & 0x0F != 0x0F:        # walls of the neighbours' edges facing this cell go too
+                    mv[k] = 0
+    for e in edits:
+        x, y, w, h = e["at"]
+        for j in range(h):
+            for i in range(w):
+                cx, cy = x + i, y + j
+                if mv[cy * ar.w + cx] & 0x0F == 0x0F:
+                    continue
+                for d, (dx, dy) in enumerate(DIR_DELTA):
+                    nx, ny = cx + dx, cy + dy
+                    if 0 <= nx < ar.w and 0 <= ny < ar.h and mv[ny * ar.w + nx] & 0x0F != 0x0F:
+                        mv[ny * ar.w + nx] &= ~((16 << ((d + 2) & 3)) | (1 << d)) & 0xFF
+
+
 def region_events(a, ar, mv, area_ix, rules, ids, flag_names):
     """The warps, zones, signs and people game_region.json gives an area
     (GAME_FORMAT.md 3.11): what Tuxemon's own events don't, or can't say."""
@@ -1008,7 +1051,8 @@ def region_events(a, ar, mv, area_ix, rules, ids, flag_names):
         # one to a cell, unless one's going is the other's coming (a keeper and their rematch)
         for q in cells.get((x, y), []):
             if not ((q.get("hide_if") and q.get("hide_if") == pe.get("show_if")) or
-                    (pe.get("hide_if") and pe.get("hide_if") == q.get("show_if"))):
+                    (pe.get("hide_if") and pe.get("hide_if") == q.get("show_if")) or
+                    (q.get("stages") and q.get("stages") == pe.get("stages"))):   # one person, as the story moves on
                 fail(f"{where}: {what} shares a cell")
         cells.setdefault((x, y), []).append(pe)
         kind = pe.get("kind", "talk")
@@ -1231,6 +1275,7 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
                     if ch == "#":
                         mv[y * ar.w + x] = 0x0F
         below, above = ar.composite()
+        apply_edits(a, ar, mv, hop, below, above)
         tiles, tix = [], {}
 
         def tile_id(im):

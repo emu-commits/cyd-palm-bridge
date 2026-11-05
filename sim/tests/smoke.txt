@@ -2272,6 +2272,62 @@ c 150 280
 t 300
 c 150 280
 t 300
+F 11 2000
+G 10 15 2 1
+t 300
+c 204 246
+t 400
+s critters_cave_gate
+c 204 246
+t 300
+F 22 2000
+F 10 2000
+F 18 2000
+F 21 2000
+G 12 23 32 0
+t 300
+s critters_reach
+G 12 25 31 1
+t 300
+c 204 246
+t 400
+s critters_reach_ranger
+c 204 246
+t 300
+G 2 20 6 3
+t 300
+s critters_brideswood_cut
+G 3 28 5 1
+t 300
+s critters_tunnel_cut
+G 9 8 21 0
+t 300
+s critters_keep_gap
+G 8 6 4 3
+t 300
+s critters_route2_cut
+G 4 2 16 3
+t 300
+s critters_drove_road
+G 0 21 11 1
+t 300
+s critters_drove_road_home
+G 5 7 3 1
+t 300
+c 204 246
+t 400
+s critters_rowan_plates
+c 204 246
+t 300
+G 0 5 11 0
+t 300
+c 204 246
+t 400
+s critters_mum_end
+c 204 246
+t 300
+c 150 280
+t 300
 c 226 12
 t 300
 c 60 132

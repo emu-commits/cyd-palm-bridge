@@ -936,7 +936,7 @@ static int bot_plays(MonGame *g, int pick, uint32_t seed){
     MbBot *b = malloc(sizeof *b);
     MpBattle bt;
     MpLog log;
-    long n, battles = 0, keepers = 0, lost = 0, lost_k = 0, caught = 0, stuck = 0, learnt = 0, bought = 0, used = 0;
+    long n, tidied = 0, battles = 0, keepers = 0, lost = 0, lost_k = 0, caught = 0, stuck = 0, learnt = 0, bought = 0, used = 0;
     int ok = 0;
     uint8_t met[32] = { 0 };        /* the creatures it has met, by position */
     char who[32] = "?";
@@ -960,6 +960,7 @@ static int bot_plays(MonGame *g, int pick, uint32_t seed){
             if(getenv("BOT_VERBOSE") && n > BOT_LIMIT - 12)
                 printf("    %ld: area %u at %u,%u facing %u: %d dir %d (%s)\n", n, w->area.index, w->x, w->y, w->facing, k, d, b->why);
             if(k == MB_DONE){ ok = 1; break; }
+            if(k == MB_TIDY){ tidied++; continue; }
             CHECK(k >= 0, "bot: the map: %d", k);
             if(k == MB_STUCK) stuck++;
             r = k == MB_TALK ? mp_interact(w, &bt, &log) : mp_step(w, d, &bt, &log);
@@ -1016,11 +1017,15 @@ static int bot_plays(MonGame *g, int pick, uint32_t seed){
     }
     int main_lv = w->party[0].level;
     for(int i = 1; i < w->n_party; i++) if(w->party[i].level > main_lv) main_lv = w->party[i].level;
+    if(ok){       /* the end-game: all the keepers, then every critter caught (the fixture has nowhere to hunt) */
+        CHECK(mb_done(b, w), "bot: stopped with a keeper left");
+        CHECK(!mb_dex_left(b, w), "bot: stopped with %d not caught: %s", mb_dex_left(b, w), b->why);
+    }
     CHECK(!ok || main_lv >= BOT_MAIN_MIN, "bot: the best critter ends at level %d, under %d", main_lv, BOT_MAIN_MIN);
     printf("  bot with %s, seed %u: %s after %ld actions; %ld battles, %ld keepers, %ld lost, "
-           "(%ld to keepers), %ld caught, %ld moves relearnt, %ld stuck, %ld bought, %ld used, %u coins; party %s\n",
-           who, (unsigned)seed, ok ? "every keeper beaten" : "NOT finished", n, battles, keepers, lost, lost_k, caught,
-           learnt, stuck, bought, used, (unsigned)w->money, party);
+           "(%ld to keepers), %ld caught, %ld moves relearnt, %ld stuck, %ld bought, %ld used, %ld moved, box %u, %u coins; party %s\n",
+           who, (unsigned)seed, ok ? "every keeper beaten, the Dex full" : "NOT finished", n, battles, keepers, lost, lost_k, caught,
+           learnt, stuck, bought, used, tidied, (unsigned)w->n_box, (unsigned)w->money, party);
     if(!ok) printf("  bot: last doing: %s, in area %u at %u,%u\n", b->why, w->area.index, w->x, w->y);
     mb_free(b);
     free(b); free(w); free(head); free(scratch);

@@ -23,6 +23,7 @@ int mb_init(MbBot *b, MonGame *g, uint32_t seed, uint8_t *scratch, uint32_t cap)
     b->g = g;
     b->rng = seed ? seed : 0x2545F491u;
     b->grid_area = -1;
+    b->dex_left = -1;
     b->n_areas = (uint16_t)(g->n_areas < MB_MAX_AREAS ? g->n_areas : MB_MAX_AREAS);
     for(uint32_t t = 0; t < g->n_tables && t < MB_MAX_TABLES; t++){
         uint16_t n;
@@ -45,6 +46,13 @@ int mb_init(MbBot *b, MonGame *g, uint32_t seed, uint8_t *scratch, uint32_t cap)
             MbWarp *o = &b->warps[b->n_warps++];
             o->area = (uint8_t)i; o->x = wp.x; o->y = wp.y; o->w = wp.w; o->h = wp.h;
             o->facing = wp.facing; o->to = wp.to;
+            /* someone who leaves on a flag, standing on it or next to it, is its gate */
+            for(uint32_t q = 0; q < a.n_people; q++){
+                MgPerson p;
+                mg_person(&a, q, &p);
+                if(p.kind == MG_P_TRAINER || !p.hide_if) continue;
+                if(p.x + 1 >= wp.x && p.x <= wp.x + wp.w && p.y + 1 >= wp.y && p.y <= wp.y + wp.h){ o->gate = p.hide_if; break; }
+            }
         }
         for(uint32_t k = 0; k < a.n_people && b->n_people < MB_MAX_PEOPLE; k++){
             MgPerson p;
@@ -224,13 +232,14 @@ static int standable(const MbBot *b, int x, int y){
 /* ---- between areas --------------------------------------------------------- */
 
 /* hops[a]: how many warps from area a to area `to` */
-static void hops_to(const MbBot *b, uint16_t to, uint16_t *hops){
+static void hops_to(const MbBot *b, const MpWorld *w, uint16_t to, uint16_t *hops){
     for(int i = 0; i < b->n_areas; i++) hops[i] = FAR;
     hops[to] = 0;
     for(int pass = 0; pass < b->n_areas; pass++){
         int changed = 0;
         for(int k = 0; k < b->n_warps; k++){
             const MbWarp *wp = &b->warps[k];
+            if(wp->gate && !mp_flag(w, wp->gate)) continue;     /* shut for now: the long way round counts */
             if(hops[wp->to] != FAR && hops[wp->to] + 1 < hops[wp->area]){
                 hops[wp->area] = (uint16_t)(hops[wp->to] + 1);
                 changed = 1;
@@ -245,7 +254,7 @@ static void hops_to(const MbBot *b, uint16_t to, uint16_t *hops){
 static uint32_t toward(MbBot *b, const MpWorld *w, uint16_t to, int *dir){
     uint16_t hops[MB_MAX_AREAS];
     uint32_t best = FAR;
-    hops_to(b, to, hops);
+    hops_to(b, w, to, hops);
     uint16_t here = w->area.index;
     if(here >= b->n_areas || hops[here] == FAR) return FAR;
     for(uint32_t k = 0; k < w->area.n_warps; k++){
@@ -330,7 +339,7 @@ static int in_zone(const MbBot *b, const MpWorld *w, int x, int y){
 
 /* Train: the zone whose wild levels suit the party best (its top a level or
  * two above the party's best), the nearest of those; on it, walk up and down. */
-static int grind(MbBot *b, const MpWorld *w, int *dir){
+static int grind(MbBot *b, const MpWorld *w, int *dir, int hunting){
     int want = best_level(w) + 2, here = -1;
     uint32_t best = NONE;
     int bd = 0;
@@ -338,6 +347,10 @@ static int grind(MbBot *b, const MpWorld *w, int *dir){
         const MbZone *z = &b->zones[k];
         uint16_t t = mp_table(w, z->table);
         uint32_t fit = (uint32_t)abs((t < MB_MAX_TABLES ? b->table_hi[t] : 0) - want);
+        if(hunting){                /* the table with the most it has never caught; none, not worth walking to */
+            if(t >= MB_MAX_TABLES || !b->table_want[t]) continue;
+            fit = 255u - b->table_want[t];
+        }
         if(z->area != w->area.index){
             int d = 0;
             uint32_t s = toward(b, w, z->area, &d);
@@ -430,6 +443,74 @@ static int heal_for(MbBot *b, MpWorld *w, int who){
     return fit >= 0 ? fit : big;
 }
 
+/* ---- the Dex, and the box ---- */
+
+int mb_dex_left(MbBot *b, const MpWorld *w){
+    if(b->dex_left >= 0) return b->dex_left;
+    int left = 0;
+    uint8_t want[(MG_MAX_DEX + 7) / 8] = { 0 };
+    for(uint32_t i = 0; i < b->g->n_mons && i < MG_MAX_DEX; i++){
+        MgMon m;
+        if(mg_mon(b->g, i, &m) || mp_caught(w, m.id)) continue;
+        want[i / 8] |= (uint8_t)(1u << (i % 8));
+        left++;
+    }
+    memset(b->table_want, 0, sizeof b->table_want);
+    for(uint32_t t = 0; left && t < b->g->n_tables && t < MB_MAX_TABLES; t++){
+        uint16_t n;
+        if(mg_enc_rows(b->g, t, &n)) continue;
+        for(uint32_t j = 0; j < n; j++){
+            MgEncRow row;
+            if(!mg_enc_row(b->g, t, j, &row) && row.rate && row.mon < MG_MAX_DEX && want[row.mon / 8] >> (row.mon % 8) & 1 &&
+               b->table_want[t] < 255) b->table_want[t]++;
+        }
+    }
+    b->dex_left = (int16_t)left;
+    return left;
+}
+
+static int is_first(const MpWorld *w, const MpCreature *c){
+    MgMon m;
+    return w->starter_id && !mg_mon(w->g, c->mon, &m) && m.id == w->starter_id;
+}
+
+static void said(MbBot *b, const MpCreature *c, const char *what){
+    MgMon m;
+    char name[20] = "A critter";
+    if(!mg_mon(b->g, c->mon, &m)) mg_text(b->g, m.name, name, sizeof name);
+    snprintf(b->why, sizeof b->why, "%s %s", name, what);
+}
+
+/* The lowest in the box that isn't the first critter, let go: there's room again. */
+static int box_room(MbBot *b, MpWorld *w){
+    int low = -1;
+    for(int i = 0; i < w->n_box; i++)
+        if(!is_first(w, &w->box[i]) && (low < 0 || w->box[i].level < w->box[low].level)) low = i;
+    if(low < 0) return 0;
+    MpCreature c = w->box[low];
+    if(mp_release(w, 1, low)) return 0;
+    said(b, &c, "goes back to the wild.");
+    return 1;
+}
+
+/* 1 if it moved someone: a full party's straggler to the box; when hunting, room in a full box */
+static int tidy(MbBot *b, MpWorld *w, int hunting){
+    uint32_t room = b->g->rules[7] < MP_PARTY ? b->g->rules[7] : MP_PARTY;
+    if(w->n_party < room) return 0;
+    if(w->n_box >= MP_BOX) return hunting ? box_room(b, w) : 0;
+    if(b->foes < MB_FOES) return 0;
+    uint32_t sum = 0;
+    for(int i = 0; i < b->foes; i++) sum += b->foe_lv[i];
+    int weak = -1;
+    for(int i = 0; i < w->n_party; i++)
+        if(!is_first(w, &w->party[i]) && (weak < 0 || w->party[i].level < w->party[weak].level)) weak = i;
+    if(weak < 0 || (uint32_t)w->party[weak].level + MB_BEHIND >= sum / b->foes) return 0;
+    MpCreature c = w->party[weak];
+    if(mp_to_box(w, weak)) return 0;
+    said(b, &c, "goes to the box.");
+    return 1;
+}
+
 /* every keeper beaten, or gone for good (a rematch's first match, say) */
 int mb_done(const MbBot *b, const MpWorld *w){
     for(int k = 0; k < b->n_people; k++){
@@ -448,7 +529,9 @@ int mb_world(MbBot *b, MpWorld *w, int *dir){
         *dir = (int)(mp_rand(&b->rng) & 3);
         return MB_STUCK;
     }
-    if(mb_done(b, w)){ snprintf(b->why, sizeof b->why, "every keeper beaten"); return MB_DONE; }
+    int hunting = mb_done(b, w);
+    if(hunting && !mb_dex_left(b, w)){ snprintf(b->why, sizeof b->why, "the Dex is full"); return MB_DONE; }
+    if(tidy(b, w, hunting)) return MB_TIDY;
     mark(b, w);
     search(b, w, 0);
     int what = MB_STEP, d = 0;
@@ -467,7 +550,7 @@ int mb_world(MbBot *b, MpWorld *w, int *dir){
             if(s < best){ best = s; what = wh; d = dd; top = p->top + p->margin; goal = k; }
         }
     b->goal = (uint8_t)(goal + 1);
-    int train = best == FAR || best_level(w) < top;
+    int train = hunting || best == FAR || best_level(w) < top;
     int tired = worn(w) || (best != FAR && !train && health(w) < 75);
     /* shopping: when it has the money for what it wants, and isn't worn down.
      * A shop it can't reach isn't tried again until the story moves on. */
@@ -501,8 +584,9 @@ int mb_world(MbBot *b, MpWorld *w, int *dir){
     /* training keeps out of keepers' sight if there's a way */
     for(int unseen = 1; train && unseen >= 0; unseen--){
         search(b, w, unseen);
-        if(grind(b, w, dir)){
-            if(best == FAR) snprintf(b->why, sizeof b->why, "training: no keeper in reach");
+        if(grind(b, w, dir, hunting)){
+            if(hunting) snprintf(b->why, sizeof b->why, "hunting: %d left for the Dex", mb_dex_left(b, w));
+            else if(best == FAR) snprintf(b->why, sizeof b->why, "training: no keeper in reach");
             else snprintf(b->why, sizeof b->why, "training for a level %d keeper", top);
             return MB_STEP;
         }
@@ -512,6 +596,7 @@ int mb_world(MbBot *b, MpWorld *w, int *dir){
         *dir = d;
         return what;
     }
+    if(hunting){ snprintf(b->why, sizeof b->why, "nothing left in reach to catch"); return MB_DONE; }
     snprintf(b->why, sizeof b->why, "stuck");
     *dir = (int)(mp_rand(&b->rng) & 3);
     return MB_STUCK;
@@ -569,6 +654,8 @@ static int strongest(const MpWorld *w, int but){
 
 void mb_events(MbBot *b, const MpBattle *bt, const MpLog *log){
     for(int i = 0; log && i < log->n; i++)
+        if(log->ev[i].kind == MP_EV_CAUGHT || log->ev[i].kind == MP_EV_EVOLVE) b->dex_left = -1;
+    for(int i = 0; log && i < log->n; i++)
         if(log->ev[i].kind == MP_EV_LOSE && b->fighting && b->people[b->fighting - 1].margin < 6)
             b->people[b->fighting - 1].margin++;
     if(bt->over) b->fighting = 0;
@@ -579,7 +666,12 @@ void mb_battle(MbBot *b, MpWorld *w, MpBattle *bt, int *act, int *arg){
     for(int k = 0; bt->trainer && k < b->n_people; k++)
         if(b->people[k].area == w->area.index && b->people[k].index == bt->trainer - 1) b->fighting = (uint8_t)(k + 1);
     uint32_t sig = bt->wild.mon | (uint32_t)bt->wild.level << 16 | (uint32_t)bt->wild.iv[0] << 24;
-    if(sig != b->foe_mon){ b->foe_mon = sig; b->tries = 0; }
+    if(sig != b->foe_mon){
+        b->foe_mon = sig; b->tries = 0;
+        b->foe_lv[b->foe_at] = bt->wild.level;
+        b->foe_at = (uint8_t)((b->foe_at + 1) % MB_FOES);
+        if(b->foes < MB_FOES) b->foes++;
+    }
     *act = MP_ACT_MOVE; *arg = -1;
     if(bt->need_swap){
         int s = strongest(w, bt->active);
@@ -593,8 +685,11 @@ void mb_battle(MbBot *b, MpWorld *w, MpBattle *bt, int *act, int *arg){
         uint32_t sc;
         int s = best_move(b, me, &bt->wild, bt->recharge[0], &sc);
         uint32_t dmg = s >= 0 ? sc / 100 : 0;
-        if(w->n_party < room && !owned(w, bt->wild.mon) && b->tries < 3 &&
-           (bt->wild.hp * 2u <= bt->wild.stat[MG_HP] || dmg >= bt->wild.hp)){
+        MgMon wm;
+        int hunted = mb_done(b, w) && !mg_mon(b->g, bt->wild.mon, &wm) && !mp_caught(w, wm.id) && (w->n_party < room || w->n_box < MP_BOX);
+        /* hunting it throws at once: with a strong party, the first blow would end it */
+        if(((w->n_party < room && !owned(w, bt->wild.mon)) || hunted) && b->tries < (hunted ? 8 : 3) &&
+           (hunted || bt->wild.hp * 2u <= bt->wild.stat[MG_HP] || dmg >= bt->wild.hp)){
             b->tries++;
             *act = MP_ACT_CATCH; *arg = 0;
             return;

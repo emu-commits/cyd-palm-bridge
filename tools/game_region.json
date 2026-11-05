@@ -60,6 +60,19 @@
       "selmatek": "Ancient desert kings kept SELMATEK as watchdogs and hunting companions. Now they guard the tombs."
     }
   },
+  "objectives": [
+    {"name": "the road to Kestrel", "until": "beat_ivy", "says": ["Kestrel"]},
+    {"name": "Keeper Tom, for the tunnel", "until": "beat_tom", "says": ["Tom"]},
+    {"name": "Warden Ivy", "until": "beat_ivy", "says": ["Warden"]},
+    {"name": "the Old Keep", "after": "beat_ivy", "until": "beat_captain", "says": ["Old Keep", "old keep"]},
+    {"name": "Captain Rook", "after": "beat_ivy", "until": "beat_captain", "says": ["captain", "Captain Rook"]},
+    {"name": "the rematch in the Ring", "after": "beat_captain", "until": "beat_ivy2", "says": ["Warden"]},
+    {"name": "Dragon's Cave", "after": "beat_ivy2", "until": "beat_ashe", "says": ["Dragon's Cave"]},
+    {"name": "Wyrmkeeper Ashe", "after": "beat_ivy2", "until": "beat_ashe", "says": ["Ashe", "Wyrmkeeper"]},
+    {"name": "Dr Wren, at the lab", "after": "beat_ashe", "until": "beat_wren", "says": ["Dr Wren"]},
+    {"name": "the gate, and the Reach", "after": "beat_wren", "says": ["the gate", "Reach"]}
+  ],
+  "story_order": ["beat_tom", "beat_ivy", "beat_captain", "beat_ivy2", "beat_ashe", "beat_wren"],
   "starters": ["agnite", "anoleaf", "cardiling", "vamporm", "nut"],
   "items": ["potion", "super_potion", "mega_potion", "revive", "cureall"],
   "money": {"start": 300, "per_level": 15},
@@ -74,7 +87,10 @@
     {"flag": "beat_ivy2",   "table": "spyder_route4", "to": "route2_c"},
     {"flag": "beat_ivy2",   "table": "spyder_routea", "to": "keep_c"},
     {"flag": "beat_ashe",   "table": "keep_c",        "to": "keep_d"},
-    {"flag": "beat_ashe",   "table": "dragons_cave",  "to": "cave_d"}
+    {"flag": "beat_ashe",   "table": "dragons_cave",  "to": "cave_d"},
+    {"flag": "beat_wren",   "table": "route1_c",      "to": "route1_d"},
+    {"flag": "beat_wren",   "table": "brideswood_c",  "to": "brideswood_d"},
+    {"flag": "beat_wren",   "table": "tunnel_c",      "to": "tunnel_d"}
   ],
   "areas": [
     {
@@ -82,29 +98,48 @@
       "warps": [
         {"at": [12, 0, 2, 1], "to": "spyder_route1", "x": 13, "y": 18, "facing": "up"},
         {"at": [6, 9], "to": "larkhollow_home", "x": 5, "y": 7, "facing": "up"},
-        {"at": [17, 9], "to": "larkhollow_lab", "x": 5, "y": 7, "facing": "up"}
+        {"at": [17, 9], "to": "larkhollow_lab", "x": 5, "y": 7, "facing": "up"},
+        {"at": [23, 11, 1, 2], "to": "kestrel", "x": 1, "y": 16, "facing": "right"}
       ],
       "signs": [
         {"at": [15, 3, 2, 2], "facing": "up",
          "text": "LARKHOLLOW. North: Route 1, then the Brideswood, then the old tunnel to Kestrel."}
       ],
       "people": [
-        {"at": [5, 10], "facing": "down", "sheet": "homemaker", "kind": "healer", "name": "Mum",
-         "text": "There you are. Sit a minute and let your critters rest. Come home whenever they're worn out.",
+        {"at": [5, 10], "facing": "down", "sheet": "homemaker", "kind": "healer", "name": "Mum", "stages": "mum",
+         "hide_if": "beat_ashe",
+         "text": "There you are. Sit a minute and let them rest. The grass comes closer to town every year, so come home whenever they're worn out.",
          "after": ""},
+        {"at": [5, 10], "facing": "down", "sheet": "homemaker", "kind": "healer", "name": "Mum", "stages": "mum",
+         "show_if": "beat_ashe", "hide_if": "beat_wren",
+         "text": "Sit, they need it. The whole town's heard about the cave. Dr Wren's asking for you at the lab, and dinner can wait till you've seen her.",
+         "after": ""},
+        {"at": [5, 10], "facing": "down", "sheet": "homemaker", "kind": "healer", "name": "Mum", "stages": "mum",
+         "show_if": "beat_wren",
+         "text": "The note's off the pot. Sit down and eat. And then go and open that gate behind Ashe, in Dragon's Cave: let them all go home to the Reach.",
+         "after": ""},
+        {"at": [22, 11], "facing": "left", "sheet": "cooldude", "kind": "talk", "name": "Drover Lad",
+         "hide_if": "beat_ivy",
+         "text": "This is the drove road, and it's shut from this end. It opens when somebody's beaten the Warden. Go round by the road north."},
+        {"at": [22, 12], "facing": "left", "sheet": "miner", "kind": "talk", "name": "Drover Lad",
+         "hide_if": "beat_ivy",
+         "text": "Kestrel's just up this road. Shame you can't use it. North, then the Brideswood, then the tunnel."},
         {"at": [14, 10], "facing": "down", "sheet": "scientist", "kind": "talk", "name": "Dr Wren",
          "hide_if": "beat_ashe", "flag": "met_wren",
-         "text": "So you're a keeper now! Every keeper tries the Kestrel Ring sooner or later. Take the road north, through the Brideswood and the old tunnel.",
-         "after": "Kestrel's past the Brideswood and through the tunnel. Rest at home if your critters are tired."},
+         "text": "A keeper at last! The wild's been rising, bigger critters, closer to town, every season. I need someone who can win the Kestrel Ring. Go north.",
+         "after": "Kestrel's past the Brideswood and through the tunnel. Warden Ivy holds its plate. Win that, and I'll tell you why it matters."},
         {"at": [20, 8], "facing": "left", "sheet": "childactor", "kind": "talk", "name": "Pip",
-         "text": "I saw a critter made of FIRE in the tall grass! Well, it was orange. Mostly."},
+         "text": "I saw a critter made of FIRE, up on Route 1! Well, it was orange. Mostly. Mum says they never used to come this close to town."},
         {"at": [9, 16], "facing": "left", "sheet": "florist", "kind": "talk", "name": "Rosa",
-         "text": "Critters love these flowers. Wild ones keep to the tall grass, though. Walk through it and they'll find you.",
+         "text": "Critters love these flowers. Wild ones keep to the tall grass, up on Route 1. Walk through it and they'll find you. It's on the way to Kestrel.",
          "after": ""}
       ]
     },
     {
       "map": "spyder_route1", "name": "Route 1",
+      "edits": [
+        {"at": [28, 4, 4, 2], "like": [27, 4]}
+      ],
       "warps": [
         {"at": [13, 19, 2, 1], "to": "larkhollow", "x": 12, "y": 1, "facing": "down"},
         {"at": [22, 0, 6, 1], "to": "spyder_brideswood", "x": 1, "y": 4, "facing": "up"}
@@ -113,7 +148,7 @@
         {"at": [26, 14], "facing": "left", "sheet": "tennisplayer", "kind": "trainer", "name": "Keeper Ada",
          "sight": 3, "hide_if": "beat_ivy", "flag": "beat_ada", "team": [["cardiling", 4], ["anoleaf", 5]],
          "text": "A new keeper! Let's see what you've got.",
-         "after": "Good match! Your critters will get stronger every battle."},
+         "after": "Good match! Your critters will get stronger every battle. So will the wild ones, these days. Keep going north."},
         {"at": [16, 9], "facing": "up", "sheet": "picnicker", "kind": "trainer", "name": "Keeper Ben",
          "sight": 2, "hide_if": "beat_ivy", "flag": "beat_ben", "team": [["vamporm", 6]],
          "text": "Hey! You walked right into my picnic. That means a battle.",
@@ -121,15 +156,26 @@
         {"at": [26, 14], "facing": "left", "sheet": "tennisplayer", "kind": "trainer", "name": "Keeper Ada",
          "sight": 3, "flag": "beat_ada2", "show_if": "beat_ivy", "team": [["cardiwing", 18], ["gectile", 18], ["agnite", 17]],
          "text": "You beat the Warden? Then my critters have some catching up to show you.",
-         "after": "They've grown, and so have yours. The old keep west of the tunnel is where the real keepers train now."},
+         "after": "They've grown, and so have yours. Captain Rook's at the Old Keep, past the tunnel's north passage. He holds the next plate."},
         {"at": [16, 9], "facing": "up", "sheet": "picnicker", "kind": "trainer", "name": "Keeper Ben",
          "sight": 2, "flag": "beat_ben2", "show_if": "beat_ivy", "team": [["fluttaflap", 19], ["selmatek", 18], ["noctalo", 18]],
          "text": "My picnic's grown up too. Same rules: you walk in, we battle.",
-         "after": "Have a sandwich. You've earned it."}
+         "after": "Have a sandwich. You've earned it. Then get on to the Old Keep: every year the grass gets meaner, and they know why."}
       ]
     },
     {
       "map": "spyder_brideswood", "name": "Brideswood", "tuxemon_events": false,
+      "edits": [
+        {"at": [0, 26, 6, 2], "like": [0, 22, 6, 2]},
+        {"at": [10, 12, 6, 8], "like": [20, 12, 6, 8]},
+        {"at": [12, 26, 6, 6], "like": [0, 28, 6, 6]},
+        {"at": [30, 14, 8, 2], "like": [30, 10, 8, 2]},
+        {"at": [36, 16, 2, 22], "like": [38, 16, 2, 22]},
+        {"at": [18, 26, 2, 10], "like": [0, 28, 2, 10]},
+        {"at": [24, 26, 4, 8], "like": [20, 26, 4, 8]},
+        {"at": [16, 8, 2, 12], "like": [20, 8, 2, 12]},
+        {"at": [18, 6, 10, 2], "like": [16, 6]}
+      ],
       "warps": [
         {"at": [0, 4, 1, 2], "to": "spyder_route1", "x": 24, "y": 1, "facing": "left"},
         {"at": [36, 0, 2, 1], "to": "spyder_cotton_tunnel", "x": 3, "y": 15, "facing": "up"}
@@ -138,10 +184,16 @@
         {"at": [0, 0, 40, 40], "table": "brideswood", "chance": 3}
       ],
       "people": [
+        {"at": [22, 6], "facing": "left", "sheet": "miner", "kind": "talk", "name": "Woodcutter Bo",
+         "hide_if": "beat_ivy",
+         "text": "We're cutting a ride straight across the wood, but the Warden's orders are to keep it shut till someone's beaten her."},
+        {"at": [22, 7], "facing": "left", "sheet": "cooldude", "kind": "talk", "name": "Woodcutter Moss",
+         "hide_if": "beat_ivy",
+         "text": "No way through yet. Tom's by the tunnel end of the wood, south and east. Mind you beat him first."},
         {"at": [6, 22], "facing": "right", "sheet": "catgirl", "kind": "trainer", "name": "Keeper Mira",
          "sight": 2, "hide_if": "beat_ivy", "flag": "beat_mira", "team": [["noctula", 6], ["zunna", 7]],
          "text": "The wood is full of night critters. I've caught the best of them.",
-         "after": "Keep heading south, then east along the bottom of the wood."},
+         "after": "Keep heading south, then east along the bottom of the wood. Keeper Tom holds the far end, and Dale won't let you by without beating Tom."},
         {"at": [31, 28], "facing": "left", "sheet": "cooldude", "kind": "trainer", "name": "Keeper Tom",
          "sight": 1, "hide_if": "beat_ivy", "flag": "beat_tom", "team": [["eyenemy", 7], ["pigabyte", 8]],
          "text": "Nobody gets to the tunnel without going through me.",
@@ -149,15 +201,24 @@
         {"at": [6, 22], "facing": "right", "sheet": "catgirl", "kind": "trainer", "name": "Keeper Mira",
          "sight": 2, "flag": "beat_mira2", "show_if": "beat_ivy", "team": [["noctalo", 20], ["zunna", 20], ["propellercat", 21]],
          "text": "The wood's gone wild since the Warden fell. So have I.",
-         "after": "Go on. The critters in the grass are bigger now too: mind them."},
+         "after": "Go on. The critters in the grass are bigger now too. Ask at the Old Keep why: they've been watching it longer than anyone."},
         {"at": [31, 28], "facing": "left", "sheet": "cooldude", "kind": "trainer", "name": "Keeper Tom",
          "sight": 1, "flag": "beat_tom2", "show_if": "beat_ivy", "team": [["eyesore", 21], ["pigabyte", 21], ["gectile", 22]],
          "text": "Dale says you cleared the way to Kestrel and back. Prove it.",
-         "after": "Right. Fair's fair. You're the real thing."}
+         "after": "Right. Fair's fair. You're the real thing. Go and show Captain Rook, up at the keep."}
       ]
     },
     {
       "map": "spyder_cotton_tunnel", "name": "Cotton Tunnel", "tuxemon_events": false,
+      "edits": [
+        {"at": [13, 17, 13, 2], "like": [20, 5]},
+        {"at": [28, 12, 5, 2], "like": [20, 5]},
+        {"at": [13, 10, 6, 2], "like": [20, 5]},
+        {"at": [32, 9, 4, 2], "like": [20, 5]},
+        {"at": [0, 18, 11, 2], "like": [20, 12]},
+        {"at": [22, 14, 4, 3], "like": [20, 12]},
+        {"at": [28, 5, 2, 2], "like": [20, 5]}
+      ],
       "warps": [
         {"at": [3, 16, 1, 1], "to": "spyder_brideswood", "x": 36, "y": 1, "facing": "down"},
         {"at": [35, 2, 1, 1], "to": "kestrel", "x": 12, "y": 19, "facing": "up"},
@@ -169,18 +230,24 @@
       "people": [
         {"at": [31, 3], "facing": "down", "sheet": "miner", "kind": "talk", "name": "Digger Bram",
          "hide_if": "beat_ivy",
-         "text": "Rocks came down across the north passage years back. We're clearing them, but the Warden says nobody goes through till they've beaten her."},
+         "text": "Rocks came down across the north passage years back. They're cleared now, but the Warden says nobody goes through till they've beaten her."},
+        {"at": [28, 5], "facing": "left", "sheet": "miner", "kind": "talk", "name": "Digger Flint",
+         "hide_if": "beat_ivy",
+         "text": "We've holed through to the far ladders here. Dale will let the Warden's beater use it, and nobody before."},
+        {"at": [28, 6], "facing": "left", "sheet": "miner", "kind": "talk", "name": "Digger Ash",
+         "hide_if": "beat_ivy",
+         "text": "Not yet. Long way round for you: east and down, past the sly one in the dark."},
         {"at": [35, 3], "facing": "down", "sheet": "miner", "kind": "talk", "name": "Foreman Dale",
          "hide_if": "beat_tom",
          "text": "The way to Kestrel's not for beginners. Beat Tom in the Brideswood first, then we'll talk."},
         {"at": [24, 6], "facing": "down", "sheet": "scientist", "kind": "trainer", "name": "Keeper Iris",
          "sight": 1, "hide_if": "beat_ivy", "flag": "beat_iris", "team": [["nut", 8], ["propellercat", 9]],
          "text": "I'm studying tunnel critters. You'll do as a test.",
-         "after": "Fascinating. Kestrel is up the far ladder."},
+         "after": "Fascinating. Everything down here's twice the size it was when I started. Kestrel is up the far ladder."},
         {"at": [39, 16], "facing": "left", "sheet": "ninja", "kind": "trainer", "name": "Keeper Sly",
          "sight": 1, "hide_if": "beat_ivy", "flag": "beat_sly", "team": [["cateye", 9], ["dune_pincher", 9]],
          "text": "You didn't see me. But I saw you.",
-         "after": "...I was never here."},
+         "after": "...I was never here. And Kestrel's not up that ladder."},
         {"at": [24, 6], "facing": "down", "sheet": "scientist", "kind": "trainer", "name": "Keeper Iris",
          "sight": 1, "flag": "beat_iris2", "show_if": "beat_ivy", "team": [["arthrobolt", 22], ["propellercat", 22], ["djinnbo", 23]],
          "text": "I've been studying the north passage critters. Shall we compare notes?",
@@ -195,6 +262,7 @@
       "map": "kestrel", "name": "Kestrel", "layout": "game_maps/kestrel.json",
       "warps": [
         {"at": [12, 20, 2, 1], "to": "spyder_cotton_tunnel", "x": 35, "y": 3, "facing": "down"},
+        {"at": [0, 16, 1, 2], "to": "larkhollow", "x": 22, "y": 11, "facing": "left"},
         {"at": [6, 15], "to": "kestrel_rest", "x": 5, "y": 7, "facing": "up"},
         {"at": [19, 15], "to": "kestrel_store", "x": 5, "y": 7, "facing": "up"}
       ],
@@ -203,6 +271,12 @@
          "text": "THE KESTREL RING. Warden Ivy takes on any keeper who reaches her."}
       ],
       "people": [
+        {"at": [1, 16], "facing": "right", "sheet": "miner", "kind": "talk", "name": "Drover Tam",
+         "hide_if": "beat_ivy",
+         "text": "The old drove road, straight home to Larkhollow. Only the Warden's say-so opens it. Win in the Ring, and it's yours."},
+        {"at": [1, 17], "facing": "right", "sheet": "cooldude", "kind": "talk", "name": "Drover Lil",
+         "hide_if": "beat_ivy",
+         "text": "It's shut. Beat Warden Ivy, at the top of the Ring, then come and walk it."},
         {"at": [19, 16], "facing": "down", "sheet": "shopassistant", "kind": "talk", "name": "Sam",
          "hide_if": "beat_ivy",
          "text": "The store opens next season. For now, there's only one thing worth buying in Kestrel: a win in the Ring."},
@@ -217,14 +291,23 @@
         {"at": [12, 4], "facing": "down", "sheet": "knightlord", "kind": "trainer", "name": "Warden Ivy",
          "hide_if": "beat_captain", "flag": "beat_ivy", "team": [["agnidon", 12], ["cardiwing", 12], ["arthrobolt", 13]],
          "text": "I'm Ivy, Warden of the Kestrel Ring. You came all the way from Larkhollow? Then show me why.",
-         "after": "You're the best keeper this side of the Brideswood now. Larkhollow will be proud."},
-        {"at": [14, 13], "facing": "down", "sheet": "postboy", "kind": "talk", "name": "Ned the Post",
-         "show_if": "beat_ivy",
-         "text": "Letter for you! It's from your mum: \"Heard the news. Dinner's on when you're home.\""},
+         "after": "The Kestrel plate is yours. Dr Wren will want it, but the answers are at the Old Keep: the north passage is open to you. So's the drove road home."},
+        {"at": [14, 13], "facing": "down", "sheet": "postboy", "kind": "talk", "name": "Ned the Post", "stages": "ned",
+         "show_if": "beat_ivy", "hide_if": "beat_ivy2",
+         "text": "Letter from your mum: \"Heard you beat the Warden! Rowan's put the plate on the shelf. Dinner's on when you're home.\" Rook's at the Old Keep, by the way."},
+        {"at": [14, 13], "facing": "down", "sheet": "postboy", "kind": "talk", "name": "Ned the Post", "stages": "ned",
+         "show_if": "beat_ivy2", "hide_if": "beat_ashe",
+         "text": "Letter from Dr Wren: \"One plate left that isn't mine. Ashe has it, at the top of Dragon's Cave. Don't dawdle: the grass reached our fence last night.\""},
+        {"at": [14, 13], "facing": "down", "sheet": "postboy", "kind": "talk", "name": "Ned the Post", "stages": "ned",
+         "show_if": "beat_ashe", "hide_if": "beat_wren",
+         "text": "Letter from Dr Wren, and it's one line: \"Come to the lab. Bring everything.\" Larkhollow, the drove road's quickest."},
+        {"at": [14, 13], "facing": "down", "sheet": "postboy", "kind": "talk", "name": "Ned the Post", "stages": "ned",
+         "show_if": "beat_wren",
+         "text": "No letters today. Nobody's frightened enough to write! They say the gate's yours to open now, up behind Ashe. They say the Reach goes on for miles."},
         {"at": [10, 7], "facing": "right", "sheet": "monk", "kind": "trainer", "name": "Ringman Pell",
          "sight": 2, "flag": "beat_pell2", "show_if": "beat_captain", "team": [["selmatek", 26], ["arthrobolt", 27], ["noctalo", 27]],
          "text": "The Warden wants a rematch, and you'll go through me first. Again.",
-         "after": "Up you go. She's been training since the day you beat her."},
+         "after": "Up you go. The Warden's been training since the day you beat her. Get past her and the gate at the keep opens."},
         {"at": [15, 5], "facing": "left", "sheet": "picnicker", "kind": "trainer", "name": "Ringwoman Juno",
          "sight": 2, "flag": "beat_juno2", "show_if": "beat_captain", "team": [["fluttaflap", 27], ["cardiwing", 27], ["eyesore", 28]],
          "text": "Back for more? So are we.",
@@ -232,7 +315,7 @@
         {"at": [12, 4], "facing": "down", "sheet": "knightlord", "kind": "trainer", "name": "Warden Ivy",
          "sight": 2, "flag": "beat_ivy2", "show_if": "beat_captain", "team": [["agnidon", 28], ["cardiwing", 29], ["arthrobolt", 30]],
          "text": "The captain of the old keep sent word about you. Good. I've waited for this.",
-         "after": "Twice, then. The gate below the old keep will open for you now. Mind Dragon's Cave: there's no rest in there."}
+         "after": "Twice, then. The gate under the Old Keep opens to you: Dragon's Cave. Ashe, at the top, holds the third plate. There's no rest in there."}
       ]
     },
     {
@@ -247,8 +330,21 @@
          "text": "Something smells good. A note on the pot says: NOT YET."}
       ],
       "people": [
-        {"at": [8, 3], "facing": "down", "sheet": "cooldude", "kind": "talk", "name": "Rowan",
-         "text": "Off to be a keeper, then? Talk to Dr Wren in the house across the square first. And mind Mum's flowers on the way out."}
+        {"at": [8, 3], "facing": "down", "sheet": "cooldude", "kind": "talk", "name": "Rowan", "stages": "rowan",
+         "hide_if": "beat_ivy",
+         "text": "Off to be a keeper, then? Talk to Dr Wren in the square first, then it's the road to Kestrel. And mind Mum's flowers on the way out."},
+        {"at": [8, 3], "facing": "down", "sheet": "cooldude", "kind": "talk", "name": "Rowan", "stages": "rowan",
+         "show_if": "beat_ivy", "hide_if": "beat_captain",
+         "text": "One plate on the shelf: Kestrel's. Dr Wren says four would do it, whatever it is. The Old Keep's got the next, through the north passage."},
+        {"at": [8, 3], "facing": "down", "sheet": "cooldude", "kind": "talk", "name": "Rowan", "stages": "rowan",
+         "show_if": "beat_captain", "hide_if": "beat_ashe",
+         "text": "Two plates! Ned says the Warden wants you back at the Ring, and that's the way into Dragon's Cave. Ashe has the third, at the top."},
+        {"at": [8, 3], "facing": "down", "sheet": "cooldude", "kind": "talk", "name": "Rowan", "stages": "rowan",
+         "show_if": "beat_ashe", "hide_if": "beat_wren",
+         "text": "Three on the shelf. Larkhollow's is the gap, the one you've seen in the Rest House. Dr Wren's had it all along: go and see her in the lab."},
+        {"at": [8, 3], "facing": "down", "sheet": "cooldude", "kind": "talk", "name": "Rowan", "stages": "rowan",
+         "show_if": "beat_wren",
+         "text": "All four plates, one shelf. Dr Wren says they open the gate behind Ashe in Dragon's Cave. The Reach! Go and see it for all of us."}
       ]
     },
     {
@@ -258,19 +354,19 @@
       ],
       "signs": [
         {"at": [0, 1, 4, 1], "facing": "up",
-         "text": "Shelves of field notes. One page says: the deeper the wood, the tougher the critters."},
+         "text": "Shelves of field notes, thirty years of them. Each year's page says the same thing: bigger, closer, more."},
         {"at": [8, 1, 2, 1], "facing": "up",
-         "text": "The machine hums. A card taped to it says: DON'T TOUCH. -W."},
+         "text": "The machine hums. A card says: DON'T TOUCH. -W. Beside it is a drawing of a gate with four plate-shaped holes, and the word REACH."},
         {"at": [7, 4], "facing": "up",
          "text": "Dr Wren's desk: a flask of something green and a book called \"Types and Their Troubles\"."}
       ],
       "people": [
         {"at": [3, 5], "facing": "down", "sheet": "shopassistant", "kind": "talk", "name": "Fern",
-         "text": "I help Dr Wren. A tip: a move that suits what it hits does twice the damage, and a poor match does half. Watch for \"very effective\"."},
+         "text": "Dr Wren's sent you on to Kestrel? A tip for the road, then: a move that suits what it hits does twice the damage, a poor match half."},
         {"at": [9, 3], "facing": "down", "sheet": "scientist", "kind": "trainer", "name": "Dr Wren",
          "sight": 0, "flag": "beat_wren", "show_if": "beat_ashe", "team": [["arthrobolt", 41], ["velocitile", 42], ["agnigon", 43]],
-         "text": "Ashe wrote to me. Dragon's Cave, the Ring twice over... Every plate in the region but ours. Then let's make it all of them: battle me.",
-         "after": "The Larkhollow plate is yours. Every keeper in the region beaten, and you started with one critter from this lab. Go and tell your mum."}
+         "text": "The Reach was shut a hundred years ago, and the wild's been backing up against that gate since. Four plates open it. Three you've got. Battle me.",
+         "after": "The Larkhollow plate is yours. The gate behind Ashe will open for you now: the Reach. Let them go home. But tell your mum first."}
       ]
     },
     {
@@ -288,11 +384,15 @@
          "text": "Welcome to the rest house. Your critters are rested now. If they're all worn out in the Ring, you'll wake up here.",
          "after": ""},
         {"at": [8, 5], "facing": "left", "sheet": "florist", "kind": "talk", "name": "Hazel",
-         "text": "I came through the tunnel last spring and never left. Kestrel grows on you."}
+         "text": "I came through the tunnel last spring and never left. Kestrel grows on you. Mind, so does the grass: win the Ring before it gets any higher."}
       ]
     },
     {
       "map": "spyder_route4", "name": "Route 2", "tuxemon_events": false,
+      "edits": [
+        {"at": [6, 4, 2, 2], "like": [5, 4]},
+        {"at": [7, 33, 11, 1], "like": [12, 32]}
+      ],
       "warps": [
         {"at": [19, 2, 1, 2], "to": "spyder_cotton_tunnel", "x": 31, "y": 3, "facing": "right"},
         {"at": [0, 4, 1, 2], "to": "spyder_routea", "x": 7, "y": 37, "facing": "left"}
@@ -325,6 +425,12 @@
         {"at": [10, 30, 5, 2], "table": "spyder_route4", "chance": 11}
       ],
       "people": [
+        {"at": [6, 4], "facing": "right", "sheet": "miner", "kind": "talk", "name": "Hiker Lowe",
+         "hide_if": "beat_captain",
+         "text": "A short cut to the keep, and Captain Rook's men hold it. Beat Rook and they'll stand aside. South, then west, then north for you."},
+        {"at": [6, 5], "facing": "right", "sheet": "cooldude", "kind": "talk", "name": "Hiker Wes",
+         "hide_if": "beat_captain",
+         "text": "Keep's business. It opens for whoever beats the captain."},
         {"at": [12, 6], "facing": "down", "sheet": "monk", "kind": "trainer", "name": "Hiker Fenn",
          "sight": 3, "flag": "beat_fenn", "team": [["noctalo", 19], ["propellercat", 20], ["pigabyte", 20]],
          "text": "The north passage opened and here you are. Let's see what the south grows.",
@@ -404,9 +510,26 @@
         "#######..###########",
         "#######..###########"
       ],
+      "edits": [
+        {"at": [15, 7, 1, 12], "like": [16, 10]},
+        {"at": [15, 23, 2, 9], "like": [16, 10]},
+        {"at": [16, 32, 1, 2], "like": [16, 10]},
+        {"at": [3, 24, 2, 4], "like": [16, 10]},
+        {"at": [8, 20, 2, 1], "like": [8, 21]}
+      ],
       "people": [
-        {"at": [4, 19], "facing": "right", "sheet": "nurse", "kind": "healer", "name": "Hermit Ola",
-         "text": "Sit, sit. Nobody walks this maze without needing a rest. Come back whenever you're worn out."},
+        {"at": [8, 20], "facing": "down", "sheet": "tennisplayer", "kind": "talk", "name": "Squire Pim",
+         "hide_if": "beat_captain",
+         "text": "This gap's the captain's own. Nobody uses it till they've beaten him. He's by the moat: go round by the east hedge."},
+        {"at": [9, 20], "facing": "down", "sheet": "catgirl", "kind": "talk", "name": "Squire Lark",
+         "hide_if": "beat_captain",
+         "text": "Beat Captain Rook, and this is your front door."},
+        {"at": [4, 19], "facing": "right", "sheet": "nurse", "kind": "healer", "name": "Hermit Ola", "stages": "ola",
+         "hide_if": "beat_ivy2",
+         "text": "Sit, sit. Nobody walks this maze without a rest. Beat the captain, then the Warden again, and the gate here opens on Dragon's Cave."},
+        {"at": [4, 19], "facing": "right", "sheet": "nurse", "kind": "healer", "name": "Hermit Ola", "stages": "ola",
+         "show_if": "beat_ivy2",
+         "text": "Sit. You'll want it. Dragon's Cave is through that gate, Ashe is at the top of it, and there's no rest between. Come back when you're worn out."},
         {"at": [16, 6], "facing": "down", "sheet": "catgirl", "kind": "trainer", "name": "Squire Wyn",
          "sight": 2, "flag": "beat_wyn", "team": [["dune_pincher", 23], ["cateye", 24], ["selmatek", 24]],
          "text": "A squire of the keep guards this grass. Today that's me.",
@@ -422,7 +545,7 @@
         {"at": [12, 18], "facing": "down", "sheet": "knightlord", "kind": "trainer", "name": "Captain Rook",
          "sight": 1, "flag": "beat_captain", "team": [["agnidon", 26], ["selmatek", 26], ["arthrobolt", 27]],
          "text": "The keep has stood here a hundred years, and so have its captains. Show me your critters.",
-         "after": "Well fought. I'll send word to Warden Ivy: she'll want to see you again."},
+         "after": "Well fought: the Keep's plate. My forebears shut the Reach, and the wild's been rising ever since. Warden Ivy will want you back at the Ring."},
         {"at": [7, 12], "facing": "down", "sheet": "knightlord", "kind": "talk", "name": "Gatewarden",
          "hide_if": "beat_ivy2",
          "text": "Below the keep is Dragon's Cave. Only a keeper who has beaten the Warden twice goes down there."}
@@ -431,20 +554,24 @@
     {
       "map": "spyder_dragonscave", "name": "Dragon's Cave", "tuxemon_events": false,
       "warps": [
-        {"at": [12, 39, 2, 1], "to": "spyder_routea", "x": 6, "y": 13, "facing": "down"}
+        {"at": [12, 39, 2, 1], "to": "spyder_routea", "x": 6, "y": 13, "facing": "down"},
+        {"at": [16, 1, 1, 1], "to": "reach", "x": 23, "y": 32, "facing": "up"}
       ],
       "zones": [
         {"at": [0, 0, 20, 40], "table": "dragons_cave", "chance": 4}
       ],
       "people": [
+        {"at": [16, 2], "facing": "down", "sheet": "knightlord", "kind": "talk", "name": "Gate Guard",
+         "hide_if": "beat_wren",
+         "text": "The old gate. The other side's the Reach, and it opens to one keeper holding all four plates. Yours is still in Dr Wren's lab."},
         {"at": [16, 33], "facing": "down", "sheet": "miner", "kind": "trainer", "name": "Delver Kai",
          "sight": 2, "flag": "beat_kai", "team": [["agnidon", 32], ["arthrobolt", 32], ["noctalo", 33]],
          "text": "Turn back while you've still got critters standing.",
-         "after": "There's no rest in here. Remember that."},
+         "after": "There's no rest in here. Remember that. Ashe is at the top, if you still mean to go."},
         {"at": [12, 29], "facing": "down", "sheet": "scientist", "kind": "trainer", "name": "Delver Mo",
          "sight": 2, "flag": "beat_mo", "team": [["eyesore", 33], ["selmatek", 33], ["fluttaflap", 34]],
          "text": "I came down here to study the cave's critters. I stayed for the battles.",
-         "after": "Fascinating. The deeper you go, the harder they get."},
+         "after": "Fascinating. The deeper you go, the harder they get. Ask Ashe why: it's her gate they're all pressed up against."},
         {"at": [2, 24], "facing": "right", "sheet": "ninja", "kind": "trainer", "name": "Delver Ren",
          "sight": 2, "flag": "beat_ren", "team": [["djinnbo", 34], ["cateye", 34], ["dune_pincher", 34]],
          "text": "You can't see me in this dark. I can see you.",
@@ -452,11 +579,11 @@
         {"at": [10, 9], "facing": "down", "sheet": "monk", "kind": "trainer", "name": "Delver Ivo",
          "sight": 1, "flag": "beat_ivo", "team": [["gectile", 35], ["cardiwing", 35], ["agnidon", 35]],
          "text": "Almost at the top. Almost.",
-         "after": "Go on. She's been waiting a long time for someone like you."},
+         "after": "Go on. Ashe has been waiting a long time for someone like you."},
         {"at": [16, 3], "facing": "down", "sheet": "knightlord", "kind": "trainer", "name": "Wyrmkeeper Ashe",
          "sight": 2, "flag": "beat_ashe", "team": [["arthrobolt", 38], ["velocitile", 39], ["cardinale", 40]],
          "text": "Few keepers reach the top of Dragon's Cave. Fewer leave it the way they came in.",
-         "after": "So it's you. Dr Wren wrote to me about a keeper from Larkhollow. Go home: she'll want to see this."}
+         "after": "So it's you: the Cave's plate is yours. Dr Wren wrote to me about a keeper from Larkhollow. Go home to her lab: Dr Wren holds the last one."}
       ]
     },
     {
@@ -472,9 +599,96 @@
          "show_if": "beat_ivy",
          "text": "Open at last! Potions for the road, and a revive or two for the worst of it."}
       ]
+    },
+    {
+      "map": "reach", "name": "The Reach", "layout": "game_maps/reach.json",
+      "warps": [
+        {"at": [23, 35, 2, 1], "to": "spyder_dragonscave", "x": 16, "y": 2, "facing": "down"},
+        {"at": [47, 14, 1, 2], "to": "spyder_cotton_tunnel", "x": 33, "y": 5, "facing": "right"}
+      ],
+      "signs": [
+        {"at": [25, 28, 1, 1], "facing": "any",
+         "text": "THE REACH. East: the old way back to the Cotton Tunnel. South: the gate, and Dragon's Cave."}
+      ],
+      "zones": [
+        {"at": [2, 3, 44, 25], "table": "the_reach", "chance": 8},
+        {"at": [2, 28, 14, 5], "table": "the_reach", "chance": 8},
+        {"at": [32, 28, 14, 5], "table": "the_reach", "chance": 8}
+      ],
+      "people": [
+        {"at": [21, 30], "facing": "right", "sheet": "nurse", "kind": "healer", "name": "Nurse Hale's Sister",
+         "text": "Rest here as long as you like. Every critter there is comes through this meadow sooner or later. Your Dex will fill if you've the patience."},
+        {"at": [26, 31], "facing": "left", "sheet": "monk", "kind": "talk", "name": "Ranger Sol",
+         "text": "A hundred years shut, and they're going home at last. The grass out there will settle now: you did that. Stay as long as you like, and catch them all."}
+      ]
     }
   ],
   "encounters": {
+    "the_reach": [
+      {"creature": "agnite", "levels": [34, 38], "rate": 8},
+      {"creature": "anoleaf", "levels": [34, 38], "rate": 8},
+      {"creature": "cardiling", "levels": [34, 38], "rate": 8},
+      {"creature": "vamporm", "levels": [34, 38], "rate": 8},
+      {"creature": "nut", "levels": [34, 38], "rate": 8},
+      {"creature": "zunna", "levels": [34, 38], "rate": 8},
+      {"creature": "noctula", "levels": [34, 38], "rate": 8},
+      {"creature": "sparkip", "levels": [34, 38], "rate": 8},
+      {"creature": "cirrup", "levels": [34, 38], "rate": 8},
+      {"creature": "eyenemy", "levels": [34, 38], "rate": 8},
+      {"creature": "selket", "levels": [34, 38], "rate": 8},
+      {"creature": "pigabyte", "levels": [34, 38], "rate": 8},
+      {"creature": "gillpip", "levels": [34, 38], "rate": 8},
+      {"creature": "sprigling", "levels": [34, 38], "rate": 8},
+      {"creature": "cateye", "levels": [34, 38], "rate": 8},
+      {"creature": "dune_pincher", "levels": [34, 38], "rate": 8},
+      {"creature": "djinnbo", "levels": [34, 38], "rate": 8},
+      {"creature": "cinderkit", "levels": [34, 38], "rate": 8},
+      {"creature": "skullick", "levels": [34, 38], "rate": 8},
+      {"creature": "propellercat", "levels": [34, 38], "rate": 8},
+      {"creature": "rivetron", "levels": [34, 38], "rate": 8},
+      {"creature": "agnidon", "levels": [38, 42], "rate": 6},
+      {"creature": "gectile", "levels": [38, 42], "rate": 6},
+      {"creature": "cardiwing", "levels": [38, 42], "rate": 6},
+      {"creature": "dracune", "levels": [38, 42], "rate": 6},
+      {"creature": "bolt", "levels": [38, 42], "rate": 6},
+      {"creature": "noctalo", "levels": [38, 42], "rate": 6},
+      {"creature": "nimbolt", "levels": [38, 42], "rate": 6},
+      {"creature": "cumulynx", "levels": [38, 42], "rate": 6},
+      {"creature": "eyesore", "levels": [38, 42], "rate": 6},
+      {"creature": "selmatek", "levels": [38, 42], "rate": 6},
+      {"creature": "rillotl", "levels": [38, 42], "rate": 6},
+      {"creature": "wildbough", "levels": [38, 42], "rate": 6},
+      {"creature": "scorchvix", "levels": [38, 42], "rate": 6},
+      {"creature": "ossicoil", "levels": [38, 42], "rate": 6},
+      {"creature": "agnigon", "levels": [42, 46], "rate": 5},
+      {"creature": "velocitile", "levels": [42, 46], "rate": 5},
+      {"creature": "cardinale", "levels": [42, 46], "rate": 5},
+      {"creature": "arthrobolt", "levels": [42, 46], "rate": 5},
+      {"creature": "fluttaflap", "levels": [42, 46], "rate": 5},
+      {"creature": "maelstrotl", "levels": [42, 46], "rate": 5},
+      {"creature": "grovarch", "levels": [42, 46], "rate": 5},
+      {"creature": "pyrewing", "levels": [42, 46], "rate": 5},
+      {"creature": "banewyrm", "levels": [42, 46], "rate": 5},
+      {"creature": "fulminax", "levels": [42, 46], "rate": 5},
+      {"creature": "tempyre", "levels": [42, 46], "rate": 5}
+    ],
+    "route1_d": [
+      {"creature": "cardiling",  "levels": [8, 12], "rate": 25},
+      {"creature": "anoleaf",    "levels": [8, 12], "rate": 25},
+      {"creature": "zunna",      "levels": [8, 12], "rate": 25},
+      {"creature": "noctula",    "levels": [8, 12], "rate": 25}
+    ],
+    "brideswood_d": [
+      {"creature": "noctula",    "levels": [10, 14], "rate": 30},
+      {"creature": "zunna",      "levels": [10, 14], "rate": 30},
+      {"creature": "eyenemy",    "levels": [10, 14], "rate": 20},
+      {"creature": "selket",     "levels": [10, 14], "rate": 20}
+    ],
+    "tunnel_d": [
+      {"creature": "nut",          "levels": [12, 16], "rate": 40},
+      {"creature": "cateye",       "levels": [12, 16], "rate": 30},
+      {"creature": "dune_pincher", "levels": [12, 16], "rate": 30}
+    ],
     "spyder_route1": [
       {"creature": "agnite",    "levels": [2, 4], "rate": 10},
       {"creature": "cardiling", "levels": [2, 4], "rate": 20},

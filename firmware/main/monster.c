@@ -891,11 +891,11 @@ static int area_open(MonGame *g, uint32_t i, MgArea *a, uint8_t *buf, uint32_t c
         }
         /* a trainer has creatures and a flag to remember the win by; no one else has creatures */
         if(ok) ok = p[4] == MG_P_TRAINER ? team && le16(p + 6) : !team && !p[5];
-        /* one to a cell, unless one's going is the other's coming (a keeper and their rematch) */
+        /* one to a cell, unless each comes or goes on a flag (a keeper and their rematch; one
+         * person as the story moves on, which mkgame.py checks are never there together) */
         for(uint32_t j = 0; ok && j < k; j++){
             const uint8_t *q = a->people + 48 * j;
-            if(q[0] == p[0] && q[1] == p[1] &&
-               !(le16(q + 8) && le16(q + 8) == le16(p + 10)) && !(le16(p + 8) && le16(p + 8) == le16(q + 10))) ok = 0;
+            if(q[0] == p[0] && q[1] == p[1] && !((le16(q + 8) || le16(q + 10)) && (le16(p + 8) || le16(p + 10)))) ok = 0;
         }
         if(!ok) return bad(g, "area %u: person %u is out of range", id, (unsigned)k);
         for(int j = 0; j < 3; j++) if((r = str_check(g, p + 12 + 8 * j, &s))) return r;
