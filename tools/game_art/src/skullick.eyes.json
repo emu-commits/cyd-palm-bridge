@@ -1,4 +1,5 @@
 {
+  "mirror": ["back"],
   "scale": 5,
   "front": [],
   "back": [],

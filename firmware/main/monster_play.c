@@ -528,6 +528,47 @@ int mp_use(MpWorld *w, uint16_t item, int who, MpLog *log){
 
 /* ---- battles ------------------------------------------------------------- */
 
+/* ---- the party and the box ---- */
+
+/* would the party still have someone who can fight without member i? */
+static int fights_on_without(const MpWorld *w, int i){
+    for(int k = 0; k < w->n_party; k++) if(k != i && w->party[k].hp) return 1;
+    return 0;
+}
+
+static void party_drop(MpWorld *w, int i){
+    for(int k = i; k + 1 < w->n_party; k++) w->party[k] = w->party[k + 1];
+    w->n_party--;
+}
+
+int mp_release(MpWorld *w, int in_box, int i){
+    if(in_box){
+        if(i < 0 || i >= w->n_box) return MG_ERANGE;
+        for(int k = i; k + 1 < w->n_box; k++) w->box[k] = w->box[k + 1];
+        w->n_box--;
+        return 0;
+    }
+    if(i < 0 || i >= w->n_party || !fights_on_without(w, i)) return MG_ERANGE;
+    party_drop(w, i);
+    return 0;
+}
+
+int mp_to_box(MpWorld *w, int i){
+    if(i < 0 || i >= w->n_party || w->n_box >= MP_BOX || !fights_on_without(w, i)) return MG_ERANGE;
+    w->box[w->n_box++] = w->party[i];
+    party_drop(w, i);
+    return 0;
+}
+
+int mp_from_box(MpWorld *w, int i){
+    uint32_t room = w->g->rules[7] < MP_PARTY ? w->g->rules[7] : MP_PARTY;
+    if(i < 0 || i >= w->n_box || w->n_party >= room) return MG_ERANGE;
+    w->party[w->n_party++] = w->box[i];
+    for(int k = i; k + 1 < w->n_box; k++) w->box[k] = w->box[k + 1];
+    w->n_box--;
+    return 0;
+}
+
 int mp_battle_start(MpWorld *w, MpBattle *b, const MpCreature *wild){
     memset(b, 0, sizeof *b);
     b->wild = *wild;

@@ -37,6 +37,10 @@ word (2026-10-16); they're marked "per Tuxemon" below.
     python3 tools/mkgame.py --fetch                       # Tuxemon at the pinned commit
     python3 tools/mkgame.py --strict -o courses/critters/game.bin
 
+Five of Tuxemon's maps are changed for this game (Route 1, the Brideswood, the Cotton Tunnel, Route 2, the Old Keep;
+the "edits" in `tools/game_region.json`: walls opened and dead ends planted over, each cell copied from elsewhere on
+the same map, so the same licences apply). The Reach is a layout of our own from the clean sheets.
+
 `tools/game_allow.tsv` says what may go in, `tools/game_region.json` which
 maps and who stands in them, `tools/game_maps/` the towns and the rooms, and
 `tools/game_ids.tsv` keeps the numbers a save refers to. The
@@ -55,6 +59,8 @@ Tuxemon checkout itself never enters this repository.
   2026-11-01: Tuxemon's back was a green butterfly unlike its front). The
   sheet, `tools/game_art/fluttaflap-sheet.png`, is Spalding004's with that
   back, so it stays **CC BY-SA 4.0**; its front and back share 15 colours.
+- **Vamporm's front** is Spalding004's, mirrored so it faces left in battle (2026-11-04), at
+  `tools/game_art/vamporm-sheet.png`; it stays **CC BY-SA 4.0**.
 - **The fire fox line** (Cinderkit, Scorchvix, Pyrewing) and **the axolotl
   line** (Gillpip, Rillotl, Maelstrotl) are the owner's drawings
   (2026-11-01), credited to CYD Palm under **CC0 1.0** like the rest of our

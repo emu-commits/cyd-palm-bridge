@@ -14,12 +14,19 @@
  * worn down; else the nearest keeper not yet beaten (fewest areas away, then
  * fewest steps; once chosen, kept until beaten), training on an encounter
  * zone first while its best creature is below that keeper's best; when every
- * keeper is beaten it's done. It
+ * keeper is beaten it hunts: it walks the encounter zones whose tables hold the most
+ * it has never caught, catches each one once, and is done when the Dex is full
+ * or nothing it can reach gives another. It
  * finds its way with a breadth-first search over the current area's cells
  * (people stand in the way, a warp is a door it only goes through on
  * purpose, a ledge hops), and between areas over the warps. Nothing about
  * the region is written here: every keeper, healer, warp and zone is read
  * from the file, so a new region needs no change.
+ *
+ * THE PARTY. A full party whose weakest is MB_BEHIND levels under the average of
+ * the last MB_FOES foes sends that one to the box, so the slot can catch
+ * something useful. Never the first critter. Hunting, a full box lets its
+ * lowest go (again never the first critter): the Dex's marks stay.
  *
  * It rests before taking on a keeper unless the party is near full, and
  * after losing to a keeper it trains a level higher before trying them
@@ -32,8 +39,8 @@
  *
  * MEMORY: an MbBot is about 3 KB; mb_init needs a scratch buffer as big as
  * the largest area head while it reads the region. Each area the player is in
- * takes 6 B a cell more while the bot is on (9.6 KB for the Brideswood's
- * 40 x 40), allocated as the area is entered, freed by mb_free. An area over
+ * takes 6 B a cell more while the bot is on (10.4 KB for the Reach's
+ * 48 x 36), allocated as the area is entered, freed by mb_free. An area over
  * MB_MAX_CELLS cells is refused (mb_world says MB_STUCK). */
 #ifndef MONSTER_BOT_H
 #define MONSTER_BOT_H
@@ -47,13 +54,15 @@
 #define MB_MAX_PEOPLE 96            /* keepers, healers and shops, region-wide */
 #define MB_HEALS      6             /* healing items it keeps in the bag */
 #define MB_MAX_ZONES  64
+#define MB_FOES       8             /* the last levels met, for what counts as under-levelled */
+#define MB_BEHIND     10            /* levels under them that sends a critter to the box */
 #define MB_MAX_TABLES 64            /* encounter tables whose levels it knows */
 #define MB_MAX_CELLS  (64 * 64)
 
 /* what mb_world says to do on the map */
-enum { MB_STEP, MB_TALK, MB_DONE, MB_STUCK };
+enum { MB_STEP, MB_TALK, MB_DONE, MB_STUCK, MB_TIDY };    /* MB_TIDY: it moved a critter (b->why says which) */
 
-typedef struct { uint8_t area, x, y, w, h, facing; uint16_t to; } MbWarp;
+typedef struct { uint8_t area, x, y, w, h, facing; uint16_t to, gate; } MbWarp;   /* gate: a flag, until which someone stands in the way */
 typedef struct {
     uint8_t  area, x, y, kind, top;      /* top: a keeper's best level */
     uint8_t  index;                      /* its position in its area */
@@ -85,6 +94,9 @@ typedef struct {
     uint8_t  goal;                  /* the keeper it's after: people[] + 1, or 0 */
     uint32_t foe_mon;               /* the wild creature the tries are at */
     uint32_t no_shop;               /* the story's flags (a checksum) when no shop could be reached; 0 none */
+    uint8_t  foe_lv[MB_FOES], foes, foe_at;     /* the levels of the last foes met */
+    int16_t  dex_left;              /* critters not yet caught; -1 needs counting again */
+    uint8_t  table_want[MB_MAX_TABLES];     /* of those, how many each table can give */
     char     why[48];               /* what it's doing now, in words */
 } MbBot;
 
@@ -93,8 +105,9 @@ typedef struct {
 int  mb_init(MbBot *b, MonGame *g, uint32_t seed, uint8_t *scratch, uint32_t cap);
 void mb_free(MbBot *b);
 /* On the map: MB_STEP with *dir (N E S W; a turn first if it faces another
- * way), MB_TALK (press A), MB_DONE (every keeper is beaten), or MB_STUCK (no
- * way to anything: *dir is a step at random). < 0 if the card can't be read. */
+ * way), MB_TALK (press A), MB_DONE (every keeper beaten and the Dex full, or nowhere left to hunt), or MB_STUCK (no
+ * way to anything: *dir is a step at random), or MB_TIDY (a critter moved; ask
+ * again). < 0 if the card can't be read. */
 int  mb_world(MbBot *b, MpWorld *w, int *dir);
 /* In a battle (b->over 0): the action for mp_turn and its argument. */
 void mb_battle(MbBot *b, MpWorld *w, MpBattle *bt, int *act, int *arg);
@@ -102,6 +115,8 @@ void mb_battle(MbBot *b, MpWorld *w, MpBattle *bt, int *act, int *arg);
 int  mb_learn(MbBot *b, MpWorld *w, int who, uint16_t move);
 /* What the rules said after each action (a lost battle teaches it). */
 void mb_events(MbBot *b, const MpBattle *bt, const MpLog *log);
+/* critters never caught (the Dex's mark, so a release doesn't count against it) */
+int  mb_dex_left(MbBot *b, const MpWorld *w);
 /* every keeper in the region beaten */
 int  mb_done(const MbBot *b, const MpWorld *w);
 /* In a shop: the item to buy next (a position in ITEM), or -1 to leave. It

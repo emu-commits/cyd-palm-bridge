@@ -81,7 +81,21 @@ def walk(areas, start):
     return seen
 
 
+def story():
+    """The next task always has two sources (tools/story_lint.py), and the lint can fail."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import story_lint
+    region = json.loads((ROOT / "tools" / "game_region.json").read_text())
+    bad, _ = story_lint.check(region)
+    check(not bad, "story lint: " + "; ".join(bad))
+    one = {"story_order": ["f"], "objectives": [{"name": "x", "until": "f", "says": ["Kestrel"]}],
+           "areas": [{"name": "A", "signs": [{"text": "To Kestrel."}], "people": []}]}
+    bad, _ = story_lint.check(one)
+    check(any("named by 1" in b for b in bad), "story lint: one source passed")
+
+
 def main():
+    story()
     with tempfile.TemporaryDirectory() as t:
         t = Path(t)
         tree = t / "tree"

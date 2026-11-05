@@ -42,6 +42,9 @@ before touching anything.
   Auto-play that shops and heals; `make -C sim monster` checks it finishes
   with its first critter at 36 or more. The Tuxemon checkout
   never enters the repo.
+- **2026-11-04, Critters' end-game:** release and the box, a map pass (`edits` on Tuxemon's maps), the Reach past the
+  gate behind Ashe, Auto-play hunting to a full Dex, and a story with a stake (`objectives`, `tools/story_lint.py`).
+  The Dex's speaker has a life now (`dex.c`). All drafts for the owner: `BACKLOG.md`.
 - `tools/game_creatures/README.md`: **critters of our own** (2026-11-01):
   `tools/mksheet.py` turns the owner's drawing (any size, on white or a
   checkerboard; kept in `tools/game_art/src/`) into the 128×88 sheet, and the

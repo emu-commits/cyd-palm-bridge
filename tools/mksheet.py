@@ -635,7 +635,7 @@ def eyes_path(src):
 
 
 def write_eyes(path, eyes):
-    lines = [f'  {json.dumps(key)}: {eyes[key]}' for key in ("scale", "ink", "holes") if eyes.get(key) is not None]
+    lines = [f'  {json.dumps(key)}: {eyes[key]}' for key in ("scale", "ink", "holes", "mirror") if eyes.get(key) is not None]
     for part in PARTS:
         rows = [json.dumps(e) for e in eyes[part]]
         body = "[\n    " + ",\n    ".join(rows) + "\n  ]" if rows else "[]"
@@ -645,8 +645,10 @@ def write_eyes(path, eyes):
 
 def read_eyes(path):
     eyes = json.loads(Path(path).read_text())
-    if set(eyes) - {"scale", "ink", "holes"} != set(PARTS):
-        fail(f"{path}: want exactly the parts {PARTS}, and may have a scale, an ink and holes")
+    if set(eyes) - {"scale", "ink", "holes", "mirror"} != set(PARTS):
+        fail(f"{path}: want exactly the parts {PARTS}, and may have a scale, an ink, holes and mirror")
+    if set(eyes.get("mirror", [])) - {"front", "back"}:
+        fail(f"{path}: mirror lists \"front\" or \"back\": {eyes['mirror']}")
     if not isinstance(eyes.get("scale", 1), int) or eyes.get("scale", 1) < 1:
         fail(f"{path}: the scale is a whole number: {eyes['scale']}")
     for part in PARTS:
@@ -772,6 +774,11 @@ def build(src, notes, scale=None, draft=False):
     (front, back), pal = reduce_colours([front, back])
     front = apply_eyes(front, eyes["front"], pal, f"{src} front")
     back = apply_eyes(back, eyes["back"], pal, f"{src} back")
+    # in battle a front faces left and a back right (the facing review, 2026-11-04)
+    if "front" in eyes.get("mirror", []):
+        front = front.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+    if "back" in eyes.get("mirror", []):
+        back = back.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
     notes.append(f"front and back: {len(pal)} colours")
     ic, ipal = reduce_colours(ic)
     notes.append(f"icons: {len(ipal)} colours")

@@ -85,7 +85,8 @@
 enum { SC_NONE, SC_ERROR, SC_PICK, SC_MAP, SC_BATTLE, SC_CARD };
 enum { UI_NONE, UI_TEXT, UI_MENU, UI_CREDITS };
 enum { MN_BATTLE, MN_MOVES, MN_SWAP, MN_PARTY, MN_FORGET, MN_NEW,
-       MN_ITEM, MN_ITEM_WHO, MN_SHOP, MN_BAG, MN_BAG_WHO };          /* the items' menus: 2.1 */
+       MN_ITEM, MN_ITEM_WHO, MN_SHOP, MN_BAG, MN_BAG_WHO,            /* the items' menus: 2.1 */
+       MN_BOX, MN_MEMBER, MN_RELEASE };                              /* the box, and what to do with one */
 enum { BT_NONE = -1, BT_N = 0, BT_E, BT_S, BT_W, BT_A, BT_B };
 /* after the transition card: */
 enum { CARD_MAP, CARD_BATTLE };
@@ -126,6 +127,8 @@ typedef struct {
     uint8_t  to_back;               /* a note, then this menu again (MN_ITEM, MN_SHOP, MN_BAG) */
     uint8_t  item_of[MENU_MAX];     /* an items menu's lines: their items */
     uint8_t  use_item;              /* the item a party menu is choosing a creature for */
+    uint8_t  pick_box, pick_i;      /* the critter the Party's menus are about: the box's or the party's, and which */
+    uint8_t  box_page, box_more;    /* the box's page, and whether it has others */
     uint16_t sh_wild_mon, sh_wild_max;
     uint8_t  sh_wild_lv;
     char     keeper[NAME_LEN];      /* the trainer in this battle */
@@ -758,7 +761,7 @@ static void box_draw_cb(lv_event_t *e){
 
 static void party_menu(Mon *m, int kind, int back){
     char (*lines)[48] = m->lines;
-    const char *ptr[MP_PARTY + 1];
+    const char *ptr[MP_PARTY + 2];
     char a[NAME_LEN];
     int n = 0;
     for(int i = 0; i < m->w.n_party; i++, n++){
@@ -768,9 +771,58 @@ static void party_menu(Mon *m, int kind, int back){
         ptr[n] = lines[n];
         icon_ready(m, n, c->mon, 0xFFFFFF);
     }
+    if(kind == MN_PARTY){ snprintf(lines[n], sizeof lines[n], "The box  (%u)", (unsigned)m->w.n_box); ptr[n] = lines[n]; n++; }
     if(back){ snprintf(lines[n], sizeof lines[n], "Back"); ptr[n] = lines[n]; n++; }
     m->sel = 0;
-    menu_show(m, kind, ptr, n, back);
+    menu_show(m, kind, ptr, n, back || kind == MN_PARTY);
+}
+
+/* a few lines to choose from, with nothing to draw beside them */
+static void plain_menu(Mon *m, int kind, const char *a, const char *b, const char *c){
+    const char *ptr[3] = { a, b, c };
+    m->sel = 0;
+    menu_show(m, kind, ptr, c ? 3 : 2, 1);
+}
+
+/* what to do with party member `pick`, or the box's */
+static void member_menu(Mon *m){
+    if(m->pick_box) plain_menu(m, MN_MEMBER, "Take into the party", "Release", "Back");
+    else plain_menu(m, MN_MEMBER, "Send to the box", "Release", "Back");
+}
+
+/* a page of the box, then More if there are others, then Back */
+#define BOX_PAGE 5
+static void box_menu(Mon *m){
+    char (*lines)[48] = m->lines;
+    const char *ptr[BOX_PAGE + 2];
+    char a[NAME_LEN];
+    int n = 0, total = m->w.n_box;
+    if(m->box_page * BOX_PAGE >= total) m->box_page = 0;
+    for(int i = m->box_page * BOX_PAGE; i < total && n < BOX_PAGE; i++, n++){
+        MpCreature *c = &m->w.box[i];
+        snprintf(lines[n], 48, "%s  Lv %u", mon_name(m, c->mon, a), c->level);
+        ptr[n] = lines[n];
+    }
+    m->box_more = total > BOX_PAGE;
+    if(m->box_more){
+        snprintf(lines[n], 48, "More  (page %d of %d)", m->box_page + 1, (total + BOX_PAGE - 1) / BOX_PAGE);
+        ptr[n] = lines[n]; n++;
+    }
+    snprintf(lines[n], 48, total ? "Back" : "Back  (the box is empty)");
+    ptr[n] = lines[n]; n++;
+    if(m->sel >= n) m->sel = 0;
+    menu_show(m, MN_BOX, ptr, n, 1);
+}
+
+static const MpCreature *picked(const Mon *m){
+    return m->pick_box ? &m->w.box[m->pick_i] : &m->w.party[m->pick_i];
+}
+
+/* a note, then back to the party or the box */
+static void note_back(Mon *m, const char *t){
+    m->to_back = 1;
+    m->menu = m->pick_box ? MN_BOX : MN_PARTY;
+    box_say(m, t);
 }
 
 static void moves_menu(Mon *m){
@@ -1303,8 +1355,49 @@ static void choose(Mon *m){
         do_turn(m, MP_ACT_SWAP, s);
         break;
     case MN_PARTY:
-        box_hide(m);
+        if(s < m->w.n_party){ m->pick_box = 0; m->pick_i = (uint8_t)s; member_menu(m); break; }
+        m->sel = 0;
+        m->box_page = 0;
+        box_menu(m);
         break;
+    case MN_BOX: {
+        int page_n = m->w.n_box - m->box_page * BOX_PAGE;
+        if(page_n > BOX_PAGE) page_n = BOX_PAGE;
+        if(s < page_n){ m->pick_box = 1; m->pick_i = (uint8_t)(m->box_page * BOX_PAGE + s); member_menu(m); break; }
+        if(m->box_more && s == page_n){ m->box_page++; m->sel = 0; box_menu(m); break; }
+        party_menu(m, MN_PARTY, 0);
+        break;
+    }
+    case MN_MEMBER: {
+        char a[NAME_LEN], t[96];
+        mon_name(m, picked(m)->mon, a);
+        if(s == 2){ if(m->pick_box) box_menu(m); else party_menu(m, MN_PARTY, 0); break; }
+        if(s == 1){
+            char *ask = m->lines[3], *no = m->lines[4];
+            snprintf(ask, 48, "Let %s go for good", a);
+            snprintf(no, 48, "Keep it");
+            plain_menu(m, MN_RELEASE, ask, no, NULL);
+            break;
+        }
+        if(m->pick_box ? mp_from_box(&m->w, m->pick_i) : mp_to_box(&m->w, m->pick_i)){
+            if(m->pick_box) snprintf(t, sizeof t, "The party's full. Send someone to the box first.");
+            else if(m->w.n_box >= MP_BOX) snprintf(t, sizeof t, "The box is full. Let one of them go first.");
+            else snprintf(t, sizeof t, "%s is all that's standing between you and the grass. It stays.", a);
+        }
+        else snprintf(t, sizeof t, m->pick_box ? "%s joins the party." : "%s goes to the box.", a);
+        note_back(m, t);
+        break;
+    }
+    case MN_RELEASE: {
+        char a[NAME_LEN], t[96];
+        mon_name(m, picked(m)->mon, a);
+        if(s){ member_menu(m); break; }
+        if(mp_release(&m->w, m->pick_box, m->pick_i))
+            snprintf(t, sizeof t, "%s is all that's standing between you and the grass. It stays.", a);
+        else snprintf(t, sizeof t, "%s goes back to the wild. The Dex won't forget it.", a);
+        note_back(m, t);
+        break;
+    }
     case MN_FORGET: {
         char a[NAME_LEN], b[NAME_LEN], c[NAME_LEN], t[160];
         MpCreature *cr = &m->w.party[m->learn_who];
@@ -1334,7 +1427,10 @@ static void press_a(Mon *m){
         if(m->to_menu){ m->to_menu = 0; m->sel = 0; battle_menu(m); return; }
         if(m->to_back){
             m->to_back = 0;
-            if(m->menu == MN_SHOP) shop_menu(m); else items_menu(m, m->menu == MN_BAG ? MN_BAG : MN_ITEM);
+            if(m->menu == MN_SHOP) shop_menu(m);
+            else if(m->menu == MN_PARTY) party_menu(m, MN_PARTY, 0);
+            else if(m->menu == MN_BOX){ m->sel = 0; box_menu(m); }
+            else items_menu(m, m->menu == MN_BAG ? MN_BAG : MN_ITEM);
             return;
         }
         if(m->scene == SC_PICK){
@@ -1376,6 +1472,9 @@ static void press_b(Mon *m){
             else if(m->menu == MN_ITEM){ m->sel = 2; battle_menu(m); }
             else if(m->menu == MN_ITEM_WHO || m->menu == MN_BAG_WHO){ m->sel = 0; items_menu(m, m->menu == MN_BAG_WHO ? MN_BAG : MN_ITEM); }
             else if(m->menu == MN_SHOP){ box_hide(m); script_next(m); }
+            else if(m->menu == MN_BOX) party_menu(m, MN_PARTY, 0);
+            else if(m->menu == MN_MEMBER){ if(m->pick_box){ m->sel = 0; box_menu(m); } else party_menu(m, MN_PARTY, 0); }
+            else if(m->menu == MN_RELEASE) member_menu(m);
             else box_hide(m);
         }
         return;
@@ -1543,9 +1642,11 @@ static void bot_tick(Mon *m){
     if(k < 0){ fail(m, "The map couldn't be read.", m->g.err); return; }
     if(k == MB_DONE){
         auto_set(m, 0);
-        box_say(m, "Every keeper in the region is beaten. Auto-play hands the game back to you.");
+        box_say(m, mb_dex_left(m->bot, &m->w) ? "Every keeper is beaten, and nothing left in reach to catch. Auto-play hands the game back to you."
+                                              : "Every keeper is beaten and the Dex is full. Auto-play hands the game back to you.");
         return;
     }
+    if(k == MB_TIDY){ box_say(m, m->bot->why); m->bot_wait = AUTO_TEXT; return; }
     if(k == MB_TALK){ press_a(m); m->bot_wait = AUTO_TALK; }
     else walk(m, d);
 }

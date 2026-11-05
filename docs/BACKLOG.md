@@ -51,6 +51,9 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 - For the owner to review, no bench needed: my drafts of his lines (`dex.c`), the shortened descriptions
   (`game_region.json`, `tools/game_creatures/`), and our critters' categories and
   sizes.
+- [x] **Dex trainer: more dialogue and a personality** `[s]` (2026-11-04; `dex_talk_story`,
+  `dex_talk_memory`, `dex_where_memory`): each Talk moves on. Still for the owner to review:
+  the lines in `dex.c` (`STORY`, `MEMORY`, `NEARLY`, `FULL`) are drafts.
 
 ---
 
@@ -148,77 +151,65 @@ open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
   board starts, `games/monster/game.bin` is on the card, and Critters opens.
   An install without the box leaves the card's game alone.
 
-### Critters: release, Auto-play's party rule, the map review, the end-game (requested 2026-11-04, NOT approved for build)
+### Critters: monster sprites face the right way (requested 2026-11-04; reviewed and fixed the same day)
 
-- [ ] **Release a party member.** Nothing in the game lets the player let a
-  critter go (no menu, no `mp_` call). Needed: a Release item on the Party
-  menu with a confirm, and a box screen to see and release from. Today a full
-  party (6) and a full box (30) make catching refuse (`MG_ERANGE`), and nothing
-  frees a box slot. Releasing keeps the Dex's marks (`DEX_PLAN.md` §4.1), so
-  the Dex must not drop a species after a release.
-- [ ] **Auto-play releases when the party is full.** When the party is full and
-  a member is under-levelled against the average level of the battle
-  encounters, the bot releases the weakest to the box. Open: how "average" is
-  taken (the last N encounters, or the area's table), and whether it may ever
-  release the starter or the last member of a line.
-- [ ] **Map review: less maze.** Review every area for:
-  1. dead-ends and forced-path walk-arounds, to remove;
-  2. one-tile passages, to widen to at least two tiles;
-  3. shortcuts that open as the far areas open (Dark Souls style), e.g. a way
-     back from Kestrel to Larkhollow once Ivy is beaten. Today the only way
-     back is the tunnel's walk;
-  4. Constraint: Route 1, the Brideswood, the Tunnel, Route 2, the Old Keep and
-     Dragon's Cave are Tuxemon's Spyder maps (`courses/critters/README.md`); the
-     checkout never enters the repo. Changing them means our own layouts (as
-     `tools/game_maps/` has for the towns), recorded in the credits.
-- [ ] **End-game area and Auto-play's hunt.** A big open area after Dr Wren
-  that spawns every critter in the game, where Auto-play goes to level its
-  party and fill the Dex. Auto-play stops only when the Dex is full, which
-  means every species has been caught once (the Dex's *caught* mark, not
-  *seen*). Open: whether a release (above) can take a species back out of
-  "caught" for the count, which the Dex's marks already keep (`DEX_PLAN.md`
-  §4.1), so the answer is probably no.
-- [ ] **Story: fix the loose threads** (from the storyline map, 2026-11-04):
-  1. The north-passage rockfall (Digger Bram, Cotton Tunnel) is text only. Check
-     whether the warp is blocked by a tile or a flag; if not, gate it on
-     `beat_ivy` in the engine and say so in the dialogue.
-  2. Pip's "fire critter" and Mum's "Heard the news" letter point at events the
-     game never shows. Either show them (a sighting, a reason for the news) or
-     cut the lines.
-  3. Ashe's "she'll want to see this" has no clear referent. Name who it is
-     (Wren or Ivy) and make Wren's and Ivy's lines agree with it.
-  4. The plate motif: the Rest House gap and the home note "NOT YET" are the
-     only plate threads. Either the other plates appear as something the player
-     collects, or the motif is cut back to the Larkhollow plate.
-- [ ] **Story: at least two sources point to every next task.** Each open
-  objective (the next town, the next gate, the rematch, the cave, the finale)
-  must be named by at least two separate sources, e.g. an NPC and a sign, or two
-  NPCs in different towns. Audit every area; a gate with one source gets a second
-  one. Check it with a lint over `tools/game_region.json` (a source count per
-  gate flag) so it stays true.
-- [ ] **Story: overarching urgency and a resolution.** Every line of dialogue
-  should move the player forward, and the story needs a thread that runs through
-  it. Proposed: a clear threat or a stake (why the Ring and the cave matter,
-  e.g. the Warden's Ring is failing, or Wren needs a plate complete before a
-  deadline), reached in stages the player can see. Each Warden, captain and
-  delver line names the next place to go. The story ends with a resolution: a
-  final scene after Wren's battle that answers the threat and closes Mum's and
-  Wren's threads. Open for the owner: what the threat is, and whether the ending
-  is a single scene or a choice.
-- [ ] **Dragon's Cave: the opening behind Wyrmkeeper Ashe is walled off.** A cave
-  opening shows behind Ashe, but the player can't walk into it. Find the cause
-  (a solid tile, a missing warp or a wrong zone in `spyder_dragonscave`) and make
-  the opening walkable, or remove it if it isn't meant to be an exit. Check the
-  ending's route (Ashe, then Wren) still works after the fix.
-  Found (2026-11-04): the cause is the map's `tuxemon_events: false` plus a solid
-  collision at the cave's top edge, cell (16,0). Tuxemon's map has a teleport
-  event on cell (16,1), directly behind Ashe, to Cotton Tunnel; it's gated on the
-  rare Drokoro's variable (`dragonscavedrokoro`). Our area drops all of
-  Tuxemon's events, so the cell is a dead end. Intent: a loop back to the Cotton
-  Tunnel north. Decide: add a warp from (16,1) to the tunnel's north passage,
-  gated on a flag the story sets (e.g. `beat_ashe`), or cut the opening. The
-  Tuxemon target spot (3,16) in the tunnel doesn't match our tunnel layout, so
-  pick the target in our map.
+- [s] **Every monster sprite's facing, all 46 at 3x.** **My choice of convention, for the owner: Option B, battle heading**
+  (a front faces left toward the player, a back right toward the foe), because nearly all of Tuxemon's already do.
+  Critters drawn head-on (Nut, Pigabyte, Banewyrm, the wood line and others) count as fine. Wrong and fixed:
+  - **Vamporm's front** faced right: mirrored at `tools/game_art/vamporm-sheet.png` (an "edited" allow-list line, credited).
+  - **The backs of Sparkip, Nimbolt, Fulminax and Skullick** had the tail on the right, so they faced left: `"mirror": ["back"]`
+    in their `.eyes.json` (`mksheet.py`).
+  - **Correction to the note of 2026-11-04:** at full size Cardiling's front faces **left**, like Cardiwing's and Cardinale's;
+    nothing to change. Agnidon's are right too.
+  - Icons weren't changed. Judged by eye; a critter you'd call otherwise is one line to flip.
+
+### Critters: release, Auto-play's party rule, the map review, the end-game (requested 2026-11-04; built the same day on "build through the backlog")
+
+- [s] **Release a party member** (2026-11-04): Party ▸ a critter ▸ Send to the box or Release (with a
+  confirm), and "The box" under the party to see, take back and release from. Nobody can leave the party
+  without a critter that can fight. The Dex's marks stay. `make -C sim monster`; shots `critters_member`,
+  `critters_member_boxed`, `critters_party_box_line`, `critters_box`, `critters_release_ask`,
+  `critters_released`, `critters_box_empty` looked at.
+- [s] **Auto-play's party rule** (2026-11-04): a full party whose weakest is 10 or more levels under the
+  average of the last 8 foes sends that one to the box (`MB_BEHIND`, `MB_FOES`). Never the first
+  critter. Hunting, a full box lets its lowest go, the first critter excepted; the Dex's marks stay.
+  The gate's five games each move 16 to 21. **My choices, for the owner:** the last 8 foes rather
+  than the area's table; the last of a line may go, because the Dex keeps it.
+- [s] **Map review: less maze** (2026-11-04; `edits` in `tools/game_region.json`, painting Tuxemon's maps
+  from their own cells, credited in `courses/critters/README.md`). Shots `critters_brideswood_cut`,
+  `critters_tunnel_cut`, `critters_keep_gap`, `critters_route2_cut`, `critters_drove_road` looked at.
+  - Dead ends removed: Brideswood's four pockets (448 to 272 walkable cells, and no branch off the way
+    through), the tunnel's south-west strip and side room, Route 2's blind corridor.
+  - Widened to two: four runs in the tunnel; the Old Keep's long corridors, by opening the hedges between
+    them (57 one-wide cells to 25). **Left narrow:** the tunnel's remaining 14 and the Keep's 25, mostly
+    doorways and the east hedge's ends; Dragon's Cave's 15, which read as a cave.
+  - Shortcuts, shut by two people who step aside: the drove road Kestrel to Larkhollow and a ride across the
+    Brideswood and a hole through to the tunnel's far ladders (`beat_ivy`); Route 2 to the Keep and the
+    Keep's front hedge (`beat_captain`); the Reach back to the tunnel. Route 1's stranded east half joins it.
+  - Rooms' small corners (`Home`, the lab) were left: they're furniture, not maze.
+- [s] **End-game: the Reach, and Auto-play's hunt** (2026-11-04): a 48 x 36 meadow past the gate behind Ashe,
+  with all 46 critters at 34 to 46, a healer, and a way back to the tunnel. After every keeper Auto-play hunts
+  until every critter is caught (the Dex's *caught* mark, so a release doesn't undo it). `make -C sim monster`
+  plays all five starters to a full Dex. Shots `critters_reach`, `critters_reach_ranger`.
+- [d] Auto-play in the Reach on the bench: the map costs it 10.4 KB (6 B a cell; the Brideswood was 9.6);
+  a run to a full Dex takes 22,000 to 40,000 actions on top of the keepers' count, so hours.
+- [s] **Story: loose threads** (2026-11-04):
+  1. The rockfall needs no engine change: Digger Bram stands on the only way to the warp until `beat_ivy`, and
+     his line now says the rocks are cleared and why he's there.
+  2. Pip's critter is real (Agnite, on Route 1), and his line says Route 1. Mum's letter says what the news is.
+  3. Ashe's line names Dr Wren.
+  4. The plates are collected: Ivy, Rook, Ashe and Wren each hand one over, and Rowan counts them on the shelf at
+     home, with a line for each stage.
+- [s] **Story: two sources for every next task** (2026-11-04): `objectives` in `tools/game_region.json`, checked by
+  `tools/story_lint.py` from `tests/mkgame_test.py`; each of the ten has 3 to 12 sources today.
+- [s] **Story: urgency and an ending** (2026-11-04). **For the owner: I chose the threat, and a single scene over a
+  choice**; it's all data, so it's cheap to change. The wild has been rising, bigger critters closer to town every
+  season (the encounter tables already did this, act by act), because the Old Keep shut the gate to the Reach a hundred
+  years ago. Four plates open it. Wren's second line says so; after her, Mum takes the note off the pot, and past the
+  gate Ranger Sol closes it. The grass really settles: `beat_wren` steps Route 1, the Brideswood and the tunnel to
+  levels 8 to 16. Shots `critters_rowan_plates`, `critters_mum_end`, `critters_cave_gate`.
+- [s] **Dragon's Cave: the opening behind Ashe** (2026-11-04): it's the gate to the Reach now: a warp on (16,1), and a
+  Gate Guard on (16,2) until `beat_wren`, who says what it takes. `make -C sim monster` walks it.
 
 ## RESUME HERE — Palm behaviours from the archive review (approved 2026-10-15)
 

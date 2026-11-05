@@ -560,11 +560,9 @@ static void key_press(Dx *m, int k){
             m->page = 0;
         }
         break;
-    case K_TALK:
-        if(!was_speaking){
-            if(m->view == V_ENTRY && !m->has_sprite) load_entry(m);
-            speak(m);
-        }
+    case K_TALK:           /* talking already: he goes on to his next line (a tap on a subscreen stops him) */
+        if(m->view == V_ENTRY && !m->has_sprite) load_entry(m);
+        speak(m);
         break;
     }
     show(m);

@@ -16,6 +16,32 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-04 — Critters: the backlog of the owner's requests
+
+Built on "build through the CYD-critters backlog items", in the simulator. `BACKLOG.md` has each one and what's
+for the owner to decide. What the numbers are, from `make -C sim monster` (the bot, seed 1, each starter):
+
+| Starter | Actions to a full Dex | Battles | Moved to the box or let go | Best critter |
+|---|---|---|---|---|
+| Agnite | 26,327 | 840 | 18 | Agnigon 78 |
+| Anoleaf | 35,074 | 989 | 18 | Velocitile 84 |
+| Cardiling | 26,140 | 829 | 21 | Cardinale 80 |
+| Vamporm | 22,626 | 675 | 20 | Fluttaflap 87 |
+| Nut | 39,757 | 1,226 | 16 | Arthrobolt 80 |
+
+`game.bin` is 740,644 B (was 674,156; its partition holds 960 KB). Two lessons:
+
+- **A shortcut breaks a bot that counts warps.** Its between-areas search counted a warp someone was standing in
+  front of, so with the drove road shut, Kestrel was "one warp away" from Larkhollow, Route 1 led nowhere closer, and
+  Kestrel looked unreachable. A warp with a flagged person on or beside it now has a `gate` (`MbWarp`), and doesn't
+  count until the flag is set.
+- **The bot's catch test could never pass with a strong party.** It threw only if the critter was weak or if
+  `sc / 100 >= hp`, but `sc` is damage times accuracy, capped at the foe's HP: under 100 % accuracy it's always less.
+  Cardiling's game walked 400,000 actions and never threw again. Hunting, it throws first.
+
+The reader's one-to-a-cell rule (`monster.c`) now allows people who each come or go on a flag; `mkgame.py` keeps the
+strict check, with `"stages"` naming one person as the story moves on. A file with staged people needs this firmware.
+
 ### 2026-11-04 — Back to 160 MHz
 
 The owner asked why the CPU went to 240 MHz, and whether it was still needed. It went up
