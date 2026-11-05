@@ -151,25 +151,17 @@ open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
   board starts, `games/monster/game.bin` is on the card, and Critters opens.
   An install without the box leaves the card's game alone.
 
-### Critters: monster sprites face the right way (requested 2026-11-04, convention not yet chosen)
+### Critters: monster sprites face the right way (requested 2026-11-04; reviewed and fixed the same day)
 
-- [ ] **Review every monster sprite's facing.** Go through all 46 creatures
-  (the 20 of our own in `tools/game_art/*-sheet.png`, and the 26 `credited`
-  Tuxemon sheets in the pinned checkout, `~/.cache/cyd-palm/tuxemon`, read
-  by `mkgame.py`'s `sprite` path) and list each one whose front or back faces
-  the wrong way. Open first: which convention applies. Option A, head-on: the
-  front faces the viewer and the back faces away, so check only mirrored
-  parts. Option B, battle heading: the wild front faces left toward the player
-  and the player's back faces right toward it, so flip any right-facing front
-  (Cardiling is the first case). Our own drawings get fixed in
-  `tools/game_art/src/` and the sheet rebuilt with `tools/mksheet.py`; a
-  Tuxemon sheet is never edited in its checkout (`tools/game_allow.tsv`
-  "edited" lines hold the changed copy). Check with the `monster` gate
-  (`make -C sim monster`) and the smoke `critters_*` shots, looked at before
-  ticking.
-- Found on 2026-11-04, from the contact sheets (not yet measured at full size):
-  Cardiwing and Cardinale and Agnidon face left in front and right in back;
-  Cardiling faces right in both; the other Tuxemon fronts were not judged.
+- [s] **Every monster sprite's facing, all 46 at 3x.** **My choice of convention, for the owner: Option B, battle heading**
+  (a front faces left toward the player, a back right toward the foe), because nearly all of Tuxemon's already do.
+  Critters drawn head-on (Nut, Pigabyte, Banewyrm, the wood line and others) count as fine. Wrong and fixed:
+  - **Vamporm's front** faced right: mirrored at `tools/game_art/vamporm-sheet.png` (an "edited" allow-list line, credited).
+  - **The backs of Sparkip, Nimbolt, Fulminax and Skullick** had the tail on the right, so they faced left: `"mirror": ["back"]`
+    in their `.eyes.json` (`mksheet.py`).
+  - **Correction to the note of 2026-11-04:** at full size Cardiling's front faces **left**, like Cardiwing's and Cardinale's;
+    nothing to change. Agnidon's are right too.
+  - Icons weren't changed. Judged by eye; a critter you'd call otherwise is one line to flip.
 
 ### Critters: release, Auto-play's party rule, the map review, the end-game (requested 2026-11-04; built the same day on "build through the backlog")
 

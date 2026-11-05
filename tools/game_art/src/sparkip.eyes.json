@@ -1,4 +1,5 @@
 {
+  "mirror": ["back"],
   "scale": 5,
   "front": [
     {"wipe": [5, 15, 9, 20], "at": [5, 15], "draw": [".DD.", "DDHD", "DDHD", "DDYD", ".DD."], "colors": {"Y": [253, 215, 50]}}

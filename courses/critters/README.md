@@ -59,6 +59,8 @@ Tuxemon checkout itself never enters this repository.
   2026-11-01: Tuxemon's back was a green butterfly unlike its front). The
   sheet, `tools/game_art/fluttaflap-sheet.png`, is Spalding004's with that
   back, so it stays **CC BY-SA 4.0**; its front and back share 15 colours.
+- **Vamporm's front** is Spalding004's, mirrored so it faces left in battle (2026-11-04), at
+  `tools/game_art/vamporm-sheet.png`; it stays **CC BY-SA 4.0**.
 - **The fire fox line** (Cinderkit, Scorchvix, Pyrewing) and **the axolotl
   line** (Gillpip, Rillotl, Maelstrotl) are the owner's drawings
   (2026-11-01), credited to CYD Palm under **CC0 1.0** like the rest of our

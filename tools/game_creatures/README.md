@@ -38,6 +38,7 @@ Tuxemon. Each one is three files and an allow-list line:
    `"ink": 2` beside the scale keeps outline only where it fills half a block,
    not a quarter. If light armour or a white ruff inside an outline comes out
    see-through, the tool took it for a gap between an arm and the body: put
+   `"mirror": ["back"]` (or `"front"`) flips that part last: in battle a front faces left and a back right.
    `"holes": [[x, y], ...]` in the eyes file, a point in the picture inside
    each real gap, `[]` if there are none. Everything else enclosed then stays.
 
