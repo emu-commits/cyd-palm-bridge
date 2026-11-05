@@ -221,7 +221,8 @@ static int line_short_one(Dex *d, char *name, size_t cap){
     return 0;
 }
 
-void dx_greeting(Dex *d, char *out, size_t cap, uint8_t *head){
+/* What he thinks you should do next: a hint, a line to finish, or how it stands. */
+void dx_progress(Dex *d, char *out, size_t cap, uint8_t *head){
     char have[24], all[24], word[32], area[DX_NAME], name[DX_NAME];
     if(!d->has_save){ snprintf(out, cap, "No keeper's licence, no Dex. Start a game in Critters first."); return; }
     if(!d->n_caught){ snprintf(out, cap, "Not one yet. Dr Wren's lab is where it starts."); return; }
@@ -242,16 +243,173 @@ void dx_greeting(Dex *d, char *out, size_t cap, uint8_t *head){
     snprintf(out, cap, "%s of %s. Nothing new near you for now. Beat the next keeper and see what moves in.", have, all);
 }
 
+/* ---- who he is ----
+ * MY DRAFTS, for the owner to change. Each piece opens at its share of the Dex
+ * (STORY[i] at i / DX_STORY of it), and he tells it the moment it opens; the
+ * Dex keeps no memory of what it's said, so the count is the only clock. */
+static const char *const STORY[] = {
+    "This gadget? I built it. Well. I complained, and Dr Wren did the wiring.",
+    "You catch them faster than I did. I was fourteen, with a borrowed camera and a critter that bit me.",
+    "That critter was an Anoleaf called Biscuit. Still bites. Mostly the postman now.",
+    "The camera was my sister's. She went up the coast, and I said I'd send her pictures of everything.",
+    "I took on the Kestrel Ring three times. Ivy's mother beat me three times. The third, she laughed.",
+    "So I stopped battling and started writing things down. I was much better at that.",
+    "I've walked this region for forty years. My boots are on their ninth set of soles.",
+    "See the limp? People assume a dragon. It was a wet log in the Brideswood. Tell them it was a dragon.",
+    "I was young once, and thin. Thin enough to fit through a crack in the old gate behind Ashe's post.",
+    "I saw the Reach, through that crack. Every critter there is, and no fence. I stayed nine days.",
+    "I told Wren what I saw. She's been at that machine of hers ever since. Thirty years, she's been at it.",
+    "My sister wrote back, you know. Took her eleven years. She said: send more of the small ones.",
+    "I never did fill this thing. Forty years, and I always stopped a few short. Knees, mostly.",
+    "I give one of these to a new keeper every so often. They go in a drawer, mostly. Not yours.",
+};
+#define DX_STORY (sizeof STORY / sizeof STORY[0])
+
+/* ---- where he met them: only of ones you've caught ---- */
+static const struct { const char *name, *line; } MEMORY[] = {
+    { "Agnite",       "My first Agnite was in Route 1's grass. It set fire to my lunch, then looked very sorry." },
+    { "Anoleaf",      "Anoleaf sit so still on Route 1 you can tread on one. I know. Biscuit has never forgiven me." },
+    { "Cardiling",    "I found a Cardiling on Route 1 singing at a fence post. It was still there the next morning." },
+    { "Vamporm",      "Vamporm hide under Route 1's flowers. A picnic will bring them out. Ask Ben about his sandwiches." },
+    { "Noctula",      "Noctula hang in the Brideswood by day. I once slept under forty of them. Never again in that hat." },
+    { "Zunna",        "First Zunna I met walked beside me down the Brideswood for an hour, then left without a word." },
+    { "Eyenemy",      "An Eyenemy followed me all through the Brideswood. It never blinked. I still check behind me." },
+    { "Selket",       "I put my hand on a Selket in the Brideswood. I took it off again very quickly." },
+    { "Pigabyte",     "Pigabyte will eat anything in the Brideswood. I lost two notebooks and a good left boot." },
+    { "Gillpip",      "I found Gillpip in a ditch in the Brideswood, after rain. No water for a mile. Don't ask me." },
+    { "Sprigling",    "Sprigling look like weeds. I pulled one out once, up in the Brideswood. It pulled back." },
+    { "Sparkip",      "Your hair stands up before you see a Sparkip. On Route 1 I took it for a storm. It was smaller." },
+    { "Cirrup",       "A Cirrup drifted over Route 1 and rained on my notes. Only my notes. I think it meant it." },
+    { "Nut",          "Down the Cotton Tunnel the Nut roll to the lowest spot. Follow the slope and you'll find them." },
+    { "Cateye",       "Two lights in the Cotton Tunnel: that's a Cateye. Or a miner's lamps. Say hello and see." },
+    { "Dune Pincher", "I met a Dune Pincher in the Cotton Tunnel wearing somebody's scarf. I never found the somebody." },
+    { "Djinnbo",      "A Djinnbo in the tunnel offered me something. No idea what. I said no, and I'm still here." },
+    { "Cinderkit",    "A Cinderkit kept me warm one night in the Cotton Tunnel, then ran off with my matches." },
+    { "Skullick",     "Skullick lick the tunnel walls for the salt. Don't lick them back. I was very young." },
+    { "Rivetron",     "I heard the Rivetron before I saw it. Clank, clank, in the dark of the tunnel. I walked faster." },
+    { "Propellercat", "On Route 2 a Propellercat landed on my pack and rode there till dusk. I never had the heart." },
+    { "Wildbough",    "That tree on Route 2 wasn't there when I walked out. It was there when I walked back. Wildbough." },
+    { "Maelstrotl",   "A Maelstrotl lives in the Old Keep's moat. Or the moat lives in it. I didn't stay to ask." },
+    { "Fulminax",     "A Fulminax on the Old Keep's wall lit up the whole yard. Best picture I ever ruined." },
+    { "Grovarch",     "I sat against a Grovarch at the Old Keep for an hour before it sighed. We both pretended it hadn't." },
+    { "Scorchvix",    "A Scorchvix looked me over in Dragon's Cave, decided I wasn't worth it, and I've never been so glad." },
+    { "Pyrewing",     "Pyrewing nest up in Dragon's Cave. Nobody's seen it twice from the same spot. I've tried." },
+    { "Banewyrm",     "You smell a Banewyrm first, in Dragon's Cave. Then you stop smelling much at all, for a week." },
+    { "Tempyre",      "I saw a Tempyre once, in Dragon's Cave. Weather indoors. I've no better way to say it." },
+    { "Agnigon",      "Ashe calls them false dragons. Not to an Agnigon's face, she doesn't. Nobody in that cave does." },
+};
+#define DX_MEMORIES (sizeof MEMORY / sizeof MEMORY[0])
+
+unsigned dx_memory_count(void){ return DX_MEMORIES; }
+const char *dx_memory_name(unsigned i){ return i < DX_MEMORIES ? MEMORY[i].name : NULL; }
+
+const char *dx_memory(const char *name){
+    for(size_t i = 0; i < DX_MEMORIES; i++) if(!strcmp(MEMORY[i].name, name)) return MEMORY[i].line;
+    return NULL;
+}
+
+/* the k-th caught critter he has a memory of, counting round; NULL if none */
+static const char *memory_of_caught(Dex *d, unsigned k){
+    const char *found[DX_MEMORIES];
+    unsigned n = 0;
+    char name[DX_NAME];
+    mg_burst_begin(&d->g);
+    for(int i = 0; i < d->n_caught && n < DX_MEMORIES; i++){
+        MgMon m;
+        if(mg_mon(&d->g, d->mon[d->caught[i]], &m) || mg_text(&d->g, m.name, name, sizeof name) < 0) continue;
+        const char *l = dx_memory(name);
+        if(l) found[n++] = l;
+    }
+    mg_burst_end(&d->g);
+    return n ? found[k % n] : NULL;
+}
+
+/* Nearly there: %s is how many are left, as a word. */
+static const char *const NEARLY[] = {
+    "%s left. I've started clearing a space on the shelf. Don't let that hurry you.",
+    "%s to go. I've never got this close with my own knees. Keep walking.",
+    "%s. The last ones hide because everybody else already looked in the easy places.",
+    "%s more. Biscuit's stopped biting the post to come and watch this. That's how you know.",
+    "%s left, and you'll miss this part when it's over. I did, and I never even finished.",
+};
+#define DX_NEARLY (sizeof NEARLY / sizeof NEARLY[0])
+
+/* Full: looking back. */
+static const char *const FULL[] = {
+    "I wrote to my sister. Told her someone finally finished it. She'll answer in about eleven years.",
+    "Remember your first? Out of Wren's lab, too small for its own feet. Look at the two of you now.",
+    "Forty years, I never filled this thing. You did it with the same knees everybody gets.",
+    "I keep thinking about Route 1. All that walking, and it's still the grass I like best.",
+    "Biscuit's asleep on my boot. Old fool. Nobody ever caught a better one, whatever this list says.",
+    "That's all of them, and I've told you all of me. There's no more of either. Thank you for asking.",
+    "Go on, then. Nothing to catch means you can just go and look at them. That was always the good part.",
+};
+#define DX_FULL (sizeof FULL / sizeof FULL[0])
+
+/* left when he starts counting them down: three, or a tenth of the Dex */
+static int nearly(const Dex *d){
+    int left = d->n - d->n_caught, near = d->n / 10 < 3 ? 3 : d->n / 10;
+    return left > 0 && left <= near && d->n_caught >= d->n / 2;
+}
+
+/* the piece of his story this many caught has opened, and whether it opened on this very count */
+static unsigned story_at(const Dex *d, int *fresh){
+    unsigned i = (unsigned)d->n_caught * DX_STORY / d->n;
+    if(i >= DX_STORY) i = DX_STORY - 1;
+    /* the first count that reaches piece i */
+    *fresh = d->n_caught && (unsigned)(d->n_caught - 1) * DX_STORY / d->n < i;
+    return i;
+}
+
+/* Each Talk moves on: what to do next, then a piece of who he is, then where he met
+ * one of yours; on the catch that opens a new piece, he tells that first. */
+void dx_greeting(Dex *d, char *out, size_t cap, uint8_t *head){
+    unsigned k = d->said++;
+    if(!d->has_save || !d->n_caught || !d->n){ dx_progress(d, out, cap, head); return; }
+    if(d->n_caught >= d->n){
+        if(!k) dx_progress(d, out, cap, head);
+        else snprintf(out, cap, "%s", FULL[(k - 1) % DX_FULL]);
+        return;
+    }
+    if(nearly(d)){
+        char left[24];
+        if(k % 2 && d->n_seen < d->n){ dx_progress(d, out, cap, head); return; }
+        dx_number((unsigned)(d->n - d->n_caught), left, sizeof left);
+        const char *f = NEARLY[(k / 2 + (unsigned)d->n_caught) % DX_NEARLY];
+        const char *p = strstr(f, "%s");
+        snprintf(out, cap, "%.*s%s%s", (int)(p - f), f, left, p + 2);
+        return;
+    }
+    int fresh;
+    unsigned piece = story_at(d, &fresh), step = k + (fresh ? 1 : 0);
+    switch(step % 3){
+    case 0: dx_progress(d, out, cap, head); return;
+    case 2: {
+        const char *l = memory_of_caught(d, step / 3);
+        if(l){ snprintf(out, cap, "%s", l); return; }
+        dx_progress(d, out, cap, head);         /* none of yours he's met: back to what to do next */
+        return;
+    }
+    }
+    /* he goes back over earlier pieces, newest first, once you've heard the latest */
+    unsigned back = step / 3;
+    snprintf(out, cap, "%s", STORY[piece - back % (piece + 1)]);
+}
+
 void dx_talk(Dex *d, int pos, char *out, size_t cap, uint8_t *head){
     if(pos < 0 || pos >= d->n || d->state[pos] != DX_CAUGHT){ snprintf(out, cap, "Nothing on this one yet."); return; }
     MgMon m;
     DxWhere w;
     char t[DX_NAME * 5], name[DX_NAME];
+    int again = d->talk_pos == pos + 1 && d->talk_n % 2;
+    d->talk_n = d->talk_pos == pos + 1 ? d->talk_n + 1 : 1;
+    d->talk_pos = (int16_t)(pos + 1);
     if(mg_mon(&d->g, d->mon[pos], &m) || mg_text(&d->g, m.name, name, sizeof name) < 0 ||
        !head || dx_where(d, d->mon[pos], &w, head)){
         snprintf(out, cap, "My notes on that one are smudged. Ask me again.");
         return;
     }
+    if(again && dx_memory(name)){ snprintf(out, cap, "%s", dx_memory(name)); return; }   /* Talk again: where he met one */
     size_t l = 0;
     out[0] = 0;
     int yours = d->marks.starter && m.id == d->marks.starter;

@@ -24,6 +24,9 @@ typedef struct {
     uint16_t *mon;                  /* by Dex position (number - 1): the position in MONS */
     uint8_t  *state;                /* by Dex position: DX_* */
     uint16_t *caught;               /* the Dex positions of the caught ones, n_caught of them */
+    uint16_t said;                  /* how many times he's spoken on the list since opening */
+    int16_t  talk_pos;              /* the entry last asked about (position + 1), and how often */
+    uint16_t talk_n;
 } Dex;
 
 /* mg_open's results; a missing or unreadable save isn't an error (has_save 0).
@@ -45,9 +48,17 @@ int  dx_where(Dex *d, uint16_t mon, DxWhere *w, uint8_t *head);
 
 /* The speaker's lines (DEX_PLAN.md 3), each to fit the lower screen. */
 #define DX_LINE 240
-/* the opening, or Talk on the list */
+/* The opening, or Talk on the list. Each one moves on (d->said): what to do next,
+ * a piece of who he is (more of it opens as the Dex fills), where he met one of
+ * yours; a count of nearly done or full has its own lines. */
 void dx_greeting(Dex *d, char *out, size_t cap, uint8_t *head);
-/* Talk on an entry */
+/* Just what to do next: a hint, a line to finish, how it stands */
+void dx_progress(Dex *d, char *out, size_t cap, uint8_t *head);
+/* Where he met this critter, by its name; NULL if he hasn't said */
+const char *dx_memory(const char *name);
+unsigned dx_memory_count(void);
+const char *dx_memory_name(unsigned i);
+/* Talk on an entry: where it lives; a second Talk, where he met one, if he did */
 void dx_talk(Dex *d, int pos, char *out, size_t cap, uint8_t *head);
 
 /* "Six", "Thirty-three": for his lines */

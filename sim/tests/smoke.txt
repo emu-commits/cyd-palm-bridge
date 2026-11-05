@@ -2274,6 +2274,12 @@ D 1,2,3,5,7,14,15,18,21,22 1,2,5,14,21
 c 120 170
 t 500
 s dex_greet
+c 157 303
+t 400
+s dex_talk_story
+c 157 303
+t 400
+s dex_talk_memory
 c 84 303
 t 300
 s dex_list
@@ -2299,6 +2305,9 @@ c 157 303
 t 500
 s dex_where
 c 157 303
+t 500
+s dex_where_memory
+c 120 240
 t 300
 c 214 303
 t 200
@@ -2308,7 +2317,7 @@ s dex_entry_seen
 c 157 303
 t 300
 s dex_talk_seen
-c 157 303
+c 120 240
 t 200
 c 214 303
 t 200

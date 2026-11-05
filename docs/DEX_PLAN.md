@@ -106,7 +106,7 @@ button. What each one does depends on what the screens are showing:
 |---|---|---|---|
 | **◀ ▶** | Previous or next page | Previous or next critter, skipping nothing | He stops, and the key acts on what's beneath |
 | **List** | All critters or caught only, in turn | Back to the list, at this critter's page | He stops, and shows the list |
-| **Talk** | His line about the player's progress | His line about where this critter lives | He stops |
+| **Talk** | His line about the player's progress | His line about where this critter lives | His next line (2026-11-04: so he can go on) |
 
 The upper screen also takes taps, for what's shown there: a row opens that
 critter, and a sprite turns it to its back and front again. Tapping either
@@ -283,8 +283,14 @@ so none is needed, and the card and his lines don't refer to one.
 | Talk, the player's starter | "Yours came from Dr Wren's lab." |
 | Talk, not caught | "Nothing on this one yet." |
 
-About 16 lines in all, some with the player's numbers and places in them. They're
-written in the firmware (`dex.c`), like Guru's, because they're the speaker's
+**2026-11-04, the owner asked for a character, not a list of hints.** Each Talk on
+the list moves on: what to do next, then a piece of who he is (14 pieces, each
+opening at its share of the Dex, and told first on the catch that opens it), then
+where he met one of the player's critters (30 memories, for caught ones only; a
+second Talk on an entry gives that critter's). Close to done (three left, or a
+tenth) he counts down; full, he looks back (7 lines).
+
+They're written in the firmware (`dex.c`), like Guru's, because they're the speaker's
 voice, not game data. **They're my drafts, for the owner to change.**
 
 ## 4) Data

@@ -51,6 +51,9 @@ someone looked at the glass. **The user runs the bench checks — never tick a
 - For the owner to review, no bench needed: my drafts of his lines (`dex.c`), the shortened descriptions
   (`game_region.json`, `tools/game_creatures/`), and our critters' categories and
   sizes.
+- [x] **Dex trainer: more dialogue and a personality** `[s]` (2026-11-04; `dex_talk_story`,
+  `dex_talk_memory`, `dex_where_memory`): each Talk moves on. Still for the owner to review:
+  the lines in `dex.c` (`STORY`, `MEMORY`, `NEARLY`, `FULL`) are drafts.
 
 ---
 
@@ -147,6 +150,26 @@ open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
 - [d] Install from the web page with "Also install Critters" ticked: the
   board starts, `games/monster/game.bin` is on the card, and Critters opens.
   An install without the box leaves the card's game alone.
+
+### Critters: monster sprites face the right way (requested 2026-11-04, convention not yet chosen)
+
+- [ ] **Review every monster sprite's facing.** Go through all 46 creatures
+  (the 20 of our own in `tools/game_art/*-sheet.png`, and the 26 `credited`
+  Tuxemon sheets in the pinned checkout, `~/.cache/cyd-palm/tuxemon`, read
+  by `mkgame.py`'s `sprite` path) and list each one whose front or back faces
+  the wrong way. Open first: which convention applies. Option A, head-on: the
+  front faces the viewer and the back faces away, so check only mirrored
+  parts. Option B, battle heading: the wild front faces left toward the player
+  and the player's back faces right toward it, so flip any right-facing front
+  (Cardiling is the first case). Our own drawings get fixed in
+  `tools/game_art/src/` and the sheet rebuilt with `tools/mksheet.py`; a
+  Tuxemon sheet is never edited in its checkout (`tools/game_allow.tsv`
+  "edited" lines hold the changed copy). Check with the `monster` gate
+  (`make -C sim monster`) and the smoke `critters_*` shots, looked at before
+  ticking.
+- Found on 2026-11-04, from the contact sheets (not yet measured at full size):
+  Cardiwing and Cardinale and Agnidon face left in front and right in back;
+  Cardiling faces right in both; the other Tuxemon fronts were not judged.
 
 ### Critters: release, Auto-play's party rule, the map review, the end-game (requested 2026-11-04, NOT approved for build)
 

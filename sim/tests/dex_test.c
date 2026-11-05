@@ -298,6 +298,38 @@ static void marks_of(Dex *d, const char *names){
     }
 }
 
+/* the talk that moves on: his story opens with the Dex, and a full one looks back */
+static void story(void){
+    Dex d;
+    char t[DX_LINE], first[DX_LINE];
+    remove(SAVE);
+    CHECK(!dx_open(&d, GAME, SAVE), "dx_open: %s", d.g.err);
+    uint8_t *head = malloc(d.head_cap);
+    d.has_save = 1;
+    marks_of(&d, "+Puddlop+");
+    d.said = 0;
+    dx_greeting(&d, first, sizeof first, head);
+    dx_greeting(&d, t, sizeof t, head);
+    CHECK(strcmp(first, t), "Talk moves on: %s", t);
+    /* the nearly-done lines give the number left */
+    marks_of(&d, "+Puddlop+ +Emberkit+ +Blazecat+ +Thornet+ ?Rustmole?");
+    d.said = 0;
+    dx_greeting(&d, t, sizeof t, head);
+    CHECK(strstr(t, "One"), "one left: %s", t);
+    /* full: the opening counts, then it looks back, and doesn't repeat straight off */
+    marks_of(&d, "+Puddlop+ +Emberkit+ +Blazecat+ +Thornet+ +Rustmole+");
+    d.said = 0;
+    dx_greeting(&d, t, sizeof t, head);
+    CHECK(strstr(t, "Five of five"), "full, the opening: %s", t);
+    dx_greeting(&d, first, sizeof first, head);
+    dx_greeting(&d, t, sizeof t, head);
+    CHECK(strcmp(first, t) && !strstr(t, "Five of five"), "full, looking back: %s", t);
+    /* a second Talk on an entry, only where he has a memory */
+    CHECK(dx_memory("Agnite") && !dx_memory("Puddlop"), "memories by name");
+    free(head);
+    dx_close(&d);
+}
+
 static void lines(void){
     Dex d;
     char t[DX_LINE], n[24];
@@ -306,7 +338,7 @@ static void lines(void){
     CHECK(!dx_open(&d, GAME, SAVE), "dx_open: %s", d.g.err);
     head = malloc(d.head_cap);
     CHECK(!d.has_save && !d.n_seen, "no save, nothing marked");
-    dx_greeting(&d, t, sizeof t, head);
+    dx_progress(&d, t, sizeof t, head);
     CHECK(strstr(t, "licence"), "no save: %s", t);
     dx_number(6, n, sizeof n); CHECK(!strcmp(n, "Six"), "%s", n);
     dx_number(33, n, sizeof n); CHECK(!strcmp(n, "Thirty-three"), "%s", n);
@@ -314,20 +346,20 @@ static void lines(void){
     dx_number(19, n, sizeof n); CHECK(!strcmp(n, "Nineteen"), "%s", n);
     /* the fixture: Puddlop, Emberkit > Blazecat, Thornet, Rustmole */
     marks_of(&d, "");
-    dx_greeting(&d, t, sizeof t, head);
+    dx_progress(&d, t, sizeof t, head);
     CHECK(strstr(t, "Not one yet"), "none yet: %s", t);
     marks_of(&d, "+Emberkit+");
-    dx_greeting(&d, t, sizeof t, head);
+    dx_progress(&d, t, sizeof t, head);
     CHECK(strstr(t, "Your Emberkit's line has one left"), "a line one short, on an odd count: %s", t);
     marks_of(&d, "+Puddlop+ +Thornet+");
-    dx_greeting(&d, t, sizeof t, head);
+    dx_progress(&d, t, sizeof t, head);
     CHECK(strstr(t, "Two of five") && strstr(t, "Something"), "a hint: %s", t);
     CHECK(!strstr(t, "Emberkit") && !strstr(t, "Blazecat"), "a hint never names what's unseen: %s", t);
     marks_of(&d, "+Puddlop+ ?Emberkit? ?Blazecat? ?Thornet? ?Rustmole?");
-    dx_greeting(&d, t, sizeof t, head);
+    dx_progress(&d, t, sizeof t, head);
     CHECK(strstr(t, "met them all"), "every one seen: %s", t);
     marks_of(&d, "+Puddlop+ +Emberkit+ +Blazecat+ +Thornet+ +Rustmole+");
-    dx_greeting(&d, t, sizeof t, head);
+    dx_progress(&d, t, sizeof t, head);
     CHECK(strstr(t, "Five of five") && strstr(t, "nothing left"), "complete: %s", t);
     /* Talk on an entry */
     int pud = 0;
@@ -348,7 +380,7 @@ static void lines(void){
     dx_talk(&d, pud, t, sizeof t, NULL);
     CHECK(strstr(t, "smudged"), "no head: %s", t);
     marks_of(&d, "+Puddlop+ +Thornet+");
-    dx_greeting(&d, t, sizeof t, NULL);
+    dx_progress(&d, t, sizeof t, NULL);
     CHECK(strstr(t, "Two of five"), "no head, no hint: %s", t);
     free(head);
     dx_close(&d);
@@ -593,13 +625,31 @@ static int dump_lines(const char *path){
                     d.caught[d.n_caught++] = (uint16_t)q;
                 }
                 d.marks.starter = yours ? m.id : 0;
-                dx_greeting(&d, t, sizeof t, head);
+                d.said = 0;
+                for(int say = 0; say < 40; say++){     /* every Talk in turn: all he can say at this count */
+                    dx_greeting(&d, t, sizeof t, head);
+                    printf("%s\n", t);
+                }
+                d.talk_pos = 0;
+                dx_talk(&d, p, t, sizeof t, head);
                 printf("%s\n", t);
                 dx_talk(&d, p, t, sizeof t, head);
                 printf("%s\n", t);
                 dx_greeting(&d, t, sizeof t, NULL);
                 printf("%s\n", t);
             }
+    }
+    if(strstr(path, "critters")){
+        for(unsigned i = 0; i < dx_memory_count(); i++){
+            int found = 0;
+            for(int p = 0; p < d.n; p++){
+                MgMon m;
+                char nm[DX_NAME];
+                mg_mon(&d.g, d.mon[p], &m);
+                if(mg_text(&d.g, m.name, nm, sizeof nm) >= 0 && !strcmp(nm, dx_memory_name(i))) found = 1;
+            }
+            if(!found){ printf("FAIL: he remembers a critter the game doesn't have: %s\n", dx_memory_name(i)); return 1; }
+        }
     }
     d.marks.starter = 0;
     dx_talk(&d, 0, t, sizeof t, NULL);
@@ -621,6 +671,7 @@ int main(int argc, char **argv){
     reading();
     events();
     lines();
+    story();
     crt_gate();
     mg_close(&G);
     if(fails){ printf("dex: FAILED (%d failures)\n", fails); return 1; }
