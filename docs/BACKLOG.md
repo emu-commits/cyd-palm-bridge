@@ -173,12 +173,11 @@ open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
 
 ### Critters: release, Auto-play's party rule, the map review, the end-game (requested 2026-11-04, NOT approved for build)
 
-- [ ] **Release a party member.** Nothing in the game lets the player let a
-  critter go (no menu, no `mp_` call). Needed: a Release item on the Party
-  menu with a confirm, and a box screen to see and release from. Today a full
-  party (6) and a full box (30) make catching refuse (`MG_ERANGE`), and nothing
-  frees a box slot. Releasing keeps the Dex's marks (`DEX_PLAN.md` §4.1), so
-  the Dex must not drop a species after a release.
+- [s] **Release a party member** (2026-11-04): Party ▸ a critter ▸ Send to the box or Release (with a
+  confirm), and "The box" under the party to see, take back and release from. Nobody can leave the party
+  without a critter that can fight. The Dex's marks stay. `make -C sim monster`; shots `critters_member`,
+  `critters_member_boxed`, `critters_party_box_line`, `critters_box`, `critters_release_ask`,
+  `critters_released`, `critters_box_empty` looked at.
 - [ ] **Auto-play releases when the party is full.** When the party is full and
   a member is under-levelled against the average level of the battle
   encounters, the bot releases the weakest to the box. Open: how "average" is

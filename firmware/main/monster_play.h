@@ -199,6 +199,14 @@ int  mp_buy(MpWorld *w, uint16_t item);
  * MP_ACT_ITEM): MG_ERANGE if there's none or it wouldn't help */
 int  mp_use(MpWorld *w, uint16_t item, int who, MpLog *log);
 
+/* ---- the party and the box ----
+ * For the map, not in a battle. Each is MG_ERANGE, nothing done, if it would
+ * leave nobody in the party who can fight, or there's no room. Letting one go
+ * is for good, and the Dex keeps its marks (mp_caught stays true). */
+int  mp_release(MpWorld *w, int in_box, int i);
+int  mp_to_box(MpWorld *w, int i);          /* party member i into the box */
+int  mp_from_box(MpWorld *w, int i);        /* box creature i into the party */
+
 /* ---- battles ---- */
 int  mp_battle_start(MpWorld *w, MpBattle *b, const MpCreature *wild);
 /* One action. MP_ERANGE (nothing done) for an action that can't be taken: a

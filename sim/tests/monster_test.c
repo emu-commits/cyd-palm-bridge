@@ -1027,9 +1027,49 @@ static int bot_plays(MonGame *g, int pick, uint32_t seed){
     return ok;
 }
 
+/* Release and the box: nobody is ever left without a critter that can fight,
+ * and the Dex's marks stay. */
+static void release_rules(MonGame *g){
+    uint32_t cap = 0;
+    for(uint32_t i = 0; i < g->n_areas; i++){
+        MgAreaDir d;
+        if(!mg_area_dir(g, i, &d) && d.head_len > cap) cap = d.head_len;
+    }
+    uint8_t *head = malloc(cap);
+    MpWorld *w = calloc(1, sizeof *w);
+    w->head_cap = cap;
+    CHECK(!mp_new(w, g, head, 7, g->n_starters ? g->starters[0] : 0), "release: a new game: %s", w->err);
+    MgMon m0;
+    CHECK(!mg_mon(g, w->party[0].mon, &m0), "release: the starter");
+    CHECK(mp_release(w, 0, 0) == MG_ERANGE && w->n_party == 1, "release: the only critter stays");
+    CHECK(mp_to_box(w, 0) == MG_ERANGE, "release: nor can it go to the box");
+    w->party[1] = w->party[0];
+    w->n_party = 2;
+    w->party[1].hp = 0;
+    CHECK(mp_release(w, 0, 0) == MG_ERANGE, "release: not the only one that can fight");
+    CHECK(!mp_release(w, 0, 1) && w->n_party == 1, "release: a fainted one can go, if another can fight");
+    CHECK(mp_caught(w, m0.id), "release: the Dex's mark stays");
+    w->party[1] = w->party[0];
+    w->party[1].level = 9;
+    w->n_party = 2;
+    CHECK(!mp_to_box(w, 1) && w->n_party == 1 && w->n_box == 1 && w->box[0].level == 9, "release: to the box");
+    CHECK(mp_release(w, 1, 1) == MG_ERANGE, "release: the box has one");
+    CHECK(!mp_from_box(w, 0) && w->n_party == 2 && !w->n_box, "release: back from the box");
+    CHECK(mp_from_box(w, 0) == MG_ERANGE, "release: an empty box");
+    for(int i = 0; i < MP_BOX; i++) w->box[i] = w->party[0];
+    w->n_box = MP_BOX;
+    CHECK(mp_to_box(w, 1) == MG_ERANGE && w->n_party == 2, "release: a full box takes no more");
+    w->box[3].level = 77;
+    CHECK(!mp_release(w, 1, 2) && w->n_box == MP_BOX - 1 && w->box[2].level == 77, "release: from the box, the rest close up");
+    while(w->n_party < MP_PARTY) w->party[w->n_party++] = w->party[0];
+    CHECK(mp_from_box(w, 0) == MG_ERANGE, "release: a full party takes no more");
+    free(w); free(head);
+}
+
 static void autoplay(void){
     MonGame g;
     if(mg_open(&g, REGION)){ CHECK(0, "%s: %s", REGION, g.err); return; }
+    release_rules(&g);
     for(int pick = 0; pick < (g.n_starters ? g.n_starters : 3); pick++)
         CHECK(bot_plays(&g, pick, 1), "bot: didn't finish the region with first critter %d", pick);
     mg_close(&g);

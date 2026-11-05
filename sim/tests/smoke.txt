@@ -2233,6 +2233,43 @@ t 300
 c 60 158
 t 300
 s critters_party_full
+c 204 246
+t 300
+s critters_member
+c 204 246
+t 300
+s critters_member_boxed
+c 204 246
+t 300
+c 64 295
+t 200
+c 64 295
+t 200
+c 64 295
+t 200
+c 64 295
+t 200
+c 64 295
+t 200
+s critters_party_box_line
+c 204 246
+t 300
+s critters_box
+c 204 246
+t 300
+c 64 295
+t 200
+c 204 246
+t 300
+s critters_release_ask
+c 204 246
+t 300
+s critters_released
+c 204 246
+t 300
+s critters_box_empty
+c 150 280
+t 300
 c 150 280
 t 300
 c 226 12
