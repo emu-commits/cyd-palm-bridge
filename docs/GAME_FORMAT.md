@@ -205,7 +205,7 @@ against one: `own_team` is the creature itself, `enemy_team` its foe, and
 | 7, flinch | at 100 − `chance` % it loses its next move, and the status ends |
 | 8, confused | at `chance` % it uses one of its usable moves at random |
 | 9, swap hurt | swapped out, it loses max HP / divisor (harpooned, spiky) |
-| 10, festering | it can't be healed (moves, its side's prop healing) |
+| 10, festering | a potion heals it nothing (an item that cures still cures); Tuxemon's `heal.py`, which healing moves don't check |
 | 11, leech | at a turn's end it loses max HP / divisor and the other side gains it; linked |
 | 12, wasting | at a turn's end it loses max HP / divisor × the turns it has had it |
 | 13, thorns | a foe hitting it with a move of `ranges` loses the holder's max HP / divisor (elementalshield: special; prickly: touch and melee) |

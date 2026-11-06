@@ -522,6 +522,10 @@ int mp_item_helps(MpWorld *w, uint16_t item, int who, uint32_t *gain){
     if((it.effects & MG_I_REVIVE) ? c->hp : !c->hp) return 0;     /* a revive is for the fainted only */
     if(it.effects & MG_I_HEAL) heal = it.amount;
     else if(it.effects & MG_I_HEAL_PCT) heal = max * it.amount / 100 ? max * it.amount / 100 : 1;
+    {   /* a festering creature gets nothing from a potion (Tuxemon's heal.py) */
+        const MgStatus *st = mp_status(w->g, c);
+        if(st && st->kind == MG_S_FESTER) heal = 0;
+    }
     if(heal > max - c->hp) heal = max - c->hp;
     if(gain) *gain = heal;
     int cure = (it.effects & MG_I_CURE) && c->status && c->status <= w->g->n_statuses &&
@@ -692,10 +696,10 @@ static uint32_t harm(MpWorld *w, MpCreature *c, int side, uint32_t n, uint32_t m
     return n;
 }
 
-/* healing t (side ts) by up to h: a festering creature can't be healed */
+/* healing t (side ts) by up to h, from a move (festering stops only items: Tuxemon's heal.py) */
 static void heal(MpWorld *w, MpCreature *t, int ts, uint32_t h, MpLog *log){
+    (void)w;
     if(!t->hp) return;
-    if(has_kind(w->g, t, MG_S_FESTER)){ say(log, MP_EV_NO_HEAL, (uint8_t)ts, t->status - 1u, 0, 0); return; }
     if(h > (uint32_t)t->stat[MG_HP] - t->hp) h = (uint32_t)t->stat[MG_HP] - t->hp;
     t->hp = (uint16_t)(t->hp + h);
     say(log, MP_EV_HEAL, (uint8_t)ts, 0, 0, h);

@@ -937,6 +937,7 @@ static void saves(MpWorld *w){
 /* The bot plays a new game with first critter `pick` from `seed`, feeding its
  * choices straight to the rules, as the screens do with presses. 1 if it
  * beat every keeper within BOT_LIMIT actions. */
+static long all_lost, all_lost_k;
 static int bot_plays(MonGame *g, int pick, uint32_t seed){
     uint32_t cap = 0;
     for(uint32_t i = 0; i < g->n_areas; i++){
@@ -1034,6 +1035,7 @@ static int bot_plays(MonGame *g, int pick, uint32_t seed){
         CHECK(!mb_dex_left(b, w), "bot: stopped with %d not caught: %s", mb_dex_left(b, w), b->why);
     }
     CHECK(!ok || main_lv >= BOT_MAIN_MIN, "bot: the best critter ends at level %d, under %d", main_lv, BOT_MAIN_MIN);
+    all_lost += lost; all_lost_k += lost_k;
     printf("  bot with %s, seed %u: %s after %ld actions; %ld battles, %ld keepers, %ld lost, "
            "(%ld to keepers), %ld caught, %ld moves relearnt, %ld stuck, %ld bought, %ld used, %ld moved, box %u, %u coins; party %s\n",
            who, (unsigned)seed, ok ? "every keeper beaten, the Dex full" : "NOT finished", n, battles, keepers, lost, lost_k, caught,
@@ -1085,10 +1087,16 @@ static void release_rules(MonGame *g){
 
 static void autoplay(void){
     MonGame g;
-    if(mg_open(&g, REGION)){ CHECK(0, "%s: %s", REGION, g.err); return; }
+    const char *region = getenv("MONSTER_REGION") ? getenv("MONSTER_REGION") : REGION;   /* another game file to measure */
+    if(mg_open(&g, region)){ CHECK(0, "%s: %s", region, g.err); return; }
     release_rules(&g);
-    for(int pick = 0; pick < (g.n_starters ? g.n_starters : 3); pick++)
-        CHECK(bot_plays(&g, pick, 1), "bot: didn't finish the region with first critter %d", pick);
+    /* BOT_SEEDS=n plays each starter on seeds 1..n (a measure, not the gate: the
+     * gate is seed 1); the losses' total is printed at the end */
+    int seeds = getenv("BOT_SEEDS") ? atoi(getenv("BOT_SEEDS")) : 1;
+    for(int sd = 1; sd <= (seeds > 0 ? seeds : 1); sd++)
+        for(int pick = 0; pick < (g.n_starters ? g.n_starters : 3); pick++)
+            CHECK(bot_plays(&g, pick, (uint32_t)sd), "bot: didn't finish the region with first critter %d, seed %d", pick, sd);
+    printf("  bot: %ld losses in all, %ld of them to keepers\n", all_lost, all_lost_k);
     mg_close(&g);
 }
 
@@ -1140,6 +1148,159 @@ static void mirror(void){
     mg_close(&g);
 }
 
+/* 9. the move effects (2.3, EFFECTS_PLAN.md), on the game that ships: each rule
+ * in a battle made for it, a move of our choosing against one of the foe's. */
+static MonGame EG;
+static int st_of(int kind, const char *name){         /* a status of this kind (and name, if given), or -1 */
+    for(uint32_t i = 0; i < EG.n_statuses; i++){
+        char t[32];
+        mg_text(&EG, EG.statuses[i].name, t, 32);
+        if(EG.statuses[i].kind == kind && (!name || !strcmp(t, name))) return (int)i;
+    }
+    return -1;
+}
+static int mv_of(const char *name){
+    for(uint32_t i = 0; i < EG.n_moves; i++){ MgMove m; char t[32]; mg_move(&EG, i, &m); mg_text(&EG, m.name, t, 32); if(!strcmp(t, name)) return (int)i; }
+    return -1;
+}
+static int ev_count(const MpLog *log, int kind){ int n = 0; for(int i = 0; i < log->n; i++) n += log->ev[i].kind == kind; return n; }
+static int ev_side(const MpLog *log, int kind, int side){ int n = 0; for(int i = 0; i < log->n; i++) n += log->ev[i].kind == kind && log->ev[i].side == side; return n; }
+
+/* a battle: our level-lv creature mon knowing only move ours, the foe knowing only theirs */
+static void eff_battle(MpWorld *w, MpBattle *b, uint8_t *head, uint32_t seed, int mon, int ours, int theirs, int lv){
+    CHECK(!mp_new(w, &EG, head, seed, (uint16_t)mon), "effects: a new game: %s", w->err);
+    uint32_t r = seed;
+    mp_make(&EG, &r, (uint16_t)mon, (uint8_t)lv, &w->party[0]);
+    MpCreature foe;
+    mp_make(&EG, &r, (uint16_t)mon, (uint8_t)lv, &foe);
+    for(int s = 0; s < MP_MOVES; s++){ w->party[0].moves[s] = MP_NO_MOVE; foe.moves[s] = MP_NO_MOVE; }
+    w->party[0].moves[0] = (uint16_t)ours;
+    foe.moves[0] = (uint16_t)theirs;
+    w->n_party = 1;
+    mp_battle_start(w, b, &foe);
+}
+
+static void effects(void){
+    if(mg_open(&EG, REGION)){ CHECK(0, "%s: %s", REGION, EG.err); return; }
+    static uint8_t head[MG_HEAD_MAX];
+    MpWorld *w = calloc(1, sizeof *w);
+    MpBattle b;
+    MpLog log;
+    int mon = EG.n_starters ? EG.starters[0] : 0, n = 0;
+    int ex = st_of(MG_S_STATS, "Exhausted"), cu = st_of(MG_S_STATS, "Charged Up"), sl = st_of(MG_S_ASLEEP, NULL);
+    int stk = st_of(MG_S_WEAKEN, "Stuck"), fe = st_of(MG_S_FESTER, NULL), le = st_of(MG_S_LEECH, NULL);
+    int dh = st_of(MG_S_DIEHARD, NULL), sh = st_of(MG_S_THORNS, NULL), rv = st_of(MG_S_REVENGE, NULL);
+    int tackle = mv_of("Struggle");
+    CHECK(ex >= 0 && cu >= 0 && sl >= 0 && stk >= 0 && fe >= 0 && le >= 0 && dh >= 0 && sh >= 0 && rv >= 0 && tackle >= 0,
+          "effects: the shipped game lacks a status or Struggle (%d %d %d %d %d %d %d %d %d %d)", ex, cu, sl, stk, fe, le, dh, sh, rv, tackle);
+    if(ex < 0 || cu < 0 || sl < 0 || stk < 0 || fe < 0 || le < 0 || dh < 0 || sh < 0 || rv < 0 || tackle < 0){ free(w); mg_close(&EG); return; }
+
+    /* stats: exhausted halves melee and ranged; charged up doubles all five, then becomes exhausted on use */
+    eff_battle(w, &b, head, 3, mon, tackle, tackle, 20);
+    MpCreature v, *me = &w->party[0];
+    me->status = (uint8_t)(ex + 1);
+    mp_view(&EG, &b, 0, me, &v);
+    CHECK(v.stat[MG_MELEE_ST] == me->stat[MG_MELEE_ST] / 2 && v.stat[MG_RANGED_ST] == me->stat[MG_RANGED_ST] / 2 &&
+          v.stat[MG_ARMOUR] == me->stat[MG_ARMOUR], "effects: exhausted's view");
+    me->status = (uint8_t)(cu + 1);
+    mp_view(&EG, &b, 0, me, &v);
+    CHECK(v.stat[MG_SPEED] == me->stat[MG_SPEED] * 2 && v.stat[MG_ARMOUR] == me->stat[MG_ARMOUR] * 2, "effects: charged up's view");
+    mp_turn(w, &b, MP_ACT_MOVE, 0, &log);
+    CHECK(me->status == ex + 1, "effects: charged up becomes exhausted once used (now %d)", me->status);
+    mp_turn(w, &b, MP_ACT_MOVE, -1, &log);       /* resting, Struggle recharging: exhausted stays */
+    b.recharge[0][0] = 0;
+    mp_turn(w, &b, MP_ACT_MOVE, 0, &log);
+    CHECK(!me->status || me->hp == 0, "effects: exhausted ends with the next move (now %d)", me->status);
+
+    /* asleep: no move while it lasts, never more than its duration, and it ends */
+    int longest = 0;
+    for(uint32_t seed = 1; seed <= 200; seed++){
+        eff_battle(w, &b, head, seed, mon, tackle, tackle, 50);
+        b.wild.status = (uint8_t)(sl + 1);
+        int t = 0;
+        for(; b.wild.status == sl + 1 && t < 20 && !b.over; t++){
+            b.recharge[0][0] = 0;
+            w->party[0].hp = w->party[0].stat[MG_HP]; b.wild.hp = b.wild.stat[MG_HP];
+            mp_turn(w, &b, MP_ACT_MOVE, 0, &log);
+            CHECK(ev_side(&log, MP_EV_ASLEEP, 1) == 1 && !ev_side(&log, MP_EV_USE, 1), "effects: asleep moves, seed %u", (unsigned)seed);
+        }
+        if(t > longest) longest = t;
+    }
+    CHECK(longest >= 2 && longest <= EG.statuses[sl].duration, "effects: asleep lasts %d turns at most, its duration %u", longest, EG.statuses[sl].duration);
+
+    /* stuck: its melee and touch moves at half power and potency */
+    {
+        MgMove m;
+        mg_move(&EG, (uint32_t)mv_of("Gnaw"), &m);
+        uint16_t p0 = m.power;
+        me->status = (uint8_t)(stk + 1);
+        mp_view_move(&EG, me, &m);
+        CHECK(m.power == p0 / 2, "effects: stuck halves a touch move's power (%u from %u)", m.power, p0);
+    }
+
+    /* festering: no healing; lifeleech: a drain each turn that ends when the other side leaves */
+    eff_battle(w, &b, head, 5, mon, tackle, tackle, 30);
+    me->status = (uint8_t)(fe + 1);
+    me->hp = me->stat[MG_HP] / 2;
+    for(uint32_t i = 0; i < EG.n_items; i++){
+        MgItem it;
+        mg_item(&EG, i, &it);
+        int helps = mp_item_helps(w, (uint16_t)i, 0, NULL);
+        if((it.effects & (MG_I_HEAL | MG_I_HEAL_PCT)) && !(it.effects & (MG_I_CURE | MG_I_REVIVE)))
+            CHECK(!helps, "effects: a potion helps a festering critter");
+        if((it.effects & MG_I_CURE) && !(it.effects & MG_I_REVIVE)) CHECK(helps, "effects: a cure doesn't help a festering critter");
+    }
+    eff_battle(w, &b, head, 6, mon, tackle, tackle, 30);
+    b.wild.status = (uint8_t)(le + 1);
+    w->party[0].hp = (uint16_t)(w->party[0].stat[MG_HP] / 2);
+    b.recharge[0][0] = 2;               /* resting: nothing ready */
+    mp_turn(w, &b, MP_ACT_MOVE, -1, &log);
+    CHECK(ev_count(&log, MP_EV_DRAIN) == 1, "effects: lifeleech drains at the turn's end");
+
+    /* diehard: a fainting blow leaves 1 HP; thorns and revenge strike back */
+    for(n = 0; n < 50; n++){
+        eff_battle(w, &b, head, 100 + (uint32_t)n, mon, tackle, tackle, 30);
+        b.wild.status = (uint8_t)(dh + 1);
+        b.wild.hp = 1;
+        mp_turn(w, &b, MP_ACT_MOVE, 0, &log);
+        if(ev_count(&log, MP_EV_DAMAGE)) break;
+    }
+    CHECK(ev_count(&log, MP_EV_HOLD_ON) == 1 && b.wild.hp == 1 && !b.wild.status, "effects: diehard holds on with 1 HP");
+    for(n = 0; n < 50; n++){
+        eff_battle(w, &b, head, 200 + (uint32_t)n, mon, tackle, tackle, 30);
+        b.wild.status = (uint8_t)(rv + 1);
+        mp_turn(w, &b, MP_ACT_MOVE, 0, &log);
+        if(ev_count(&log, MP_EV_HIT_BACK)) break;
+    }
+    CHECK(ev_count(&log, MP_EV_HIT_BACK) >= 1, "effects: revenge strikes back");
+
+    /* the battle's end: a status that doesn't outlast it goes, and so does a switched type */
+    eff_battle(w, &b, head, 9, mon, tackle, tackle, 30);
+    me->xtype = 1;
+    b.wild.hp = 1;
+    me->status = (uint8_t)(stk + 1);
+    for(int t = 0; t < 20 && !b.over; t++){ b.recharge[0][0] = 0; mp_turn(w, &b, MP_ACT_MOVE, 0, &log); }
+    CHECK(b.over && !me->xtype && !me->sturn && !me->status, "effects: the battle's end clears stuck and the switched type");
+
+    /* a move that disappears: out of reach, then it lands */
+    int rd = mv_of("Rift Dash");
+    if(rd >= 0){
+        int landed = 0;
+        for(n = 0; n < 40 && !landed; n++){
+            eff_battle(w, &b, head, 300 + (uint32_t)n, mon, rd, tackle, 40);
+            mp_turn(w, &b, MP_ACT_MOVE, 0, &log);
+            if(!ev_count(&log, MP_EV_VANISH)) continue;
+            CHECK(b.gone[0] && b.land[0] == 1, "effects: out of reach after disappearing");
+            mp_turn(w, &b, MP_ACT_MOVE, -1, &log);
+            landed = ev_count(&log, MP_EV_DAMAGE) >= 1 && !b.gone[0];
+        }
+        CHECK(landed, "effects: a move that disappears lands the next turn");
+    }
+    printf("  effects: the rules hold on the shipped game (asleep at most %d turns)\n", longest);
+    free(w);
+    mg_close(&EG);
+}
+
 int main(int argc, char **argv){
     if(argc == 3 && !strcmp(argv[1], "dump")) return dump(argv[2]);
     if(getenv("MONSTER_SAVE")) SAVE = getenv("MONSTER_SAVE");
@@ -1158,6 +1319,7 @@ int main(int argc, char **argv){
     MpWorld *w = battles();
     saves(w);
     free(w);
+    effects();
     autoplay();
     mirror();
     free(out);

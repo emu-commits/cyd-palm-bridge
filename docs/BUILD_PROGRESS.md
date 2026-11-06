@@ -16,6 +16,39 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-06 — Critters: E5, the effects that aren't statuses, and the rules tested
+
+| Step | Moves kept | Unended | Mean turns | Longest | Moved most (points) |
+|---|---|---|---|---|---|
+| E4's end | 113 | 0 | 3.55 | 39 | |
+| remove | 115 | 0 | 3.54 | 39 | Noctalo 1.9 |
+| splash | 122 | 0 | 3.49 | 39 | Pigabyte 3.6 |
+| multiattack | 123 | 0 | 3.49 | 39 | Paladrax 1.0 |
+| appear | 125 | 0 | 3.48 | 39 | Agnidon 2.9 |
+| disappear | 126 | 0 | 3.49 | 39 | Pigabyte 2.6 |
+| statchange | 128 | 0 | 3.52 | 39 | Eyesore 3.4 |
+| switch | 130 | 0 | 3.51 | 39 | Anoleaf 1.9 |
+| prop_damage | 131 | 0 | 3.49 | 39 | Agnidon 4.9 |
+| prop_healing | 133 | **244** | 4.17 | 400 | **failed**: left off the list |
+
+- **prop_healing stays off the list** (the plan's second choice): with it the Vamporm line has two heals, Refresh
+  and Hibernate (66 % of its HP, and asleep), and every unended battle was among that line. Hibernate at recharge 8
+  still left 189. The proportion isn't a field `move_edits` can change. The firmware plays it; two moves, Hibernate
+  and Shadow Blast, stay out (`game_region.json`'s `effects_note`). **131 of the critters' 133 moves are in.**
+- **The game, over four seeds a starter (20 games): 415 losses against E0's 420** (262 against 257 to keepers).
+  Seed 1 alone: Agnite 22, Anoleaf 33, Cardiling 9, Vamporm 5, Nut 21 (90 against 87).
+- **Festering, corrected:** Tuxemon's festering stops a potion (`heal.py`), and its healing moves never check it.
+  It had been written the other way round. Now a potion heals a festering critter nothing (a cure still cures) and
+  moves heal as before. Found by the new rules test: no move here heals without giving a status first, which would
+  replace festering anyway.
+- **The rules tested** (`make -C sim monster`, section 9, on the game that ships): exhausted's and charged up's
+  multipliers, charged up becoming exhausted on use and exhausted ending at the next move; asleep never moving,
+  never longer than its five turns (200 seeds: at most 5), and ending; stuck halving a touch move; festering and
+  potions; lifeleech's drain; diehard's 1 HP; revenge striking back; the battle's end clearing a battle-only
+  status and a switched type; a move that disappears going out of reach and landing the next turn.
+- Shot `critters_badges`: Asleep on ours, two of five turns gone, and Lifeleech on the foe. The width test covers
+  every status in the game (20): 117 px of 126.
+
 ### 2026-11-06 — Critters: E4, shields and comebacks
 
 | Step | Moves kept | Unended | Mean turns | Longest | Moved most (points) |

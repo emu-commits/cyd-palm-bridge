@@ -270,9 +270,12 @@ after, and shown on the battle cards as a status badge.
 - [s] **E3, over time**: festering, lifeleech, wasting (plague is left out: E6). Built 2026-11-06, with a change to
   Auto-play's policy the game gate asked for (`BUILD_PROGRESS.md`).
 - [s] **E4, shields and comebacks**: elementalshield, diehard, revenge, retaliate, prickly, spiky. Built 2026-11-06.
-- [ ] **E5, effects that aren't statuses**: remove, splash, multiattack, appear/disappear, statchange, switch,
-  prop_damage/prop_healing, charging.
-- [ ] **E6**: the effects left out on purpose, each with its reason in `GAME_FORMAT.md`.
+- [s] **E5, effects that aren't statuses**: remove, splash, multiattack, appear/disappear, statchange, switch,
+  prop_damage (charging came with E1). Built 2026-11-06. **prop_healing is played but off the list**: it brought back
+  the healing stalemate in the Vamporm line (244 unended); Hibernate and Shadow Blast stay out until it's tuned.
+- [s] **E6**: the effects left out on purpose, each with its reason in `GAME_FORMAT.md` §2 (charmed, lockdown,
+  feedback, lifegift, wild, plague, and the effects swap, run, forfeit, money, scope, transfer, life_swap, life_share,
+  photogenesis, foresight, cooldown_modifier).
 - [d] **Bench, per phase:** a few battles with the phase's effects on the board, the badge readable at arm's length.
 
 ### Critters: the drove road, Kestrel's look, and progress without grinding (requested 2026-11-06; not started)

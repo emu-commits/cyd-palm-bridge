@@ -100,7 +100,7 @@ enum {
     MP_EV_FLINCH,       /* side flinches (status a) and does nothing */
     MP_EV_CONFUSED,     /* side is confused (status a): it uses a move at random */
     MP_EV_DRAIN,        /* side loses n HP to status a, and the other side gains it */
-    MP_EV_NO_HEAL,      /* side can't be healed (status a) */
+    MP_EV_NO_HEAL,      /* side can't be healed (status a; unused since festering stops items alone) */
     MP_EV_HOLD_ON,      /* side holds on with 1 HP (status a), which ends */
     MP_EV_HIT_BACK,     /* side loses n HP to the other side's status a */
     MP_EV_VANISH,       /* side goes out of reach: its move lands next turn */
