@@ -18,7 +18,9 @@
  *     7. Auto-play (monster_bot.c) on the game that ships
  *        (courses/critters/game.bin): from a new game with each of the
  *        three first critters, the bot alone beats every keeper in the
- *        region, within a step limit, from a fixed seed.
+ *        region, within a step limit, from a fixed seed;
+ *     8. the mirror match: a level 6 Vamporm against one, 200 seeds, every
+ *        battle ends within 400 turns (the healing move's recharge).
  * Run from sim/. */
 #include "monster.h"
 #include "monster_bot.h"
@@ -1080,6 +1082,54 @@ static void autoplay(void){
     mg_close(&g);
 }
 
+/* 8. the mirror match (2026-11-05): a level 6 Vamporm against a level 6
+ * Vamporm, on the game that ships, with a random move each turn for both
+ * sides, must end within MIRROR_TURNS on every seed. Before the refresh edit
+ * (tools/game_region.json move_edits) a sixth of these never ended: healing
+ * undid every hit. */
+#define MIRROR_SEEDS 200
+#define MIRROR_TURNS 400
+static uint16_t mon_in(MonGame *g, const char *name){
+    for(uint32_t i = 0; i < g->n_mons; i++){ MgMon m; mg_mon(g, (uint16_t)i, &m); char t[32]; mg_text(g, m.name, t, 32); if(!strcmp(t, name)) return (uint16_t)i; }
+    return 0xFFFF;
+}
+static void mirror(void){
+    MonGame g;
+    if(mg_open(&g, REGION)){ CHECK(0, "%s: %s", REGION, g.err); return; }
+    uint16_t vam = mon_in(&g, "Vamporm");
+    CHECK(vam != 0xFFFF, "the mirror match: no Vamporm in the game");
+    static uint8_t head[MG_HEAD_MAX];
+    int unended = 0, longest = 0;
+    for(uint32_t seed = 1; seed <= MIRROR_SEEDS && vam != 0xFFFF; seed++){
+        MpWorld *w = calloc(1, sizeof *w);
+        MpBattle b;
+        MpLog log;
+        CHECK(!mp_new(w, &g, head, seed, vam), "mirror: a new game: %s", w->err);
+        uint32_t r1 = seed * 7 + 3, r2 = seed * 13 + 5;
+        CHECK(!mp_make(&g, &r1, vam, 6, &w->party[0]) && !mp_stats(&g, &w->party[0]), "mirror: our critter");
+        w->party[0].hp = w->party[0].stat[MG_HP];
+        w->n_party = 1;
+        MpCreature wild;
+        CHECK(!mp_make(&g, &r2, vam, 6, &wild) && !mp_stats(&g, &wild), "mirror: the wild critter");
+        wild.hp = wild.stat[MG_HP];
+        CHECK(!mp_battle_start(w, &b, &wild), "mirror: a battle: %s", w->err);
+        int turn = 0;
+        for(; !b.over && turn < MIRROR_TURNS; turn++){
+            int arg = -1;
+            for(int k = 0; k < MP_MOVES; k++)
+                if(w->party[b.active].moves[k] != MP_NO_MOVE && !b.recharge[0][k]){ arg = k; if(mp_rand(&w->rng) & 1) break; }
+            CHECK(mp_turn(w, &b, MP_ACT_MOVE, arg, &log) == 0, "mirror: seed %u turn %d refused", (unsigned)seed, turn);
+            if(b.need_swap) break;
+        }
+        if(!b.over) unended++;
+        if(turn > longest) longest = turn;
+        free(w);
+    }
+    CHECK(unended == 0, "mirror: %d of %d level 6 Vamporm battles never ended in %d turns", unended, MIRROR_SEEDS, MIRROR_TURNS);
+    printf("  mirror: %d level 6 Vamporm battles, %d unended, the longest %d turns\n", MIRROR_SEEDS, unended, longest);
+    mg_close(&g);
+}
+
 int main(int argc, char **argv){
     if(argc == 3 && !strcmp(argv[1], "dump")) return dump(argv[2]);
     if(getenv("MONSTER_SAVE")) SAVE = getenv("MONSTER_SAVE");
@@ -1099,6 +1149,7 @@ int main(int argc, char **argv){
     saves(w);
     free(w);
     autoplay();
+    mirror();
     free(out);
     mg_close(&G);
     printf("monster: %s (%d failure%s)\n", fails ? "FAILED" : "OK", fails, fails == 1 ? "" : "s");

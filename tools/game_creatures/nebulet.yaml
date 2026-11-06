@@ -1,0 +1,26 @@
+# Nebulet: the cosmic line's second stage. The owner's drawing (2026-11-05).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Nebulet
+description: >-
+  The rings round its horns turn with the stars. It keeps a loose star in
+  its tail to light the way home.
+category: Nebula
+height_cm: 95
+weight_kg: 25
+drawing: tools/game_art/src/nebulet.png
+types: [cosmic]
+shape: sprite
+stage: stage1
+experience_group: default
+catch_rate: 60
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: crystal}
+- {level_learned: 1, technique: phantasmal_force}
+- {level_learned: 1, technique: lineage}
+- {level_learned: 20, technique: ruby}
+- {level_learned: 26, technique: dreamwalk}
+evolutions:
+- {at_level: 32, monster_slug: astrolune}

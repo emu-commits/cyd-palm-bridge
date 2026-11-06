@@ -2085,7 +2085,9 @@ void mon_ui_set_auto(int on){
     if(!m || (on && (!m->started || m->scene == SC_ERROR))) return;
     auto_set(m, on);
 }
-int mon_ui_keep_awake(void){ return g_mon && power_on_usb(); }
+/* Auto-play keeps the screen awake on battery too: a lock or a touch ends it (auto_set 0),
+   so the flag is only set while the game is playing itself. */
+int mon_ui_keep_awake(void){ return g_mon && (g_mon->autoplay || power_on_usb()); }
 int mon_ui_playing(void){ return g_mon && g_mon->started; }
 
 int mon_ui_save(void){

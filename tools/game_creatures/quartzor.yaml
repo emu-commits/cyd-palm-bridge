@@ -1,0 +1,26 @@
+# Quartzor: drawn for the project by the owner (2026-11-05).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Quartzor
+description: >-
+  Every crystal on its back grew from a fight it won. It sharpens them on
+  cave walls at night.
+category: Quartz
+height_cm: 110
+weight_kg: 140
+drawing: tools/game_art/src/quartzor.jpg
+types: [earth]
+shape: brute
+stage: stage1
+experience_group: default
+catch_rate: 60
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: hammerhead}
+- {level_learned: 1, technique: crystal}
+- {level_learned: 1, technique: rock}
+- {level_learned: 20, technique: grinding}
+- {level_learned: 26, technique: greenstone}
+evolutions:
+- {at_level: 32, monster_slug: prismyth}

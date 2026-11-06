@@ -90,6 +90,8 @@ DIR_DELTA = [(0, -1), (1, 0), (0, 1), (-1, 0)]
 
 # effects (GAME_FORMAT.md 3.5)
 E_DAMAGE, E_HEALING, E_GIVE = 1, 2, 3
+# the move fields region["move_edits"] may overwrite (the rest are Tuxemon's)
+MOVE_EDIT_FIELDS = {"recharge", "accuracy", "healing_power", "power", "potency"}
 T_ENEMY, T_OWN = 0, 1
 # statuses the first version plays (GAME_PLAN.md section 6)
 STATUS_KINDS = {"poison": 1, "burn": 2, "recover": 3}
@@ -363,6 +365,16 @@ class Rules:
                 else:
                     self.techs[t] = d
         self.unsupported = unsupported
+        # Our balance edits to Tuxemon's moves (region["move_edits"]): a field
+        # overwritten on the move's YAML. Only fields the game format keeps.
+        for t, fields in (region.get("move_edits") or {}).items():
+            if t not in self.techs:
+                fail(f"move_edits: {t} isn't a move the game keeps")
+            for k, v in fields.items():
+                if k == "why": continue        # a note for people, not a field
+                if k not in MOVE_EDIT_FIELDS:
+                    fail(f"move_edits: {t}.{k} isn't a field we may edit")
+                self.techs[t][k] = v
         report.append(f"moves: {len(self.techs)} kept, {len(unsupported)} left out "
                       f"(effects the first version doesn't play)")
         for t, why in sorted(unsupported.items()):

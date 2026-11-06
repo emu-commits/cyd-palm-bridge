@@ -1,0 +1,26 @@
+# Starlet: the cosmic line's first stage. The owner's drawing (2026-11-05).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Starlet
+description: >-
+  Born on a night a new star lights up. The little planet on its tail was
+  the first thing it caught.
+category: Star Kit
+height_cm: 45
+weight_kg: 7
+drawing: tools/game_art/src/starlet.png
+types: [cosmic]
+shape: sprite
+stage: basic
+experience_group: default
+catch_rate: 100
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: gnaw}
+- {level_learned: 1, technique: crystal}
+- {level_learned: 5, technique: phantasmal_force}
+- {level_learned: 9, technique: lineage}
+- {level_learned: 12, technique: fluff_up}
+evolutions:
+- {at_level: 16, monster_slug: nebulet}

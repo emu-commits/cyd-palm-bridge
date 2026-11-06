@@ -1,0 +1,25 @@
+# Oculoth: drawn for the project by the owner (2026-11-05).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Oculoth
+description: >-
+  It walks the sea floor on legs of light. Every eye on its stalks watches
+  a different thing.
+category: Watcher
+height_cm: 180
+weight_kg: 95
+drawing: tools/game_art/src/oculoth.jpg
+types: [water, shadow]
+shape: serpent
+stage: stage1
+experience_group: slow
+catch_rate: 45
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: bubbles}
+- {level_learned: 1, technique: phantasmal_force}
+- {level_learned: 1, technique: mobbing}
+- {level_learned: 26, technique: water_blast}
+- {level_learned: 32, technique: strangulation}
+- {level_learned: 38, technique: kraken}

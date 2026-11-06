@@ -211,6 +211,44 @@ open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
 - [s] **Dragon's Cave: the opening behind Ashe** (2026-11-04): it's the gate to the Reach now: a warp on (16,1), and a
   Gate Guard on (16,2) until `beat_wren`, who says what it takes. `make -C sim monster` walks it.
 
+### Critters: a healing stalemate (reported 2026-11-05; built the same day, option: the healing move costs more)
+
+- [s] **Vamporm can out-heal an equal foe, so a battle never ends.** A level 6 Vamporm against a level 6 Vamporm
+  never ended: `refresh` (healing power 3.0, recharge 3) healed a full bar every few turns. **Chosen, for the owner
+  to confirm:** the healing move costs more: `refresh`'s recharge is 8 (`move_edits` in `tools/game_region.json`,
+  applied by `tools/mkgame.py`, credited to Tuxemon's move data). Measured in the sim with the same battles
+  (random moves, both sides): recharge 3 left 32 of 200 battles unended after 2,000 turns; recharge 8 ended all
+  1,000 seeds, the longest in 176 turns and the mean in 20. Recharge 7 also ended all 1,000, with a longer tail
+  (1,323 turns). `make -C sim monster` still passes: Auto-play beats every keeper, and the new mirror gate
+  (`monster_test` check 8, 200 seeds, 400-turn limit) is green. Not measured: a human player choosing moves, and
+  the other healers (`recover`, `lifeleech`), which weren't changed.
+
+### Critters: keep the screen awake in Auto-play (reported 2026-11-05; a regression)
+
+- [d] **Auto-play must hold the screen awake.** It used to; the last update broke it, and now the screen auto-sleeps
+  while Auto-play is running. Expected: with Auto-play on, the idle screen-off and the automatic light-sleep stay
+  off until Auto-play is stopped or the game is touched, as they do on USB.
+  **Fixed in code (2026-11-05, not yet on the bench):** `mon_ui_keep_awake()` (`firmware/main/ui_monster.c`) returned
+  `g_mon && power_on_usb()`, so it ignored Auto-play. It now returns `g_mon && (g_mon->autoplay || power_on_usb())`.
+  A lock or a touch clears `autoplay`, so the screen dims again once the game is no longer playing itself.
+  Bench check: run Auto-play on the battery for longer than the idle timeout, with `backlight_sec` set low, and
+  confirm the screen stays on; then stop Auto-play (touch) and confirm it dims again.
+
+### Critters: five more lines, 60 critters (drawn by the owner 2026-11-05; built the same day)
+
+- [s] **Heroic, cosmic, crystal, rock and eye lines** (14 critters; `tools/game_creatures/README.md` has each line's
+  scales, places and what was drawn by hand). Each drawing's eyes and gems are checked at 10× with `--look` and at game
+  size. `mksheet.py` gained `"keep"` (colours with their own place among the 15: the heroic red gems, the crystal and
+  rock lines' pink eyes) and `"icon_row"` (icons drawn close under the feet). Neither changes an earlier sheet:
+  `mkgame_test` proves each is the same to the byte. `make -C sim monster` still finishes with the Dex full.
+- **For the owner:** the names, types, moves, places and Dex text are mine, all to change. Types: Valkit's line heroic,
+  Starlet's cosmic, Geodot's earth (Prismyth earth and cosmic), Pebblub's earth (Tectorath earth and shadow), Oglet's
+  water and shadow. Many of Tuxemon's heroic and cosmic moves need effects the game doesn't play, so those lines lean
+  on Lantern, Punch, Radiance, Crystal, Lineage, Ruby and Dreamwalk.
+- [d] **On the panel:** each new critter's front and back in battle read as its drawing at arm's length: the heroic
+  gems red, the cosmic eyes cyan, Geodot's one pink and one cyan eye, Prismyth's gold eye, the rock line's pink glow.
+  Nebulet, Astrolune, Valorix, Paladrax and Tectorath are the grainiest.
+
 ## RESUME HERE — Palm behaviours from the archive review (approved 2026-10-15)
 
 `PALM_ARCHIVE_REVIEW.md` measured the firmware against Palm's UI Guidelines
