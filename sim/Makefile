@@ -60,7 +60,7 @@ WRAP_LD := -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free
 LVGL_SRCS := $(shell find lvgl/src -name '*.c' 2>/dev/null)
 LVGL_OBJS := $(patsubst lvgl/src/%.c,build/lvgl/%.o,$(LVGL_SRCS))
 
-.PHONY: host wasm smoke smoke32 secretscan poolparity data graf mines wordie sudoku zip clock coach guru gurupool dash course srs monster dex games clean lvgl-src
+.PHONY: host wasm smoke smoke32 secretscan poolparity data graf mines wordie sudoku zip clock coach guru gurupool dash course srs monster balance dex games clean lvgl-src
 
 # LVGL_SRCS is evaluated when make parses this file, so on a clean checkout the
 # source must be fetched BEFORE the build graph is used: the entry points fetch,
@@ -257,6 +257,20 @@ build/monster_test: $(MONSTER_SRCS) $(FW)/monster.h $(FW)/monster_play.h $(FW)/m
 	$(CC) -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all -I$(FW) -I$(BR) \
 	    $(MONSTER_SRCS) -lm -o $@
 
+# ---- balance: the balance run (docs/EFFECTS_PLAN.md section 3): every critter
+# against every critter at three levels, both sides choosing as Auto-play does,
+# compared with the accepted baseline (tests/data/balance.tsv). BALANCE_RECORD=1
+# records a new one; BALANCE_SEEDS changes the seeds a pair (20). Optimised and
+# without the sanitizers: it's 216,000 battles. ----
+BALANCE_SRCS := tests/balance.c $(FW)/monster.c $(FW)/monster_play.c $(FW)/monster_bot.c
+balance: build/balance_test
+	./build/balance_test
+	@echo "sim balance: OK"
+
+build/balance_test: $(BALANCE_SRCS) $(FW)/monster.h $(FW)/monster_play.h $(FW)/monster_bot.h $(BR)/safefile.h
+	@mkdir -p build
+	$(CC) -O2 -g -Wall -Wextra -I$(FW) -I$(BR) $(BALANCE_SRCS) -lm -o $@
+
 # ---- dex: what the Dex reads (docs/DEX_PLAN.md section 7), under ASan and UBSan. ----
 DEX_SRCS := tests/dex_test.c $(FW)/dex.c $(FW)/crt.c $(FW)/monster.c $(FW)/monster_play.c
 dex: build/dex_test
@@ -353,7 +367,7 @@ build/dash_test: tests/dash_test.c $(BR)/dash.c $(BR)/dash.h
 	$(CC) -O2 -Wall -I$(BR) tests/dash_test.c $(BR)/dash.c -o $@ -lm
 
 # ---- games: every game's logic gate in one go (what CI runs). ----
-games: poolparity mines wordie sudoku zip clock coach guru gurupool dash course srs monster dex
+games: poolparity mines wordie sudoku zip clock coach guru gurupool dash course srs monster balance dex
 
 # ---- wasm: everything compiled by emcc in one shot (CI build; no local emcc needed).
 # 32-bit wasm => the TRUE device-sized pool applies (see lv_conf.h). main() boots

@@ -31,7 +31,7 @@
 #define MG_FORMAT_MAJOR 2                   /* 2.0: the player's looks once, in LOOK */
 #define MG_MAX_TYPES    16
 #define MG_MAX_SHAPES   32
-#define MG_MAX_STATUSES 8
+#define MG_MAX_STATUSES 32                 /* 2.3: Tuxemon's, those a kept move gives */
 #define MG_MAX_STARTERS 8                   /* META 0x12's three and 0x13's up to five */
 #define MG_MAX_STEPS    32                  /* META 0x14: encounter tables that change with a flag */
 #define MG_MAX_ITEMS    9                   /* ITEM (2.1): what a shop sells and the bag holds */
@@ -57,18 +57,45 @@
 #define MG_ERANGE   (-5)    /* the caller asked for something out of range */
 
 enum { MG_META, MG_TYPE, MG_SHAP, MG_STAT, MG_MOVE, MG_MONS, MG_LRNS, MG_ENCT, MG_AREA,
-       MG_ADAT, MG_SPRT, MG_TEXT, MG_CRED, MG_LOOK, MG_ITEM, MG_DEXE, MG_ICON, MG_NSECT };
-#define MG_NREQUIRED MG_ITEM                /* ITEM (2.1), DEXE and ICON (2.2) may be missing */
+       MG_ADAT, MG_SPRT, MG_TEXT, MG_CRED, MG_LOOK, MG_ITEM, MG_DEXE, MG_ICON, MG_STEX, MG_NSECT };
+#define MG_NREQUIRED MG_ITEM                /* ITEM (2.1), DEXE and ICON (2.2), STEX (2.3) may be missing */
+#define MG_SICON 9                          /* a status's badge picture, 9 x 9 in four colours (STEX) */
+#define MG_SICON_BYTES 21                   /* 81 pixels at 2 bits */
 #define MG_ICON_SIZE 24                     /* the Dex's list icons, and the party's */
 #define MG_ICON_BYTES (32 + MG_ICON_SIZE * MG_ICON_SIZE / 2)    /* 16 colours, then 4 bits a pixel */
 
 /* move ranges (GAME_FORMAT.md 3.6) */
 enum { MG_MELEE, MG_TOUCH, MG_RANGED, MG_REACH, MG_RELIABLE, MG_SPECIAL };
-/* effect kinds, and their targets */
-enum { MG_E_NONE, MG_E_DAMAGE, MG_E_HEALING, MG_E_GIVE };
-enum { MG_T_ENEMY, MG_T_OWN };
-/* status kinds */
-enum { MG_S_POISON = 1, MG_S_BURN, MG_S_RECOVER };
+/* effect kinds (GAME_FORMAT.md 3.6), and their targets. An effect's second byte
+ * (`status`) is the status given (GIVE), which statuses go (REMOVE: 1 positive,
+ * 2 negative, 3 any), the divisor on a miss (SPLASH), the hits (MULTI), the stat
+ * (STAGE: 0 armour .. 4 speed, its fourth byte the signed steps), the type
+ * (SWITCH), or a percentage of max HP (PROP_DAMAGE, PROP_HEAL). 2.3 adds 4-12. */
+enum { MG_E_NONE, MG_E_DAMAGE, MG_E_HEALING, MG_E_GIVE, MG_E_REMOVE, MG_E_SPLASH, MG_E_MULTI,
+       MG_E_APPEAR, MG_E_DISAPPEAR, MG_E_STAGE, MG_E_SWITCH, MG_E_PROP_DAMAGE, MG_E_PROP_HEAL, MG_E_LAST = MG_E_PROP_HEAL };
+enum { MG_T_ENEMY, MG_T_OWN, MG_T_BOTH };
+/* status kinds (GAME_FORMAT.md 3.5); 2.3 adds 4-16 */
+enum { MG_S_POISON = 1, MG_S_BURN, MG_S_RECOVER,
+       MG_S_STATS,          /* nothing but its stat multipliers (STEX): exhausted, blinded, ... */
+       MG_S_ASLEEP,         /* skips its moves; stays asleep at `chance` % a turn after the first, at most `duration` */
+       MG_S_WEAKEN,         /* its moves of `ranges` lose power and potency / divisor (stuck, grabbed) */
+       MG_S_FLINCH,         /* at 100 - chance % its next move is lost, then it ends */
+       MG_S_CONFUSED,       /* at chance % it uses a move of its own at random instead */
+       MG_S_SWAPHURT,       /* loses max HP / divisor when it's swapped out (harpooned, spiky) */
+       MG_S_FESTER,         /* can't be healed */
+       MG_S_LEECH,          /* loses max HP / divisor a turn to the side that gave it (linked) */
+       MG_S_WASTING,        /* loses max HP / divisor x the turns it has had it */
+       MG_S_THORNS,         /* a foe hitting it with a move of `ranges` loses its max HP / divisor */
+       MG_S_DIEHARD,        /* a blow that would faint it leaves 1 HP, then it ends */
+       MG_S_REVENGE,        /* a foe's blow (not special) costs the foe that much, which it gains */
+       MG_S_RETALIATE,      /* a foe's blow (not special) costs the foe that much */
+       MG_S_LAST = MG_S_RETALIATE };
+/* status flags: 1 negative, 2 persists after a battle, 4 linked to the side that
+ * gave it (ends when either creature leaves), 8 ends when its holder uses a move
+ * (becoming `then`, if it names one) */
+enum { MG_SF_NEGATIVE = 1, MG_SF_PERSISTS = 2, MG_SF_LINKED = 4, MG_SF_ON_USE = 8 };
+/* the stats a status multiplies or a move's steps change, in this order */
+enum { MG_X_ARMOUR, MG_X_DODGE, MG_X_MELEE, MG_X_RANGED, MG_X_SPEED, MG_NX };
 /* stats, in the order SHAP stores them */
 enum { MG_HP, MG_ARMOUR, MG_DODGE, MG_MELEE_ST, MG_RANGED_ST, MG_SPEED, MG_NSTATS };
 /* facing: N E S W */
@@ -85,7 +112,10 @@ typedef struct { uint32_t off; uint16_t len; } MgStr;      /* a string reference
 
 typedef struct {
     uint32_t id;
-    uint8_t  kind, divisor, flags;          /* flags: 1 negative, 2 persists after a battle */
+    uint8_t  kind, divisor, flags;          /* flags: MG_SF_* */
+    uint8_t  chance, duration, ranges;      /* 2.3: percent; turns (0 none); bit r: range r */
+    uint8_t  then;                          /* 2.3: STEX's status after it, position + 1 (0 none) */
+    uint8_t  mult[MG_NX];                   /* 2.3: tenths (10: unchanged), from STEX */
     uint16_t immune;                        /* bit t: type t is immune */
     MgStr    name;
 } MgStatus;
@@ -98,6 +128,7 @@ typedef struct {
     uint8_t  accuracy, potency, recharge, targets;
     uint16_t heal;                          /* hundredths */
     uint8_t  eff_kind[3], eff_status[3], eff_target[3];
+    int8_t   eff_arg[3];                    /* 2.3: STAGE's steps */
     MgStr    name;
 } MgMove;
 
@@ -180,6 +211,7 @@ typedef struct {
     uint32_t money_start, money_per_level;  /* META 0x24: coins to start with; a keeper's prize per level */
     uint8_t  n_items;       /* ITEM's records (0 without the section) */
     uint8_t  has_dex, has_icons;            /* DEXE and ICON are there (2.2) */
+    uint8_t  has_sicons;                    /* STEX is there (2.3): the statuses' badges */
     uint8_t  n_steps;       /* once flag is set, a zone naming table uses to (in order: a table may step twice) */
     struct { uint16_t flag, table, to; } steps[MG_MAX_STEPS];
 
@@ -232,6 +264,9 @@ int  mg_dex(MonGame *g, uint32_t i, MgDex *d);
 /* Creature i's icon into buf (MG_ICON_BYTES: 16 RGB565 colours, index 0 clear, then
  * 4 bits a pixel): MG_ERANGE in a file without ICON. Not CRC checked one by one. */
 int  mg_icon(MonGame *g, uint32_t i, uint8_t *buf, uint32_t cap);
+/* Status i's badge (2.3): its four colours as RGB565 (pal[0], clear, is 0) and
+ * MG_SICON_BYTES of 2-bit pixels, row by row: MG_ERANGE without STEX. */
+int  mg_status_icon(MonGame *g, uint32_t i, uint16_t pal[4], uint8_t *px);
 
 /* Enter area i: read and check its head into buf (head_len bytes; MG_HEAD_MAX
  * is always enough), and fill a. The pointers in a point into buf. */

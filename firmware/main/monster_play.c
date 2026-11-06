@@ -118,6 +118,7 @@ static void mult_frac(MonGame *g, const MgMove *m, const MpCreature *def, uint64
     MgMon dm;
     uint64_t n = 1, d = 1;
     if(!mg_mon(g, def->mon, &dm)){
+        if(def->xtype && def->xtype <= g->n_types){ dm.type[0] = (uint8_t)(def->xtype - 1); dm.type[1] = MG_NONE8; }
         for(int i = 0; i < 2; i++){
             if(m->type[i] == MG_NONE8 || m->type[i] >= g->n_types) continue;
             for(int j = 0; j < 2; j++){
@@ -165,6 +166,39 @@ uint32_t mp_speed_score(const MpCreature *c, const MgMove *m){
     if(v < 100) v = 100;
     v += c->stat[MG_DODGE];
     return v / 100;
+}
+
+const MgStatus *mp_status(const MonGame *g, const MpCreature *c){
+    return c->status && c->status <= g->n_statuses ? &g->statuses[c->status - 1] : NULL;
+}
+
+/* Tuxemon's stage table (monster/stats.py NONLINEAR_TABLE) as num / den */
+static const uint8_t STAGE_NUM[13] = { 2, 2, 2, 2, 2, 2, 1, 3, 4, 5, 6, 7, 8 };
+static const uint8_t STAGE_DEN[13] = { 8, 7, 6, 5, 4, 3, 1, 2, 2, 2, 2, 2, 2 };
+/* the SHAP order of the stats MG_X_* name */
+static const uint8_t X_STAT[MG_NX] = { MG_ARMOUR, MG_DODGE, MG_MELEE_ST, MG_RANGED_ST, MG_SPEED };
+
+void mp_view(MonGame *g, const MpBattle *b, int side, const MpCreature *c, MpCreature *out){
+    const MgStatus *st = mp_status(g, c);
+    if(out != c) *out = *c;
+    for(int k = 0; k < MG_NX; k++){
+        uint32_t v = out->stat[X_STAT[k]];
+        if(st && st->mult[k] != 10) v = v * st->mult[k] / 10;
+        int sg = b ? b->stage[side & 1][k] : 0;
+        if(sg){
+            if(sg < -6) sg = -6;
+            if(sg > 6) sg = 6;
+            v = v * STAGE_NUM[sg + 6] / STAGE_DEN[sg + 6];
+        }
+        out->stat[X_STAT[k]] = (uint16_t)(v > 65535 ? 65535 : v);
+    }
+}
+
+void mp_view_move(MonGame *g, const MpCreature *c, MgMove *m){
+    const MgStatus *st = mp_status(g, c);
+    if(!st || st->kind != MG_S_WEAKEN || !(st->ranges >> m->range & 1)) return;
+    m->power = (uint16_t)(m->power / st->divisor);
+    m->potency = (uint8_t)(m->potency / st->divisor);
 }
 
 static uint64_t isqrt64(uint64_t x){
@@ -618,69 +652,245 @@ static int has_usable(const MpCreature *c, const uint8_t *rech){
 static int immune(MonGame *g, const MpCreature *c, uint8_t st){
     MgMon m;
     if(mg_mon(g, c->mon, &m)) return 1;
+    if(c->xtype && c->xtype <= g->n_types){ m.type[0] = (uint8_t)(c->xtype - 1); m.type[1] = MG_NONE8; }
     uint16_t mask = g->statuses[st].immune;
     for(int j = 0; j < 2; j++)
         if(m.type[j] != MG_NONE8 && m.type[j] < 16 && (mask >> m.type[j] & 1)) return 1;
     return 0;
 }
 
+static MpCreature *side_mon(MpWorld *w, MpBattle *b, int side){
+    return side ? &b->wild : &w->party[b->active];
+}
+
+static int has_kind(const MonGame *g, const MpCreature *c, int kind){
+    const MgStatus *st = mp_status(g, c);
+    return st && st->kind == kind;
+}
+
+static void end_status(MpCreature *c, int side, MpLog *log){
+    say(log, MP_EV_STATUS_END, (uint8_t)side, c->status - 1u, 0, 0);
+    c->status = 0;
+    c->sturn = 0;
+}
+
+/* side's creature takes n HP of harm (not healing). A die-hard status leaves
+ * it 1 HP from a blow that would faint it. Returns what it lost. */
+static uint32_t harm(MpWorld *w, MpCreature *c, int side, uint32_t n, uint32_t mult, int kind, uint32_t a, MpLog *log){
+    if(n > c->hp) n = c->hp;
+    if(n && n == c->hp && has_kind(w->g, c, MG_S_DIEHARD)){
+        n = c->hp - 1u;
+        c->hp = (uint16_t)(c->hp - n);
+        say(log, kind, (uint8_t)side, kind == MP_EV_DAMAGE ? mult : a, 0, n);
+        say(log, MP_EV_HOLD_ON, (uint8_t)side, c->status - 1u, 0, 0);
+        c->status = 0; c->sturn = 0;
+        return n;
+    }
+    c->hp = (uint16_t)(c->hp - n);
+    say(log, kind, (uint8_t)side, kind == MP_EV_DAMAGE ? mult : a, 0, n);
+    if(!c->hp) say(log, MP_EV_FAINT, (uint8_t)side, 0, 0, 0);
+    return n;
+}
+
+/* healing t (side ts) by up to h: a festering creature can't be healed */
+static void heal(MpWorld *w, MpCreature *t, int ts, uint32_t h, MpLog *log){
+    if(!t->hp) return;
+    if(has_kind(w->g, t, MG_S_FESTER)){ say(log, MP_EV_NO_HEAL, (uint8_t)ts, t->status - 1u, 0, 0); return; }
+    if(h > (uint32_t)t->stat[MG_HP] - t->hp) h = (uint32_t)t->stat[MG_HP] - t->hp;
+    t->hp = (uint16_t)(t->hp + h);
+    say(log, MP_EV_HEAL, (uint8_t)ts, 0, 0, h);
+}
+
+/* the foe (side fs) was hit by move m for d HP: its shields and comebacks */
+static void struck(MpWorld *w, MpCreature *att, int as, MpCreature *foe, const MgMove *m, uint32_t d, MpLog *log){
+    const MgStatus *st = mp_status(w->g, foe);
+    if(!st || !foe->hp || !att->hp) return;
+    uint32_t n = 0;
+    if(st->kind == MG_S_THORNS && (st->ranges >> m->range & 1)) n = foe->stat[MG_HP] / st->divisor;
+    else if((st->kind == MG_S_REVENGE || st->kind == MG_S_RETALIATE) && m->range != MG_SPECIAL) n = d;
+    if(!n) return;
+    uint32_t lost = harm(w, att, as, n, 0, MP_EV_HIT_BACK, foe->status - 1u, log);
+    if(st->kind == MG_S_REVENGE) heal(w, foe, !as, lost, log);
+}
+
+/* give status st to t (side ts) */
+static void give(MpWorld *w, MpBattle *b, MpCreature *t, int ts, uint8_t st, MpLog *log){
+    MonGame *g = w->g;
+    if(!t->hp || b->gone[ts]) return;
+    if(immune(g, t, st)){ say(log, MP_EV_IMMUNE, (uint8_t)ts, st, 0, 0); return; }
+    t->status = (uint8_t)(st + 1);
+    t->sturn = 0;
+    say(log, MP_EV_STATUS, (uint8_t)ts, st, 0, 0);
+}
+
 /* side uses its move in slot s */
 static int act(MpWorld *w, MpBattle *b, int side, int s, MpLog *log){
     MonGame *g = w->g;
-    MpCreature *me = side ? &b->wild : &w->party[b->active];
-    MpCreature *foe = side ? &w->party[b->active] : &b->wild;
+    MpCreature *me = side_mon(w, b, side);
+    MpCreature *foe = side_mon(w, b, !side);
     MgMove m;
     if(!me->hp) return 0;
+    const MgStatus *mst = mp_status(g, me);
+    /* what it holds may keep it from moving, or choose for it */
+    if(mst && mst->kind == MG_S_ASLEEP){
+        b->land[side] = 0; b->gone[side] = 0;
+        if(me->sturn < 255) me->sturn++;
+        say(log, MP_EV_ASLEEP, (uint8_t)side, me->status - 1u, 0, 0);
+        if(me->sturn > 1 && (mp_below(&w->rng, 100) >= mst->chance || (mst->duration && me->sturn >= mst->duration)))
+            end_status(me, side, log);
+        return 0;
+    }
+    int landing = b->land[side] != 0;
+    if(landing){ s = b->land[side] - 1; b->land[side] = 0; b->gone[side] = 0; }
+    else if(mst && mst->kind == MG_S_FLINCH && mp_below(&w->rng, 100) >= mst->chance){
+        say(log, MP_EV_FLINCH, (uint8_t)side, me->status - 1u, 0, 0);
+        end_status(me, side, log);
+        return 0;
+    }
+    else if(mst && mst->kind == MG_S_CONFUSED && mp_below(&w->rng, 100) < mst->chance){
+        int usable[MP_MOVES], n = 0;
+        for(int k = 0; k < MP_MOVES; k++) if(me->moves[k] != MP_NO_MOVE && !b->recharge[side][k]) usable[n++] = k;
+        if(n){ s = usable[mp_below(&w->rng, (uint32_t)n)]; say(log, MP_EV_CONFUSED, (uint8_t)side, me->status - 1u, 0, 0); }
+    }
     if(s < 0){ say(log, MP_EV_RECHARGE, (uint8_t)side, 0, 0, 0); return 0; }
     int r = mg_move(g, me->moves[s], &m);
     if(r) return werr(w, r, "%s", g->err);
+    uint8_t held = me->status;
     say(log, MP_EV_USE, (uint8_t)side, me->moves[s], 0, 0);
-    b->recharge[side][s] = (uint8_t)(m.recharge + 1);     /* this turn's end takes one off */
-    if(mp_below(&w->rng, 10000) >= m.accuracy * 100u){ say(log, MP_EV_MISS, (uint8_t)side, 0, 0, 0); return 0; }
+    if(!landing) b->recharge[side][s] = (uint8_t)(m.recharge + 1);     /* this turn's end takes one off */
+    mp_view_move(g, me, &m);
+    int splash = 0, damage = 0, hit = 1;
     for(int e = 0; e < 3; e++){
-        if(!foe->hp && m.eff_target[e] == MG_T_ENEMY) break;
-        switch(m.eff_kind[e]){
-        case MG_E_DAMAGE: {
+        if(m.eff_kind[e] == MG_E_SPLASH) splash = m.eff_status[e];
+        if(m.eff_kind[e] == MG_E_DAMAGE) damage = 1;
+    }
+    if(b->gone[!side]){ say(log, MP_EV_OUT_OF_REACH, (uint8_t)side, 0, 0, 0); goto used; }
+    if(!landing && mp_below(&w->rng, 10000) >= m.accuracy * 100u){
+        if(!splash){ say(log, MP_EV_MISS, (uint8_t)side, 0, 0, 0); goto used; }
+        hit = 0;        /* a splash still lands, divided */
+    }
+    MpCreature va, vf;
+    for(int e = 0; e < 3; e++){
+        uint8_t k = m.eff_kind[e], v = m.eff_status[e], tg = m.eff_target[e];
+        if(!foe->hp && tg == MG_T_ENEMY && k != MG_E_DISAPPEAR) break;
+        if(!hit && k != MG_E_SPLASH && k != MG_E_DAMAGE) continue;
+        mp_view(g, b, side, me, &va);
+        mp_view(g, b, !side, foe, &vf);
+        switch(k){
+        case MG_E_SPLASH:
+            if(damage) break;           /* with a damage effect too, a splash only softens a miss */
+            /* fall through */
+        case MG_E_DAMAGE:
+        case MG_E_DISAPPEAR: {
+            if(k == MG_E_DISAPPEAR && !landing){
+                b->gone[side] = 1; b->land[side] = (uint8_t)(s + 1);
+                say(log, MP_EV_VANISH, (uint8_t)side, 0, 0, 0);
+                goto used;
+            }
             if(m.range == MG_SPECIAL) break;
-            uint32_t mult, d = mp_damage(g, me, &m, foe, &mult);
-            if(d > foe->hp) d = foe->hp;
-            foe->hp = (uint16_t)(foe->hp - d);
-            say(log, MP_EV_DAMAGE, (uint8_t)!side, mult, 0, d);
-            if(!foe->hp) say(log, MP_EV_FAINT, (uint8_t)!side, 0, 0, 0);
+            uint32_t mult, d = mp_damage(g, &va, &m, &vf, &mult);
+            if(!hit && splash) d /= (uint32_t)splash;
+            d = harm(w, foe, !side, d, mult, MP_EV_DAMAGE, 0, log);
+            struck(w, me, side, foe, &m, d, log);
+            break;
+        }
+        case MG_E_MULTI: {
+            uint32_t hits = 0;
+            for(uint32_t i = 0; i < v && foe->hp && me->hp; i++){
+                if(i && mp_below(&w->rng, 10000) >= m.accuracy * 100u) break;
+                mp_view(g, b, !side, foe, &vf);
+                uint32_t mult, d = mp_damage(g, &va, &m, &vf, &mult);
+                d = harm(w, foe, !side, d, mult, MP_EV_DAMAGE, 0, log);
+                struck(w, me, side, foe, &m, d, log);
+                hits++;
+            }
+            say(log, MP_EV_HITS, (uint8_t)side, hits, 0, 0);
             break;
         }
         case MG_E_HEALING: {
-            MpCreature *t = m.eff_target[e] == MG_T_OWN ? me : foe;
-            int ts = m.eff_target[e] == MG_T_OWN ? side : !side;
-            uint32_t h = 7 + (uint32_t)me->level * m.heal / 100;
-            if(h > (uint32_t)t->stat[MG_HP] - t->hp) h = (uint32_t)t->stat[MG_HP] - t->hp;
-            t->hp = (uint16_t)(t->hp + h);
-            say(log, MP_EV_HEAL, (uint8_t)ts, 0, 0, h);
+            MpCreature *t = tg == MG_T_OWN ? me : foe;
+            heal(w, t, tg == MG_T_OWN ? side : !side, 7 + (uint32_t)me->level * m.heal / 100, log);
             break;
         }
-        case MG_E_GIVE: {
-            MpCreature *t = m.eff_target[e] == MG_T_OWN ? me : foe;
-            int ts = m.eff_target[e] == MG_T_OWN ? side : !side;
-            uint8_t st = m.eff_status[e];
-            if(mp_below(&w->rng, 10000) >= m.potency * 100u || !t->hp) break;
-            if(immune(g, t, st)){ say(log, MP_EV_IMMUNE, (uint8_t)ts, st, 0, 0); break; }
-            t->status = (uint8_t)(st + 1);
-            say(log, MP_EV_STATUS, (uint8_t)ts, st, 0, 0);
+        case MG_E_GIVE:
+        case MG_E_REMOVE:
+        case MG_E_STAGE: {
+            if(mp_below(&w->rng, 10000) >= m.potency * 100u) break;
+            for(int t = 0; t < 2; t++){
+                if(!(tg == MG_T_BOTH || tg == (t ? MG_T_OWN : MG_T_ENEMY))) continue;
+                int ts = t ? side : !side;
+                MpCreature *c = t ? me : foe;
+                if(!c->hp) continue;
+                if(k == MG_E_GIVE) give(w, b, c, ts, v, log);
+                else if(k == MG_E_REMOVE){
+                    const MgStatus *cs = mp_status(g, c);
+                    int neg = cs && (cs->flags & MG_SF_NEGATIVE);
+                    if(cs && (v == 3 || (v == 1 && !neg) || (v == 2 && neg))){
+                        say(log, MP_EV_REMOVED, (uint8_t)ts, c->status - 1u, 0, 0);
+                        c->status = 0; c->sturn = 0;
+                    }
+                }
+                else{
+                    int sg = b->stage[ts][v] + m.eff_arg[e];
+                    if(sg < -6) sg = -6;
+                    if(sg > 6) sg = 6;
+                    b->stage[ts][v] = (int8_t)sg;
+                    say(log, MP_EV_STAGE, (uint8_t)ts, v, (uint16_t)(int16_t)m.eff_arg[e], (uint32_t)(sg + 6));
+                }
+            }
             break;
         }
-        default:
+        case MG_E_SWITCH:
+            for(int t = 0; t < 2; t++){
+                if(!(tg == MG_T_BOTH || tg == (t ? MG_T_OWN : MG_T_ENEMY))) continue;
+                MpCreature *c = t ? me : foe;
+                MgMon cm;
+                if(!c->hp || mg_mon(g, c->mon, &cm)) continue;
+                int already = c->xtype ? c->xtype - 1 == v : (cm.type[0] == v || cm.type[1] == v);
+                if(!already) c->xtype = (uint8_t)(v + 1);
+                say(log, MP_EV_TYPE, (uint8_t)(t ? side : !side), v, (uint16_t)already, 0);
+            }
+            break;
+        case MG_E_PROP_DAMAGE: {
+            uint32_t n = (uint32_t)foe->stat[MG_HP] * v / 100;      /* of the target's whole HP */
+            for(int t = 0; t < 2; t++){
+                if(!(tg == MG_T_BOTH || tg == (t ? MG_T_OWN : MG_T_ENEMY))) continue;
+                MpCreature *c = t ? me : foe;
+                if(c->hp) harm(w, c, t ? side : !side, n, 100, MP_EV_DAMAGE, 0, log);
+            }
             break;
         }
+        case MG_E_PROP_HEAL: {
+            uint32_t n = (uint32_t)me->stat[MG_HP] * v / 100;       /* of the user's */
+            for(int t = 0; t < 2; t++){
+                if(!(tg == MG_T_BOTH || tg == (t ? MG_T_OWN : MG_T_ENEMY))) continue;
+                heal(w, t ? me : foe, t ? side : !side, n, log);
+            }
+            break;
+        }
+        default:            /* appear: the damage after it does the work */
+            break;
+        }
+    }
+used:
+    /* a status that lasts until its holder's next move (exhausted, charged up,
+     * charging) ends now, perhaps becoming the next */
+    mst = mp_status(g, me);
+    if(me->hp && held && me->status == held && mst && (mst->flags & MG_SF_ON_USE)){
+        uint8_t then = mst->then;
+        end_status(me, side, log);
+        if(then) give(w, b, me, side, (uint8_t)(then - 1), log);
     }
     return 0;
 }
 
 /* a status's effect at the end of a turn */
-static void status_tick(MpWorld *w, MpCreature *c, int side, MpLog *log){
-    if(!c->hp || !c->status || c->status > w->g->n_statuses) return;
-    const MgStatus *st = &w->g->statuses[c->status - 1];
+static void status_tick(MpWorld *w, MpBattle *b, MpCreature *c, int side, MpLog *log){
+    const MgStatus *st = mp_status(w->g, c);
+    if(!c->hp || !st) return;
     uint32_t amount = c->stat[MG_HP] / st->divisor;
-    if(st->kind == MG_S_RECOVER){
+    switch(st->kind){
+    case MG_S_RECOVER:
         if(amount > (uint32_t)c->stat[MG_HP] - c->hp) amount = (uint32_t)c->stat[MG_HP] - c->hp;
         c->hp = (uint16_t)(c->hp + amount);
         say(log, MP_EV_STATUS_HEAL, (uint8_t)side, c->status - 1u, 0, amount);
@@ -689,11 +899,48 @@ static void status_tick(MpWorld *w, MpCreature *c, int side, MpLog *log){
             c->status = 0;
         }
         return;
+    case MG_S_POISON:
+    case MG_S_BURN:
+        if(amount > c->hp) amount = c->hp;
+        c->hp = (uint16_t)(c->hp - amount);
+        say(log, MP_EV_STATUS_HURT, (uint8_t)side, c->status - 1u, 0, amount);
+        if(!c->hp) say(log, MP_EV_FAINT, (uint8_t)side, 0, 0, 0);
+        return;
+    case MG_S_WASTING:
+        if(c->sturn < 255) c->sturn++;
+        harm(w, c, side, amount * c->sturn, 0, MP_EV_STATUS_HURT, c->status - 1u, log);
+        return;
+    case MG_S_LEECH: {
+        MpCreature *o = side_mon(w, b, !side);
+        if(!o->hp){ end_status(c, side, log); return; }
+        uint8_t st_pos = (uint8_t)(c->status - 1u);
+        if(amount > c->hp) amount = c->hp;
+        c->hp = (uint16_t)(c->hp - amount);
+        say(log, MP_EV_DRAIN, (uint8_t)side, st_pos, 0, amount);
+        if(!c->hp) say(log, MP_EV_FAINT, (uint8_t)side, 0, 0, 0);
+        if(amount > (uint32_t)o->stat[MG_HP] - o->hp) amount = (uint32_t)o->stat[MG_HP] - o->hp;
+        o->hp = (uint16_t)(o->hp + amount);
+        return;
     }
-    if(amount > c->hp) amount = c->hp;
-    c->hp = (uint16_t)(c->hp - amount);
-    say(log, MP_EV_STATUS_HURT, (uint8_t)side, c->status - 1u, 0, amount);
-    if(!c->hp) say(log, MP_EV_FAINT, (uint8_t)side, 0, 0, 0);
+    default:
+        return;
+    }
+}
+
+/* side's creature is about to change (a swap, the keeper's next): what was
+ * the battle's alone goes, and a linked status on either creature ends */
+static void side_leaves(MpWorld *w, MpBattle *b, int side, int swapped, MpLog *log){
+    MonGame *g = w->g;
+    MpCreature *out = side_mon(w, b, side), *other = side_mon(w, b, !side);
+    const MgStatus *st = mp_status(g, out);
+    if(swapped && st && st->kind == MG_S_SWAPHURT && out->hp)
+        harm(w, out, side, out->stat[MG_HP] / st->divisor, 0, MP_EV_STATUS_HURT, out->status - 1u, log);
+    st = mp_status(g, out);
+    if(st && (st->flags & MG_SF_LINKED)){ out->status = 0; out->sturn = 0; }
+    st = mp_status(g, other);
+    if(st && (st->flags & MG_SF_LINKED) && other->hp) end_status(other, !side, log);
+    memset(b->stage[side], 0, sizeof b->stage[side]);
+    b->gone[side] = 0; b->land[side] = 0;
 }
 
 /* level-ups, new moves and evolution for party member i */
@@ -738,6 +985,7 @@ static void battle_end(MpWorld *w, MpBattle *b){
     for(int i = 0; i < w->n_party; i++){
         MpCreature *c = &w->party[i];
         if(c->status && c->status <= w->g->n_statuses && !(w->g->statuses[c->status - 1].flags & 2)) c->status = 0;
+        c->sturn = 0; c->xtype = 0;
     }
     b->over = 1;
 }
@@ -771,6 +1019,7 @@ static int resolve(MpWorld *w, MpBattle *b, MpLog *log){
         }
         if(b->trainer && b->next < b->n_team){
             /* the trainer's next creature; those who fight it share its experience */
+            side_leaves(w, b, 1, 0, log);
             b->wild = b->team[b->next++];
             memset(b->recharge[1], 0, sizeof b->recharge[1]);
             mp_mark_mon(w, b->wild.mon, 0);
@@ -823,6 +1072,11 @@ static int catch_it(MpWorld *w, MpBattle *b, MpLog *log, int *caught){
     }
     uint32_t room = g->rules[7] < MP_PARTY ? g->rules[7] : MP_PARTY;
     mp_mark_mon(w, b->wild.mon, 1);
+    {
+        const MgStatus *st = mp_status(g, &b->wild);
+        if(st && !(st->flags & MG_SF_PERSISTS)) b->wild.status = 0;
+        b->wild.sturn = 0; b->wild.xtype = 0;
+    }
     if(w->n_party < room){
         w->party[w->n_party] = b->wild;
         say(log, MP_EV_CAUGHT, 1, w->n_party, 0, 0);
@@ -870,6 +1124,7 @@ int mp_turn(MpWorld *w, MpBattle *b, int act_kind, int arg, MpLog *log){
     }
 
     if(act_kind == MP_ACT_SWAP){
+        side_leaves(w, b, 0, !b->need_swap, log);
         b->active = (uint8_t)arg;
         b->fought |= (uint8_t)(1u << arg);
         say(log, MP_EV_SWAP, 0, (uint32_t)arg, 0, 0);
@@ -877,6 +1132,11 @@ int mp_turn(MpWorld *w, MpBattle *b, int act_kind, int arg, MpLog *log){
     }
     if(act_kind == MP_ACT_ITEM) use_item(w, (uint16_t)(arg & 0xFF), arg >> 8, log);
     int foe_slot = mp_wild_choice(w, b);
+    if(b->foe_set){
+        b->foe_set = 0;
+        if(b->foe_slot < MP_MOVES && b->wild.moves[b->foe_slot] != MP_NO_MOVE && !b->recharge[1][b->foe_slot])
+            foe_slot = b->foe_slot;
+    }
     if(act_kind == MP_ACT_RUN){
         int32_t chance = 40 + 15 * ((int32_t)b->run_tries + me->level - b->wild.level);
         if((int32_t)mp_below(&w->rng, 100) < chance){
@@ -900,7 +1160,10 @@ int mp_turn(MpWorld *w, MpBattle *b, int act_kind, int arg, MpLog *log){
         if(arg >= 0 && foe_slot >= 0){
             if((r = mg_move(g, me->moves[arg], &pm)) || (r = mg_move(g, b->wild.moves[foe_slot], &fm)))
                 return werr(w, r, "%s", g->err);
-            uint32_t sp = mp_speed_score(me, &pm), sf = mp_speed_score(&b->wild, &fm);
+            MpCreature vm, vw;
+            mp_view(g, b, 0, me, &vm);
+            mp_view(g, b, 1, &b->wild, &vw);
+            uint32_t sp = mp_speed_score(&vm, &pm), sf = mp_speed_score(&vw, &fm);
             player_first = sp > sf || (sp == sf && !mp_below(&w->rng, 2));
         }
         if(player_first){
@@ -910,8 +1173,8 @@ int mp_turn(MpWorld *w, MpBattle *b, int act_kind, int arg, MpLog *log){
     }
     else if((r = act(w, b, 1, foe_slot, log))) return r;
 
-    status_tick(w, &w->party[b->active], 0, log);
-    status_tick(w, &b->wild, 1, log);
+    status_tick(w, b, &w->party[b->active], 0, log);
+    status_tick(w, b, &b->wild, 1, log);
     for(int s = 0; s < 2; s++)
         for(int k = 0; k < MP_MOVES; k++) if(b->recharge[s][k]) b->recharge[s][k]--;
     return resolve(w, b, log);

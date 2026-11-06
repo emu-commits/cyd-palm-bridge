@@ -1925,6 +1925,9 @@ t 1500
 u
 t 600
 s critters_battle
+W 1 2 0
+s critters_badges
+W -1 -1 0
 c 204 246
 t 300
 s critters_battle_menu

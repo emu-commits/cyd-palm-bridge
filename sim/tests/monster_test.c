@@ -108,8 +108,17 @@ static int dump(const char *path){
     for(uint32_t i = 0; i < g.n_statuses; i++){
         MgStatus *st = &g.statuses[i];
         text(&g, st->name, t);
-        printf("status %u %s kind %u divisor %u flags %u immune 0x%04x\n", (unsigned)st->id, t, st->kind,
+        printf("status %u %s kind %u divisor %u flags %u immune 0x%04x", (unsigned)st->id, t, st->kind,
                st->divisor, st->flags, st->immune);
+        if(st->chance || st->duration || st->ranges) printf(" chance %u duration %u ranges %u", st->chance, st->duration, st->ranges);
+        if(g.has_sicons){
+            uint16_t pal[4];
+            uint8_t px[MG_SICON_BYTES];
+            mg_status_icon(&g, i, pal, px);
+            printf(" mult %u,%u,%u,%u,%u then %u icon %04x%04x%04x %08x", st->mult[0], st->mult[1], st->mult[2], st->mult[3],
+                   st->mult[4], st->then, pal[1], pal[2], pal[3], (unsigned)mg_crc32(0, px, MG_SICON_BYTES));
+        }
+        printf("\n");
     }
     for(uint32_t i = 0; i < g.n_moves; i++){
         MgMove m;
@@ -122,6 +131,7 @@ static int dump(const char *path){
         for(int e = 0; e < 3; e++){
             if(!m.eff_kind[e]) continue;
             printf("%s%u/%u/%u", sep, m.eff_kind[e], m.eff_status[e], m.eff_target[e]);
+            if(m.eff_arg[e]) printf("/%d", m.eff_arg[e]);
             sep = " ";
         }
         int any = m.eff_kind[0] || m.eff_kind[1] || m.eff_kind[2];

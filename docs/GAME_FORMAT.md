@@ -190,6 +190,56 @@ The divisors, immunities and persistence come from Tuxemon's status files
 (`STAT`). Tuxemon also lowers HP on the overworld every 10 steps while
 poisoned (`step_interval`); the first version doesn't.
 
+**The move effects (2.3, `EFFECTS_PLAN.md`).** A build plays only the effects
+on `game_region.json`'s `"effects"` list (and damage, healing, poison, burn and
+recover, which 2.2 played); a move needing any other is left out. Each rule is
+Tuxemon's (`tuxemon/core/effects/<name>.py`), in integers, for a battle of one
+against one: `own_team` is the creature itself, `enemy_team` its foe, and
+`own_team:enemy_team` both (`"teams"` on the list).
+
+| Status kind | Rule |
+|---|---|
+| 4, stats | its stats × the multipliers in `STEX`, while held: exhausted (melee, ranged × 0.5), blinded (speed, dodge × 0.5), enraged (melee × 2, ranged × 0.5), hardshell (armour × 1.5), sniping (melee × 0.5, ranged × 2), slow, softened, focused, chargedup (all × 2) |
+| 5, asleep | skips its move; from its second turn asleep it wakes at 100 − `chance` % a turn, and always after `duration` (noddingoff: 50 %, 5) |
+| 6, weaken | its moves of `ranges` have power and potency ÷ divisor (stuck: melee and touch; grabbed: ranged and reach) |
+| 7, flinch | at 100 − `chance` % it loses its next move, and the status ends |
+| 8, confused | at `chance` % it uses one of its usable moves at random |
+| 9, swap hurt | swapped out, it loses max HP / divisor (harpooned, spiky) |
+| 10, festering | it can't be healed (moves, its side's prop healing) |
+| 11, leech | at a turn's end it loses max HP / divisor and the other side gains it; linked |
+| 12, wasting | at a turn's end it loses max HP / divisor × the turns it has had it |
+| 13, thorns | a foe hitting it with a move of `ranges` loses the holder's max HP / divisor (elementalshield: special; prickly: touch and melee) |
+| 14, diehard | a blow that would faint it leaves 1 HP, and it ends |
+| 15, revenge | a foe's blow (not special) costs the foe as much, and the holder gains it |
+| 16, retaliate | as revenge, without the gain |
+
+A status flagged **on use** (exhausted, chargedup, charging) ends when its
+holder next uses a move, after that move, and becomes `then` if it names one
+(charging, then chargedup, then exhausted). A **linked** status (lifeleech,
+grabbed) ends when either creature leaves the battle. Only poison and burn
+outlast a battle; every other status, a creature's steps and a switched type end
+with it.
+
+| Move effect | Rule |
+|---|---|
+| 4, remove | at its potency, takes away the target's status if it's positive (1), negative (2) or any (3) |
+| 5, splash | damage; a miss still lands, ÷ the divisor. With a damage effect in the same move, only the miss rule (no second blow). Played as plain damage in one against one (the owner's decision 3) |
+| 6, multiattack | up to n hits, each drawn on its own after the first; a miss ends it |
+| 7, appear | the damage after it does the work (nothing here is ever out of reach when it's used) |
+| 8, disappear | the user goes out of reach (the foe's move can't reach it) and the move lands next turn as damage. Tuxemon lands a separate technique (`strike`); here the same move lands |
+| 9, statchange | at its potency, the stat's steps move by the fourth byte, −6 .. 6; a step stage multiplies by Tuxemon's table (2/8 .. 1 .. 8/2); a creature's steps go when it leaves |
+| 10, switch | the target's type becomes the one named, for the battle |
+| 11, prop damage | the targets lose the given percentage of the **foe's** max HP (Tuxemon's `reference_hp`) |
+| 12, prop healing | the targets gain the percentage of the **user's** max HP |
+
+**Left out on purpose (E6).** `charmed` (needs a second creature on a side),
+`lockdown` (locks items, which nothing here limits), `feedback` (Tuxemon's own
+is unfinished), `lifegift` and `wild` (no technique gives them), `plague` (an
+infection carried between battles), and the effects `swap`, `run`, `forfeit`,
+`money`, `scope`, `transfer`, `life_swap`, `life_share`, `photogenesis`,
+`foresight` and `cooldown_modifier` (our recharge works differently). None of
+our critters' moves needs any of them.
+
 **Order of a turn.** The faster move goes first:
 
     speed_score = floor(max(1, speed × (1 + move_speed × 0.25)) + dodge × 0.01)
@@ -352,12 +402,13 @@ hunter, landrace, leviathan, piscine, polliwog, serpent, sprite, varmint).
 | Offset | Size | Field |
 |---|---|---|
 | 0 | 4 | Id (`game_ids.tsv`) |
-| 4 | 1 | Kind: 1 poison (loses HP), 2 burn (loses HP), 3 recover (gains HP) |
+| 4 | 1 | Kind: 1 poison (loses HP), 2 burn (loses HP), 3 recover (gains HP); 2.3 adds 4-16 (§2) |
 | 5 | 1 | Divisor: the HP change each turn is max HP / divisor |
-| 6 | 1 | Flags: bit 0 negative, bit 1 persists after a battle |
-| 7 | 1 | 0 |
+| 6 | 1 | Flags: bit 0 negative, bit 1 persists after a battle, bit 2 linked to the side that gave it, bit 3 ends when its holder uses a move (2.3) |
+| 7 | 1 | Chance, percent (2.3: asleep, flinch, confused; 0 otherwise) |
 | 8 | 2 | Immune types: bit *t* set means type *t* is immune |
-| 10 | 2 | 0 |
+| 10 | 1 | Duration, turns (2.3; 0 none) |
+| 11 | 1 | Ranges: bit *r* set for range *r* (2.3: weaken, thorns) |
 | 12 | 8 | Name |
 | 20 | 4 | 0 |
 
@@ -376,7 +427,7 @@ hunter, landrace, leviathan, piscine, polliwog, serpent, sprite, varmint).
 | 12 | 1 | Recharge, turns |
 | 13 | 1 | Targets: bit 0 the enemy, bit 1 itself |
 | 14 | 2 | Healing power, hundredths |
-| 16 | 12 | Three effects of 4 B, in order (kind 0 = none): u8 kind (1 damage, 2 healing, 3 give status), u8 status (its position in `STAT`, for give), u8 target (0 the enemy, 1 itself), u8 0 |
+| 16 | 12 | Three effects of 4 B, in order (kind 0 = none): u8 kind (1 damage, 2 healing, 3 give status; 2.3: 4 remove, 5 splash, 6 multiattack, 7 appear, 8 disappear, 9 statchange, 10 switch, 11 prop damage, 12 prop healing), u8 its value (give: the status's position in `STAT`; remove: 1 positive, 2 negative, 3 any; splash: the divisor on a miss; multiattack: the hits; statchange: the stat, 0 armour .. 4 speed; switch: the type; prop damage and healing: percent), u8 target (0 the enemy, 1 itself, 2 both), i8 statchange's steps (0 for the rest) |
 | 28 | 4 | 0 |
 | 32 | 8 | Name |
 
@@ -639,6 +690,22 @@ first menu frame of the creature's sheet, at (0, 64), with its own palette. The
 section's CRC is checked by `mg_verify()`, not on open or per record: a damaged
 icon can only be the wrong colours. The Dex's list and the game's party screens
 use them.
+
+### 3.19 `STEX`: the statuses' multipliers and badges (2.3)
+
+u16 statuses (the same as `STAT`'s), u16 0, then 40 B a status, in `STAT`'s
+order. A file without it (2.2) has every multiplier 10 and no badges.
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 5 | Multipliers, tenths (10 unchanged; 1-40): armour, dodge, melee, ranged, speed |
+| 5 | 1 | The status it becomes after an on-use end: position in `STAT` + 1 (0 none) |
+| 6 | 2 | 0 |
+| 8 | 8 | The badge's four colours, RGB565; the first (clear) is 0 |
+| 16 | 21 | The badge, 9 × 9, 2 bits a pixel, row by row, low bits first |
+| 37 | 3 | 0 |
+
+The badges are ours, CC0 (`tools/gen_status_icons.py`).
 
 ## 4) Colour: 8 bits for maps, 4 for creatures
 

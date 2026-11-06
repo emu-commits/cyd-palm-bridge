@@ -38,7 +38,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mkcourse import fold, latin_fallback  # noqa: E402  (one set of text rules)
 
-FORMAT_MAJOR, FORMAT_MINOR = 2, 2      # 2.0: the player's looks once, in LOOK; 2.1 items, money and shops; 2.2 the Dex
+FORMAT_MAJOR, FORMAT_MINOR = 2, 3      # 2.0: the player's looks once, in LOOK; 2.1 items, money and shops; 2.2 the Dex;
+                                       # 2.3 the move effects (EFFECTS_PLAN.md): STAT's kinds 4-16, STEX, MOVE's kinds 4-12
 MAGIC = b"CYDG"
 
 TUXEMON_URL = "https://github.com/Tuxemon/Tuxemon.git"
@@ -66,10 +67,10 @@ I_HEAL, I_HEAL_PCT, I_CURE, I_REVIVE = 1, 2, 4, 8
 MAX_ITEMS = 9
 
 SECTIONS = [b"META", b"TYPE", b"SHAP", b"STAT", b"MOVE", b"MONS", b"LRNS",
-            b"ENCT", b"AREA", b"ADAT", b"SPRT", b"TEXT", b"CRED", b"LOOK", b"ITEM", b"DEXE", b"ICON"]
+            b"ENCT", b"AREA", b"ADAT", b"SPRT", b"TEXT", b"CRED", b"LOOK", b"ITEM", b"DEXE", b"ICON", b"STEX"]
 CRC_ON_OPEN = {b"META", b"TYPE", b"SHAP", b"STAT", b"MOVE", b"MONS", b"LRNS",
-               b"ENCT", b"AREA", b"TEXT", b"ITEM", b"DEXE"}
-OPTIONAL_SECTIONS = {b"ITEM", b"DEXE", b"ICON"}      # 2.1's and 2.2's: an older file has none of them
+               b"ENCT", b"AREA", b"TEXT", b"ITEM", b"DEXE", b"STEX"}
+OPTIONAL_SECTIONS = {b"ITEM", b"DEXE", b"ICON", b"STEX"}      # 2.1's, 2.2's and 2.3's: an older file has none of them
 ICON_SIZE = 24                # the list icons: the sheet's first menu frame, at (0, 64)
 ICON_REC = 32 + ICON_SIZE * ICON_SIZE // 2           # its 16 colours, then 4 bits a pixel
 MAX_CREATURE_ID = 255         # the save's seen and caught sets hold 256 bits (GAME_FORMAT.md 5)
@@ -90,12 +91,34 @@ DIR_DELTA = [(0, -1), (1, 0), (0, 1), (-1, 0)]
 
 # effects (GAME_FORMAT.md 3.5)
 E_DAMAGE, E_HEALING, E_GIVE = 1, 2, 3
+# 2.3 (docs/EFFECTS_PLAN.md): the effects that aren't "give", as MOVE's kinds 4-12
+E_REMOVE, E_SPLASH, E_MULTI, E_APPEAR, E_DISAPPEAR, E_STAGE, E_SWITCH, E_PROP_DAMAGE, E_PROP_HEAL = range(4, 13)
+MOVE_EFFECTS = {"remove": E_REMOVE, "splash": E_SPLASH, "multiattack": E_MULTI, "appear": E_APPEAR,
+                "disappear": E_DISAPPEAR, "statchange": E_STAGE, "switch": E_SWITCH,
+                "prop_damage": E_PROP_DAMAGE, "prop_healing": E_PROP_HEAL}
+BASE_EFFECTS = {"damage", "healing", "poison", "burn", "recover"}     # what 2.2 played: always on
+# also on the list: "teams", a status given to a team or to both sides (in one against one,
+# own_team is itself and enemy_team the foe; own_team:enemy_team gives it to both)
 # the move fields region["move_edits"] may overwrite (the rest are Tuxemon's)
 MOVE_EDIT_FIELDS = {"recharge", "accuracy", "healing_power", "power", "potency"}
-T_ENEMY, T_OWN = 0, 1
-# statuses the first version plays (GAME_PLAN.md section 6)
-STATUS_KINDS = {"poison": 1, "burn": 2, "recover": 3}
-STATUS_EFFECT = {"poisoned": 1, "burnt": 2, "recover": 3}
+T_ENEMY, T_OWN, T_BOTH = 0, 1, 2
+# a status's kind (GAME_FORMAT.md 3.5) from its Tuxemon effect; "statchange" alone
+# (and exhausted, chargedup, charging, which only end it on use) is kind 4
+STATUS_EFFECT = {"poisoned": 1, "burnt": 2, "recover": 3, "noddingoff": 5, "stuck": 6, "grabbed": 6,
+                 "flinching": 7, "confused": 8, "harpooned": 9, "spiky": 9, "festering": 10, "lifeleech": 11,
+                 "wasting": 12, "elemental_shield": 13, "prickly": 13, "diehard": 14, "revenge": 15,
+                 "retaliate": 16}
+STATS_ONLY = {"statchange", "exhausted", "chargedup", "charging"}
+ON_USE = {"exhausted", "chargedup", "charging"}       # Tuxemon clears these at PERFORM_TECH
+X_STATS = ["armour", "dodge", "melee", "ranged", "speed"]
+SF_NEGATIVE, SF_PERSISTS, SF_LINKED, SF_ON_USE = 1, 2, 4, 8
+# left out on purpose (EFFECTS_PLAN.md E6), each with why (GAME_FORMAT.md 2)
+LEFT_OUT = {"charmed": "needs a second creature on the same side to turn on",
+            "lockdown": "locks items, which a battle here never limits",
+            "feedback": "Tuxemon's own is unfinished (a parameter it never reads)",
+            "lifegift": "no technique gives it", "wild": "a wild-only status no technique gives",
+            "plague": "an infection carried between battles, a system this game doesn't have",
+            "faint": "not a status here: 0 HP is fainted", "eliminated": "not a status here"}
 
 
 class GameError(Exception):
@@ -330,8 +353,13 @@ class Rules:
         self.shapes = sorted(y(db / "shape" / "shapes.yaml"), key=lambda s: s["slug"])
         self.shape_ix = {s["slug"]: i for i, s in enumerate(self.shapes)}
 
+        # the effects a build may use (region["effects"]; EFFECTS_PLAN.md 2.1): a move
+        # is kept only if each of its effects (a status it gives, or the effect's own
+        # type) is on the list or was played before 2.3
+        self.enabled = set(region.get("effects") or []) | BASE_EFFECTS
+        self.status_db = db / "status"
         self.statuses = {}
-        for slug in STATUS_KINDS:
+        for slug in ("poison", "burn", "recover"):
             self.statuses[slug] = y(db / "status" / f"{slug}.yaml")
 
         self.mons = {}
@@ -365,6 +393,18 @@ class Rules:
                 else:
                     self.techs[t] = d
         self.unsupported = unsupported
+        # the statuses kept moves give, and the ones those turn into (charging, then
+        # charged up, then exhausted)
+        todo = [p[0] for d in self.techs.values() for e in d["effects"] if e["type"] == "give"
+                for p in [e.get("parameters") or []]]
+        while todo:
+            st = todo.pop()
+            if st in self.statuses:
+                continue
+            self.statuses[st] = y(db / "status" / f"{st}.yaml")
+            then = self.statuses[st].get("on_tech_use")
+            if then and then != "empty" and then not in self.statuses:
+                todo.append(then)
         # Our balance edits to Tuxemon's moves (region["move_edits"]): a field
         # overwritten on the move's YAML. Only fields the game format keeps.
         for t, fields in (region.get("move_edits") or {}).items():
@@ -406,19 +446,65 @@ class Rules:
             fail(f"{what}: multiplier {x} isn't a multiple of 0.25")
         return int(q)
 
+    @staticmethod
+    def target(objectives):
+        """An effect's objectives (enemy_monster, own_team:enemy_team, ...) in a
+        battle of one against one: the enemy, itself, or both."""
+        sides = set()
+        for o in str(objectives).split(":"):
+            if o in ("enemy_monster", "enemy_team"):
+                sides.add(T_ENEMY)
+            elif o in ("own_monster", "own_team"):
+                sides.add(T_OWN)
+            else:
+                return None
+        return T_BOTH if len(sides) == 2 else sides.pop() if sides else None
+
+    def status_kind(self, slug, d=None):
+        """The kind a Tuxemon status plays as, or None if this game can't play it."""
+        if slug in LEFT_OUT:
+            return None
+        p = self.status_db / f"{slug}.yaml"
+        if d is None:
+            if not p.exists():
+                return None
+            d = need_yaml().safe_load(open(p, encoding="utf-8"))
+        types = [e["type"] for e in d.get("effects") or []]
+        kinds = {STATUS_EFFECT[t] for t in types if t in STATUS_EFFECT}
+        if any(t not in STATUS_EFFECT and t not in STATS_ONLY for t in types) or len(kinds) > 1:
+            return None
+        return kinds.pop() if kinds else 4
+
     def _unsupported(self, d):
         if d.get("range") not in RANGES:
             return f"range {d.get('range')}"
         for e in d.get("effects", []):
             t = e["type"]
-            p = e.get("parameters") or []
+            p = [str(x) for x in e.get("parameters") or []]
+            why = f"effect {t} {' '.join(p)}".strip()
             if t == "damage" and not p:
                 continue
             if t == "healing" and p in ([], ["own_monster"], ["enemy_monster"]):
                 continue
-            if t == "give" and len(p) == 2 and p[0] in STATUS_KINDS and p[1] in ("own_monster", "enemy_monster"):
+            if t == "give" and len(p) == 2 and self.target(p[1]) is not None and self.status_kind(p[0]):
+                if p[0] not in self.enabled or (p[1] not in ("own_monster", "enemy_monster") and "teams" not in self.enabled):
+                    return why + " (not on the effects list)"
                 continue
-            return f"effect {t} {' '.join(map(str, p))}".strip()
+            if t in MOVE_EFFECTS:
+                ok = {"remove": lambda: len(p) == 2 and p[0] in ("positive", "negative", "all") and self.target(p[1]) is not None,
+                      "splash": lambda: len(p) == 1 and p[0].isdigit() and 1 <= int(p[0]) <= 8,
+                      "multiattack": lambda: len(p) == 1 and p[0].isdigit() and 1 <= int(p[0]) <= 8,
+                      "appear": lambda: not p, "disappear": lambda: len(p) == 1,
+                      "statchange": lambda: len(p) == 1 and self.target(p[0]) is not None and len(d.get("stat_modifiers") or {}) == 1,
+                      "switch": lambda: len(p) == 2 and self.target(p[0]) is not None and p[1] in self.types,
+                      "prop_damage": lambda: len(p) == 2 and self.target(p[0]) is not None and 0 < float(p[1]) <= 1,
+                      "prop_healing": lambda: len(p) == 2 and self.target(p[0]) is not None and 0 < float(p[1]) <= 1}[t]()
+                if not ok:
+                    return why
+                if t not in self.enabled:
+                    return why + " (not on the effects list)"
+                continue
+            return why
         if not d.get("effects"):
             return "no effects"
         return None
@@ -1120,23 +1206,55 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
                     for s in rules.shapes)
     stat_slugs = sorted(rules.statuses)
     stat_ix = {s: i for i, s in enumerate(stat_slugs)}
-    STAT = b""
+    if len(stat_slugs) > 32:
+        fail(f"{len(stat_slugs)} statuses; the reader takes 32")
+    from gen_status_icons import ICONS, OUTLINE
+    STAT, STEX = b"", struct.pack("<HH", len(stat_slugs), 0)
     for s in stat_slugs:
         d = rules.statuses[s]
-        eff = d["effects"][0]
-        kind = STATUS_EFFECT.get(eff["type"])
+        kind = rules.status_kind(s, d)
         if kind is None:
-            fail(f"status {s}: effect {eff['type']}")
-        div = int(eff["parameters"][0])
+            fail(f"status {s}: effects {[e['type'] for e in d.get('effects') or []]} aren't played")
+        eff = next((e for e in d.get("effects") or [] if e["type"] in STATUS_EFFECT), {})
+        p = [str(x) for x in eff.get("parameters") or []]
+        div, chance, ranges = 1, 0, 0
+        if kind in (1, 2, 3, 6, 9, 11, 12, 13):
+            div = round(float(p[0]))
+        if kind in (5, 7, 8):
+            chance = round(float(p[0]) * 100)
+        if kind in (6, 13):
+            ranges = sum(1 << RANGES.index(r) for r in p[1].split(":"))
+        if not 1 <= div <= 255 or not 0 <= chance <= 100:
+            fail(f"status {s}: a value out of range")
         immune = 0
         for m in d.get("modifiers", []):
             if m.get("attribute") == "type" and m.get("multiplier") == 0.0:
                 for v in m["values"]:
                     immune |= 1 << type_ix[v]
-        flags = (1 if d.get("category") == "negative" else 0) | \
-                (2 if (d.get("behaviors") or {}).get("persists_after_combat") else 0)
-        STAT += struct.pack("<IBBBBH2x", assign_id(ids, "status", s), kind, div, flags, 0, immune)
+        types = {e["type"] for e in d.get("effects") or []}
+        then = d.get("on_tech_use") if types & ON_USE else None
+        flags = (SF_NEGATIVE if d.get("category") == "negative" else 0) | \
+                (SF_PERSISTS if (d.get("behaviors") or {}).get("persists_after_combat") else 0) | \
+                (SF_LINKED if d.get("bond") else 0) | (SF_ON_USE if types & ON_USE else 0)
+        dur = int(d.get("duration") or 0)
+        STAT += struct.pack("<IBBBBHBB", assign_id(ids, "status", s), kind, div, flags, chance, immune, dur, ranges)
         STAT += text.ref(text_ok(rules.name(s), f"status {s}")) + b"\0" * 4
+        mult = []
+        for k in X_STATS:
+            sm = (d.get("stat_modifiers") or {}).get(k)
+            v = 10 if not sm else round(float(sm["value"]) * 10)
+            if sm and sm.get("operation", "*") != "*" or not 1 <= v <= 40:
+                fail(f"status {s}: stat modifier {k} isn't a multiplier this game plays")
+            mult.append(v)
+        if s not in ICONS:
+            fail(f"status {s}: no icon in tools/gen_status_icons.py")
+        main, light, rows = ICONS[s]
+        px = bytearray(21)
+        for n, ch in enumerate("".join(rows)):
+            px[n // 4] |= ".#o+".index(ch) << (2 * (n % 4))
+        pal = [0, rgb565(OUTLINE), rgb565(main), rgb565(light)]
+        STEX += bytes(mult) + bytes([stat_ix[then] + 1 if then in stat_ix else 0, 0, 0]) + \
+            struct.pack("<4H", *pal) + bytes(px) + b"\0" * 3
 
     # moves
     tech_slugs = sorted(rules.techs)
@@ -1147,16 +1265,33 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
         ty = [type_ix[x] for x in d.get("types", [])][:2] + [0xFF, 0xFF]
         effs = []
         for e in d["effects"]:
-            p = e.get("parameters") or []
-            if e["type"] == "damage":
-                effs.append((E_DAMAGE, 0, T_ENEMY))
-            elif e["type"] == "healing":
-                effs.append((E_HEALING, 0, T_ENEMY if p == ["enemy_monster"] else T_OWN))
+            p = [str(x) for x in e.get("parameters") or []]
+            k = e["type"]
+            if k == "damage":
+                effs.append((E_DAMAGE, 0, T_ENEMY, 0))
+            elif k == "healing":
+                effs.append((E_HEALING, 0, T_ENEMY if p == ["enemy_monster"] else T_OWN, 0))
+            elif k == "give":
+                effs.append((E_GIVE, stat_ix[p[0]], Rules.target(p[1]), 0))
+            elif k == "remove":
+                effs.append((E_REMOVE, ("positive", "negative", "all").index(p[0]) + 1, Rules.target(p[1]), 0))
+            elif k in ("splash", "multiattack"):
+                effs.append((MOVE_EFFECTS[k], int(p[0]), T_ENEMY, 0))
+            elif k in ("appear", "disappear"):
+                effs.append((MOVE_EFFECTS[k], 0, T_ENEMY, 0))
+            elif k == "statchange":
+                (stat, sm), = d["stat_modifiers"].items()
+                step = int(sm["step"])
+                if stat not in X_STATS or not step or not -6 <= step <= 6:
+                    fail(f"move {t}: statchange {stat} {step}")
+                effs.append((E_STAGE, X_STATS.index(stat), Rules.target(p[0]), step))
+            elif k == "switch":
+                effs.append((E_SWITCH, type_ix[p[1]], Rules.target(p[0]), 0))
             else:
-                effs.append((E_GIVE, stat_ix[p[0]], T_OWN if p[1] == "own_monster" else T_ENEMY))
+                effs.append((MOVE_EFFECTS[k], max(1, round(float(p[1]) * 100)), Rules.target(p[0]), 0))
         if len(effs) > 3:
             fail(f"move {t}: more than 3 effects")
-        effs += [(0, 0, 0)] * (3 - len(effs))
+        effs += [(0, 0, 0, 0)] * (3 - len(effs))
         tgt = d.get("target") or {}
         tmask = sum(1 << i for i, k in enumerate(("enemy_monster", "own_monster")) if tgt.get(k))
         power = round(float(d.get("power", 0)) * 100)
@@ -1168,7 +1303,7 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
         MOVE += struct.pack("<IBBBBHBBBBH", assign_id(ids, "move", t), ty[0], ty[1],
                             RANGES.index(d["range"]), SPEEDS.index(d.get("speed", "normal")),
                             power, acc, pot, int(d.get("recharge", 0)), tmask, heal)
-        MOVE += b"".join(struct.pack("<BBBx", *e) for e in effs)
+        MOVE += b"".join(struct.pack("<BBBb", *e) for e in effs)
         MOVE += b"\0" * 4
         MOVE += text.ref(text_ok(rules.name(t), f"move {t}"))
 
@@ -1493,7 +1628,7 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
     secs = {b"META": META, b"TYPE": TYPE, b"SHAP": SHAP, b"STAT": STAT, b"MOVE": MOVE, b"MONS": MONS,
             b"LRNS": LRNS, b"ENCT": ENCT, b"AREA": AREA, b"ADAT": bytes(ADAT), b"SPRT": bytes(SPRT),
             b"TEXT": bytes(text.b), b"CRED": CRED, b"LOOK": LOOK, b"ITEM": ITEM,
-            b"DEXE": DEXE, b"ICON": ICON}
+            b"DEXE": DEXE, b"ICON": ICON, b"STEX": STEX}
     off = 32 + 16 * len(SECTIONS)
     table, body = b"", b""
     for tag in SECTIONS:
@@ -1593,6 +1728,7 @@ class Game:
         self.sec.setdefault(b"ITEM", struct.pack("<HH", 0, 0))
         self.sec.setdefault(b"DEXE", b"")
         self.sec.setdefault(b"ICON", b"")
+        self.sec.setdefault(b"STEX", b"")
         self.text = self.sec[b"TEXT"]
 
     def s(self, b, o):
@@ -1769,15 +1905,24 @@ def dump(g):
         out.append(f"type {n} " + " ".join(map(str, row)))
     for i, r in enumerate(g.records(b"SHAP", 8)):
         out.append(f"shape {i} " + " ".join(map(str, r[:6])))
-    for r in g.records(b"STAT", 24):
-        sid, kind, div, flags, _, imm = struct.unpack_from("<IBBBBH", r)
-        out.append(f"status {sid} {g.s(r, 12)} kind {kind} divisor {div} flags {flags} immune {imm:#06x}")
+    stex = g.records(b"STEX", 40, skip=4) if g.sec[b"STEX"] else []
+    for i, r in enumerate(g.records(b"STAT", 24)):
+        sid, kind, div, flags, chance, imm, dur, rng = struct.unpack_from("<IBBBBHBB", r)
+        line = f"status {sid} {g.s(r, 12)} kind {kind} divisor {div} flags {flags} immune {imm:#06x}"
+        if chance or dur or rng:
+            line += f" chance {chance} duration {dur} ranges {rng}"
+        if stex:
+            x = stex[i]
+            pal = struct.unpack_from("<4H", x, 8)
+            line += (f" mult {','.join(map(str, x[:5]))} then {x[5]} icon {pal[1]:04x}{pal[2]:04x}{pal[3]:04x} "
+                     f"{crc32(x[16:37]):08x}")
+        out.append(line)
     for r in g.records(b"MOVE", 40):
         v = struct.unpack_from("<IBBBBHBBBBH", r)
-        effs = [struct.unpack_from("<BBB", r, 16 + 4 * i) for i in range(3)]
+        effs = [struct.unpack_from("<BBBb", r, 16 + 4 * i) for i in range(3)]
         out.append(f"move {v[0]} {g.s(r, 32)} types {v[1]},{v[2]} range {RANGES[v[3]]} speed {v[4]} "
                    f"power {v[5]} acc {v[6]} pot {v[7]} recharge {v[8]} target {v[9]} heal {v[10]} "
-                   f"effects {' '.join('%d/%d/%d' % e for e in effs if e[0])}")
+                   f"effects {' '.join('%d/%d/%d' % e[:3] + ('/%d' % e[3] if e[3] else '') for e in effs if e[0])}")
     lr = g.records(b"LRNS", 4)
     for r in g.records(b"MONS", 48):
         v = struct.unpack_from("<IHBBBBBBBBBBHHIII", r)

@@ -123,4 +123,8 @@ int  mb_done(const MbBot *b, const MpWorld *w);
  * keeps MB_HEALS healing items, the strongest that cost at most half its money. */
 int  mb_shop(const MbBot *b, MpWorld *w);
 
+/* The move Auto-play would use for side's creature me against foe (with b->g
+ * only: the balance run picks both sides' moves with it). A slot, or -1. */
+int  mb_pick(MbBot *b, const MpBattle *bt, int side, const MpCreature *me, const MpCreature *foe, const uint8_t *rech);
+
 #endif

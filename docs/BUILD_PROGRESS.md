@@ -16,6 +16,32 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-06 — Critters: E0, the foundation for Tuxemon's move effects
+
+`EFFECTS_PLAN.md` E0, on "work through the effects plan and the backlog": nothing new is switched on, and the
+game plays exactly as before. Measured:
+
+- **Game format 2.3.** `STAT` keeps its 24 B and gives its reserved bytes meanings (chance, duration, ranges, two
+  flags); a new section, `STEX`, holds each status's five multipliers, what it becomes after use, and its badge. MOVE's
+  effects gain kinds 4-12 and a target "both". A 2.2 file still reads. The save stays at version 4: no new status
+  outlasts a battle (decision 6), so nothing new is saved. `game.bin` is 807,372 B (was 807,232: STEX's three badges).
+- **The `"effects"` list** in `game_region.json`: a move is built only if each effect it needs is on it. With the list
+  empty the build keeps the same 69 moves as before; with every effect on, all 133 the critters learn.
+- **The rules for every effect** (`monster_play.c`; `GAME_FORMAT.md` §2), off until a step switches them on. Proof
+  that E0 changed nothing: `make -C sim monster`'s recorded battle transcript is byte for byte the same, and the five
+  Auto-play games end with the same actions, battles, losses and parties as before (seed 1: Agnite 36,334 actions,
+  1,641 battles, 9 lost; Anoleaf 42,090, 1,574, 27; Cardiling 28,658, 986, 22; Vamporm 15,265, 703, 5; Nut 31,897,
+  874, 24).
+- **The badge** on each battle card (11 x 11, our CC0 pictures from `tools/gen_status_icons.py`; a negative status
+  on red with a solid frame, a positive on green with a dotted one; dots for the turns left of a status with a
+  duration) and the status's word on our card's third line. Shot `critters_badges`, looked at. The smoke's `W`
+  command sets the statuses, and measures every critter's name at level 100 and every status word against the badge:
+  103 px of 116 and 123 of 126. It fails the smoke if either runs over.
+- **`make -C sim balance`** (`sim/tests/balance.c`): every critter against every critter at levels 10, 25 and 40,
+  20 seeds a pair, both sides choosing as Auto-play does (`mb_pick`). The baseline, `tests/data/balance.tsv`:
+  **216,000 battles, 0 unended, a mean of 3.59 turns, the longest 41**, in about 35 s on this PC (-O2). The plan
+  guessed minutes, so no sampling is needed.
+
 ### 2026-11-04 — Critters: the backlog of the owner's requests
 
 Built on "build through the CYD-critters backlog items", in the simulator. `BACKLOG.md` has each one and what's

@@ -249,6 +249,66 @@ open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
   gems red, the cosmic eyes cyan, Geodot's one pink and one cyan eye, Prismyth's gold eye, the rock line's pink glow.
   Nebulet, Astrolune, Valorix, Paladrax and Tectorath are the grainiest.
 
+### Critters: Tuxemon's move effects, one at a time (requested 2026-11-05; plan written the same day)
+
+The game plays damage, healing and three statuses; 192 of Tuxemon's 274 moves need effects it doesn't, which
+leaves 64 moves (173 move slots, 27 critters) out of this game. **The plan: `docs/EFFECTS_PLAN.md`.** Each effect is
+switched on by data (`"effects"` in `tools/game_region.json`), one per commit, measured by a balance run before and
+after, and shown on the battle cards as a status badge.
+
+- [ ] **Owner: review the plan's decisions** (§8): the order, the balance gate numbers, splash as plain damage,
+  the badge design and drawing our own icons, the left-out list, no new status outlasting a battle.
+- [s] **E0, the foundation** (no effect switched on): format 2.3 (the save stays 4: nothing new outlasts a battle),
+  the `"effects"` list, the status badge on both battle cards, `tools/gen_status_icons.py`, `sim/tests/balance.c` and
+  its baseline run. Built 2026-11-06 (`BUILD_PROGRESS.md`); shot `critters_badges`.
+- [ ] **E1, stat multipliers**, one step each: exhausted, blinded, enraged, hardshell, sniping, slow, softened,
+  focused, chargedup.
+- [ ] **E2, statuses that cost turns**: noddingoff (asleep), stuck, grabbed, flinching, confused, harpooned. Asleep
+  gets its own balance review with the owner before it ships.
+- [ ] **E3, over time**: festering, lifeleech, wasting, plague.
+- [ ] **E4, shields and comebacks**: elementalshield, diehard, revenge, retaliate, prickly, spiky.
+- [ ] **E5, effects that aren't statuses**: remove, splash, multiattack, appear/disappear, statchange, switch,
+  prop_damage/prop_healing, charging.
+- [ ] **E6**: the effects left out on purpose, each with its reason in `GAME_FORMAT.md`.
+- [d] **Bench, per phase:** a few battles with the phase's effects on the board, the badge readable at arm's length.
+
+### Critters: the drove road, Kestrel's look, and progress without grinding (requested 2026-11-06; not started)
+
+Three requests from the owner, written as backlog items; nothing built.
+
+- [ ] **1. The shortcut between Larkhollow and Kestrel: more reasonable logic and a visible foundation.** Today the
+  drove road is two warps (`larkhollow` 23,11 ↔ `kestrel` 0,16 in `tools/game_region.json`) with nothing on the
+  ground: two drovers stand on the road (Drover Lad in Larkhollow, Tam and Lil at Kestrel's end) and their words are
+  the only gate, which the player reads as "a person in the way" rather than a closed road. Make it read as a road:
+  a physical barrier (a gate or a chain across the road, drawn in the map) at each end, one reason the story gives
+  for it (the Warden's word, so `beat_ivy` opens it), the road drawn as a road with a sight line from either end, and
+  one drover who says what changed once it's open. Check the logic against the other route: the tunnel way from
+  Larkhollow is long, so the road must be the sensible shortcut after Ivy and not an accident of the map. **(mine:
+  a fixed gate that opens by flag, not a drover stood on a tile.)**
+- [ ] **2. Redo Kestrel's town so it doesn't look like Larkhollow.** Both towns use the same two sheets
+  (`core_city_and_country` and `core_outdoor`, see `tools/game_maps/larkhollow.json` and `kestrel.json`), so they read
+  as one village. Give Kestrel its own look: a different ground and building palette from the sheets (or a second
+  sheet, if one fits), its own roof and wall styles, and a town plan that suits a Ring town (a walled arena, stands,
+  a market street) rather than a village. Kestrel stays laid out for this game (`tools/game_maps/`), so no Tuxemon map
+  is copied. Shots `critters_kestrel` before and after, looked at.
+- [ ] **3. Progress must not come from walking back and forth.** The owner's point, and a **design failure**: Auto-play
+  walks in one area to trigger wild encounters and level its party up before the next big keeper. A real player
+  would do the same, so the content is short. The fix is in the content, not the bot:
+  - **Side areas to explore** off the main road: a path with its own wild table and a reason to go (a cave, a
+    shrine, a lake, a mine, a Wren specimen trail), each with a healer and something to find. Each one takes a
+    few hours, not a few minutes of walking.
+  - **Side quests that pay in levels and items**: a local request per town (a Ring errand in Kestrel, a Woodcutter's
+    job in the Brideswood, a delivery from Ned, a specimen from Sam's shop, Mum's errands at home). Each one sends
+    the player through a side area and ends at a person, so the xp comes with a story beat, not a loop.
+  - **A level curve per beat**: for each keeper, the level the player should have reached by then and the side
+    content that brings them there (the `steps` and encounter tables in `game_region.json` already change by act;
+    extend that to side areas).
+  - **A gate, so this can't come back**: a balance check (`make -C sim monster` or a new one) that fails when Auto-play
+    needs more than a set number of consecutive wild battles in one area before a keeper, or when a keeper's level
+    comes from one area only. **(mine: the number is the owner's to set.)**
+  - **Open question for the owner:** the full-Dex hunt in the Reach (22,000 to 40,000 actions, `[d]` above) is the
+    same kind of walking. Is it a post-game chore to keep, a side quest with a reward, or cut?
+
 ## RESUME HERE — Palm behaviours from the archive review (approved 2026-10-15)
 
 `PALM_ARCHIVE_REVIEW.md` measured the firmware against Palm's UI Guidelines

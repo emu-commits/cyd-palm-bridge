@@ -58,6 +58,9 @@ before touching anything.
   Coach or Guru bubble). **Built in the sim 2026-11-03** (`ui_dex.c`, `dex.c`, the
   TV effect in `crt.c`; game format 2.2, save version 4; gate `make -C sim dex`);
   its bench items are the owner's. §9 holds the owner's decisions.
+- `docs/EFFECTS_PLAN.md`: **Tuxemon's move effects, one at a time** (planned 2026-11-05, nothing built): each
+  effect switched on by data, measured by a balance run, shown as a status badge on the battle cards. Its
+  checklist is in `BACKLOG.md`; §8 holds the owner's open decisions.
 - `docs/APP_PLATFORM_PLAN.md`: native C apps loaded from the SD card.
   **On hold since 2026-09-29**; don't build any of it without the user's yes.
 
@@ -82,7 +85,7 @@ before touching anything.
     `pip install radicale`) whenever `bridge/` changes;
   - `sudo mkdir -p /sdcard && sudo chmod 777 /sdcard`, then `make -C sim`
     with the targets `poolparity nosecrets secretscan data graf mines wordie
-    sudoku zip clock coach guru gurupool dash course srs monster dex smoke smoke32`;
+    sudoku zip clock coach guru gurupool dash course srs monster balance dex smoke smoke32`;
   - `python3 tests/mkcourse_test.py` (the course builder; needs the Pillow
     in `tools/requirements-course.txt`, and downloads the pinned font);
   - `python3 tests/mkgame_test.py` (the game converter, on the fixture; needs

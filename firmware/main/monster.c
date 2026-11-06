@@ -17,6 +17,7 @@
 #define MAX_SECTS  64
 #define META_MAX   1024
 #define STAT_SIZE  24
+#define STEX_SIZE  40
 #define MOVE_SIZE  40
 #define MONS_SIZE  48
 #define LRNS_SIZE  4
@@ -29,7 +30,7 @@
 /* the section tags, 4 bytes each in MG_* order, as the section table holds
  * them (one string: tests/nodelete.sh rightly flags a quoted HTTP method name,
  * and one of these tags is spelt like one) */
-static const char TAGS[] = "METATYPESHAPSTATMOVEMONSLRNSENCTAREAADATSPRTTEXTCREDLOOKITEMDEXEICON";
+static const char TAGS[] = "METATYPESHAPSTATMOVEMONSLRNSENCTAREAADATSPRTTEXTCREDLOOKITEMDEXEICONSTEX";
 #define TAG(k) (TAGS + 4 * (k))
 /* checked on open: everything small (section 6) */
 #define CRC_ON_OPEN(i) ((i) != MG_ADAT && (i) != MG_SPRT && (i) != MG_CRED && (i) != MG_LOOK && (i) != MG_ICON)
@@ -345,6 +346,7 @@ static void parse_move(const uint8_t *b, MgMove *m){
         m->eff_kind[i] = b[16 + 4 * i];
         m->eff_status[i] = b[17 + 4 * i];
         m->eff_target[i] = b[18 + 4 * i];
+        m->eff_arg[i] = (int8_t)b[19 + 4 * i];
     }
 }
 
@@ -355,10 +357,15 @@ static int check_move(MonGame *g, const uint8_t *b, MgMove *m){
     if(m->range > MG_SPECIAL || m->speed > 6 || m->accuracy > 100 || m->potency > 100 || m->targets > 3)
         return bad(g, "move %u: a value out of range", (unsigned)m->id);
     for(int i = 0; i < 3; i++){
-        if(m->eff_kind[i] > MG_E_GIVE || m->eff_target[i] > MG_T_OWN || b[19 + 4 * i])
+        uint8_t k = m->eff_kind[i], v = m->eff_status[i];
+        int arg = m->eff_arg[i];
+        if(k > MG_E_LAST || m->eff_target[i] > MG_T_BOTH || (arg && k != MG_E_STAGE))
             return bad(g, "move %u: a bad effect", (unsigned)m->id);
-        if(m->eff_kind[i] == MG_E_GIVE && m->eff_status[i] >= g->n_statuses)
-            return bad(g, "move %u: a status out of range", (unsigned)m->id);
+        if((k == MG_E_GIVE && v >= g->n_statuses) || (k == MG_E_REMOVE && (v < 1 || v > 3)) ||
+           ((k == MG_E_SPLASH || k == MG_E_MULTI) && (v < 1 || v > 8)) ||
+           (k == MG_E_STAGE && (v >= MG_NX || !arg || arg < -6 || arg > 6)) ||
+           (k == MG_E_SWITCH && v >= g->n_types) || ((k == MG_E_PROP_DAMAGE || k == MG_E_PROP_HEAL) && (!v || v > 100)))
+            return bad(g, "move %u: an effect out of range", (unsigned)m->id);
     }
     return str_check(g, b + 32, &m->name);
 }
@@ -478,6 +485,16 @@ int mg_icon(MonGame *g, uint32_t i, uint8_t *buf, uint32_t cap){
     return rds(g, MG_ICON, 4 + i * MG_ICON_BYTES, buf, MG_ICON_BYTES);
 }
 
+int mg_status_icon(MonGame *g, uint32_t i, uint16_t pal[4], uint8_t *px){
+    uint8_t b[STEX_SIZE];
+    if(!g->has_sicons || i >= g->n_statuses) return MG_ERANGE;
+    int r = rds(g, MG_STEX, 4 + STEX_SIZE * i, b, STEX_SIZE);
+    if(r) return r;
+    for(int k = 0; k < 4; k++) pal[k] = k ? le16(b + 8 + 2 * k) : 0;
+    memcpy(px, b + 16, MG_SICON_BYTES);
+    return 0;
+}
+
 int mg_find_item(MonGame *g, uint32_t id, uint16_t *pos){
     for(uint32_t i = 0; i < g->n_items; i++){
         MgItem it;
@@ -562,10 +579,35 @@ static int check_records(MonGame *g){
         if((r = rds(g, MG_STAT, STAT_SIZE * i, b, STAT_SIZE))) return r;
         st->id = le32(b);
         st->kind = b[4]; st->divisor = b[5]; st->flags = b[6];
+        st->chance = b[7]; st->duration = b[10]; st->ranges = b[11];
         st->immune = le16(b + 8);
-        if(st->kind < MG_S_POISON || st->kind > MG_S_RECOVER || !st->divisor || (st->immune >> nt))
+        st->then = 0;
+        memset(st->mult, 10, sizeof st->mult);
+        if(st->kind < MG_S_POISON || st->kind > MG_S_LAST || !st->divisor || (st->immune >> nt) ||
+           st->flags > 15 || st->chance > 100 || st->ranges >> (MG_SPECIAL + 1) || le32(b + 20))
             return bad(g, "status %u is out of range", (unsigned)st->id);
         if((r = str_check(g, b + 12, &st->name))) return r;
+    }
+    /* STEX (2.3, may be missing): u16 statuses, u16 0, then 40 B each: the
+     * multipliers (tenths, 1-40), the status after it (position + 1), 0, 0,
+     * the badge's four colours (RGB565), its 81 2-bit pixels, 3 B 0 */
+    if(g->s[MG_STEX].len){
+        if(g->s[MG_STEX].len < 4) return bad(g, "STEX is too short");
+        if((r = rds(g, MG_STEX, 0, b, 4))) return r;
+        if(le16(b) != g->n_statuses || le16(b + 2) || g->s[MG_STEX].len != 4u + STEX_SIZE * g->n_statuses)
+            return bad(g, "STEX is the wrong size");
+        for(uint32_t i = 0; i < g->n_statuses; i++){
+            MgStatus *st = &g->statuses[i];
+            if((r = rds(g, MG_STEX, 4 + STEX_SIZE * i, b, STEX_SIZE))) return r;
+            for(int k = 0; k < MG_NX; k++){
+                if(!b[k] || b[k] > 40) return bad(g, "status %u: a multiplier out of range", (unsigned)st->id);
+                st->mult[k] = b[k];
+            }
+            st->then = b[5];
+            if(st->then > g->n_statuses || st->then == i + 1 || b[6] || b[7] || b[37] || b[38] || b[39] || le16(b + 8))
+                return bad(g, "status %u: STEX is out of range", (unsigned)st->id);
+        }
+        g->has_sicons = 1;
     }
     /* MOVE */
     if(g->s[MG_MOVE].len % MOVE_SIZE || !g->s[MG_MOVE].len || g->s[MG_MOVE].len / MOVE_SIZE > 65535)
