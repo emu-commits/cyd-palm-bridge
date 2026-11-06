@@ -1,149 +1,161 @@
-battles	216000	0	3.45	70
-critter	Nut	61.6	1120951016
-critter	Bolt	62.2	1120951016
-critter	Arthrobolt	38.6	1120951016
-critter	Agnite	62.8	3579144120
-critter	Agnidon	63.0	3579144120
-critter	Agnigon	58.2	3579144120
-critter	Vamporm	83.2	1605700400
-critter	Dracune	81.1	1605700400
-critter	Fluttaflap	72.9	1605700400
-critter	Eyenemy	55.8	1706930257
-critter	Eyesore	55.4	1706930257
-critter	Noctula	23.4	3260109998
-critter	Noctalo	23.7	3260109998
-critter	Cardiling	53.3	1786523668
-critter	Cardiwing	53.3	1786523668
-critter	Cardinale	53.5	1786523668
-critter	Anoleaf	49.9	529590554
-critter	Gectile	50.9	529590554
-critter	Velocitile	50.9	529590554
-critter	Djinnbo	44.5	4157949553
-critter	Dune Pincher	48.8	479952269
-critter	Pigabyte	70.3	2107838745
-critter	Propellercat	37.3	3551436262
-critter	Zunna	44.2	2499892667
-critter	Selket	27.6	2054885515
-critter	Selmatek	27.8	2054885515
-critter	Cateye	26.0	266703911
-critter	Astrolune	51.0	785316562
-critter	Banewyrm	52.3	3802314810
-critter	Bouldrom	65.2	4079186928
-critter	Cinderkit	30.2	1989788753
-critter	Cirrup	24.3	3495609632
-critter	Cumulynx	34.8	4090465074
-critter	Fulminax	70.3	2418591007
-critter	Geodot	31.9	3577873391
-critter	Gillpip	73.9	1454936286
+battles	216000	0	3.67	39
+critter	Nut	76.2	3140746089
+critter	Bolt	76.3	3140746089
+critter	Arthrobolt	56.5	2683946204
+critter	Agnite	61.8	3579144120
+critter	Agnidon	61.4	3579144120
+critter	Agnigon	58.4	3579144120
+critter	Vamporm	77.6	2620189072
+critter	Dracune	77.4	2620189072
+critter	Fluttaflap	71.6	2620189072
+critter	Eyenemy	55.3	3413689574
+critter	Eyesore	54.0	3413689574
+critter	Noctula	22.6	3260109998
+critter	Noctalo	22.6	3260109998
+critter	Cardiling	50.9	1786523668
+critter	Cardiwing	50.9	1786523668
+critter	Cardinale	51.1	1786523668
+critter	Anoleaf	49.8	529590554
+critter	Gectile	48.1	529590554
+critter	Velocitile	47.9	529590554
+critter	Djinnbo	53.2	2405731257
+critter	Dune Pincher	48.5	479952269
+critter	Pigabyte	69.4	2273578342
+critter	Propellercat	41.2	2372026008
+critter	Zunna	55.7	2090573672
+critter	Selket	26.9	1191128470
+critter	Selmatek	26.8	1191128470
+critter	Cateye	28.0	4117497161
+critter	Astrolune	50.2	785316562
+critter	Banewyrm	49.9	3802314810
+critter	Bouldrom	66.3	4079186928
+critter	Cinderkit	29.0	1989788753
+critter	Cirrup	24.4	3495609632
+critter	Cumulynx	34.2	4090465074
+critter	Fulminax	70.1	2418591007
+critter	Geodot	33.1	3577873391
+critter	Gillpip	66.8	1454936286
 critter	Grovarch	55.5	957262028
-critter	Maelstrotl	74.6	519622119
-critter	Nebulet	34.9	1560135964
-critter	Nimbolt	54.8	767509596
-critter	Oculoth	65.8	2425362016
+critter	Maelstrotl	72.0	519622119
+critter	Nebulet	36.0	1560135964
+critter	Nimbolt	50.3	767509596
+critter	Oculoth	66.2	2425362016
 critter	Oglet	57.4	751928135
-critter	Ossicoil	54.3	3363673843
-critter	Paladrax	64.2	4194497592
-critter	Pebblub	24.4	1956832047
-critter	Prismyth	37.5	2731604172
-critter	Pyrewing	73.8	2336511960
-critter	Quartzor	57.2	741757272
-critter	Rillotl	65.0	2447590361
-critter	Rivetron	46.5	1707300864
-critter	Scorchvix	58.9	2210739321
-critter	Skullick	47.0	4292631585
-critter	Sparkip	21.7	511381873
-critter	Sprigling	34.1	2353894368
-critter	Starlet	19.2	2023786903
-critter	Tectorath	60.0	305533208
-critter	Tempyre	55.6	1969346072
-critter	Valkit	38.3	21842624
-critter	Valorix	44.9	1290698613
-critter	Wildbough	40.5	3107912548
-move	Acid	28.5	49.1
-move	Adamantine	38.2	58.8
-move	All In	28.3	67.4
-move	Assault	26.7	49.3
-move	Battery Acid	28.5	50.9
-move	Battery Discharge	31.2	42.5
-move	Beam	36.1	54.1
-move	Berserk	30.1	51.5
-move	Blade	37.9	57.6
-move	Blossom	30.2	41.0
-move	Breathe Fire	27.2	46.6
-move	Bubbles	51.1	64.6
-move	Bullet	49.5	51.2
-move	Caustic Spray	35.4	51.3
-move	Crystal	38.4	30.7
-move	Dreamwalk	43.6	55.0
-move	Earthquake	25.9	37.8
-move	Energy Beam	30.5	57.5
-move	Energy Claws	30.6	70.1
-move	Entomb	42.0	56.7
-move	Eyebite	1.5	43.9
-move	Fire Claw	25.9	46.8
-move	Flamethrower	30.3	64.0
-move	Fledgling	16.9	49.1
-move	Fluff Up	0.5	52.4
-move	Font	31.9	63.9
-move	Fume	3.3	77.5
-move	Give All	31.7	36.3
-move	Gnaw	39.8	50.9
-move	Goad	28.9	42.2
-move	Greenstone	23.6	48.7
-move	Grinding	22.0	52.6
-move	Gust	43.3	29.6
-move	Hammerhead	22.1	63.1
-move	Kindling Flame	29.2	64.8
-move	Kraken	24.8	65.2
-move	Lantern	19.2	45.1
-move	Leaf Stab	45.2	51.1
-move	Lightning Spheres	32.6	37.1
-move	Lineage	28.1	35.7
-move	Magma	19.4	43.0
-move	Mobbing	28.5	61.0
-move	Muck	22.2	44.0
-move	Needle	39.7	52.3
-move	Nest	26.5	33.2
-move	Peck	49.1	27.1
-move	Peregrine	22.5	70.6
-move	Perfect Cut	35.8	38.9
-move	Phantasmal Force	20.0	38.5
-move	Poison Courtship	2.3	69.5
-move	Punch	39.0	52.2
-move	Pyrokinesis	15.1	34.3
-move	Radiance	25.7	58.2
-move	Ram	37.8	44.8
-move	Refresh	12.0	54.7
-move	Rock	38.5	45.4
-move	Roll	21.9	46.7
-move	Rot	0.0	60.0
-move	Ruby	38.4	37.9
-move	Saber	27.2	57.0
-move	Sand Spray	48.3	54.0
-move	Shadow Boxing	47.7	40.4
-move	Slice	21.3	41.5
-move	Spiky Strike	51.2	33.3
-move	Spit Poison	43.9	60.3
-move	Splinter	31.0	55.2
-move	Staff Smash	30.6	47.5
-move	Static Field	7.0	53.3
-move	Steel Jaws	11.8	67.1
-move	Stick	38.6	39.1
-move	Sting	28.4	54.6
-move	Strangulation	30.5	67.9
-move	Struggle	13.3	46.5
-move	Sunburst	35.4	73.9
-move	Supernova	13.2	38.1
-move	Take Cover	4.5	38.7
-move	Ten Thousand Feathers	28.3	63.6
-move	Thunderclap	35.6	56.4
-move	Tinder	5.2	39.4
-move	Tsunami	6.8	55.6
-move	Venomous Tentacle	40.1	76.5
-move	Viper	22.6	41.6
-move	Wall of Steel	16.4	80.3
-move	Water Blast	54.5	71.1
-move	Water Bullet	25.4	62.9
-move	Whirlwind	34.0	42.7
-move	Wing Tip	42.1	55.6
-move	Woodsmash	31.7	61.0
+critter	Ossicoil	50.7	3363673843
+critter	Paladrax	62.2	4194497592
+critter	Pebblub	25.8	1956832047
+critter	Prismyth	37.8	2731604172
+critter	Pyrewing	72.5	2336511960
+critter	Quartzor	58.1	741757272
+critter	Rillotl	60.5	2447590361
+critter	Rivetron	44.8	1707300864
+critter	Scorchvix	54.1	2210739321
+critter	Skullick	43.6	4292631585
+critter	Sparkip	21.5	511381873
+critter	Sprigling	34.4	2353894368
+critter	Starlet	20.2	2023786903
+critter	Tectorath	62.2	305533208
+critter	Tempyre	55.5	1969346072
+critter	Valkit	35.6	21842624
+critter	Valorix	38.9	1290698613
+critter	Wildbough	40.4	3107912548
+move	Acid	28.0	46.1
+move	Adamantine	39.9	57.2
+move	All In	27.2	66.2
+move	Amnesia	36.3	49.8
+move	Assault	27.4	49.0
+move	Battery Acid	20.9	57.6
+move	Battery Discharge	32.9	41.4
+move	Beam	26.4	58.7
+move	Berserk	29.6	49.3
+move	Blade	39.9	55.8
+move	Blossom	31.0	40.1
+move	Breath	3.8	55.0
+move	Breathe Fire	28.5	44.5
+move	Bubble Trap	27.6	62.4
+move	Bubbles	51.5	62.3
+move	Bullet	43.1	63.2
+move	Caustic Spray	35.6	49.8
+move	Constrict	39.0	55.4
+move	Crystal	38.8	31.0
+move	Dreamwalk	48.3	54.2
+move	Earthquake	28.4	35.6
+move	Energy Beam	29.8	52.6
+move	Energy Claws	29.2	69.2
+move	Entomb	43.3	56.7
+move	Eyebite	1.1	52.8
+move	Fire Claw	26.2	45.1
+move	Flamethrower	29.6	61.1
+move	Fledgling	15.9	52.5
+move	Fluff Up	0.5	53.7
+move	Font	33.2	59.0
+move	Fume	2.7	78.9
+move	Give All	20.5	54.3
+move	Gnaw	39.0	48.5
+move	Goad	28.1	39.8
+move	Greenstone	23.7	50.4
+move	Grinding	24.0	52.5
+move	Gust	42.9	29.1
+move	Hammerhead	21.7	65.8
+move	Kindling Flame	28.7	62.7
+move	Kraken	23.9	64.3
+move	Lantern	19.2	38.5
+move	Lava	48.7	65.2
+move	Leaf Stab	46.0	47.2
+move	Lightning Spheres	33.3	34.2
+move	Lineage	28.0	36.3
+move	Magma	19.4	43.7
+move	Magnetic Body	22.9	66.0
+move	Mind Vise	41.1	23.2
+move	Mobbing	31.0	61.3
+move	Muck	21.8	44.8
+move	Muddle	30.8	74.0
+move	Needle	39.6	52.2
+move	Nest	20.8	53.5
+move	Peck	49.4	26.9
+move	Peregrine	23.5	69.2
+move	Perfect Cut	33.7	50.4
+move	Petrify	4.2	30.8
+move	Phantasmal Force	19.5	40.1
+move	Poison Courtship	2.1	68.7
+move	Punch	39.1	50.1
+move	Pyrokinesis	14.3	32.7
+move	Quicksand	35.8	25.6
+move	Radiance	24.8	56.6
+move	Ram	38.0	46.5
+move	Refresh	12.1	53.4
+move	Rock	37.9	49.3
+move	Roll	2.9	41.5
+move	Rot	0.0	66.7
+move	Ruby	34.8	38.8
+move	Saber	27.5	56.7
+move	Sand Spray	48.2	50.8
+move	Shadow Boxing	47.5	36.3
+move	Sleep Bomb	40.0	55.4
+move	Sleeping Powder	5.2	75.4
+move	Slice	18.3	49.2
+move	Spiky Strike	52.0	33.7
+move	Spit Poison	38.9	65.2
+move	Splinter	30.4	53.5
+move	Staff Smash	31.1	47.8
+move	Static Field	0.2	75.0
+move	Steel Jaws	10.9	76.7
+move	Stick	38.3	39.9
+move	Sting	28.7	51.1
+move	Strangulation	28.0	69.9
+move	Struggle	11.2	44.3
+move	Sunburst	19.8	71.5
+move	Supernova	16.3	42.6
+move	Take Cover	11.2	30.1
+move	Ten Thousand Feathers	27.9	64.7
+move	Thunderclap	20.7	63.6
+move	Tinder	5.4	36.1
+move	Tsunami	6.8	53.1
+move	Venomous Tentacle	44.3	71.0
+move	Viper	22.7	39.0
+move	Wall of Steel	16.7	79.7
+move	Water Blast	55.1	67.9
+move	Water Bullet	25.4	58.9
+move	Whirlwind	33.5	41.6
+move	Wing Tip	42.5	53.8
+move	Woodsmash	31.1	60.9

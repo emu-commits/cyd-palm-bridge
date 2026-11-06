@@ -16,6 +16,28 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-06 — Critters: E2, the statuses that cost turns
+
+| Step | Moves kept | Unended | Mean turns | Longest | Moved most (points) |
+|---|---|---|---|---|---|
+| E1's end | 89 | 0 | 3.45 | 70 | |
+| stuck | 93 | 0 | 3.47 | 70 | Cateye 3.9, after the Mind Vise edit |
+| grabbed | 94 | 0 | 3.47 | 70 | Zunna 5.1 |
+| noddingoff (asleep) | 95 | 0 | 3.50 | 70 | Eyenemy 3.4 |
+| teams (a status to a team or both sides) | 102 | 0 | 3.67 | 39 | Arthrobolt 17.6 (its moves changed) |
+| flinching, confused, harpooned | 102 | 0 | 3.67 | 39 | none: no critter's move gives them |
+
+- **One tune:** Mind Vise gave stuck every turn at recharge 1 and was chosen in 54.9 % of its users' turns, past the
+  field's most chosen move; recharge 2 brings it to 40.5 %.
+- **Asleep was to have its own balance review with the owner** (plan §4, E2). By the run it's the quietest of the
+  three: the mean battle moves 3.47 → 3.50 turns and no critter more than 3.4 points. It ships switched on; taking
+  it off again is one line in `"effects"` and a rebuild. Its bench item stays the owner's.
+- **Auto-play learnt to leave a status that costs turns** (plan §6): asleep or weakened, it uses a Cureall if it
+  has one (asleep only), or sends out a healthy critter within 3 levels. Before that, E2 had Anoleaf's game losing
+  56 times (42 to keepers) against 27 at E0, and 130 losses in all (+49 %); after, **103 (+18 %)**: Agnite 15,
+  Anoleaf 23, Cardiling 33, Vamporm 10, Nut 22. The balance run doesn't swap, so its numbers don't move.
+- Shot `critters_badges`: Asleep on ours with three dots (two of its five turns gone), Stuck on the foe.
+
 ### 2026-11-06 — Critters: E1, the stat multipliers switched on
 
 One effect per step, each run against the step before it (`make -C sim balance`, 216,000 battles, 20 seeds a pair at

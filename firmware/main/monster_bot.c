@@ -773,6 +773,26 @@ void mb_battle(MbBot *b, MpWorld *w, MpBattle *bt, int *act, int *arg){
             return;
         }
     }
+    /* a status that costs turns (asleep, flinching): cure it, or send another out
+     * (EFFECTS_PLAN.md 6) */
+    {
+        const MgStatus *st = mp_status(b->g, me);
+        if(st && (st->kind == MG_S_ASLEEP || st->kind == MG_S_WEAKEN) && !bt->land[0]){
+            for(uint32_t i = 0; st->kind == MG_S_ASLEEP && i < b->g->n_items && i < MP_BAG; i++){
+                MgItem it;
+                if(w->bag[i] && !mg_item(b->g, i, &it) && (it.effects & MG_I_CURE) && mp_item_helps(w, (uint16_t)i, bt->active, NULL)){
+                    *act = MP_ACT_ITEM; *arg = (int)i | bt->active << 8;
+                    return;
+                }
+            }
+            int o = strongest(w, bt->active);
+            if(o >= 0 && w->party[o].level + 3 >= me->level && w->party[o].hp * 2u >= w->party[o].stat[MG_HP] &&
+               !w->party[o].status){
+                *act = MP_ACT_SWAP; *arg = o;
+                return;
+            }
+        }
+    }
     int s = strongest(w, -1);
     if(s >= 0 && s != bt->active && w->party[s].level >= me->level + 2){
         *act = MP_ACT_SWAP; *arg = s;

@@ -1,5 +1,5 @@
 {
-  "effects": ["exhausted", "blinded", "enraged", "hardshell", "sniping", "slow", "softened", "focused", "chargedup", "charging"],
+  "effects": ["exhausted", "blinded", "enraged", "hardshell", "sniping", "slow", "softened", "focused", "chargedup", "charging", "stuck", "grabbed", "noddingoff", "teams", "flinching", "confused", "harpooned"],
   "title": "Critters",
   "note": "The first region (G3, 2026-10-16): Larkhollow, Route 1, Brideswood, Cotton Tunnel and Kestrel. Route 1, Brideswood and the tunnel are Tuxemon's Spyder maps from clean tilesets; the two towns are laid out for this game (tools/game_maps/) from the clean sheets. Route 1's east half doesn't reach Brideswood on foot in Tuxemon's map, so the way on is its open north edge. The story and every line of dialogue are ours.",
   "player": ["player", "player_green", "player_orange", "player_olive", "player_violet", "player_rose"],
@@ -94,7 +94,8 @@
   "keeper_bonus": 150,
   "move_edits": {
     "refresh": {"recharge": 8, "why": "2026-11-05: a level 6 Vamporm against a level 6 Vamporm never ended, because refresh (healing_power 3.0, recharge 3) healed a full bar every few turns. Recharge 8: 1,000 mirror battles at level 6 all end (the longest 176 turns, the mean 20); recharge 3 left 16% unended at 2,000 turns."},
-    "thunderclap": {"potency": 0.5, "why": "2026-11-06, E1 exhausted: the move exhausted unlocks is the Nut line's first ranged one, and at Tuxemon's power 1.25 and potency 0.75 the balance run moved Arthrobolt 13.4 points (31.6 to 45.0 %) and Nut 11.6. Power 1.1 and potency 0.5: Arthrobolt +9.6, within the 10-point gate.", "power": 1.1}
+    "thunderclap": {"potency": 0.5, "why": "2026-11-06, E1 exhausted: the move exhausted unlocks is the Nut line's first ranged one, and at Tuxemon's power 1.25 and potency 0.75 the balance run moved Arthrobolt 13.4 points (31.6 to 45.0 %) and Nut 11.6. Power 1.1 and potency 0.5: Arthrobolt +9.6, within the 10-point gate.", "power": 1.1},
+    "mind_vise": {"recharge": 2, "why": "2026-11-06, E2 stuck: a weak blow that gives stuck every turn (recharge 1) was chosen in 54.9 % of its users' turns, past the field's most chosen move (Water Blast, 54.5 %). Recharge 2: see BUILD_PROGRESS.md."}
   },
   "steps": [
     {"flag": "beat_ivy",    "table": "spyder_route1", "to": "route1_b"},
