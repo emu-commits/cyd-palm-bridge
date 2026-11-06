@@ -308,7 +308,13 @@ Three requests from the owner, written as backlog items; nothing built.
   sheet, if one fits), its own roof and wall styles, and a town plan that suits a Ring town (a walled arena, stands,
   a market street) rather than a village. Kestrel stays laid out for this game (`tools/game_maps/`), so no Tuxemon map
   is copied. Shots `critters_kestrel` before and after, looked at.
-- [ ] **3. Progress must not come from walking back and forth.** The owner's point, and a **design failure**: Auto-play
+- [ ] **3. Progress must not come from walking back and forth.** Partly built 2026-11-06: **the Mere**, a side area
+  of our own off Larkhollow's west road (gated until Keeper Tom), with four optional keepers (8-11) between Tom and
+  Ivy, three more after Ivy (21-24), a healer at its entrance, and Fisher Ola's request, which pays 3 Super Potions
+  (a new "gift" person kind, format 2.3). `make -C sim monster` now prints the grind: training battles fell from 676
+  to 571 over the five games, and the worst stretch from 97 (before Ivy) to 59 (before Keeper Iris's tunnel rematch,
+  23). Still open: a second side area for the post-Ivy rematches, more side quests, the gate's threshold (the owner's
+  number), and the Reach hunt question. The owner's point, and a **design failure**: Auto-play
   walks in one area to trigger wild encounters and level its party up before the next big keeper. A real player
   would do the same, so the content is short. The fix is in the content, not the bot:
   - **Side areas to explore** off the main road: a path with its own wild table and a reason to go (a cave, a

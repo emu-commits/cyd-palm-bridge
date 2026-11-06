@@ -13,6 +13,8 @@ area	spyder_routea	10
 area	spyder_dragonscave	11
 area	kestrel_store	12
 area	reach	13
+area	spyder_routec	14
+area	mere	15
 creature	agnite	1
 creature	agnidon	2
 creature	agnigon	3
@@ -106,6 +108,14 @@ flag	beat_kai	30
 flag	beat_mo	31
 flag	beat_ren	32
 flag	beat_ivo	33
+flag	beat_pip	34
+flag	beat_moss	35
+flag	beat_twins	36
+flag	mere_cleared	37
+flag	beat_hollis	38
+flag	beat_coral	39
+flag	beat_tobin	40
+flag	ola_paid	41
 item	potion	1
 item	super_potion	2
 item	mega_potion	3

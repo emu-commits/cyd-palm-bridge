@@ -109,6 +109,7 @@ enum {
     MP_EV_STAGE,        /* side's stat a (MG_X_*) moves by (int16_t)b steps; n the stage now + 6 */
     MP_EV_TYPE,         /* side's type becomes a (b 1: it was already) */
     MP_EV_REMOVED,      /* side's status a is taken away */
+    MP_EV_GIFT,         /* person a gives the player b of item n */
 };
 
 typedef struct {

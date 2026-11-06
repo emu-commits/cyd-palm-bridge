@@ -101,7 +101,8 @@ enum { MG_HP, MG_ARMOUR, MG_DODGE, MG_MELEE_ST, MG_RANGED_ST, MG_SPEED, MG_NSTAT
 /* facing: N E S W */
 enum { MG_N, MG_E, MG_S, MG_W };
 /* what a person does when spoken to (GAME_FORMAT.md 3.11, minor version 1) */
-enum { MG_P_TALK, MG_P_TRAINER, MG_P_HEALER, MG_P_SHOP };     /* a shop: 2.1 */
+enum { MG_P_TALK, MG_P_TRAINER, MG_P_HEALER, MG_P_SHOP, MG_P_GIFT };     /* a shop: 2.1; a gift: 2.3, once, by
+                                                                       its flag: ITEM's mon[0], level[0] of them */
 /* what an item does (GAME_FORMAT.md 3.16): it may heal a number of HP or a
  * percentage of the whole, cure a negative status, and/or bring back a
  * fainted creature (then only a fainted one) */

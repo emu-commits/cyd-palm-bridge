@@ -99,6 +99,7 @@
     "mind_vise": {"recharge": 2, "why": "2026-11-06, E2 stuck: a weak blow that gives stuck every turn (recharge 1) was chosen in 54.9 % of its users' turns, past the field's most chosen move (Water Blast, 54.5 %). Recharge 2: see BUILD_PROGRESS.md."}
   },
   "steps": [
+    {"flag": "beat_ivy",    "table": "mere",          "to": "mere_b"},
     {"flag": "beat_ivy",    "table": "spyder_route1", "to": "route1_b"},
     {"flag": "beat_ivy",    "table": "brideswood",    "to": "brideswood_b"},
     {"flag": "beat_ivy",    "table": "cotton_tunnel", "to": "tunnel_b"},
@@ -120,7 +121,8 @@
         {"at": [12, 0, 2, 1], "to": "spyder_route1", "x": 13, "y": 18, "facing": "up"},
         {"at": [6, 9], "to": "larkhollow_home", "x": 5, "y": 7, "facing": "up"},
         {"at": [17, 9], "to": "larkhollow_lab", "x": 5, "y": 7, "facing": "up"},
-        {"at": [23, 11, 1, 2], "to": "kestrel", "x": 1, "y": 16, "facing": "right"}
+        {"at": [23, 11, 1, 2], "to": "kestrel", "x": 1, "y": 16, "facing": "right"},
+        {"at": [0, 11, 1, 2], "to": "mere", "x": 28, "y": 6, "facing": "left"}
       ],
       "signs": [
         {"at": [15, 3, 2, 2], "facing": "up",
@@ -139,6 +141,10 @@
          "show_if": "beat_wren",
          "text": "The note's off the pot. Sit down and eat. And then go and open that gate behind Ashe, in Dragon's Cave: let them all go home to the Reach.",
          "after": ""},
+        {"at": [1, 11], "facing": "right", "sheet": "gate", "kind": "talk", "name": "", "hide_if": "beat_tom",
+         "text": "The path west to the Mere, gated. A sign: KEEPERS ONLY. Beat Keeper Tom in the Brideswood first: the Mere's keepers won't battle a beginner."},
+        {"at": [1, 12], "facing": "right", "sheet": "gate_right", "kind": "talk", "name": "", "hide_if": "beat_tom",
+         "text": "Hermit Bryn's gate. Past it, the Mere and its keepers."},
         {"at": [22, 11], "facing": "left", "sheet": "gate", "kind": "talk", "name": "",
          "hide_if": "beat_ivy",
          "text": "A gate across the drove road, chained and locked. A notice: CLOSED TO TRAVELLERS. The herds' road, kept by the Kestrel Ring. Opened on the Warden's word."},
@@ -654,9 +660,74 @@
         {"at": [26, 31], "facing": "left", "sheet": "monk", "kind": "talk", "name": "Ranger Sol",
          "text": "A hundred years shut, and they're going home at last. The grass out there will settle now: you did that. Stay as long as you like, and catch them all."}
       ]
+    },
+    {
+      "map": "mere", "name": "The Mere", "layout": "game_maps/mere.json",
+      "warps": [
+        {"at": [29, 6, 1, 2], "to": "larkhollow", "x": 1, "y": 11, "facing": "right"}
+      ],
+      "signs": [
+        {"at": [27, 5, 1, 1], "facing": "any", "text": "THE MERE. Hermit Bryn's cottage, and Ola's fishing. Keepers train here."}
+      ],
+      "zones": [
+        {"at": [10, 3, 17, 2], "table": "mere", "chance": 10},
+        {"at": [10, 9, 18, 6], "table": "mere", "chance": 10}
+      ],
+      "people": [
+        {"at": [25, 5], "facing": "down", "sheet": "cooldude", "kind": "trainer", "name": "Angler Pip",
+         "sight": 3, "flag": "beat_pip", "team": [["gillpip", 8], ["noctula", 8]],
+         "text": "Mara sent us to keep the path. Nobody fishes the Mere without a battle first!",
+         "after": "Fair's fair. Go on, then."},
+        {"at": [20, 8], "facing": "up", "sheet": "miner", "kind": "trainer", "name": "Hiker Moss",
+         "sight": 3, "flag": "beat_moss", "team": [["pebblub", 9], ["sprigling", 9]],
+         "text": "I've walked this path every day for a month, for Mara. Let's see your legs!",
+         "after": "Mara's at the far end, by the cottage. She's tougher than me."},
+        {"at": [15, 5], "facing": "down", "sheet": "picnicker", "kind": "trainer", "name": "Twins Bee and Bo",
+         "sight": 3, "flag": "beat_twins", "team": [["cardiling", 10], ["zunna", 10]],
+         "text": "Two of us, one of you! Well, one critter each...",
+         "after": "We'll tell Mara you're coming."},
+        {"at": [9, 8], "facing": "up", "sheet": "catgirl", "kind": "trainer", "name": "Collector Mara",
+         "sight": 3, "flag": "mere_cleared", "team": [["oglet", 11], ["anoleaf", 11], ["vamporm", 11]],
+         "text": "So you're the one who walked through my keepers. The Mere's critters are mine to study. Prove you deserve to fish here!",
+         "after": "Hm. Ola can have her Mere back. I'll go and study the Brideswood instead."},
+        {"at": [12, 15], "facing": "up", "sheet": "monk", "kind": "trainer", "name": "Ranger Hollis",
+         "sight": 3, "show_if": "beat_ivy", "flag": "beat_hollis", "team": [["geodot", 20], ["rillotl", 21]],
+         "text": "Since the Warden's win, the strong ones come to the Mere to train. Show me why Ivy let you through.",
+         "after": "You'll do. The Old Keep's captain fights like this, but harder."},
+        {"at": [24, 15], "facing": "up", "sheet": "tennisplayer", "kind": "trainer", "name": "Diver Coral",
+         "sight": 3, "show_if": "beat_ivy", "flag": "beat_coral", "team": [["rillotl", 22], ["cirrup", 22]],
+         "text": "I dive the Mere for its rarest critters. My partners are the best of them!",
+         "after": "The Mere's deeper than it looks."},
+        {"at": [14, 8], "facing": "up", "sheet": "homemaker", "kind": "trainer", "name": "Old Tobin",
+         "sight": 3, "show_if": "beat_ivy", "flag": "beat_tobin", "team": [["sparkip", 23], ["skullick", 23], ["valkit", 24]],
+         "text": "I've kept critters since before the Ring was built. Come on, then, young one!",
+         "after": "You remind me of the Warden, when she started."},
+        {"at": [27, 8], "facing": "up", "sheet": "nurse", "kind": "healer", "name": "Hermit Bryn",
+         "text": "Off to face Mara's keepers? Rest a moment first, you and your critters. My cottage is at the far end, if you get that far."},
+        {"at": [5, 11], "facing": "right", "sheet": "florist", "kind": "talk", "name": "Fisher Ola", "hide_if": "mere_cleared",
+         "text": "This is my Mere, and four keepers have claimed it: Collector Mara and her helpers. They battle anyone on the path. Beat Mara, by the cottage, and I'll pay you for it in potions."},
+        {"at": [5, 11], "facing": "right", "sheet": "florist", "kind": "gift", "name": "Fisher Ola", "show_if": "mere_cleared",
+         "flag": "ola_paid", "gift": ["super_potion", 3],
+         "text": "Mara's gone off to the Brideswood! Here, as I promised. And come back when you're stronger: strong keepers come to the Mere once the Warden's been beaten.",
+         "after": "The fish are biting again. Thank you."}
+      ]
     }
   ],
   "encounters": {
+    "mere": [
+      {"creature": "gillpip", "levels": [7, 10], "rate": 25},
+      {"creature": "noctula", "levels": [7, 10], "rate": 20},
+      {"creature": "sprigling", "levels": [8, 11], "rate": 20},
+      {"creature": "pebblub", "levels": [8, 11], "rate": 20},
+      {"creature": "oglet", "levels": [9, 12], "rate": 15}
+    ],
+    "mere_b": [
+      {"creature": "rillotl", "levels": [18, 22], "rate": 25},
+      {"creature": "noctalo", "levels": [18, 22], "rate": 20},
+      {"creature": "wildbough", "levels": [19, 23], "rate": 20},
+      {"creature": "bouldrom", "levels": [19, 23], "rate": 20},
+      {"creature": "oglet", "levels": [20, 24], "rate": 15}
+    ],
     "the_reach": [
       {"creature": "agnite", "levels": [34, 38], "rate": 8},
       {"creature": "anoleaf", "levels": [34, 38], "rate": 8},

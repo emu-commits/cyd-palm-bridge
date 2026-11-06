@@ -988,6 +988,12 @@ static int ev_text(Mon *m, const MpEvent *e, char *t, size_t cap){
         snprintf(t, cap, "You beat %s!", person_name(m, e->a, a)); return 1;
     case MP_EV_HEALED:
         snprintf(t, cap, "Your critters are rested."); return 1;
+    case MP_EV_GIFT: {
+        char it[NAME_LEN];
+        snprintf(t, cap, "%s gives you %u %s%s.", person_name(m, e->a, a), e->b, item_name(m, (uint16_t)e->n, it),
+                 e->b == 1 ? "" : "s");
+        return 1;
+    }
     case MP_EV_PRIZE:
         snprintf(t, cap, "%s pays you %u coins.", person_name(m, e->a, a), (unsigned)e->n); return 1;
     case MP_EV_ITEM: {

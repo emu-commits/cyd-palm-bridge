@@ -62,7 +62,7 @@ MAX_AREA_CELLS = 255          # width and height each
 MAX_PEOPLE = 32               # in one area (monster.h MG_MAX_PEOPLE)
 MAX_FLAGS = 256               # flags are numbered 1 .. 255
 TEAM = 3                      # a trainer's creatures
-PERSON_KINDS = {"talk": 0, "trainer": 1, "healer": 2, "shop": 3}
+PERSON_KINDS = {"talk": 0, "trainer": 1, "healer": 2, "shop": 3, "gift": 4}     # gift: 2.3
 I_HEAL, I_HEAL_PCT, I_CURE, I_REVIVE = 1, 2, 4, 8
 MAX_ITEMS = 9
 
@@ -616,14 +616,12 @@ class Area:
                 if not g:
                     cells.append(None)
                     continue
-                if flip:
-                    fail(f"{slug}: flipped tiles aren't supported")
                 fg, sh = [s for s in sheets if s[0] <= g][-1]
                 if sh.name not in allowed:
                     lost[sh.name] = lost.get(sh.name, 0) + 1
                     cells.append(None)
                     continue
-                cells.append((sh, g - fg))
+                cells.append((sh, g - fg, flip))     # flip: Tiled's bits 31-29 (8 across, 4 down, 2 diagonal)
             self.layers.append((L.get("name"), cells))
         self.lost = lost
         n_tiles = sum(1 for _, c in self.layers for x in c if x)
@@ -731,6 +729,14 @@ class Area:
                 if not c:
                     continue
                 t = c[0].tile(c[1])
+                f = c[2] if len(c) > 2 else 0
+                if f:                           # Tiled: the diagonal first (a transpose), then across, then down
+                    if f & 2:
+                        t = t.transpose(Image.Transpose.TRANSPOSE)
+                    if f & 8:
+                        t = t.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+                    if f & 4:
+                        t = t.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
                 if n < BELOW_LAYERS:
                     lo.alpha_composite(t)
                 else:
@@ -1170,6 +1176,11 @@ def region_events(a, ar, mv, area_ix, rules, ids, flag_names):
                 fail(f"{where}: {what}: a trainer needs 1 to {TEAM} creatures and a flag")
             if not 0 <= sight <= 15:
                 fail(f"{where}: {what}: sight {sight}")
+        elif kind == "gift":
+            gift = pe.get("gift") or []
+            if len(gift) != 2 or gift[0] not in rules.items or not 1 <= int(gift[1]) <= 99 or not f or team or sight:
+                fail(f"{where}: {what}: a gift needs [item, 1-99] (an item on the region's list) and a flag")
+            team = [("@item", list(rules.items).index(gift[0]), int(gift[1]))]
         elif team or sight:
             fail(f"{where}: {what}: only a trainer has creatures or sight")
         persons.append({"x": x, "y": y, "facing": facing(pe.get("facing", "down"), what) & 3, "sheet": pe["sheet"],
@@ -1494,7 +1505,10 @@ def build(root, bpp, report, ids, allow_path=ALLOW, region_path=REGION, spike=Tr
             body += struct.pack("<BBBBBBHHH", pe["x"], pe["y"], pe["facing"], chars.index(pe["sheet"]),
                                 pe["kind"], pe["sight"], pe["flag"], pe["hide_if"], pe["show_if"])
             body += text.ref(pe["name"]) + text.ref(pe["text"]) + text.ref(pe["after"])
-            team = [(mon_ix[c], lv) for c, lv in pe["team"]] + [(0xFFFF, 0)] * (TEAM - len(pe["team"]))
+            if pe["team"] and pe["team"][0][0] == "@item":          # a gift: the item and how many
+                team = [pe["team"][0][1:]] + [(0xFFFF, 0)] * (TEAM - 1)
+            else:
+                team = [(mon_ix[c], lv) for c, lv in pe["team"]] + [(0xFFFF, 0)] * (TEAM - len(pe["team"]))
             body += b"".join(struct.pack("<HBx", m, lv) for m, lv in team)
         head_len = 64 + len(body) + 8 * len(chunks)
         tiles_off = (head_len + 3) & ~3

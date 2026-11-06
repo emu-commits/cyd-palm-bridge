@@ -950,6 +950,11 @@ static int bot_plays(MonGame *g, int pick, uint32_t seed){
     MpBattle bt;
     MpLog log;
     long n, tidied = 0, battles = 0, keepers = 0, lost = 0, lost_k = 0, caught = 0, stuck = 0, learnt = 0, bought = 0, used = 0;
+    /* the grind (BACKLOG.md, "progress without grinding"): wild battles fought
+     * only to train, between one keeper beaten and the next, and the longest */
+    long trained = 0, streak = 0, worst_streak = 0, train_all = 0;
+    char worst_at[48] = "";
+    int training = 0;
     int ok = 0;
     uint8_t met[32] = { 0 };        /* the creatures it has met, by position */
     char who[32] = "?";
@@ -970,6 +975,7 @@ static int bot_plays(MonGame *g, int pick, uint32_t seed){
         }
         else{
             int d, k = mb_world(b, w, &d);
+            training = !strncmp(b->why, "training", 8);
             if(getenv("BOT_VERBOSE") && n > BOT_LIMIT - 12)
                 printf("    %ld: area %u at %u,%u facing %u: %d dir %d (%s)\n", n, w->area.index, w->x, w->y, w->facing, k, d, b->why);
             if(k == MB_DONE){ ok = 1; break; }
@@ -984,6 +990,20 @@ static int bot_plays(MonGame *g, int pick, uint32_t seed){
         for(int i = 0; i < log.n; i++){
             const MpEvent *e = &log.ev[i];
             if(e->kind == MP_EV_ENCOUNTER || e->kind == MP_EV_TRAINER) battles++;
+            if(e->kind == MP_EV_ENCOUNTER && training && !mb_done(b, w)){ trained++; train_all++; }
+            if(e->kind == MP_EV_BEATEN){
+                if(trained > worst_streak){
+                    MgAreaDir ad;
+                    MgPerson pp;
+                    char an[24] = "?", pn[24] = "?";
+                    if(!mg_area_dir(g, w->area.index, &ad)) mg_text(g, ad.name, an, sizeof an);
+                    mg_person(&w->area, e->a, &pp);
+                    mg_text(g, pp.name, pn, sizeof pn);
+                    worst_streak = trained;
+                    snprintf(worst_at, sizeof worst_at, "%s, %s", pn, an);
+                }
+                trained = 0;
+            }
             if((e->kind == MP_EV_ENCOUNTER || e->kind == MP_EV_SENDS) && e->a < 256) met[e->a / 8] |= (uint8_t)(1u << (e->a % 8));
             if(e->kind == MP_EV_BEATEN) keepers++;
             if(e->kind == MP_EV_LOSE){ lost++; lost_k += bt.trainer != 0; }
@@ -1036,6 +1056,9 @@ static int bot_plays(MonGame *g, int pick, uint32_t seed){
     }
     CHECK(!ok || main_lv >= BOT_MAIN_MIN, "bot: the best critter ends at level %d, under %d", main_lv, BOT_MAIN_MIN);
     all_lost += lost; all_lost_k += lost_k;
+    (void)streak;
+    printf("  grind with %s, seed %u: %ld wild battles to train before keepers, at most %ld before one (%s)\n",
+           who, (unsigned)seed, train_all, worst_streak, worst_at);
     printf("  bot with %s, seed %u: %s after %ld actions; %ld battles, %ld keepers, %ld lost, "
            "(%ld to keepers), %ld caught, %ld moves relearnt, %ld stuck, %ld bought, %ld used, %ld moved, box %u, %u coins; party %s\n",
            who, (unsigned)seed, ok ? "every keeper beaten, the Dex full" : "NOT finished", n, battles, keepers, lost, lost_k, caught,
@@ -1095,7 +1118,7 @@ static void autoplay(void){
     int seeds = getenv("BOT_SEEDS") ? atoi(getenv("BOT_SEEDS")) : 1;
     for(int sd = 1; sd <= (seeds > 0 ? seeds : 1); sd++)
         for(int pick = 0; pick < (g.n_starters ? g.n_starters : 3); pick++)
-            CHECK(bot_plays(&g, pick, (uint32_t)sd), "bot: didn't finish the region with first critter %d, seed %d", pick, sd);
+            if(!getenv("BOT_ONLY") || atoi(getenv("BOT_ONLY")) == pick) CHECK(bot_plays(&g, pick, (uint32_t)sd), "bot: didn't finish the region with first critter %d, seed %d", pick, sd);
     printf("  bot: %ld losses in all, %ld of them to keepers\n", all_lost, all_lost_k);
     mg_close(&g);
 }

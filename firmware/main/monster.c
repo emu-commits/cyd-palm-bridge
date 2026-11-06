@@ -922,9 +922,15 @@ static int area_open(MonGame *g, uint32_t i, MgArea *a, uint8_t *buf, uint32_t c
         const uint8_t *p = a->people + 48 * k;
         MgStr s;
         int team = 0, ok = p[0] < a->w && p[1] < a->h && p[2] <= 3 && p[3] < a->n_chars &&
-                           p[4] <= MG_P_SHOP && p[5] <= 15 && le16(p + 6) < MG_FLAGS &&
+                           p[4] <= MG_P_GIFT && p[5] <= 15 && le16(p + 6) < MG_FLAGS &&
                            le16(p + 8) < MG_FLAGS && le16(p + 10) < MG_FLAGS;
-        for(int j = 0; ok && j < MG_TEAM; j++){
+        if(ok && p[4] == MG_P_GIFT){
+            /* a gift: item (in the first creature's place), how many, and a flag to give it once by */
+            ok = le16(p + 36) < g->n_items && p[38] && p[38] <= 99 && !p[39] && le16(p + 6) && !p[5];
+            for(int j = 1; ok && j < MG_TEAM; j++) ok = le16(p + 36 + 4 * j) == MG_NONE16 && !p[38 + 4 * j] && !p[39 + 4 * j];
+            team = -1;
+        }
+        for(int j = 0; ok && team >= 0 && j < MG_TEAM; j++){
             uint16_t mon = le16(p + 36 + 4 * j);
             uint8_t lv = p[38 + 4 * j];
             if(p[39 + 4 * j]) ok = 0;
@@ -932,7 +938,7 @@ static int area_open(MonGame *g, uint32_t i, MgArea *a, uint8_t *buf, uint32_t c
             else ok = j == team++ && mon < g->n_mons && lv && lv <= g->rules[5];
         }
         /* a trainer has creatures and a flag to remember the win by; no one else has creatures */
-        if(ok) ok = p[4] == MG_P_TRAINER ? team && le16(p + 6) : !team && !p[5];
+        if(ok && team >= 0) ok = p[4] == MG_P_TRAINER ? team && le16(p + 6) : !team && !p[5];
         /* one to a cell, unless each comes or goes on a flag (a keeper and their rematch; one
          * person as the story moves on, which mkgame.py checks are never there together) */
         for(uint32_t j = 0; ok && j < k; j++){

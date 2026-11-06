@@ -452,6 +452,11 @@ int mp_interact(MpWorld *w, MpBattle *b, MpLog *log){
             say(log, MP_EV_HEALED, 0, (uint32_t)k, 0, 0);
         }
         if(p.kind == MG_P_SHOP) say(log, MP_EV_SHOP, 0, (uint32_t)k, 0, 0);
+        if(p.kind == MG_P_GIFT && !done && p.mon[0] < MP_BAG){
+            uint32_t have = w->bag[p.mon[0]], n = p.level[0];
+            w->bag[p.mon[0]] = (uint8_t)(have + n > MP_BAG_MAX ? MP_BAG_MAX : have + n);
+            say(log, MP_EV_GIFT, 0, (uint32_t)k, n, p.mon[0]);
+        }
         mp_set_flag(w, p.flag);
         return 1;
     }
