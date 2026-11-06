@@ -261,8 +261,9 @@ after, and shown on the battle cards as a status badge.
 - [s] **E0, the foundation** (no effect switched on): format 2.3 (the save stays 4: nothing new outlasts a battle),
   the `"effects"` list, the status badge on both battle cards, `tools/gen_status_icons.py`, `sim/tests/balance.c` and
   its baseline run. Built 2026-11-06 (`BUILD_PROGRESS.md`); shot `critters_badges`.
-- [ ] **E1, stat multipliers**, one step each: exhausted, blinded, enraged, hardshell, sniping, slow, softened,
-  focused, chargedup.
+- [s] **E1, stat multipliers**, one step each: exhausted, blinded, enraged, hardshell, sniping, slow, softened,
+  focused, chargedup, charging. Built 2026-11-06; one tune (Thunderclap) and two gate refinements for the owner
+  (`BUILD_PROGRESS.md`).
 - [ ] **E2, statuses that cost turns**: noddingoff (asleep), stuck, grabbed, flinching, confused, harpooned. Asleep
   gets its own balance review with the owner before it ships.
 - [ ] **E3, over time**: festering, lifeleech, wasting, plague.

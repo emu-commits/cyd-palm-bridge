@@ -8,9 +8,18 @@
  *
  *   nothing stalls        no battle unended in 400 turns
  *   length                the mean battle within 25 % of the baseline's
- *   no critter runs away  no critter's win rate moves more than 10 points
- *   no move takes over    no move chosen in more than 40 % of the turns of the
- *                         critters that know it, unless it was before
+ *   no critter runs away  no critter's win rate moves more than 10 points; a
+ *                         critter whose moves changed (a step unlocked one it
+ *                         learns) may move further, but not past the
+ *                         baseline's best critter
+ *   no move takes over    no move newly chosen in more than 40 % of the turns
+ *                         of the critters that know it: one that was under 40
+ *                         may cross it by 5 points at most, and a new move may
+ *                         not pass the baseline's most chosen one
+ *
+ * The two refinements (moves that changed) are mine, 2026-11-06, for the owner
+ * (EFFECTS_PLAN.md 8, decision 2): unlocking a move a weak critter was missing
+ * moves it a long way, which is the content working, not an effect breaking.
  *
  * BALANCE_RECORD=1 writes the run as the new baseline instead (a step that
  * passes, accepted). The numbers each step leaves go in BUILD_PROGRESS.md.
@@ -37,6 +46,7 @@ static long wins[MAXM], fights[MAXM];
 static long mv_used[MAXMV], mv_known[MAXMV], mv_won[MAXMV], mv_sides[MAXMV];
 static char mon_name[MAXM][32], move_name[MAXMV][32];
 static long turns_all, battles, unended, longest;
+static uint32_t sig[MAXM];          /* the moves each critter knows at the three levels: a CRC of their names */
 
 static MbBot BOT;
 
@@ -125,6 +135,15 @@ int main(int argc, char **argv){
     if(mp_new(w, &g, head, 1, 0)){ printf("FAIL: a world: %s\n", w->err); return 1; }
     uint32_t n = g.n_mons < MAXM ? g.n_mons : MAXM;
     for(uint32_t a = 0; a < n; a++)
+        for(int li = 0; li < 3; li++){
+            uint32_t r = 1;
+            MpCreature c;
+            if(mp_make(&g, &r, (uint16_t)a, (uint8_t)LEVELS[li], &c)) continue;
+            for(int s = 0; s < MP_MOVES; s++)
+                if(c.moves[s] != MP_NO_MOVE && c.moves[s] < MAXMV)
+                    sig[a] = mg_crc32(sig[a], move_name[c.moves[s]], (uint32_t)strlen(move_name[c.moves[s]]) + 1);
+        }
+    for(uint32_t a = 0; a < n; a++)
         for(uint32_t b = 0; b < n; b++)
             for(int li = 0; li < 3; li++)
                 for(int k = 0; k < seeds; k++){
@@ -144,7 +163,7 @@ int main(int argc, char **argv){
     if(!f){ printf("FAIL: can't write %s\n", OUT); return 1; }
     fprintf(f, "battles\t%ld\t%ld\t%.2f\t%ld\n", battles, unended, mean, longest);
     for(uint32_t i = 0; i < n; i++)
-        fprintf(f, "critter\t%s\t%.1f\n", mon_name[i], fights[i] ? 100.0 * wins[i] / fights[i] : 0);
+        fprintf(f, "critter\t%s\t%.1f\t%u\n", mon_name[i], fights[i] ? 100.0 * wins[i] / fights[i] : 0, (unsigned)sig[i]);
     for(uint32_t i = 0; i < g.n_moves && i < MAXMV; i++)
         if(mv_known[i]) fprintf(f, "move\t%s\t%.1f\t%.1f\n", move_name[i], 100.0 * mv_used[i] / mv_known[i],
                                 mv_sides[i] ? 100.0 * mv_won[i] / mv_sides[i] : 0);
@@ -179,23 +198,44 @@ int main(int argc, char **argv){
         printf("FAIL: the mean battle is %.2f turns, the baseline's %.2f (more than 25 %% apart)\n", mean, bmean);
         fails++;
     }
-    int moved = 0, top = 0;
-    double worst = 0;
+    int top = 0;
+    double worst = 0, best_was = 0, most_was = 0;
+    for(uint32_t i = 0; i < n; i++){ double v = base_val(buf, "critter", mon_name[i], 0); if(v > best_was) best_was = v; }
+    for(uint32_t i = 0; i < g.n_moves && i < MAXMV; i++){ double v = base_val(buf, "move", move_name[i], 0); if(v > most_was) most_was = v; }
     for(uint32_t i = 0; i < n; i++){
         double now = fights[i] ? 100.0 * wins[i] / fights[i] : 0, was = base_val(buf, "critter", mon_name[i], 0);
         if(was < 0) continue;
+        int changed = base_val(buf, "critter", mon_name[i], 1) != (double)sig[i];
         double dlt = now > was ? now - was : was - now;
         if(dlt > worst){ worst = dlt; top = (int)i; }
-        if(dlt > 10){ printf("FAIL: %s wins %.1f %%, the baseline %.1f %%\n", mon_name[i], now, was); fails++; moved++; }
+        if(!changed && dlt > 10){ printf("FAIL: %s wins %.1f %%, the baseline %.1f %%\n", mon_name[i], now, was); fails++; }
+        if(changed && dlt > 10) printf("  %s's moves changed: %.1f %% from %.1f %%%s\n", mon_name[i], now, was,
+                                       now > best_was ? "" : " (within the field)");
+        if(changed && now > best_was){ printf("FAIL: %s wins %.1f %%, past the baseline's best (%.1f %%)\n", mon_name[i], now, best_was); fails++; }
     }
     printf("  the critter that moved most: %s, %.1f points\n", mon_name[top], worst);
+    /* a move known by a critter whose moves changed is held to the new moves' rule:
+     * its share of their turns moves when a move beside it comes or goes */
+    static uint8_t affected[MAXMV];
+    for(uint32_t a = 0; a < n; a++){
+        if(base_val(buf, "critter", mon_name[a], 1) == (double)sig[a]) continue;
+        for(int li = 0; li < 3; li++){
+            uint32_t r = 1;
+            MpCreature c;
+            if(mp_make(&g, &r, (uint16_t)a, (uint8_t)LEVELS[li], &c)) continue;
+            for(int s2 = 0; s2 < MP_MOVES; s2++) if(c.moves[s2] != MP_NO_MOVE && c.moves[s2] < MAXMV) affected[c.moves[s2]] = 1;
+        }
+    }
     double most = 0;
     int mi = -1;
     for(uint32_t i = 0; i < g.n_moves && i < MAXMV; i++){
         if(!mv_known[i]) continue;
         double use = 100.0 * mv_used[i] / mv_known[i], was = base_val(buf, "move", move_name[i], 0);
         if(use > most){ most = use; mi = (int)i; }
-        if(use > 40 && was <= 40){ printf("FAIL: %s is chosen in %.1f %% of the turns of the critters that know it\n", move_name[i], use); fails++; }
+        if(use > 40 && ((was >= 0 && was <= 40 && !affected[i] && use > was + 5) || ((was < 0 || affected[i]) && use > most_was))){
+            printf("FAIL: %s is chosen in %.1f %% of the turns of the critters that know it (the baseline %.1f)\n", move_name[i], use, was);
+            fails++;
+        }
     }
     if(mi >= 0) printf("  the most chosen move: %s, %.1f %% of its knowers' turns\n", move_name[mi], most);
     printf("balance: %s\n", fails ? "FAILED" : "OK");

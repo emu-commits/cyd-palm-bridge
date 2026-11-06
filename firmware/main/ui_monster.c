@@ -217,6 +217,9 @@ static const char *status_word(Mon *m, uint16_t st, char *buf){
     if(st < m->g.n_statuses){
         switch(m->g.statuses[st].kind){
         case MG_S_ASLEEP: snprintf(buf, NAME_LEN, "Asleep"); return buf;
+        case MG_S_THORNS:           /* "Elemental Shield" doesn't fit beside the HP */
+            if(m->g.statuses[st].ranges == 1u << MG_SPECIAL){ snprintf(buf, NAME_LEN, "Shield"); return buf; }
+            break;
         default: break;
         }
     }
@@ -467,7 +470,8 @@ static void badge(Mon *m, const Rect *c, int bw, int x, int y, int s){
     fill(m->band, bw, c, x, y, 11, 11, edge);
     fill(m->band, bw, c, x + 1, y + 1, 9, 9, ground);
     if(!neg)
-        for(int i = 1; i < 10; i += 2){                  /* the dotted frame: gaps in the edge */
+        for(int i = 2; i < 10; i += (i & 1) ? 3 : 1){    /* the dashed frame: 2-px gaps (2, 3, 6, 7); a
+                                                            1-px dot would read as the TV's scanlines */
             fill(m->band, bw, c, x + i, y, 1, 1, ground); fill(m->band, bw, c, x + i, y + 10, 1, 1, ground);
             fill(m->band, bw, c, x, y + i, 1, 1, ground); fill(m->band, bw, c, x + 10, y + i, 1, 1, ground);
         }
@@ -658,7 +662,7 @@ static void battle_labels(Mon *m){
     lv_label_set_text(m->foe, t);
     snprintf(t, sizeof t, "%s  Lv %u", mon_name(m, m->sh_mon[m->sh_active], a), me->level);
     lv_label_set_text(m->me, t);
-    snprintf(t, sizeof t, "HP %u / %u", m->sh_hp[m->sh_active], me->stat[MG_HP]);
+    snprintf(t, sizeof t, m->sh_st[0] ? "%u/%u" : "HP %u / %u", m->sh_hp[m->sh_active], me->stat[MG_HP]);
     lv_label_set_text(m->mehp, t);
     lv_obj_clear_flag(m->foe, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(m->me, LV_OBJ_FLAG_HIDDEN);
@@ -2308,7 +2312,7 @@ int mon_ui_test_status(int ours, int foe, int turns){
     for(uint32_t i = 0; i < m->g.n_statuses; i++){
         lv_point_t sz, hp;
         lv_text_get_size(&sz, status_word(m, (uint16_t)i, nm), &lv_font_palm, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-        lv_text_get_size(&hp, "HP 999 / 999  ", &lv_font_palm, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        lv_text_get_size(&hp, "999/999  ", &lv_font_palm, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
         if(sz.x + hp.x > worst_st) worst_st = sz.x + hp.x;
     }
     fprintf(stderr, "badge: the widest name line %d px of %d; the widest HP and status line %d px of %d\n",

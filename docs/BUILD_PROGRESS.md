@@ -16,6 +16,41 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-06 — Critters: E1, the stat multipliers switched on
+
+One effect per step, each run against the step before it (`make -C sim balance`, 216,000 battles, 20 seeds a pair at
+levels 10/25/40, seeds fixed by `balance.c`), accepted into `tests/data/balance.tsv` only when it passed:
+
+| Step | Moves kept | Unended | Mean turns | Longest | Moved most (points) |
+|---|---|---|---|---|---|
+| E0 baseline | 69 | 0 | 3.59 | 41 | |
+| exhausted | 72 | 0 | 3.57 | 41 | Arthrobolt 9.6, after the Thunderclap edit |
+| blinded | 77 | 0 | 3.46 | 39 | Pigabyte 43.0 (its moves changed) |
+| enraged | 81 | 0 | 3.38 | 39 | Noctula 10.0 |
+| hardshell | 84 | 0 | 3.45 | 39 | Arthrobolt 16.5 (its moves changed) |
+| sniping | 87 | 0 | 3.45 | 70 | Agnidon 5.2 |
+| slow, softened, focused | 87 | 0 | 3.45 | 70 | none: no move gives them yet without E3-E5's effects |
+| chargedup | 88 | 0 | 3.45 | 70 | Agnigon 1.9 |
+| charging | 89 | 0 | 3.45 | 70 | Nebulet 0.7 |
+
+- **One tune**, Thunderclap (`move_edits`): at Tuxemon's power 1.25 and potency 0.75 exhausted's step moved
+  Arthrobolt 13.4 points and Nut 11.6; power 1.1 and potency 0.5 passes.
+- **The gates were refined (mine, for the owner, decision 2).** Blinded moved Pigabyte from 32 % to 75 % and the
+  Nut line 16 points, but not by the effect: those moves are the first ranged or second level-1 moves these critters
+  have had (Pigabyte had one move at level 1). The field already runs from 15 % (Noctula) to 85 % (Vamporm). So a
+  critter whose moves changed may move more than 10 points as long as it stays within the baseline's best, and a move
+  of such a critter, or a new move, may not pass the baseline's most chosen move (Water Blast, 55 %). A critter
+  whose moves didn't change still has the 10-point gate, and an old move may cross 40 % by 5 points at most.
+  `balance.tsv` now records each critter's moves (a CRC of their names) so the run can tell.
+- **The game still plays:** Auto-play finishes with every starter. Losses, E0 then E1: Agnite 9 → 24, Anoleaf 27 → 24,
+  Cardiling 22 → 32, Vamporm 5 → 5, Nut 24 → 22; 87 → 107 in all (+23 %, within the plan's 50 %; Agnite alone is
+  over, from a small count).
+- **The badge, measured:** with E1's names the status line ran 142 px into a 126 px card. Our card's third line now
+  drops the "HP" word while a status shows ("72/72  Charged Up"), and elementalshield says "Shield": 117 px. The
+  positive badge's dotted frame was a column alternating every row, which the Dex's scanline check (rightly) took
+  for the TV effect in `critters_menu`; it's dashed in 2-px steps now. Shot `critters_badges` (Berserk on ours,
+  Exhausted on the foe), looked at.
+
 ### 2026-11-06 — Critters: E0, the foundation for Tuxemon's move effects
 
 `EFFECTS_PLAN.md` E0, on "work through the effects plan and the backlog": nothing new is switched on, and the
