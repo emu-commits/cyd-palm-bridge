@@ -36,6 +36,7 @@
 #define BATTLE "../tests/data/game/battle.txt"
 #define REGION "../courses/critters/game.bin"
 #define BOT_LIMIT 400000L           /* presses and battle turns, all told (GAME_LENGTH_PLAN.md) */
+#define GRIND_MAX   50               /* wild battles only to train, before one keeper: mine, for the owner */
 #define BOT_MAIN_MIN 36             /* the first critter's level when every keeper is beaten, at least (the owner's ask) */
 static const char *SAVE = "build/monster_save.bin";   /* MONSTER_SAVE overrides */
 
@@ -953,7 +954,7 @@ static int bot_plays(MonGame *g, int pick, uint32_t seed){
     /* the grind (BACKLOG.md, "progress without grinding"): wild battles fought
      * only to train, between one keeper beaten and the next, and the longest */
     long trained = 0, streak = 0, worst_streak = 0, train_all = 0;
-    char worst_at[48] = "";
+    char worst_at[64] = "";
     int training = 0;
     int ok = 0;
     uint8_t met[32] = { 0 };        /* the creatures it has met, by position */
@@ -1057,6 +1058,11 @@ static int bot_plays(MonGame *g, int pick, uint32_t seed){
     CHECK(!ok || main_lv >= BOT_MAIN_MIN, "bot: the best critter ends at level %d, under %d", main_lv, BOT_MAIN_MIN);
     all_lost += lost; all_lost_k += lost_k;
     (void)streak;
+    /* the grind gate (BACKLOG.md, "progress without grinding"): no more than
+     * GRIND_MAX wild battles fought only to train before any one keeper. The
+     * number is mine (2026-11-06: the worst is 40, Cardiling before Ben); the
+     * owner sets it */
+    CHECK(!ok || worst_streak <= GRIND_MAX, "bot: %ld wild battles to train before %s (the gate is %d)", worst_streak, worst_at, GRIND_MAX);
     printf("  grind with %s, seed %u: %ld wild battles to train before keepers, at most %ld before one (%s)\n",
            who, (unsigned)seed, train_all, worst_streak, worst_at);
     printf("  bot with %s, seed %u: %s after %ld actions; %ld battles, %ld keepers, %ld lost, "

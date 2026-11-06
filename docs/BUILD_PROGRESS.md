@@ -16,6 +16,30 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-06 — Critters: the Mere, and progress without grinding
+
+`BACKLOG.md` item 3. The measure first: `make -C sim monster` now counts, per game, the wild battles Auto-play
+fights only to train ("training for a level N keeper") between one keeper and the next.
+
+| Step | Training battles, five games | Worst before one keeper | Losses |
+|---|---|---|---|
+| E5's end | 676 | 97 (Anoleaf, before Warden Ivy) | 90 |
+| the Mere, tiers 1-2 | 571 | 59 (before Keeper Iris's rematch) | 102 |
+| Auto-play takes a keeper it can beat first | 385 | 119 (Anoleaf, before Ashe) | 104 |
+| the Mere's third tier (36-38) | 252 | 40 | 170 |
+| ...comfortably beatable (2 levels over) first | **300** | **40** (Cardiling, before Ben) | **101** |
+
+- **The Mere** (`tools/game_maps/mere.json`, our layout, 30 x 20): in from Larkhollow's west road through Hermit
+  Bryn's gate (gone once Keeper Tom is beaten); a path through two meadows to her cottage and Fisher Ola's pond.
+  Ten optional keepers in three tiers, the grass table `mere` stepping to `mere_b` and `mere_c` with the story.
+- **First tries that failed:** Tuxemon's `spyder_routec`, which Route 1's west edge leads to, is open sea (it also
+  had a warp into Dragon's Cave); `mkgame.py` learnt flipped tiles for it on the way, and kept that. The healer stood
+  behind all four keepers' sight lines, so a worn-out Auto-play bounced at the door: she's at the entrance now.
+- **A gift person** (kind 4, format 2.3): gives `level[0]` of item `mon[0]` once, by its flag (`MP_EV_GIFT`).
+- **prop_healing tried again** with a new `move_edits` field for its proportion: Hibernate at 0.33 left 111
+  battles unended, at 0.2 still 64 (Vamporm against Vamporm). It stays off.
+- `smoke32` ran in an Ubuntu container (this PC has no gcc-multilib): OK, the device-sized pool too.
+
 ### 2026-11-06 — Critters: Kestrel, a Ring town
 
 `BACKLOG.md` item 2 of 2026-11-06: Kestrel used Larkhollow's sheets the same way and read as the same village. It

@@ -100,7 +100,8 @@ BASE_EFFECTS = {"damage", "healing", "poison", "burn", "recover"}     # what 2.2
 # also on the list: "teams", a status given to a team or to both sides (in one against one,
 # own_team is itself and enemy_team the foe; own_team:enemy_team gives it to both)
 # the move fields region["move_edits"] may overwrite (the rest are Tuxemon's)
-MOVE_EDIT_FIELDS = {"recharge", "accuracy", "healing_power", "power", "potency"}
+MOVE_EDIT_FIELDS = {"recharge", "accuracy", "healing_power", "power", "potency",
+                    "prop_healing"}     # the proportion a prop_healing effect heals (2.3)
 T_ENEMY, T_OWN, T_BOTH = 0, 1, 2
 # a status's kind (GAME_FORMAT.md 3.5) from its Tuxemon effect; "statchange" alone
 # (and exhausted, chargedup, charging, which only end it on use) is kind 4
@@ -414,6 +415,13 @@ class Rules:
                 if k == "why": continue        # a note for people, not a field
                 if k not in MOVE_EDIT_FIELDS:
                     fail(f"move_edits: {t}.{k} isn't a field we may edit")
+                if k == "prop_healing":
+                    effs = [e for e in self.techs[t]["effects"] if e["type"] == "prop_healing"]
+                    if not effs or not 0 < float(v) <= 1:
+                        fail(f"move_edits: {t} has no prop_healing, or {v} isn't a proportion")
+                    for e in effs:
+                        e["parameters"] = [e["parameters"][0], str(v)]
+                    continue
                 self.techs[t][k] = v
         report.append(f"moves: {len(self.techs)} kept, {len(unsupported)} left out "
                       f"(effects the first version doesn't play)")

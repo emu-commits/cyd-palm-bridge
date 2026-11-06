@@ -308,15 +308,14 @@ Three requests from the owner, written as backlog items; nothing built.
   sheet, if one fits), its own roof and wall styles, and a town plan that suits a Ring town (a walled arena, stands,
   a market street) rather than a village. Kestrel stays laid out for this game (`tools/game_maps/`), so no Tuxemon map
   is copied. Shots `critters_kestrel` before and after, looked at.
-- [ ] **3. Progress must not come from walking back and forth.** Partly built 2026-11-06: **the Mere**, a side area
-  of our own off Larkhollow's west road (gated until Keeper Tom), with four optional keepers (8-11) between Tom and
-  Ivy, three more after Ivy (21-24), a healer at its entrance, and Fisher Ola's request, which pays 3 Super Potions
-  (a new "gift" person kind, format 2.3). `make -C sim monster` now prints the grind: training battles fell from 676
-  to 571 over the five games, and the worst stretch from 97 (before Ivy) to 59 (before Keeper Iris's tunnel rematch,
-  23). Still open: a second side area for the post-Ivy rematches, more side quests, the gate's threshold (the owner's
-  number), and the Reach hunt question. The owner's point, and a **design failure**: Auto-play
-  walks in one area to trigger wild encounters and level its party up before the next big keeper. A real player
-  would do the same, so the content is short. The fix is in the content, not the bot:
+- [s] **3. Progress must not come from walking back and forth.** Built 2026-11-06, for the owner to judge on the
+  bench: **the Mere**, a side area of our own off Larkhollow's west road (gated until Keeper Tom), with three tiers of
+  optional keepers (8-11 before Ivy; 21-24 after Ivy; 36-38 after her rematch, for Ashe at 40), a grass table that
+  steps up with them, Hermit Bryn's rest at its entrance, and Fisher Ola's request, paid in 3 Super Potions (a new
+  "gift" person kind). Auto-play now takes the keepers it can beat before training for a harder one. Measured over
+  the five games (seed 1): **wild battles fought only to train fell from 676 to 300**, the worst stretch before one
+  keeper from 97 to 40, and losses are 101 (E0 had 87). `make -C sim monster` fails past **50** in one stretch
+  (`GRIND_MAX`, mine: **owner, set the number**). Still open below: more side areas and quests, and the Reach hunt.
   - **Side areas to explore** off the main road: a path with its own wild table and a reason to go (a cave, a
     shrine, a lake, a mine, a Wren specimen trail), each with a healer and something to find. Each one takes a
     few hours, not a few minutes of walking.
@@ -353,6 +352,13 @@ Three requests from the owner, written as backlog items; nothing built. Today's 
   when no other party member is at full HP. Gate: a run chosen with a full-health bench member fails
   `make -C sim monster`. **(mine: "full health" means HP at its maximum, and a fainted member does not count as
   able to fight.)**
+
+### Critters: battle screen overlap (reported 2026-11-06; not started)
+
+- [ ] **1. The opponent's sprite must not overlap the player's status box.** In battle, the opponent critter's
+  sprite currently draws over the player's critter's name, HP and status box. The sprites and the boxes should be
+  laid out so neither covers the other, at the device's screen size. Gate: a battle smoke shot showing both
+  cards with no overlap, looked at (`[s]`); the bench check is the owner's (`[d]`).
 
 ---
 

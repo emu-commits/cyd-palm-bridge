@@ -540,12 +540,17 @@ int mb_world(MbBot *b, MpWorld *w, int *dir){
      * because another is nearer there), else the nearest not yet beaten */
     uint32_t best = FAR;
     int top = 0, goal = -1;
-    for(int pass = 0; pass < 2 && goal < 0; pass++)
+    /* passes: the goal it chose, if it can beat them now; the nearest it can beat now;
+     * the goal; the nearest. A keeper it can beat comes before a nearer one it would
+     * have to train for (BACKLOG.md, "progress without grinding"): a player takes the
+     * fights that are open before walking the grass */
+    for(int pass = 0; pass < 4 && goal < 0; pass++)
         for(int k = 0; k < b->n_people; k++){
             const MbPerson *p = &b->people[k];
             int wh, dd;
             if(p->kind != MG_P_TRAINER || mp_flag(w, p->flag) || !present(w, p)) continue;
-            if(pass == 0 && k + 1 != b->goal) continue;
+            if((pass == 0 || pass == 2) && k + 1 != b->goal) continue;
+            if(pass < 2 && best_level(w) < p->top + p->margin + 2) continue;    /* comfortably */
             uint32_t s = to_person(b, w, p, &wh, &dd);
             if(s < best){ best = s; what = wh; d = dd; top = p->top + p->margin; goal = k; }
         }
