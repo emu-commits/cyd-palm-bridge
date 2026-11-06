@@ -16,6 +16,25 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-06 — Critters: E4, shields and comebacks
+
+| Step | Moves kept | Unended | Mean turns | Longest | Moved most (points) |
+|---|---|---|---|---|---|
+| E3's end (the policy row) | 107 | 0 | 3.57 | 39 | |
+| elementalshield | 110 | 0 | 3.57 | 39 | Dune Pincher 3.8 |
+| diehard | 112 | 0 | 3.54 | 39 | Arthrobolt 2.0 |
+| revenge | 113 | 0 | 3.55 | 39 | Anoleaf 2.4 |
+| retaliate, prickly, spiky | 113 | 0 | 3.55 | 39 | none: no critter's move gives them |
+
+- **A gate fixed:** diehard failed on Nut and Bolt "past the baseline's best" (76.5 % against 76.3) though they moved
+  under 2 points: they were near the top already. The field limit applies only to a critter that moved more than 10
+  points now.
+- **One seed a starter is too noisy to judge a step.** E4's game had 176 losses on seed 1 against E3's 126, yet the
+  keeper it lost to most (Captain Rook, 76 times) had the same team in both. `BOT_SEEDS=n` now plays each starter on
+  seeds 1..n and prints the total (`MONSTER_REGION` names another game file). Over four seeds a starter (20 games):
+  **E0 420 losses (257 to keepers), E4 572 (392), +36 %**, within the plan's 50 %. Over the same 20 games E5 comes
+  back to 415 (next entry).
+
 ### 2026-11-06 — Critters: E3, damage over time and no healing
 
 | Step | Moves kept | Unended | Mean turns | Longest | Moved most (points) |

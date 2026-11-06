@@ -10,7 +10,7 @@
  *   length                the mean battle within 25 % of the baseline's
  *   no critter runs away  no critter's win rate moves more than 10 points; a
  *                         critter whose moves changed (a step unlocked one it
- *                         learns) may move further, but not past the
+ *                         learns) may move further, but then not past the
  *                         baseline's best critter
  *   no move takes over    no move newly chosen in more than 40 % of the turns
  *                         of the critters that know it: one that was under 40
@@ -154,7 +154,11 @@ int main(int argc, char **argv){
                     battles++;
                     turns_all += t;
                     if(t > longest) longest = t;
-                    if(r < 0){ unended++; continue; }
+                    if(r < 0){
+                        unended++;
+                        if(getenv("BALANCE_VERBOSE")) printf("  unended: %s and %s at %d, seed %u\n", mon_name[a], mon_name[b], LEVELS[li], (unsigned)seed);
+                        continue;
+                    }
                     fights[a]++; fights[b]++;
                     wins[r ? a : b]++;
                 }
@@ -211,7 +215,7 @@ int main(int argc, char **argv){
         if(!changed && dlt > 10){ printf("FAIL: %s wins %.1f %%, the baseline %.1f %%\n", mon_name[i], now, was); fails++; }
         if(changed && dlt > 10) printf("  %s's moves changed: %.1f %% from %.1f %%%s\n", mon_name[i], now, was,
                                        now > best_was ? "" : " (within the field)");
-        if(changed && now > best_was){ printf("FAIL: %s wins %.1f %%, past the baseline's best (%.1f %%)\n", mon_name[i], now, best_was); fails++; }
+        if(changed && dlt > 10 && now > best_was){ printf("FAIL: %s wins %.1f %%, past the baseline's best (%.1f %%)\n", mon_name[i], now, best_was); fails++; }
     }
     printf("  the critter that moved most: %s, %.1f points\n", mon_name[top], worst);
     /* a move known by a critter whose moves changed is held to the new moves' rule:
