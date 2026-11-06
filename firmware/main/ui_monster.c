@@ -70,7 +70,7 @@
 #define BAND_PX    (240 * 40)       /* the display's draw buffer, lvgl_port.c: a narrower strip is taller */
 #define ICON_PX    (MG_ICON_SIZE * MG_ICON_SIZE)
 #define ICON_ROW   24               /* a party menu's lines, for the icons */
-#define NCACHE     96               /* tiles kept: Kestrel shows 60, and the people take two each */
+#define NCACHE     96               /* tiles kept: Kestrel shows 79 (2026-11-06, its market and Ring), and the people take two each */
 #define TICK_MS    30
 #define STEP_TICKS 4                /* a step: four frames of 4 px */
 #define BURST_TICKS 3               /* the timer runs before the refresh: past the first paint */

@@ -248,7 +248,7 @@
       ],
       "warps": [
         {"at": [3, 16, 1, 1], "to": "spyder_brideswood", "x": 36, "y": 1, "facing": "down"},
-        {"at": [35, 2, 1, 1], "to": "kestrel", "x": 12, "y": 19, "facing": "up"},
+        {"at": [35, 2, 1, 1], "to": "kestrel", "x": 12, "y": 25, "facing": "up"},
         {"at": [31, 2, 1, 1], "to": "spyder_route4", "x": 18, "y": 2, "facing": "up"}
       ],
       "zones": [
@@ -288,7 +288,7 @@
     {
       "map": "kestrel", "name": "Kestrel", "layout": "game_maps/kestrel.json",
       "warps": [
-        {"at": [12, 20, 2, 1], "to": "spyder_cotton_tunnel", "x": 35, "y": 3, "facing": "down"},
+        {"at": [12, 26, 2, 1], "to": "spyder_cotton_tunnel", "x": 35, "y": 3, "facing": "down"},
         {"at": [0, 16, 1, 2], "to": "larkhollow", "x": 22, "y": 11, "facing": "left"},
         {"at": [6, 15], "to": "kestrel_rest", "x": 5, "y": 7, "facing": "up"},
         {"at": [19, 15], "to": "kestrel_store", "x": 5, "y": 7, "facing": "up"}

@@ -16,6 +16,19 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-06 — Critters: Kestrel, a Ring town
+
+`BACKLOG.md` item 2 of 2026-11-06: Kestrel used Larkhollow's sheets the same way and read as the same village. It
+keeps the two sheets (both clean), but its ground is `core_outdoor`'s dry-earth family (the same layout 16 columns
+over, so the autotile's edges move by 16 too) with sandy roads; the Ring's floor is flagstones in a frame from
+`core_city_and_country`, walled in stone with two banners; and a new market square (flagstones, the awning stall,
+fruit crates, a fountain) takes six new rows south. Every person, door and the drove road keep their places; the
+south exit moves from (12,20) to (12,26), and the tunnel's warp now lands at (12,25).
+
+Measured: at most **79 different tiles on one screen** (was 64; the area's tile cache holds 96, with people taking
+two each). The statue and two of the four crates came out to get there from 87. Auto-play's games are unchanged
+but for Kestrel's longer walk (Agnite 37,145 → 37,709 actions). The game file is 836,400 B.
+
 ### 2026-11-06 — Critters: the drove road's gate
 
 `BACKLOG.md` item 1 of 2026-11-06. The road between Larkhollow and Kestrel was two warps with drovers standing on

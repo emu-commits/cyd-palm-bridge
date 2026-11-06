@@ -297,7 +297,12 @@ Three requests from the owner, written as backlog items; nothing built.
   one drover who says what changed once it's open. Check the logic against the other route: the tunnel way from
   Larkhollow is long, so the road must be the sensible shortcut after Ivy and not an accident of the map. **(mine:
   a fixed gate that opens by flag, not a drover stood on a tile.)**
-- [ ] **2. Redo Kestrel's town so it doesn't look like Larkhollow.** Both towns use the same two sheets
+- [s] **2. Redo Kestrel's town so it doesn't look like Larkhollow.** Built 2026-11-06 from the same two clean sheets:
+  dry earth and sandy roads (`core_outdoor`'s brown family, 16 columns right of Larkhollow's green), the Ring a
+  walled flagstone arena with banners below its gate hall, and a market square south of the crossroads (an awning
+  stall, fruit crates, a fountain); the town is six rows longer (26 x 27) and its south exit moved from row 20 to 26,
+  every other place unchanged. At most 79 tiles on one screen (the cache keeps 96). Shot `critters_kestrel`,
+  looked at, before and after. **Owner:** the two houses are still the sheet's only two wooden designs. Both towns use the same two sheets
   (`core_city_and_country` and `core_outdoor`, see `tools/game_maps/larkhollow.json` and `kestrel.json`), so they read
   as one village. Give Kestrel its own look: a different ground and building palette from the sheets (or a second
   sheet, if one fits), its own roof and wall styles, and a town plan that suits a Ring town (a walled arena, stands,
