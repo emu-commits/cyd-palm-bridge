@@ -267,7 +267,8 @@ after, and shown on the battle cards as a status badge.
 - [s] **E2, statuses that cost turns**: noddingoff (asleep), stuck, grabbed, flinching, confused, harpooned, and
   "teams". Built 2026-11-06; asleep ships switched on (the quietest by the run). **Owner:** its review is still yours,
   and taking it off is one line in `"effects"`.
-- [ ] **E3, over time**: festering, lifeleech, wasting, plague.
+- [s] **E3, over time**: festering, lifeleech, wasting (plague is left out: E6). Built 2026-11-06, with a change to
+  Auto-play's policy the game gate asked for (`BUILD_PROGRESS.md`).
 - [ ] **E4, shields and comebacks**: elementalshield, diehard, revenge, retaliate, prickly, spiky.
 - [ ] **E5, effects that aren't statuses**: remove, splash, multiattack, appear/disappear, statchange, switch,
   prop_damage/prop_healing, charging.

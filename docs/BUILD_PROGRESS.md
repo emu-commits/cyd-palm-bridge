@@ -16,6 +16,25 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-06 — Critters: E3, damage over time and no healing
+
+| Step | Moves kept | Unended | Mean turns | Longest | Moved most (points) |
+|---|---|---|---|---|---|
+| E2's end | 102 | 0 | 3.67 | 39 | |
+| festering | 105 | 0 | 3.65 | 39 | Selmatek 5.4 |
+| lifeleech | 107 | 0 | 3.66 | 39 | Vamporm 3.5 |
+| wasting | 107 | 0 | 3.66 | 39 | none: no critter's move gives it |
+| Auto-play's policy (below) | 107 | 0 | 3.57 | 39 | Eyesore 5.9; Amnesia's use 36.3 → 43.4 % |
+
+All three passed the balance run, but **the game gate failed**: Auto-play's five games lost 170 times (+95 % on
+E0's 87), Nut's 53 and Anoleaf's 49, mostly to Captain Rook and Ringman Pell at their highest margin (52 losses
+there). Neither keeper's team had changed. Auto-play's own critters had: the Vamporm line learns Proboscis, a weak
+blow that gives lifeleech, and the policy valued any status at a third of a blow even in a fight its best blow would
+end in two turns. **Now a status is worth something only in a fight that lasts** (the foe has more than twice the
+best blow's HP), weighted by the move's potency (`worth()` in `monster_bot.c`). Losses: Agnite 26, Anoleaf 40,
+Cardiling 29, Vamporm 10, Nut 21; **126 in all, +45 %**. The policy is both sides' in the balance run, so that run
+moved too (the last row); it's recorded as the baseline E4 is measured against, a policy change, not an effect.
+
 ### 2026-11-06 — Critters: E2, the statuses that cost turns
 
 | Step | Moves kept | Unended | Mean turns | Longest | Moved most (points) |

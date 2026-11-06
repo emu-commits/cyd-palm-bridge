@@ -614,7 +614,7 @@ static int owned(const MpWorld *w, uint16_t mon){
  * accuracy. me and foe are as the battle sees them (mp_view). A status is worth
  * a share of the damage it saves or adds, if the one it would go to has none
  * and isn't immune (EFFECTS_PLAN.md 6). */
-static uint32_t worth(MbBot *b, const MpCreature *me, const MpCreature *foe, int s, const uint8_t *rech){
+static uint32_t worth(MbBot *b, const MpCreature *me, const MpCreature *foe, int s, const uint8_t *rech, uint32_t dmax){
     MonGame *g = b->g;
     MgMove m;
     if(me->moves[s] == MP_NO_MOVE || rech[s] || mg_move(g, me->moves[s], &m)) return 0;
@@ -623,7 +623,9 @@ static uint32_t worth(MbBot *b, const MpCreature *me, const MpCreature *foe, int
     int damage = 0;
     for(int e = 0; e < 3; e++) if(m.eff_kind[e] == MG_E_DAMAGE) damage = 1;
     if(m.range != MG_SPECIAL) d = mp_damage(g, me, &m, foe, NULL);
-    uint32_t base = d ? d : (uint32_t)me->level + 5;       /* what a turn is worth, roughly */
+    uint32_t base = dmax ? dmax : (uint32_t)me->level + 5;     /* what a turn is worth: the best blow it has */
+    int long_fight = foe->hp > 2 * base;    /* a status pays only in a fight that lasts: the best blow
+                                               won't end it within two turns */
     for(int e = 0; e < 3; e++){
         uint8_t k = m.eff_kind[e], tg = m.eff_target[e];
         switch(k){
@@ -657,8 +659,9 @@ static uint32_t worth(MbBot *b, const MpCreature *me, const MpCreature *foe, int
         case MG_E_GIVE: {
             const MgStatus *st = &g->statuses[m.eff_status[e]];
             int neg = st->flags & MG_SF_NEGATIVE;
-            uint32_t share = st->kind == MG_S_ASLEEP ? base : st->kind == MG_S_POISON || st->kind == MG_S_BURN ? 1 :
-                             st->kind == MG_S_RECOVER ? 0 : base / 3;     /* the first three as before 2.3 */
+            uint32_t share = st->kind == MG_S_POISON || st->kind == MG_S_BURN ? 1 :      /* the first three as before 2.3 */
+                             st->kind == MG_S_RECOVER || !long_fight ? 0 : st->kind == MG_S_ASLEEP ? base : base / 3;
+            share = share * m.potency / 100;
             if(tg != MG_T_OWN && !foe->status && neg) v += share;
             if(tg != MG_T_ENEMY){
                 if(!me->status && !neg) v += share;
@@ -668,12 +671,12 @@ static uint32_t worth(MbBot *b, const MpCreature *me, const MpCreature *foe, int
         }
         case MG_E_REMOVE: {
             const MgStatus *fs = mp_status(g, foe), *ms = mp_status(g, me);
-            if(tg != MG_T_OWN && fs && !(fs->flags & MG_SF_NEGATIVE)) v += base / 2;
-            if(tg != MG_T_ENEMY && ms && (ms->flags & MG_SF_NEGATIVE)) v += base / 2;
+            if(tg != MG_T_OWN && fs && !(fs->flags & MG_SF_NEGATIVE) && long_fight) v += base / 2;
+            if(tg != MG_T_ENEMY && ms && (ms->flags & MG_SF_NEGATIVE) && long_fight) v += base / 2;
             break;
         }
         case MG_E_STAGE:
-            v += base / 6;
+            if(long_fight) v += base / 6;
             break;
         default:
             break;
@@ -682,14 +685,28 @@ static uint32_t worth(MbBot *b, const MpCreature *me, const MpCreature *foe, int
     return v * m.accuracy + 1;              /* + 1: any move beats none */
 }
 
+/* the most damage one of me's moves can do now (no statuses counted) */
+static uint32_t best_blow(MbBot *b, const MpCreature *me, const MpCreature *foe, const uint8_t *rech){
+    uint32_t top = 0;
+    for(int s = 0; s < MP_MOVES; s++){
+        MgMove m;
+        if(me->moves[s] == MP_NO_MOVE || rech[s] || mg_move(b->g, me->moves[s], &m) || m.range == MG_SPECIAL) continue;
+        mp_view_move(b->g, me, &m);
+        uint32_t d = mp_damage(b->g, me, &m, foe, NULL);
+        if(d > top) top = d;
+    }
+    return top;
+}
+
 static int best_move(MbBot *b, const MpBattle *bt, const MpCreature *me, const MpCreature *foe, const uint8_t *rech, uint32_t *score){
     int best = -1;
     uint32_t top = 0;
     MpCreature vm, vf;
     mp_view(b->g, bt, 0, me, &vm);
     mp_view(b->g, bt, 1, foe, &vf);
+    uint32_t dmax = best_blow(b, &vm, &vf, rech);
     for(int s = 0; s < MP_MOVES; s++){
-        uint32_t v = worth(b, &vm, &vf, s, rech);
+        uint32_t v = worth(b, &vm, &vf, s, rech, dmax);
         if(v > top){ top = v; best = s; }
     }
     if(score) *score = top;
@@ -702,8 +719,9 @@ int mb_pick(MbBot *b, const MpBattle *bt, int side, const MpCreature *me, const 
     uint32_t top = 0;
     mp_view(b->g, bt, side, me, &vm);
     mp_view(b->g, bt, !side, foe, &vf);
+    uint32_t dmax = best_blow(b, &vm, &vf, rech);
     for(int s = 0; s < MP_MOVES; s++){
-        uint32_t v = worth(b, &vm, &vf, s, rech);
+        uint32_t v = worth(b, &vm, &vf, s, rech, dmax);
         if(v > top){ top = v; best = s; }
     }
     return best;
