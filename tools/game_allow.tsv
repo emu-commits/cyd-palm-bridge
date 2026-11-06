@@ -106,6 +106,8 @@ character	player_orange	CC0 1.0	CYD Palm	tools/game_art/player_orange.png	ours
 character	player_olive	CC0 1.0	CYD Palm	tools/game_art/player_olive.png	ours
 character	player_violet	CC0 1.0	CYD Palm	tools/game_art/player_violet.png	ours
 character	player_rose	CC0 1.0	CYD Palm	tools/game_art/player_rose.png	ours
+character	gate	CC0 1.0	CYD Palm	tools/game_art/gate.png	ours
+character	gate_right	CC0 1.0	CYD Palm	tools/game_art/gate_right.png	ours
 character	childactor	CC0 1.0	pboop	ATTRIBUTIONS.md "Child Actor"	credited
 character	catgirl	CC-BY-SA 4.0	pboop; Sanglorian; tamashihoshi	ATTRIBUTIONS.md "Cat Girl", "Cat Lady 01"	credited
 character	tennisplayer	CC-BY-SA 4.0	pboop; Sanglorian	ATTRIBUTIONS.md "Tennis Player", "Tennis Ace Trainer"	credited

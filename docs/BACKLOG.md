@@ -282,7 +282,13 @@ after, and shown on the battle cards as a status badge.
 
 Three requests from the owner, written as backlog items; nothing built.
 
-- [ ] **1. The shortcut between Larkhollow and Kestrel: more reasonable logic and a visible foundation.** Today the
+- [s] **1. The shortcut between Larkhollow and Kestrel: more reasonable logic and a visible foundation.** Built
+  2026-11-06: a locked gate (our CC0 drawing, `tools/gen_gate_sheet.py`) stands across the road at both ends, two
+  leaves each, with its own words (the notice: closed to travellers, the herds' road, kept by the Ring, opened on
+  the Warden's word); the drovers stand beside the road and give the reason (wild critters took the herds on it, so
+  the Ring locked it, and Ivy keeps the key), and once `beat_ivy` is set the gates are gone and one drover at each
+  end says what changed. Shots `critters_drove_gate`, `critters_drove_gate_says`, and the open road
+  (`critters_drove_road`, `critters_drove_road_home`). **Owner:** the words are my drafts. Today the
   drove road is two warps (`larkhollow` 23,11 ↔ `kestrel` 0,16 in `tools/game_region.json`) with nothing on the
   ground: two drovers stand on the road (Drover Lad in Larkhollow, Tam and Lil at Kestrel's end) and their words are
   the only gate, which the player reads as "a person in the way" rather than a closed road. Make it read as a road:
@@ -314,6 +320,30 @@ Three requests from the owner, written as backlog items; nothing built.
     comes from one area only. **(mine: the number is the owner's to set.)**
   - **Open question for the owner:** the full-Dex hunt in the Reach (22,000 to 40,000 actions, `[d]` above) is the
     same kind of walking. Is it a post-game chore to keep, a side quest with a reward, or cut?
+
+### Critters: Auto-play's catch and run rules (requested 2026-11-06; not started)
+
+Three requests from the owner, written as backlog items; nothing built. Today's rules are in
+`firmware/main/monster_bot.c` (the battle choice): a catch is thrown when the wild critter is at or under half HP
+(or one blow would take it), or at once while hunting; a run is chosen when the party is `worn()`.
+
+- [ ] **1. Don't catch a critter at full health.** Auto-play should not throw at an opponent whose HP is full (it
+  has not been worn down, so the throw is wasted). Hunting throws at once (`hunted`), which breaks this: the rule
+  must hold in hunting too, so a full-health critter is weakened first. Gate: a battle log with a catch on a
+  full-HP foe fails `make -C sim monster`.
+- [ ] **2. Don't catch when the party has no open space.** Auto-play should only try to catch while the party has
+  5 or fewer members, so the catch has a free slot. Today the hunting branch also allows a catch on a full party
+  when the box has room (`w->n_box < MP_BOX`), which the owner does not want. A full party sends its straggler to
+  the box first (see the 2026-11-04 release section), so the catch comes after that move, not instead of it.
+  Gate: no catch attempt with 6 in the party.
+- [ ] **3. Don't run while another party member can still fight.** Auto-play should not choose Run (`MP_ACT_RUN`)
+  while any party member other than the active one is at full health, since that member could win the battle.
+  `worn()` allows a run on total HP alone, which can fire with a full-health member still in the party. Run only
+  when no other party member is at full HP. Gate: a run chosen with a full-health bench member fails
+  `make -C sim monster`. **(mine: "full health" means HP at its maximum, and a fainted member does not count as
+  able to fight.)**
+
+---
 
 ## RESUME HERE — Palm behaviours from the archive review (approved 2026-10-15)
 

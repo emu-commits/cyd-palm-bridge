@@ -16,6 +16,17 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-06 — Critters: the drove road's gate
+
+`BACKLOG.md` item 1 of 2026-11-06. The road between Larkhollow and Kestrel was two warps with drovers standing on
+them. Now a gate stands across it at each end: two "people" drawn as a gate's leaves (`gate`, `gate_right`, our CC0
+sheets from `tools/gen_gate_sheet.py`, every frame the same), present until `beat_ivy`. A drover beside each end
+gives the story's reason before, and another says what changed after. Auto-play still finds its way: a warp with a
+flagged person beside it was already a gate to it (`MbWarp.gate`), and its five games are unchanged.
+
+Found on the way: a person with no name said ": " before their words. `ev_text` filled the name in the same
+`snprintf` that tested it, so whether the test saw the old or the new name was up to the compiler. Fixed.
+
 ### 2026-11-06 — Critters: E5, the effects that aren't statuses, and the rules tested
 
 | Step | Moves kept | Unended | Mean turns | Longest | Moved most (points) |

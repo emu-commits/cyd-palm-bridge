@@ -962,7 +962,8 @@ static int ev_text(Mon *m, const MpEvent *e, char *t, size_t cap){
     }
     case MP_EV_TALK: {
         MgStr st = { e->n, e->b };
-        int k = snprintf(t, cap, "%s%s", person_name(m, e->a, a), a[0] ? ": " : "");
+        person_name(m, e->a, a);                    /* first: the next line reads a[0] */
+        int k = snprintf(t, cap, "%s%s", a, a[0] ? ": " : "");
         if(k < 0 || (size_t)k >= cap) k = 0;
         if(!e->b || mtext(&m->g, st, t + k, (uint32_t)(cap - (size_t)k))) return 0;
         redraw();                                   /* they turned to face the player */

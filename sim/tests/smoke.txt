@@ -2149,6 +2149,14 @@ s critters_keep
 G 10 12 37 0
 t 300
 s critters_cave
+G 0 21 12 1
+t 300
+s critters_drove_gate
+c 204 246
+t 300
+s critters_drove_gate_says
+c 204 246
+t 300
 F 10 2000
 G 11 5 4 0
 t 300
