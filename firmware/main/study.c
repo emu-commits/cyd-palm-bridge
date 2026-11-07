@@ -132,21 +132,33 @@ int st_undo(StSession *s, uint16_t *item){
 
 static int file_exists(const char *p){ struct stat st; return stat(p, &st) == 0; }
 
+/* The mark holds the size of the demo it installed. A firmware with a newer
+ * demo (a different size) replaces the course on a card that still has the
+ * old one, so an update reaches people who already opened Study; progress is
+ * kept apart from the course and stays. A demo the user removed stays
+ * removed: the mark is there but the folder is not. An empty mark is one
+ * written before the mark held anything, so it counts as an older demo. */
 int st_install_demo(const char *root, int force){
     char dir[96], path[128], mark[96];
     snprintf(dir, sizeof dir, "%s/study", root);
     snprintf(mark, sizeof mark, "%s/study/.demo", root);
-    if(!force && file_exists(mark)) return 0;
+    snprintf(path, sizeof path, "%s/study/demo-kanji/course.srs", root);
+    if(!force && file_exists(mark)){
+        unsigned long had = 0;
+        FILE *m = fopen(mark, "rb");
+        if(m){ if(fscanf(m, "%lu", &had) != 1) had = 0; fclose(m); }
+        if(had == (unsigned long)study_demo_size) return 0;   /* this demo, already */
+        if(!file_exists(path)) return 0;                      /* removed: stays so */
+    }
     mkdir(dir, 0777);
     snprintf(dir, sizeof dir, "%s/study/demo-kanji", root);
     mkdir(dir, 0777);
-    snprintf(path, sizeof path, "%s/course.srs", dir);
     SafeFile sf;
     if(!sf_open(&sf, path, "wb")) return -1;
     int ok = fwrite(study_demo_srs, 1, study_demo_size, sf.f) == study_demo_size;
     if(sf_commit(&sf, ok)) return -1;
     FILE *m = fopen(mark, "wb");
-    if(m) fclose(m);
+    if(m){ fprintf(m, "%lu\n", (unsigned long)study_demo_size); fclose(m); }
     return 1;
 }
 

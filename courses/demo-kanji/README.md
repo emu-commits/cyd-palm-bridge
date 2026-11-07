@@ -1,19 +1,23 @@
 # Kanji demo — the course that ships with Study
 
-Two WaniKani-style levels of Japanese: radicals, then the kanji built from
-them, then words that use the kanji. The firmware carries this course and
+Two WaniKani-style levels of Japanese: kanji, each learned by its meaning
+and its sound (reading), then words that use them. There are no radicals:
+the course teaches the kanji themselves. The firmware carries this course and
 installs it on the SD card the first time Study opens (`SRS_PLAN.md` §9).
 It also serves as **the worked example for writing a course**: copy this
 folder to start your own. The format itself is `docs/COURSE_FORMAT.md`.
 
-| Level | Radicals | Kanji | Words |
-|---|---|---|---|
-| 1 "First strokes" | 一 十 人 口 山 日 月 木 | 一 二 三 十 人 口 大 山 日 月 木 本 | 20, from 一つ to 二日 |
-| 2 "Trees into forests" | 丨 卜 目 田 力 亻 | 上 下 中 目 田 力 男 休 体 林 森 明 | 20, from 上 to 日中 |
+| Level | Kanji | Words |
+|---|---|---|
+| 1 "First strokes" | 一 二 三 十 人 口 大 山 日 月 木 本 | 20, from 一つ to 二日 |
+| 2 "Trees into forests" | 上 下 中 目 田 力 男 休 体 林 森 明 | 20, from 上 to 日中 |
 
-That's 78 items: 14 radicals, 24 kanji and 40 words. Every radical is used by
-a kanji, and some level 2 kanji are built from level 1 radicals (休 is 亻 +
-木, 明 is 日 + 月), so unlocking across levels gets exercised.
+That's 64 items: 24 kanji and 40 words. Some level 2 words use level 1
+kanji (明日 is 明 + 日), so unlocking across levels gets exercised.
+
+The first version had 14 radicals in front of the kanji. They were taken out
+on 2026-11-07 (the owner: learn only the sound and meaning of the kanji).
+Their lines stay in `ids.tsv`, so their numbers are never reused.
 
 ## Licence and sources
 
@@ -25,11 +29,8 @@ on it without asking.
   KANJIDIC2 and every word's written form and reading with JMdict; all of
   them match. Meanings are the dictionaries' where they fit a flashcard, with
   a few extra accepted answers (such as "woods" for 林).
-- **Radical names, mnemonics and example sentences were written for this
-  course.** None of it comes from WaniKani, whose content belongs to Tofugu:
-  - Radicals are named for what they mean or look like. 卜 is "signpost"
-    (its old meaning, "divination", is also accepted), and 亻 is "standing
-    person".
+- **Mnemonics and example sentences were written for this course.** None
+  of it comes from WaniKani, whose content belongs to Tofugu:
   - The stage names are the course's own (Learning, Known, Strong, Deep,
     Retired). Using WaniKani's would also clash with the Guru app on this
     device.
@@ -43,8 +44,7 @@ on it without asking.
 
 - **`id`**, `demo-kanji`: the folder on the card (`/sdcard/study/demo-kanji/`)
   and where progress is kept.
-- **`kinds`**: `radical` is quizzed on its meaning; `kanji` and `word` on
-  meaning and reading. `"level_up": true` on `kanji` means the next level
+- **`kinds`**: `kanji` and `word`, both quizzed on meaning and reading. `"level_up": true` on `kanji` means the next level
   opens when 90 % of this level's kanji are known (`unlock.level_percent`).
 - **`scheduler`**: `stages`, WaniKani's intervals (4 h, 8 h, 1 day, 2 days,
   1 week, 2 weeks, a month, 4 months, then retired) **with a 2-hour stage in
@@ -52,15 +52,14 @@ on it without asking.
   6 (a week) or above. `known: 2` is the stage at which an item counts as
   known, which is what opens the lessons built on it: here, one right
   answer.
-- **`unlock.by_links`**: a kanji's lesson waits until its radicals are known,
-  and a word's until its kanji are. The `built_from` links in `items.jsonl`
+- **`unlock.by_links`**: a word's lesson waits until its kanji are known. The `built_from` links in `items.jsonl`
   say which.
 - **`grading: "two"`**: Wrong / Right, as WaniKani does it.
 - **`levels`**: a title and theme for each.
 
-**The demo is faster than WaniKani, so it can be tried in an afternoon.** A
-kanji's lesson opens as soon as its radicals have been answered right once,
-2 hours after their lesson; a word's opens 2 hours after its kanji's. Level
+**The demo is faster than WaniKani, so it can be tried in an afternoon.**  A
+level's kanji are all open from the start; a word's lesson opens as soon as
+its kanji have been answered right once, 2 hours after their lesson. Level
 2 opens once 11 of level 1's 12 kanji (90 %, rounded up) have been answered
 right once. At WaniKani's own pace (its intervals without the 2-hour stage,
 and `known: 5`, which are the format's defaults), each of those steps takes
@@ -69,21 +68,15 @@ job is to show every kind of lesson on the first day.
 
 ### `items.jsonl`: the items, one per line
 
-Lessons follow the file within a level: radicals first, then kanji, then
-words. Three lines, one of each kind:
+Lessons follow the file within a level: kanji first, then words. One line
+of each kind:
 
 ```json
-{"id": "radical:木", "kind": "radical", "level": 1, "term": "木", "meanings": ["tree"], "mnemonic_meaning": "A trunk, two branches spreading down like roots: a tree."}
+{"id": "kanji:本", "kind": "kanji", "level": 1, "term": "本", "meanings": ["book", "origin", "main", "true"], "readings": [{"text": "ほん", "type": "on", "primary": true}, {"text": "もと", "type": "kun"}], "mnemonic_meaning": "A tree with a line across its root: ...", "mnemonic_reading": "Bring the books home: hon.", "rank": 10}
 ```
 
 - **`id`** is any text unique in the course. The kind is put in front
-  (`radical:`, `kanji:`, `word:`) because 木 is a radical, a kanji and a
-  word here.
-- A radical is quizzed only on its meaning, so it needs no reading.
-
-```json
-{"id": "kanji:本", "kind": "kanji", "level": 1, "term": "本", "meanings": ["book", "origin", "main", "true"], "readings": [{"text": "ほん", "type": "on", "primary": true}, {"text": "もと", "type": "kun"}], "mnemonic_meaning": "A tree with a line across its root: ...", "mnemonic_reading": "Bring the books home: hon.", "built_from": ["radical:木", "radical:一"], "rank": 10}
-```
+  (`kanji:`, `word:`) because 上 is a kanji and a word here.
 
 - **`meanings`**: the first is shown; the rest are accepted answers.
 - **`readings`**: every reading, typed `on` or `kun`. The **primary** one is
@@ -93,8 +86,6 @@ words. Three lines, one of each kind:
   1.7 KB for a two-line mnemonic; written that way, 24 mnemonics and 6
   notes took the course from 82 KB to 142 KB). The card shows the reading in kana right
   beside the mnemonic anyway.
-- **`built_from`**: the radicals, in the order they're written. The card
-  shows them, and with `unlock.by_links` they gate the lesson.
 - **`rank`**: KANJIDIC2's frequency rank (1 = the most common kanji in
   newspapers).
 
@@ -116,10 +107,9 @@ if you delete an item, its line stays and its number is never reused.
 
 ### `course.srs`: the built course
 
-What goes on the card: 81,760 bytes, and **82 % of it is pictures** (91 of
-them, 66,784 B). There's one for each kanji, radical and word written in
-kanji (the radical 一 and the kanji 一 share one), and one for each example
-sentence. Everything else is text: meanings, mnemonics and notes in the Palm
+What goes on the card: 79,264 bytes, and **83 % of it is pictures** (88 of
+them, 66,156 B). There's one for each kanji and word written in kanji (the
+kanji 上 and the word 上 share one), and one for each example sentence. Everything else is text: meanings, mnemonics and notes in the Palm
 font, readings in the kana font. `mkcourse.py --check` prints the breakdown.
 
 ## Building it

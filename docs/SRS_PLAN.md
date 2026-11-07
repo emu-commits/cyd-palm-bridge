@@ -175,6 +175,9 @@ either way.
   | **Study** | Guru | Coach |
 
   News moves up from 7 to 4, Games stays at 6, and Study takes 7.
+  (Since 2026-11-07, with Date Book, Address and To Do archived, the grid
+  is Settings, HotSync, Games / News, Memos, a free cell / **Study**,
+  Guru, Coach: Study is still at 7.)
 - **Icon:** a textbook on a black circle, Palm style, 24×22 A8 like the
   other launcher icons, drawn with a small generator as the Guru and Zip
   icons are.
@@ -503,7 +506,10 @@ jobs:
    - rendered kanji.
 
 **Content (accepted; written in S0):** 12 kanji and 20 words per level, with
-the radicals they need: 8 in level 1 and 6 in level 2, 78 items in all. Kanji in level 2 are built from radicals of both levels,
+the radicals they need: 8 in level 1 and 6 in level 2, 78 items in all.
+**Since 2026-11-07 there are no radicals** (the owner: learn only the sound and
+meaning of the kanji themselves): 64 items, and a level's kanji all open at
+once. The rest of this section describes the first version. Kanji in level 2 are built from radicals of both levels,
 so unlocking across levels is exercised:
 
 | Level | Kanji |

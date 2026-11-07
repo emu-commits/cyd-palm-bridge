@@ -6,10 +6,9 @@
   "author": "The CYD Palm project",
   "licence": "CC0-1.0",
   "language": "ja",
-  "description": "Two WaniKani-style levels: radicals, then the kanji built from them, then words that use the kanji.",
-  "source": "Written for this project. Readings and meanings checked against KANJIDIC2 and JMdict; radical names, mnemonics and sentences are its own.",
+  "description": "Two WaniKani-style levels: kanji, learned by meaning and reading, then words that use them.",
+  "source": "Written for this project. Readings and meanings checked against KANJIDIC2 and JMdict; mnemonics and sentences are its own.",
   "kinds": [
-    {"name": "radical", "quiz": ["meaning"]},
     {"name": "kanji", "quiz": ["meaning", "reading"], "level_up": true},
     {"name": "word", "quiz": ["meaning", "reading"]}
   ],

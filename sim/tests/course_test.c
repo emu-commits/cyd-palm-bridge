@@ -149,8 +149,8 @@ static void check_demo(void){
     if(r) return;
     CHECK(course_verify(&c, buf, sizeof buf) == 0, "verify the demo: %s", c.err);
     CHECK(!strcmp(c.id, "demo-kanji"), "id %s", c.id);
-    CHECK(c.n_items == 78 && c.n_levels == 2, "%u items, %u levels", (unsigned)c.n_items, (unsigned)c.n_levels);
-    CHECK(c.n_kinds == 3 && !strcmp(c.kinds[1].name, "kanji") && c.kinds[1].quiz == 3 && c.kinds[1].flags == 1,
+    CHECK(c.n_items == 64 && c.n_levels == 2, "%u items, %u levels", (unsigned)c.n_items, (unsigned)c.n_levels);
+    CHECK(c.n_kinds == 2 && !strcmp(c.kinds[0].name, "kanji") && c.kinds[0].quiz == 3 && c.kinds[0].flags == 1,
           "kinds");
     CHECK(c.scheduler == CS_STAGES && c.n_steps == 10 && c.steps[0] == 2 * 3600 && c.steps[1] == 4 * 3600 && c.steps[9] == 0,
           "stages: %u, first %u", c.n_steps, (unsigned)c.steps[0]);
@@ -162,22 +162,31 @@ static void check_demo(void){
     CHECK(course_meta_text(&c, 0x0004, t, 8) == 7 && !strcmp(t, "The CYD"), "author cut to fit '%s'", t);
     CHECK(course_meta_text(&c, 0x0099, t, sizeof t) == 0 && !t[0], "an absent key");
 
-    /* 明 is built from the radicals 日 and 月; its primary reading is めい */
-    uint32_t n = find_term(&c, "明");
-    CHECK(n != 0xFFFFFFFF, "find 明");
-    if(n != 0xFFFFFFFF){
+    /* 明's primary reading is めい; a kanji has no links now (no radicals), and
+     * the word 明日 is built from the kanji 明 and 日 */
+    uint32_t w = find_term(&c, "明日");
+    CHECK(w != 0xFFFFFFFF, "find 明日");
+    if(w != 0xFFFFFFFF){
         CourseItem it;
-        CHECK(course_item(&c, n, &it) == 0 && c.kinds[it.kind].name[0] == 'k', "明 is a kanji");
-        CHECK(course_item_load(&c, &it, buf, sizeof buf) > 0, "load 明");
-        CHECK(it.n_links == 2, "明 has %u links", it.n_links);
+        CHECK(course_item(&c, w, &it) == 0 && c.kinds[it.kind].name[0] == 'w', "明日 is a word");
+        CHECK(course_item_load(&c, &it, buf, sizeof buf) > 0, "load 明日");
+        CHECK(it.n_links == 2, "明日 has %u links", it.n_links);
         for(uint16_t i = 0; i < it.n_links && i < 2; i++){
             CourseLink l;
             course_link(buf, &it, i, &l);
             CHECK(l.type == CL_BUILT_FROM, "a built_from link");
             char term[16];
             CHECK(field_text(&c, l.target, CF_TERM, 0, term, sizeof term, NULL) == 0
-                  && !strcmp(term, i ? "月" : "日"), "明 link %u -> %s", i, term);
+                  && !strcmp(term, i ? "日" : "明"), "明日 link %u -> %s", i, term);
         }
+    }
+    uint32_t n = find_term(&c, "明");
+    CHECK(n != 0xFFFFFFFF, "find 明");
+    if(n != 0xFFFFFFFF){
+        CourseItem it;
+        CHECK(course_item(&c, n, &it) == 0 && c.kinds[it.kind].name[0] == 'k', "明 is a kanji");
+        CHECK(course_item_load(&c, &it, buf, sizeof buf) > 0, "load 明");
+        CHECK(it.n_links == 0, "明 has %u links", it.n_links);
         CHECK(field_text(&c, n, CF_READING, 0, t, sizeof t, &attr) == 0 && !strcmp(t, "めい")
               && (attr & CF_A_PRIMARY) && (attr & CF_A_KANA) && (attr & CF_A_VALUE) == 1, "明's reading %s %02x", t, attr);
         CHECK(field_text(&c, n, CF_TERM, 0, t, sizeof t, &attr) == 0 && (attr & CF_A_PICTURE), "明 is drawn");
@@ -221,10 +230,10 @@ static void check_demo(void){
     CHECK(course_item(&c, 0, &it) == 0 && course_item_load(&c, &it, buf, it.text_len - 1) == COURSE_ERANGE,
           "a buffer too small for the item");
     CHECK(course_verify(&c, buf, COURSE_VERIFY_BUF - 1) == COURSE_ERANGE, "verify needs its scratch");
-    /* levels: 1 then 2, covering 40 + 38 items */
+    /* levels: 1 then 2, covering 32 + 32 items (12 kanji and 20 words each) */
     CourseLevel l;
-    CHECK(course_level(&c, 0, &l) == 0 && l.number == 1 && l.first == 0 && l.count == 40, "level 1");
-    CHECK(course_level(&c, 1, &l) == 0 && l.number == 2 && l.first == 40 && l.count == 38, "level 2");
+    CHECK(course_level(&c, 0, &l) == 0 && l.number == 1 && l.first == 0 && l.count == 32, "level 1");
+    CHECK(course_level(&c, 1, &l) == 0 && l.number == 2 && l.first == 32 && l.count == 32, "level 2");
     course_close(&c);
 }
 

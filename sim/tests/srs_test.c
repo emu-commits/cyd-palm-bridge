@@ -46,7 +46,7 @@ static Course *open_course(const char *path){
 }
 
 /* the item number of the item whose TERM is `term` and whose kind's name
- * starts with `kind` (NULL: any) -- the demo's radical 一 and kanji 一 share
+ * starts with `kind` (NULL: any) -- the demo's kanji 上 and word 上 share
  * a term */
 static uint32_t item_of_kind(Course *c, const char *term, const char *kind){
     static uint8_t buf[COURSE_ITEM_BUF];
@@ -64,7 +64,6 @@ static uint32_t item_of_kind(Course *c, const char *term, const char *kind){
 }
 static uint32_t item_of(Course *c, const char *term){ return item_of_kind(c, term, NULL); }
 static uint32_t kanji(Course *c, const char *term){ return item_of_kind(c, term, "kanji"); }
-static uint32_t radical(Course *c, const char *term){ return item_of_kind(c, term, "radical"); }
 static uint32_t word(Course *c, const char *term){ return item_of_kind(c, term, "word"); }
 
 static uint32_t id_of(Course *c, uint32_t n){ CourseItem it; course_item(c, n, &it); return it.id; }
@@ -362,8 +361,8 @@ static void remap(void){
     course_close(v1); course_close(v2); free(v1); free(v2);
 }
 
-/* The demo's unlocks: radicals first; a kanji once its radicals are known; a
- * word once its kanji are; level 2 once 11 of level 1's 12 kanji are known. */
+/* The demo's unlocks: a level's kanji first (they're built from nothing); a
+ * word once its kanji are known; level 2 once 11 of level 1's 12 kanji are. */
 static int has(const uint16_t *v, int n, uint32_t x){ for(int i = 0; i < n; i++) if(v[i] == x) return 1; return 0; }
 
 /* a lesson, then `rights` right answers */
@@ -381,17 +380,14 @@ static void unlocks(void){
     CHECK(srs_open(&s, c, TMP, T0, 0) == 0, "open");
     uint16_t v[100], level;
     int n = srs_lessons(&s, v, 100, &level);
-    CHECK(n == 8 && level == 1, "at first: the 8 level-1 radicals (%d), level %u", n, level);
-    for(int i = 0; i < n; i++) CHECK(c->kinds[0].name[0] == 'r' && v[i] < 8, "a radical first");
-    for(int i = 0; i < 8; i++) learn(&s, c, v[i], 0);
-    CHECK(srs_lessons(&s, v, 100, &level) == 0, "radicals learning, not known: no kanji yet");
-    for(uint32_t i = 0; i < 8; i++) learn(&s, c, i, 1);         /* one right answer each */
-    n = srs_lessons(&s, v, 100, &level);
-    CHECK(n == 12 && level == 1, "every level-1 kanji: %d", n);
-    /* 大 is built from 一 and 人: known now. Words wait for their kanji. */
-    CHECK(has(v, n, kanji(c, "大")) && !has(v, n, word(c, "大人")), "kanji before words");
+    CHECK(n == 12 && level == 1, "at first: the 12 level-1 kanji (%d), level %u", n, level);
+    for(int i = 0; i < n; i++) CHECK(c->kinds[0].name[0] == 'k' && v[i] < 12, "a kanji first");
+    CHECK(!has(v, n, word(c, "大人")), "words wait for their kanji");
     static const char *K1[] = { "一","二","三","十","人","口","大","山","日","月","木","本" };
-    for(int i = 0; i < 10; i++) learn(&s, c, kanji(c, K1[i]), 1);
+    for(int i = 0; i < 12; i++) learn(&s, c, kanji(c, K1[i]), 0);
+    n = srs_lessons(&s, v, 100, &level);
+    CHECK(n == 0, "kanji learning, not known: no words yet (%d)", n);
+    for(int i = 0; i < 10; i++) learn(&s, c, kanji(c, K1[i]), 1);   /* one right answer each */
     n = srs_lessons(&s, v, 100, &level);
     CHECK(level == 1, "10 of 12 kanji known: level 2 still shut (%u)", level);
     CHECK(has(v, n, word(c, "大人")) && has(v, n, word(c, "一つ")) && !has(v, n, word(c, "日本")),
@@ -399,11 +395,9 @@ static void unlocks(void){
     learn(&s, c, kanji(c, K1[10]), 1);
     n = srs_lessons(&s, v, 100, &level);
     CHECK(level == 2, "11 of 12 (90 %%, rounded up): level 2 opens (%u)", level);
-    /* level 2: its radicals, and the kanji built only from level-1 radicals */
-    CHECK(has(v, n, radical(c, "亻")) && has(v, n, radical(c, "卜")), "level 2's radicals");
-    CHECK(has(v, n, kanji(c, "明")) && has(v, n, kanji(c, "林")) && has(v, n, kanji(c, "森")),
-          "明 (日+月), 林 and 森 (木) open with the level");
-    CHECK(!has(v, n, kanji(c, "休")) && !has(v, n, kanji(c, "上")), "休 waits for 亻, 上 for 卜");
+    /* level 2: every one of its kanji at once, no radicals in front of them */
+    CHECK(has(v, n, kanji(c, "明")) && has(v, n, kanji(c, "休")) && has(v, n, kanji(c, "上")) &&
+          has(v, n, kanji(c, "森")), "明, 休, 上 and 森 open with the level");
     /* the ordering: teaching order, the lesson list is capped by max */
     CHECK(srs_lessons(&s, v, 3, &level) == n, "the count is all of them, whatever max is");
     srs_close(&s);
@@ -569,6 +563,14 @@ static void card(void){
     CHECK(st_remove_course(root, "demo-kanji") == 0 && st_list_courses(root, ids, 8) == 0, "removed");
     CHECK(st_install_demo(root, 0) == 0, "removing it keeps it removed");
     CHECK(st_install_demo(root, 1) == 1 && st_list_courses(root, ids, 8) == 1, "reinstalled on request");
+    /* an older demo on the card (an empty mark, or another size) is replaced */
+    snprintf(p, sizeof p, "%s/study/.demo", root); spit(p, b, 0);
+    CHECK(st_install_demo(root, 0) == 1, "an older demo is replaced by this firmware's");
+    CHECK(st_install_demo(root, 0) == 0, "...once");
+    st_remove_course(root, "demo-kanji");
+    spit(p, b, 0);
+    CHECK(st_install_demo(root, 0) == 0, "an older demo the user removed stays removed");
+    CHECK(st_install_demo(root, 1) == 1, "and comes back on request");
     CHECK(st_remove_course(root, "../x") == -1, "an id can't climb out of study/");
     snprintf(p, sizeof p, "%s/study/b-course", root); mkdir(p, 0777);
     snprintf(p, sizeof p, "%s/study/b-course/course.srs", root); spit(p, b, 10);

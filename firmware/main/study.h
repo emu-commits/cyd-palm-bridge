@@ -68,7 +68,8 @@ int  st_undo(StSession *s, uint16_t *item);
 
 /* Write the built-in demo course to <root>/study/demo-kanji/ the first time
  * (then <root>/study/.demo marks it done, so removing the demo keeps it
- * removed), or whenever `force` is set (the "Reinstall demo" menu item).
+ * removed), when the card holds an older demo than this firmware's (the mark
+ * records which), or whenever `force` is set (the "Reinstall demo" menu item).
  * Returns 1 if it wrote the course, 0 if it didn't need to, < 0 on error. */
 int  st_install_demo(const char *root, int force);
 
