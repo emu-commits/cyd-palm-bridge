@@ -46,4 +46,23 @@ int gurupool_from_sd(void);
  * somebody has spent time on would be the worst possible behaviour. */
 int gurupool_export(const char *path);
 
+/* ---- editing on the device ------------------------------------------------
+ * Guru's own edit screen changes the list. Each call writes the WHOLE active
+ * pool, with the one change, to `path` (replaced whole, through safefile.h),
+ * then loads it back, so what Guru shows is always what the card holds. If
+ * the card already had a guru.txt that could not be used, it is kept beside
+ * the new one as guru.txt.bak rather than written over.
+ *
+ * Text is cleaned on the way in: a '|' becomes '/', a line break or tab a
+ * space, and the name is cut to its 30 characters. Both name and why must be
+ * non-empty after that (the file format requires both).
+ *
+ * gurupool_put: id 0 adds a habit under the lowest free id (1..64); any other
+ * id replaces that habit. Returns the habit's id, or -1 (gurupool_error()
+ * says why: no free id, an empty field, the card).
+ * gurupool_remove: drops habit `id`. Refuses to remove the last one, since an
+ * empty list is not a list. 0, or -1. */
+int gurupool_put(const char *path, int id, int cat, const char *name, const char *why);
+int gurupool_remove(const char *path, int id);
+
 #endif

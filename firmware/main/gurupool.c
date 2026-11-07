@@ -1,6 +1,7 @@
 /* gurupool.c -- see gurupool.h. Parses the card's habit pool in place. */
 #include "gurupool.h"
 #include "guru.h"
+#include "safefile.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,7 +41,9 @@ static int gp_fail(int line, const char *msg, const char *detail){
 }
 
 const char *gurupool_error(void){ return g_err; }
-int         gurupool_from_sd(void){ return g_from_sd; }
+/* guru_pool_reset() puts the built-in list back without telling this file,
+ * so "from the card" also asks guru.c whether a card list is still in. */
+int         gurupool_from_sd(void){ return g_from_sd && guru_pool_is_custom(); }
 
 /* ---------------------------------------------------------------- parsing */
 /* Trim in place and return the start. The end is trimmed by writing a NUL, so
@@ -203,16 +206,8 @@ int gurupool_load(const char *path){
 }
 
 /* ---------------------------------------------------------------- exporting */
-int gurupool_export(const char *path){
-    g_err[0] = 0;
-    if(!path) return -1;
-
-    FILE *chk = fopen(path, "rb");
-    if(chk){ fclose(chk); gp_fail(0, "already on the card; not overwritten", 0); return -1; }
-
-    FILE *f = fopen(path, "wb");
-    if(!f){ gp_fail(0, "could not be written", 0); return -1; }
-
+/* The comment block both writers put at the top of the file. */
+static void gp_header(FILE *f){
     fprintf(f,
         "# Guru habit pool.\n"
         "#\n"
@@ -237,6 +232,19 @@ int gurupool_export(const char *path){
         "# say what something is for, but should not name a disease or give a dose.\n",
         guru_cat_key(0), guru_cat_key(1), guru_cat_key(2),
         guru_cat_key(3), guru_cat_key(4), GP_NAME_MAX);
+}
+
+int gurupool_export(const char *path){
+    g_err[0] = 0;
+    if(!path) return -1;
+
+    FILE *chk = fopen(path, "rb");
+    if(chk){ fclose(chk); gp_fail(0, "already on the card; not overwritten", 0); return -1; }
+
+    FILE *f = fopen(path, "wb");
+    if(!f){ gp_fail(0, "could not be written", 0); return -1; }
+
+    gp_header(f);
 
     /* the BUILT-IN pool, deliberately: the export is a pristine starting point,
      * so exporting after a bad edit gives the user the original back. */
@@ -254,4 +262,94 @@ int gurupool_export(const char *path){
     int bad = ferror(f);
     if(fclose(f) != 0 || bad){ gp_fail(0, "could not be written", 0); return -1; }
     return 0;
+}
+
+/* ---------------------------------------------------------------- editing */
+/* Copy `src` into `dst` as one clean field: no '|' (it would split the line),
+ * no line breaks or tabs, trimmed, at most `max` characters. */
+static void gp_clean(char *dst, int cap, const char *src, int max){
+    int n = 0;
+    while(src && *src == ' ') src++;
+    for(; src && *src && n < cap - 1 && n < max; src++){
+        char c = *src;
+        if(c == '|') c = '/';
+        else if(c == '\n' || c == '\r' || c == '\t') c = ' ';
+        dst[n++] = c;
+    }
+    while(n > 0 && dst[n - 1] == ' ') n--;
+    dst[n] = 0;
+}
+
+/* Write the active pool to `path` with one habit replaced or added (put_id,
+ * > 0) or one dropped (del_id, > 0), then load it back. */
+static int gp_write(const char *path, int put_id, int put_cat, const char *put_name,
+                    const char *put_why, int del_id){
+    /* a card file that exists but was not used (it failed to parse) is the
+     * user's work: kept as .bak, not written over. FatFs rename() will not
+     * replace a file, so the old .bak goes first. */
+    if(!gurupool_from_sd() && sf_exists(path)){
+        char bak[168];
+        snprintf(bak, sizeof bak, "%s.bak", path);
+        remove(bak);
+        rename(path, bak);
+    }
+    SafeFile sf;
+    FILE *f = sf_open(&sf, path, "wb");
+    if(!f){ gp_fail(0, "could not be written", 0); return -1; }
+    gp_header(f);
+    int put_done = 0;
+    for(int c = 0; c < GU_NCAT; c++){
+        int head = 0;
+        for(int i = 0; i <= guru_ntasks(); i++){
+            int id, cat; const char *nm, *wy;
+            if(i < guru_ntasks()){
+                const GuruTask *t = guru_task(i);
+                id = t->id;
+                if(id == del_id) continue;
+                if(id == put_id){ cat = put_cat; nm = put_name; wy = put_why; put_done = 1; }
+                else            { cat = t->cat;  nm = t->name;  wy = t->why; }
+            } else {
+                /* a new habit goes at the end of its category */
+                if(put_id <= 0 || put_done || c != put_cat) continue;
+                id = put_id; cat = put_cat; nm = put_name; wy = put_why; put_done = 1;
+            }
+            if(cat != c) continue;
+            if(!head){ fprintf(f, "\n# --- %s\n", guru_cat_name(c)); head = 1; }
+            fprintf(f, "%d | %s | %s | %s\n", id, guru_cat_key(cat), nm, wy);
+        }
+    }
+    if(sf_commit(&sf, !ferror(f)) != 0){ gp_fail(0, "could not be written", 0); return -1; }
+    char keep[sizeof g_err];
+    if(gurupool_load(path) < 0){
+        /* should not happen: everything written was checked first. Say so. */
+        snprintf(keep, sizeof keep, "%s", g_err);
+        snprintf(g_err, sizeof g_err, "%s", keep[0] ? keep : "guru.txt: saved but not read back");
+        return -1;
+    }
+    return 0;
+}
+
+int gurupool_put(const char *path, int id, int cat, const char *name, const char *why){
+    g_err[0] = 0;
+    if(!path || cat < 0 || cat >= GU_NCAT) return gp_fail(0, "bad habit", 0);
+    char nm[GP_NAME_MAX + 1], wy[GP_WHY_MAX + 1];
+    gp_clean(nm, sizeof nm, name, GP_NAME_MAX);
+    gp_clean(wy, sizeof wy, why, GP_WHY_MAX);
+    if(!nm[0]){ snprintf(g_err, sizeof g_err, "A habit needs a name"); return -1; }
+    if(!wy[0]){ snprintf(g_err, sizeof g_err, "Add a line on why it matters"); return -1; }
+    if(id <= 0){
+        for(int k = 1; k <= GU_TASK_MAX && id <= 0; k++)
+            if(!guru_task_by_id(k)) id = k;
+        if(id <= 0){ snprintf(g_err, sizeof g_err, "The list is full (64 habits)"); return -1; }
+    } else if(!guru_task_by_id(id)){
+        return gp_fail(0, "no such habit", 0);
+    }
+    return gp_write(path, id, cat, nm, wy, 0) == 0 ? id : -1;
+}
+
+int gurupool_remove(const char *path, int id){
+    g_err[0] = 0;
+    if(!path || !guru_task_by_id(id)) return gp_fail(0, "no such habit", 0);
+    if(guru_ntasks() <= 1){ snprintf(g_err, sizeof g_err, "Guru needs at least one habit"); return -1; }
+    return gp_write(path, 0, 0, 0, 0, id);
 }

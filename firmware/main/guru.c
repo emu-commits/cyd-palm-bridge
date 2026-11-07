@@ -268,6 +268,14 @@ int guru_toggle(GuruState *s, int id, uint32_t now, int tz_off_min){
     return 1;
 }
 
+/* A habit deleted from the pool takes its tick with it, so a habit given the
+ * same number later does not arrive already ticked. Today's count is left as
+ * it is: the thing was done, whatever the list says now. */
+void guru_forget(GuruState *s, int id){
+    if(!s || !gu_bit_ok(id)) return;
+    gu_bit_clr(s, id);
+}
+
 /* -------------------------------------------------------------------- read-outs */
 int guru_today_n(const GuruState *s, uint32_t now, int tz_off_min){
     if(!s) return 0;

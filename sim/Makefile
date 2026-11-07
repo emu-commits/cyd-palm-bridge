@@ -341,7 +341,7 @@ gurupool: build/gurupool_test
 build/gurupool_test: tests/gurupool_test.c $(FW)/gurupool.c $(FW)/guru.c \
                      $(FW)/guru_pool.c $(FW)/gurupool.h $(FW)/guru.h
 	@mkdir -p build
-	$(CC) -O2 -Wall -I$(FW) tests/gurupool_test.c $(FW)/gurupool.c $(FW)/guru.c \
+	$(CC) -O2 -Wall -I$(FW) -I$(BR) tests/gurupool_test.c $(FW)/gurupool.c $(FW)/guru.c \
 	      $(FW)/guru_pool.c -o $@
 
 # ---- dash: the lock screen's freshness + age rules (needs libm for the moon). ----
