@@ -1,113 +1,36 @@
-/* dav.h -- minimal CalDAV/CardDAV client used by the bridge.
- * Host build shells out to the `curl` binary; on ESP32 the same request
- * shapes (PUT / GET / PROPFIND Depth:1) map to esp_http_client + mbedTLS.
+/* dav.h -- the HTTPS transport HotSync's fetches use (news, weather,
+ * location), and its circuit breaker.
+ *
+ * It was the CalDAV/CardDAV client for the iCloud sync until that was archived
+ * on 2026-11-07 (git tag archive/pim-caldav). The device implementation is
+ * firmware/components/bridge/dav_esp.c; the breaker is bridge/dav_break.c,
+ * shared with the host's break_test.
  */
 #ifndef DAV_H
 #define DAV_H
 
 typedef struct { char base[256]; char user[128]; char pass[64]; } DavCtx;
 
-extern int dav_last_status;   /* HTTP status of the most recent discovery PROPFIND */
+extern int dav_last_status;   /* HTTP status of the most recent request that set it */
 
-/* PUT body (from file) to <base>/<coll>/<name>; captures returned ETag and
- * HTTP status. ifmatch: NULL/"" = unconditional; else sent as If-Match (a
- * 412 means the object changed on the server since ifmatch was observed).  */
-int dav_put(const DavCtx*d,const char*coll,const char*name,const char*ctype,
-            const char*bodyfile,const char*ifmatch,
-            char*etag_out,int etagcap,int*status_out);
-
-/* There is no DELETE, and there must never be one. Nothing on this device or
- * in this bridge removes an object from the server: a record deleted on the
- * device leaves the device only (sync.c, "hidden"), and a record leaving the
- * calendar window is pruned locally. `make nodelete` fails the build if a
- * DELETE (or MOVE, which removes the source) appears in shipped code. */
-
-/* PROPFIND Depth:0 for a single object's current ETag. returns 0 on success. */
-int dav_getetag(const DavCtx*d,const char*coll,const char*name,char*etag,int cap);
-
-/* GET <base>/<coll>/<name> into out buffer. returns bytes or -1. */
-int dav_get(const DavCtx*d,const char*coll,const char*name,char*out,int cap);
-/* GET <base>/<coll>/<name> streamed into the file `path`, whatever its size (a
- * contact with a photo is tens of KB). Returns the HTTP status, or -1. */
-int dav_get_file(const DavCtx*d,const char*coll,const char*name,const char*path);
-
-/* Stream a public https URL's body to an SD file (the News reader's feed fetch).
- * Returns the HTTP status, or -1. Device-only: implemented in dav_esp.c; the host
- * transport (dav.c) does not provide it (nothing on the host fetches feeds). */
+/* GET a public https URL, the body streamed to the file at `path` (no RAM cap).
+ * Returns the HTTP status, or -1. Device only. */
 int dav_fetch_url(const char *url, const char *path);
 
-/* PROPFIND Depth:1 on <base>/<coll>/ ; cb(name, etag) per member object. */
-typedef void (*dav_list_cb)(const char*name,const char*etag,void*ctx);
-int dav_list(const DavCtx*d,const char*coll,dav_list_cb cb,void*ctx);
-
-/* RFC 6578 sync-collection REPORT. token="" for an initial (full) sync; else
- * the token stored from the previous run. cb fires once per changed member
- * (deleted=1 => removed on server). newtoken receives the server's fresh token.
- * returns: 0 ok; 1 = token invalid/expired (caller should full-resync with "");
- *          -1 = server doesn't support sync-collection (caller: fall back to PROPFIND). */
-typedef void (*dav_sync_cb)(const char*name,const char*etag,int deleted,void*ctx);
-int dav_sync_report(const DavCtx*d,const char*coll,const char*token,
-                    dav_sync_cb cb,void*ctx,char*newtoken,int tokcap);
-
-/* ---- a time window, and batched fetches (a real account) ------------------
- * CalDAV calendar-query REPORT, Depth:1: the VEVENTs with an occurrence in
- * [start,end) (UTC epoch seconds). The server applies the filter, recurrences
- * included, so a weekly meeting that began years ago is listed and last year's
- * one-off isn't. cb(name, etag) per member, like dav_list. Returns the member
- * count, or -1 if the reply wasn't a multistatus (no answer, or no support). */
-int dav_query_window(const DavCtx*d,const char*coll,long long start,long long end,
-                     dav_list_cb cb,void*ctx);
-/* The To Do list's listing: the open VTODOs, then those completed since
- * `doneSince` (two calendar-query REPORTs). cb(name, etag) per member. The
- * member count, or -1 if either wasn't a multistatus. */
-int dav_query_todos(const DavCtx*d,const char*coll,long long doneSince,
-                    dav_list_cb cb,void*ctx);
-/* calendar-multiget (card=0) or addressbook-multiget (card=1) for `n` member
- * names of coll: many objects in one request instead of a GET each. The raw
- * multistatus reply is written to the file `spool`, to be read by
- * dav_parse_multiget_stream (dav_xml.h). Returns the HTTP status, or -1. */
-int dav_multiget(const DavCtx*d,const char*coll,int card,const char*const*names,int n,
-                 const char*spool);
-/* PROPFIND Depth:0 for one object's ETag, telling the outcomes apart: returns
- * the HTTP status (207 or 200: found, etag filled; 404 or 410: gone; anything
- * else, or <0 when the server wasn't reached: unknown). */
-int dav_probe(const DavCtx*d,const char*coll,const char*name,char*etag,int cap);
-
-/* --- discovery (CalDAV/CardDAV bootstrap, e.g. iCloud) --- */
-/* PROPFIND Depth:0 on `path`; returns the first <href> found inside the element
- * whose local-name is `prop` (e.g. "current-user-principal","calendar-home-set").
- * `extra_ns` is any additional xmlns decls the prop needs. 0 on success.        */
-int dav_prop_href(const DavCtx*d,const char*path,const char*propOpen,
-                  const char*extra_ns,char*out,int cap);
-/* Effective URL (after redirects) for a PROPFIND on `path` -> scheme://host. */
-int dav_effective_host(const DavCtx*d,const char*path,char*out,int cap);
-/* PROPFIND Depth:1 on `path`; cb(href, kind) where kind: 'c'=calendar,
- * 'a'=addressbook, 0=other. href is the absolute path as returned.             */
-typedef void (*dav_coll_cb)(const char*href,int kind,const char*displayname,void*ctx);
-int dav_list_collections(const DavCtx*d,const char*path,dav_coll_cb cb,void*ctx);
-
-/* Close any persistent keep-alive connection, freeing the ~40 KB TLS working set.
- * The engine calls this before every heap-heavy disk sort (sortFile) and at end
- * of sync, so TLS never coexists with a sort. No-op on the host (curl) transport. */
+/* Close the persistent keep-alive connection, freeing the ~40 KB TLS working
+ * set. HotSync calls it between phases and before Wi-Fi goes down. */
 void dav_disconnect(void);
 
 /* ---- transport circuit breaker --------------------------------------------
- * A request that cannot reach the server costs up to two 20-second timeouts,
- * and the engine issues one request PER RECORD. Measured on device: a heap too
- * small to mount a TLS handshake turned a single collection into forty minutes
- * of identical failures, with nothing on screen but "Syncing Date Book...".
- *
+ * A request that cannot reach the server costs up to two 20-second timeouts.
  * So the transport counts consecutive unreachable requests. Once DAV_FAIL_LIMIT
  * of them go by, it is considered DOWN and every later request returns -1
- * immediately without touching the network -- the caller unwinds in
- * milliseconds instead of hours, and the failure is reported as what it is.
- * Any reply from the server clears the count, including 401 or 404: those mean
- * the connection worked and the request was answered.
+ * immediately without touching the network. Any reply from the server clears
+ * the count, including 401 or 404: those mean the connection worked.
  *
  * dav_transport_reset() re-arms it; call at the start of each phase so one bad
- * collection cannot condemn the next. dav_transport_down() reports the state. */
-/* Heap-integrity checkpoint hook, shared with the engine's (see sync.h) and
- * installed by the device during the memory rework. Temporary. */
+ * fetch cannot condemn the next. dav_transport_down() reports the state. */
+/* Heap-integrity checkpoint hook, installed by the device's HotSync. */
 typedef void (*DavCheckFn)(const char *where);
 void dav_set_check(DavCheckFn fn);
 void dav_check(const char *where);

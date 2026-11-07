@@ -2,7 +2,7 @@
 # Run by `make -C sim smoke` (CI gate); any bad command or crash exits non-zero.
 t 1000
 # Lock-screen dashboard (product roadmap): the first thing shown on boot -- clock,
-# world time, cached weather + hourly strip, battery, next event/due, sun + moon.
+# world time, cached weather + hourly strip, battery, STUDY due, sun + moon.
 # Swipe up to unlock into the launcher. Pool-safe (one I1 canvas + labels).
 s dashboard
 d 120 275
@@ -67,12 +67,13 @@ s r13_punct_cancelled
 c 80 262
 t 4500
 s r13_punct_lapsed
-# R5: Lock is on the Applications screen's Options menu. Open the menu, tap it,
+# R5: Lock is on the Applications screen's Options menu (Power, Lock, About since
+# Settings left the menu for the launcher). Open the menu, tap it,
 # and unlock again -- a lock with a way in and no way back is not a feature.
 c 18 300
 t 300
 s r5_launcher_menu
-c 60 112
+c 60 86
 t 400
 s r5_locked
 d 120 275
@@ -91,7 +92,7 @@ s r5_unlocked
 # which has state of its own, is kept. After the unlock, a bare launcher.
 c 18 300
 t 300
-c 60 190
+c 60 112
 t 300
 s r11_about_open
 L
@@ -114,10 +115,10 @@ t 300
 # fresh box file the first target is 'm'; draw it -> "Nice! NN%" + advance. Then tap
 # the Train toggle and draw once -> captures a per-device template ("saved your..").
 # Pool-safe (labels + one canvas); a regression here would HANG or misdraw.
-# Graffiti moved into the Games folder: open Games (row 2 col 3) first, then
+# Graffiti moved into the Games folder: open Games (row 1 col 3) first, then
 # Graffiti. It shares the folder's second row with Zip, and that row is
 # SPACE_EVENLY across the full width -- so Graffiti is at x=169, not x=120.
-c 195 110
+c 195 56
 t 400
 s games_folder_graf
 c 169 108
@@ -173,7 +174,7 @@ c 32 40
 t 400
 c 18 225
 t 300
-# News (RSS reader, roadmap #4): launcher app (row 2 col 1 since the Planner merge) opens a one-item-per-view
+# News (RSS reader, roadmap #4): launcher app (row 2 col 1) opens a one-item-per-view
 # feed (seeded with samples in the sim).
 # Press-drag UP navigates to the next article. Pool-safe (labels + content swap on
 # a gesture surface; a regression here would HANG or fail to advance).
@@ -198,10 +199,10 @@ t 300
 # the Graffiti strip (reusing the Latin recognizer, untouched). Draw a caret '^'
 # (= 'a') to answer -> "Correct!" + deterministic advance to the next kana.
 # Pool-safe (labels only; a regression here would HANG or misrender the kana).
-# Graffiti moved into the Games folder: open Games (row 2 col 3) first, then
+# Graffiti moved into the Games folder: open Games (row 1 col 3) first, then
 # Graffiti. It shares the folder's second row with Zip, and that row is
 # SPACE_EVENLY across the full width -- so Graffiti is at x=169, not x=120.
-c 195 110
+c 195 56
 t 400
 s games_folder_graf
 c 169 108
@@ -241,336 +242,10 @@ t 400
 s kana_write_stroke
 c 18 225
 t 300
-# Date Book: Day view -> tap the date to zoom out to Week (I3) -> tap a day to
-# zoom back to Day -> home. The Week view is a plain scrollable list (pool-safe).
-c 40 55
-t 400
-s datebook_day
-c 120 40
-t 400
-s datebook_week
-c 120 80
-t 400
-s datebook_day2
-# P1: a sleep over the Day view wakes on the Day view (it woke on the launcher).
-L
-t 300
-d 120 275
-t 30
-m 120 210
-t 30
-m 120 140
-t 30
-m 120 90
-t 30
-u
-t 400
-s p1_day_resumed
-# P2: writing on the Day view makes an event, as on a Palm. A digit is the start
-# hour (3 -> 3:00 pm) and a letter starts the description. Both are cancelled
-# (Cancel, bottom right), so the walk below finds the day as it was.
-k 3
-t 300
-s p2_digit_event
-c 204 190
-t 400
-k Lunch
-t 300
-s p2_letter_event
-c 204 190
-t 400
-s p2_day_unchanged
-# C4 event Details: menu -> New -> Details -> toggle Alarm on + cycle Repeat ->
-# close -> Done (persists via ApptPack). Plain buttons only -> pool-safe.
-c 18 300
-t 300
-c 60 68
-t 400
-s q1_new_event
-# Q2: the event's date is picked on the SAME calendar the To Do due picker uses
-# -- one popup, one set of state, and it carries the hard-won
-# lv_event_get_current_target fix. "No Date" is absent here: an event that is on
-# no day is not an event.
-c 60 108
-t 400
-s q2_date_popup
-# "Today" (the quick button at the top), NOT an arbitrary calendar cell. The
-# first version of this walk tapped (61,200), which is Tuesday the 8th -- a real
-# date, correctly saved, and three weeks outside the week view that is supposed
-# to prove it was saved. A gate step has to land somewhere the NEXT step can see.
-c 60 62
-t 400
-s q2_date_picked
-# Q3: the start time comes from a list of half-hours, 8:00 AM to 9:00 PM. The
-# four steppers above it reach anything the list cannot offer -- so even the
-# fallback is tapping, not typing.
-c 60 152
-t 400
-s q3_time_popup
-c 120 190
-t 400
-s q3_time_picked
-c 120 188
-t 400
-c 150 105
-t 200
-c 150 140
-t 200
-s cal_details
-# P8: the Details sheet's "i" (top right): what Alarm and Repeat do, and that
-# writing on the Day view makes an event
-c 180 88
-t 300
-s p8_details_tips
-c 60 233
-t 300
-s p8_details_back
-c 210 260
-t 200
-c 40 188
-t 300
-s cal_event_saved
-# The day view we come back to is the day we STARTED on, and Q2 just moved the
-# event to whichever day was tapped on the calendar -- so "(no events)" here is
-# correct and proves nothing. Zoom out to the week, where every day is visible:
-# THIS is the shot that says the event was really written, on the day that was
-# picked, with the time that was picked.
-c 120 40
-t 400
-s cal_event_in_week
-# P6: reminders. The event above has an alarm; the screen sleeps (`L`), and the
-# wake looks for reminders due over the dark time (`R`: a day back to two
-# ahead, so it holds an event made "today" whenever the tour runs). One list,
-# over the lock, dismissed only by OK; then the unlock comes back to the week.
-L
-t 300
-R 86400 172800
-t 300
-s p6_reminders_on_wake
-# a tap beside the box must not lose it (Palm: dismissed only by OK)...
-c 120 280
-t 300
-s p6_still_there
-# ...OK does; then the swipe, and the week comes back (P1)
-c 45 195
-t 300
-d 120 275
-t 30
-m 120 210
-t 30
-m 120 140
-t 30
-m 120 90
-t 30
-u
-t 400
-s p6_after_wake
-c 18 225
-t 300
-# Address list -> record detail -> edit form (C4 bottom bar) -> Done (I4 toast)
-c 120 55
-t 400
-s address_list
-# Q6: the Look Up box is shorter now to make room for New at its right. Type a
-# prefix and the list must narrow -- the filter runs off VALUE_CHANGED, so this
-# also proves `k` is going through the same per-keystroke path Graffiti does.
-# "Ch" matches exactly one seeded contact, so the shot proves it filters DOWN TO
-# something; an empty result would look the same whether the filter worked or
-# the table simply failed to build.
-k Ch
-t 300
-s q6_lookup_filtered
-# A bare `k` empties the field, so the rest of the Address walk sees a full
-# list. The filter is deliberately sticky across app opens, so leaving it set
-# here would quietly change every later shot.
-k
-t 300
-s q6_lookup_ready
-# C4 Edit Categories: category trigger -> picker -> "Edit Categories" tail row ->
-# New -> tap keyboard (one key) -> Save (writes AppInfo) -> Done. A pool-safe
-# editor (list + one textarea + one button-matrix); a regression here would HANG.
-c 218 12
-t 300
-c 200 152
-t 300
-s cat_editor
-c 208 40
-t 300
-c 179 148
-t 100
-c 208 40
-t 300
-s cat_saved
-c 32 40
-t 300
-# back on the Address list: tap a record
-c 120 130
-t 400
-s address_detail
-c 200 188
-t 400
-s edit_form
-# C4: the Address edit form now scrolls through 10 fields (was 5). Drag up to
-# reveal Company/Phone/Address/City/State/Zip and screenshot the lower half.
-d 120 140
-t 30
-m 120 110
-t 30
-m 120 80
-t 30
-m 120 55
-t 30
-m 120 35
-t 30
-u
-t 300
-s edit_form_fields
-# R8: Phone opens the keypad. Tap 1, hold 0 (which types +), then delete both,
-# leaving the number exactly as it was -- the form is saved below. Phone's y
-# depends on how far the drag above scrolled the form, which depends on the
-# touch read period (10 ms since the fast-tap fix; it was 114 at 33 ms).
-c 120 159
-t 400
-s r8_keypad
-# the same fast-typing pattern as the Calculator's: 1, then slide to 2 without
-# a lift in between -- both must land. Then hold 0, which types +.
-d 41 100
-m 120 100
-t 30
-u
-t 100
-d 120 244
-t 700
-u
-t 200
-s r8_keypad_typed
-c 199 292
-t 100
-c 199 292
-t 100
-c 199 292
-t 100
-c 208 17
-t 300
-s r8_keypad_done
-# tap Done (bottom-left) -> saves -> transient "Saved" toast (I4)
-c 36 190
-t 150
-s address_saved
-# R9: a new contact, written in lower case. Last and First capitalise Each Word,
-# so "van der berg" must read "Van Der Berg". Cancelled, so nothing is saved and
-# the list the next walk expects is unchanged.
-c 215 40
-t 400
-k van der berg
-c 120 108
-t 300
-k anna
-t 200
-s r9_words
-c 204 190
-t 400
-t 900
-# Options menu -> About: the C6 honesty lines (Memo device-only, To Do = CalDAV)
-# NOTE: y here tracks the Options list. Adding a row above About moves this tap;
-# it hit "Remove demo data" for one build and the gate still passed, because the
-# gate asserts the exit code, not what is in the picture. Check about_box.png.
-c 18 300
-t 400
-s addr_menu
-c 60 236
-t 400
-s about_box
-# Dismissing the modal CONSUMES the tap, so this one only closes the box and we
-# are still inside Address afterwards. The home tap has to be its own.
-c 120 30
-t 300
-c 18 225
-t 300
-c 18 225
-t 300
-# PROVE we are back on the launcher before tapping a launcher cell. For several
-# builds we were not: the About box is modal and the tap that dismisses it is
-# CONSUMED by the dismissal, so "close the box" and "go home" are two taps and
-# this sequence only had one. The To Do tap below then landed on the Address list
-# and opened a record, and todo_list.ppm has been a picture of an Address detail
-# ever since -- green the whole time, because the gate reads the exit code.
-s launcher_after_about
-# The Planner (launcher row 1 col 3): To Do and Memo in one app. It opens on the
-# half that was open last, which on a fresh boot is To Do. The title bar says
-# "Planner"; the bar's first box says which half this is, and is the switch.
-c 195 56
-t 400
-s todo_list
-# Q7 quick add: the same helper as Q8's, so this proves the shared one and not a
-# second copy of it. A to do quick-added while a category filter is on must land
-# in THAT category -- filing it under Unfiled would make it vanish from the list
-# that was open, which is indistinguishable from the add having failed.
-k Call the dentist
-t 200
-c 215 40
-t 500
-s q7_todo_added
-# P3: tapping the title opens the menu (Palm 3.5 on).
-c 24 12
-t 300
-s p3_title_menu
-# ...and it reopens on the item chosen last, while the same screen is up.
-# "Hide Completed" (y 132) redraws the list, which is still the same screen;
-# picked again from the remembered row, it puts the list back as it was.
-c 80 132
-t 400
-c 24 12
-t 300
-s p3_menu_remembered
-c 80 132
-t 400
-# To Do due-date picker: open the first record -> Edit -> the Due trigger -> pick
-# a day off the calendar. This walk exists because tapping a calendar day used to
-# SEGFAULT here (exit 139, so this gate would have caught it): the calendar's
-# button matrix bubbles VALUE_CHANGED, so lv_event_get_target() handed back the
-# button matrix and lv_calendar_get_pressed_date() cast it to a calendar. The
-# shot is the point -- due_picked must read a real date (9/14/2026, the Monday
-# tapped below), not "No Date" and not a junk one. See due_cal_cb.
-#
-# y=64 is the FIRST ROW, which the Q7 bar pushed down by LIST_BAR_H. This tap
-# was y=40 and it silently became a tap on the quick-add field: no record
-# opened, the next two taps landed on the list and on a detail button, and
-# due_popup.ppm became a picture of a To Do detail with the run still green.
-# The row it opens is now "Call the dentist" -- the record quick-added six lines
-# up -- which is the better target anyway: it proves a quick-added record is a
-# full record and not a stub that cannot be edited.
-c 120 64
-t 400
-c 200 186
-t 500
-s r7_todo_form
-# R7 moved Due and Priority onto compact rows with the label beside the control
-# (Palm's own To Do Details layout), so the Due trigger is the first of them now.
-c 145 93
-t 500
-s due_popup
-c 61 218
-t 500
-s due_picked
-# R7: priority is tapped, 1-4. The quick-added record starts at 1; tap 3, and
-# due_saved below must show a 3 beside the box.
-c 166 129
-t 300
-s r7_priority
-# Save it, and land back on the list: due_saved is the shot that proves the To Do
-# row layout end to end -- box, priority digit against the box column's right
-# edge, description, and the due date (9/14) at the right margin.
-c 40 186
-t 1200
-s due_saved
-c 18 225
-t 300
-# Memo: the same Planner tile (it reopens on To Do, the half left open above),
-# then the switch at the left of the bar.
-c 195 56
-t 400
-c 30 40
+# Memos (launcher row 2 col 2): the Planner without To Do, which was archived
+# with Date Book, Address and the iCloud sync (2026-11-07). A new card has no
+# memos at all -- no demo data -- so the list starts empty.
+c 120 110
 t 400
 s memo_list
 # Q8 quick add: write into the bar, tap New, and the row must APPEAR. This is
@@ -583,10 +258,10 @@ s q8_memo_typed
 c 215 40
 t 500
 s q8_memo_added
-# The Planner's checklist memo. New on an empty bar opens the form; the "[X]"
-# button in the action row (between Done and the category) puts a box at the
-# start of the line the cursor is on. K types hex: 0a is a newline, and the second item is written
-# out as "[ ] eggs" by hand, which must work just the same.
+# The checklist memo. New on an empty bar opens the form; the "[X]" button in
+# the action row (between Done and the category) puts a box at the start of the
+# line the cursor is on. K types hex: 0a is a newline, and the second item is
+# written out as "[ ] eggs" by hand, which must work just the same.
 c 215 40
 t 400
 k Groceries
@@ -600,9 +275,9 @@ t 100
 s planner_memo_boxes
 c 36 188
 t 1200
-# "Groceries" sorts second. Its detail is a list: the title as a plain row, the
-# two items with drawn boxes (the To Do list's own boxes, no per-line object).
-c 120 86
+# "Groceries" sorts first (strcasecmp). Its detail is a list: the title as a
+# plain row, the two items with drawn boxes (no per-line object).
+c 120 64
 t 400
 s planner_checklist
 # Tap milk's BOX: ticked, struck through, saved into the memo text as "[x]".
@@ -623,7 +298,7 @@ t 300
 # launcher and an edit form open when the screen slept was lost. Write half a
 # memo, sleep (`L`), wake: the form must be back with the words in it, saved.
 # Then a second memo left by Home: saved too, with a "Saved" toast.
-c 195 56
+c 120 110
 t 400
 c 215 40
 t 400
@@ -652,12 +327,13 @@ c 18 225
 t 200
 s p1_home_saved
 t 1200
-c 195 56
+c 120 110
 t 400
 s p1_memos_kept
 # P4: Palm's alert order -- the verb on the left, Cancel on its right, and a
-# title naming the operation. Delete "Left by Home" from its own detail.
-c 120 130
+# title naming the operation. Delete "Left by Home" (the third row: Groceries,
+# Half a thought, Left by Home, pick up...) from its own detail.
+c 120 108
 t 400
 c 24 12
 t 300
@@ -723,7 +399,7 @@ s p7_tidied
 # that START with the query, and the "i" (Tips) that says so.
 c 222 226
 t 400
-k mee
+k gro
 t 300
 s p8_find
 c 226 44
@@ -735,8 +411,8 @@ c 18 225
 t 300
 c 18 225
 t 300
-# HotSync -- launcher row 2 col 2, back in the middle where it is findable
-c 120 110
+# HotSync -- launcher row 1 col 2
+c 120 56
 t 400
 s hotsync
 # Sync Now with NO Wi-Fi saved (a fresh card; the W5 walk below adds one). There
@@ -760,17 +436,20 @@ c 200 180
 t 300
 # Options -> Power: the battery/drain/drift readout. Worth a shot because every
 # number on it is either measured or an explicit "not measured yet", and the
-# wording is the part that can regress silently.
+# wording is the part that can regress silently. Power is the menu's first
+# item now that Settings is a launcher tile.
 c 18 300
 t 400
-c 60 86
+c 60 60
 t 400
 s power_screen
 c 18 225
 t 300
-# W1: Menu > Settings is now a NINE-TILE GRID, not a fourteen-row list. The grid
-# reuses show_launcher()'s geometry exactly, so its tiles sit on the same centres
-# as the launcher's apps: x = 46 / 120 / 195, y = 56 / 110 / 160.
+# W1: Settings is a TILE GRID, not a fourteen-row list, and since 2026-11-07 it
+# is the launcher's first tile rather than a menu item. The grid reuses
+# show_launcher()'s geometry exactly, so its tiles sit on the same centres as
+# the launcher's apps: x = 46 / 120 / 195, y = 56 / 110 / 160. Seven tiles:
+# Wi-Fi, News, Date & Time / Display, Location, Owner / About.
 #
 # THIS WHOLE SECTION WAS RE-POINTED WHEN THE GRID LANDED, and it is the reason to
 # look at the PNGs rather than the exit code. Every tap below used to walk the old
@@ -778,13 +457,13 @@ t 300
 # the shots quietly became pictures of the Apple ID editor with the brightness
 # drags typing junk into it. The stepper -- the one widget whose regression HANGS
 # this run -- was not being exercised at all, and nothing said so.
-c 18 300
+c 18 225
 t 300
-c 75 66
+c 46 56
 t 400
 # W3: the Assistant is owed a greeting on the first Settings entry after an
 # unlock, so THIS shot has her in the Graffiti strip with her balloon beside her.
-# All nine tiles are visible behind her and stay live -- that is the whole reason
+# All seven tiles are visible behind her and stay live -- that is the whole reason
 # she is down there rather than in the content area.
 s settings_grid
 # Tap her to put the writing strip back. The tap lands inside the pane; if the
@@ -795,11 +474,11 @@ s settings_grid
 c 120 260
 t 300
 s settings_greet_gone
-# W7: News (row 1, col 3) opens the FEED LIST directly -- the tile used to hold
+# W7: News (row 1, col 2) opens the FEED LIST directly -- the tile used to hold
 # one row whose only content was the name of the next screen. Tap the first
 # feed's box to switch it off, then "Built-ins" (top left) which puts back any
 # built-in feed that was deleted without disturbing the rest.
-c 195 56
+c 120 56
 t 400
 s w7_feeds
 c 15 70
@@ -810,9 +489,9 @@ t 400
 s w7_feeds_builtins
 c 18 225
 t 300
-c 18 300
+c 18 225
 t 300
-c 75 66
+c 46 56
 t 400
 # W5: Wi-Fi (row 1, col 1) -> four remembered networks, none set on a fresh card.
 # Open slot 1 -> "Name" -> the SCAN PICKER. The simulator's scan is a fixed
@@ -843,84 +522,31 @@ s w5_net_set
 # back to the tile list: the slot now reads with its name rather than "(empty)"
 c 18 225
 t 300
-c 18 300
+c 18 225
 t 300
-c 75 66
+c 46 56
 t 400
 c 46 56
 t 400
 s w5_wifi_list_set
 c 18 225
 t 300
-c 18 300
-t 300
-c 75 66
-t 400
-# Accounts (row 1, col 2) -> the Apple ID field -> the I1.2 tap keyboard; type one
-# key, then Save -> I4 transient "Saved" toast, and the editor returns to the
-# ACCOUNTS panel rather than to the old list. That return address is the W1 change
-# most likely to regress silently: the editor used to infer it from the field.
-c 120 56
-t 400
-s settings_accounts
-c 120 37
-t 400
-s prefs_kb
-c 14 150
-t 300
-s prefs_kb_typed
-c 208 40
-t 200
-s prefs_field_saved
-t 300
-# W6: the account flow proper. The Accounts panel is two things to type and then
-# a button that finds the rest: "Find my calendars..." (row 3) runs discovery and
-# lists the account's collections BY NAME. Tapping one opens the role popup --
-# Calendar / Reminders / Address -- which is what stops anyone ever pasting a
-# UUID path. Discovery runs in the simulator against a pretend account (see
-# sim/stubs/hotsync_stub.c); only the network is missing, and the network is not
-# the part that gets designed wrong.
-c 120 93
-t 500
-s w6_discover
-c 120 65
-t 400
-s w6_role_popup
-# The popup is centred and sized to its content: its two role buttons land at
-# about y=158 and y=186. Measured off w6_role_popup.png, not guessed -- the
-# first attempt aimed at 126, hit the header, and w6_assigned came out as a
-# second photograph of the popup.
-c 120 158
-t 400
-s w6_assigned
-# back lands on ACCOUNTS, not on the old one-list view -- discovery is reachable
-# from three places now and "back" used to mean the same one every time.
-c 32 40
-t 400
-s w6_back_to_accounts
-# Advanced: the two server addresses, off the account path because they default
-# to iCloud and read as two more required fields when they are in it.
-c 120 121
-t 400
-s w6_advanced
 c 18 225
 t 300
-c 18 300
-t 300
-c 75 66
+c 46 56
 t 400
-# Home, then Settings > Display (row 2, col 2) -> the brightness stepper. It must
+# Settings > Display (row 2, col 1) -> the brightness stepper. It must
 # NOT be an lv_slider: a bar/slider draw-layer alloc live-locks LVGL on the 32 KB
 # pool -> WDT freeze. Open the [-] NN% [+] popup, step it, close. A regression
 # here HANGS this run. The Display panel is ONE row, so unlike the old list this
 # needs no scrolling to reach -- which is the whole point of the grid.
 c 18 225
 t 300
-c 18 300
+c 18 225
 t 300
-c 75 66
+c 46 56
 t 400
-c 120 110
+c 46 110
 t 400
 s settings_display
 c 120 37
@@ -936,25 +562,26 @@ t 400
 # W9: "Screen off" -- the backlight timeout, which until now lived in config.ini
 # and nowhere in the UI, despite being the setting that decides most of the
 # battery life. Row 2 of the Display panel (y=65) -> the shared pick-one screen,
-# with the current value marked by a bullet. Choose "1 minute" (row 4, y=121).
+# with the current value marked by a bullet. Choose "1 minute" (row 4, y=100;
+# the tap was at 121 for a while, which is "2 minutes").
 c 120 65
 t 400
 s w9_backlight_pick
-c 120 121
+c 120 100
 t 400
 s w9_display_set
 c 18 225
 t 300
-# W9: Location (row 2, col 3). latitude/longitude were two numbers on a
+# W9: Location (row 2, col 2). latitude/longitude were two numbers on a
 # keyboard, which is why weather silently did nothing for almost everyone. The
 # zone table carries each city's coordinates, so "where are you" is now a tap on
 # the same list of cities the clock uses -- with the numbers still underneath
 # for anyone not near one of them.
-c 18 300
+c 18 225
 t 300
-c 75 66
+c 46 56
 t 400
-c 195 110
+c 120 110
 t 400
 s w9_location
 c 120 37
@@ -975,62 +602,18 @@ c 120 65
 t 400
 c 18 225
 t 300
-# W9: Sync conflicts (row 3, col 1) -- a cycling row replaced by the same pick
-# screen, because a cycling row cannot show you the options you are not on: you
-# learned what "keep both" meant by landing on it. The names say what HAPPENS,
-# not what the setting is called.
-c 18 300
-t 300
-c 75 66
-t 400
-c 46 160
-t 400
-s w9_sync
-# The first row is how much of the calendar Date Book keeps (a window of days,
-# not the account's history); pick "The next month".
-c 120 37
-t 400
-s w9_calendar_pick
-c 120 59
-t 400
-s w9_sync_calendar
-# The second row is the conflict policy; pick "Keep both copies".
-c 120 63
-t 400
-s w9_policy_pick
-c 120 81
-t 400
-s w9_sync_set
-# The third row is whether a sync may change the account at all. A new account
-# starts read-only; pick "Send my changes", and the row says so.
-c 120 89
-t 400
-s w9_changes_pick
-c 120 59
-t 400
-s w9_sync_changes
-# The fourth row is which tasks To Do keeps: the open ones and those done in
-# the last two weeks (the default), or the whole list.
-c 120 115
-t 400
-s w9_todo_pick
-c 120 37
-t 400
-s w9_sync_todo
-c 18 225
-t 300
-# Settings > Date & Time (row 2, col 1): the tile that absorbed the old "Lock
+# Settings > Date & Time (row 1, col 3): the tile that absorbed the old "Lock
 # screen..." sub-screen -- system zone, two world clocks, 12/24h, all on one
 # non-scrolling panel. Tap "World clock 1" -> the shared zone picker (lv_table,
 # pool-safe like the timezone picker; a regression HANGS or exhausts the pool).
 # Cancel back (no write, so config and the dashboard stay at defaults) -> home.
 c 18 225
 t 300
-c 18 300
+c 18 225
 t 300
-c 75 66
+c 46 56
 t 400
-c 46 110
+c 195 56
 t 400
 s dash_settings
 # W8 PUT TWO ROWS ON TOP OF THIS PANEL (Time, Date), so every row below shifted
@@ -1054,7 +637,7 @@ t 200
 s w8_set_clock_stepped
 c 50 182
 t 400
-# Set date: the SAME lv_calendar the Date Book's due-date picker uses. Cancel,
+# Set date: an lv_calendar (the one the archived Date Book's pickers used). Cancel,
 # for the same reason -- and because a tap on a day would move the clock under
 # every later shot in this run.
 c 120 65
@@ -1087,24 +670,26 @@ s tz_picked
 # easy to turn into "overwrites the location" by deleting one condition.
 c 18 225
 t 300
-c 18 300
+c 18 225
 t 300
-c 75 66
+c 46 56
 t 400
-c 195 110
+c 120 110
 t 400
 s tz_kept_location
 c 18 225
 t 300
+# (About is alone on the grid's third row, and a row is centred, so it is at
+# x=120, not under Wi-Fi.)
 # The old one-list Preferences view is NOT deleted -- it is the only screen that
 # shows every setting at once, which is what you want when a config.ini is wrong.
 # It now hangs off Settings > About, and this walk is the only thing keeping it
 # gated while the wizards are still lists.
-c 18 300
+c 18 225
 t 300
-c 75 66
+c 46 56
 t 400
-c 195 160
+c 120 160
 t 400
 s settings_about
 # "All settings (one list)" is the About panel's FIFTH row (y=147) since the
@@ -1115,8 +700,10 @@ t 400
 s prefs_list
 c 18 225
 t 300
-# Graffiti with the C1 ink trail: screenshot MID-stroke, then after recognition
-c 120 55
+# Graffiti with the C1 ink trail: screenshot MID-stroke, then after recognition,
+# into the Memos quick-add bar (it was Address's Look Up until Address was
+# archived)
+c 120 110
 t 400
 d 80 215
 t 40
@@ -1137,7 +724,7 @@ s graffiti_lookup
 # HotSync step that streams real RSS on device. A hang/crash here fails the run.
 c 18 225
 t 300
-c 120 110
+c 120 56
 t 400
 s hotsync_prefetch
 # Sync Now. It is BOTTOM_MID -14 of content, so y=175 -- which is within a pixel
@@ -1154,17 +741,15 @@ s news_from_sync
 # Preferences > News feeds: the checkbox manager + the URL editor keyboard. Pin the
 # list to the bottom (the feeds row lives below Discover), tap it, toggle a feed,
 # open the editor. Pool-safe (lv_table + one textarea + one button-matrix).
-# Settings has been a nine-tile grid since W1 and News is a tile (W7), so this
+# Settings has been a tile grid since W1 and News is a tile (W7), so this
 # walk no longer drags a list: the three drags it used to do, and a tap at
 # (120,156), had been landing on the Owner tile -- feeds_manager was a picture
 # of the Owner screen, green, for two days.
 c 18 225
 t 300
-c 18 300
-t 300
-c 80 60
+c 46 56
 t 500
-c 195 55
+c 120 56
 t 500
 s feeds_manager
 c 16 65
@@ -1175,9 +760,13 @@ t 400
 s feed_editor
 c 31 40
 t 300
+# back on the feed list the Assistant stands over the strip again: tap her
+# away, or the Home tap below lands on her instead
+c 120 260
+t 300
 c 18 225
 t 300
-# Games (product roadmap): launcher row 3 col 2 (the die icon) opens the Games
+# Games (product roadmap): launcher row 1 col 3 (the die icon) opens the Games
 # NOTE: adding Coach as the 9th app moved this column -- row 3 now holds three
 # icons (News 46 / Games 120 / Coach 194) instead of two, so the old x=169 landed
 # on Coach. The smoke gates on exit code, not pixels, so it passed while touring
@@ -1187,7 +776,7 @@ t 300
 # Tap the Minesweeper mine icon (left) to open it. Minesweeper draws its 9x9 board on a
 # 1-bpp canvas; the first tap is always safe and floods open; then switch to Flag mode and
 # flag a cell. The board takes taps via PRESSED (resistive-panel robust). Pool-safe.
-c 195 110
+c 195 56
 t 300
 s games_menu
 c 40 55
@@ -1210,7 +799,7 @@ t 300
 # Persistence: leave to the launcher, reopen Games -> Mines, and the dug board is
 # restored exactly (saved to /sdcard after every move). mines_persist must match
 # mines_dug, not a fresh board.
-c 195 110
+c 195 56
 t 300
 c 40 55
 t 400
@@ -1224,7 +813,7 @@ t 300
 # The row scores with mono state tiles: filled=correct, double-border=present, slashed=absent;
 # used keys pick up the same states. Grid + keyboard are ONE pool-cheap I1 canvas; taps
 # hit-test via PRESSED. (The physical Graffiti strip also types letters on the device.)
-c 195 110
+c 195 56
 t 300
 c 120 55
 t 400
@@ -1248,7 +837,7 @@ t 300
 # Persistence: leave to the launcher, reopen Games -> Wordie, and the scored guess
 # grid + keyboard states are restored (saved to /sdcard after every keystroke).
 # wordie_persist must match wordie_scored, not a fresh daily.
-c 195 110
+c 195 56
 t 300
 c 120 55
 t 400
@@ -1260,7 +849,7 @@ t 300
 # tab, the first blank is pre-selected (thick border). Tap a number-pad digit to fill
 # it (the physical Graffiti strip also enters digits on the device), then reopen from
 # the folder to confirm the in-progress board persists (saved to /sdcard).
-c 195 110
+c 195 56
 t 300
 c 198 55
 t 400
@@ -1270,7 +859,7 @@ t 300
 s sudoku_entered
 c 18 225
 t 300
-c 195 110
+c 195 56
 t 300
 c 198 55
 t 400
@@ -1289,7 +878,7 @@ t 300
 # is correctly refused, and from the moment the pen crosses it the path draws along
 # the sweep until a number would come out of turn. That exercises the whole drag
 # path on ANY board. Cell centres are (60+24c, 56+24r).
-c 195 110
+c 195 56
 t 300
 c 68 108
 t 400
@@ -1344,7 +933,7 @@ s zip_clock_running
 c 18 225
 t 300
 w 3000
-c 195 110
+c 195 56
 t 300
 c 68 108
 t 400
@@ -1360,7 +949,7 @@ s zip_cleared
 c 18 225
 t 300
 # Persistence: reopen from the folder -- the cleared board comes back, not a new one.
-c 195 110
+c 195 56
 t 300
 c 68 108
 t 400
@@ -1369,7 +958,7 @@ c 18 225
 t 300
 # Coach (the centrepiece: ritual focus timer). Launcher row 3 col 3 -- the
 # hourglass. The flow is Today -> three ritual taps -> draw a sigil -> a SEALED
-# full-screen session -> reflect -> note, and it writes a Memo + a Date Book block
+# full-screen session -> reflect -> note, and it writes a Memo
 # on the way out. Every screen here is labels, buttons and one button-matrix; the
 # only canvas is the sigil, which reuses game_cv_buf.
 c 194 160
@@ -1445,7 +1034,7 @@ s coach_blocker
 c 176 133
 t 400
 s coach_note
-# Skip the note -> Today. The session still exports a Date Book block.
+# Skip the note -> Today. (No note, so no memo.)
 c 192 188
 t 500
 s coach_today_after
@@ -1513,10 +1102,10 @@ s coach_week_back
 c 18 300
 t 400
 s coach_menu
-c 79 132
+c 79 106
 t 400
 s coach_menu_len
-c 79 158
+c 79 132
 t 400
 s coach_menu_goal
 c 200 60
@@ -1524,13 +1113,8 @@ t 400
 s coach_menu_closed
 c 18 225
 t 300
-# The session exported a real Date Book record, so it rides the next HotSync to
-# iCloud. It must be on today's day view.
-c 40 55
-t 500
-s coach_export_cal
-c 18 225
-t 300
+# (The session used to be exported to Date Book as well; it went with Date
+# Book, 2026-11-07. The note, when written, is still a memo.)
 # Guru (launcher row 3 col 2, between News and Coach -- the bob-and-third-eye icon).
 # Her engine (guru.c) has landed; her habit list has not, so the home screen is
 # still a shell -- but it now reads the real numbers back out of the engine, so
@@ -1563,8 +1147,8 @@ c 18 95
 t 300
 s guru_checked
 # Tap a habit's NAME (column 1) instead and you get what it means, with a button
-# to tick it from there. Column 0 toggles, column 1 opens -- the same split To Do
-# uses, so the box is a box and the words are a link.
+# to tick it from there. Column 0 toggles, column 1 opens, so the box is a box
+# and the words are a link.
 c 120 117
 t 400
 s guru_task
@@ -1603,7 +1187,7 @@ s guru_six
 c 226 12
 t 400
 s guru_menu
-# "This week" is the third row (Settings / Power / This week). R4's layout: the
+# "This week" is the third row (Power / New habit / This week). R4's layout: the
 # chart, all five categories with the empty four as dotted tracks, and her
 # verdict from the strip. With six checks all in Gut this MUST read as the
 # narrow-week verdict, not the "not enough yet" one.
@@ -1623,15 +1207,136 @@ t 500
 s r1_guru_week_button
 c 120 100
 t 400
+# Editing a habit on the device (2026-11-07). A habit's page has Edit between
+# Did it and Back; Edit opens a form with the Graffiti strip back (the
+# category steps through the five on a tap; the name and the why are written)
+# and has turned into Save in the same place. Save writes the whole list to
+# guru.txt on the card and goes back to the page, strip hidden again.
+c 120 117
+t 400
+c 145 300
+t 400
+s guru_edit
+k  and honey
+t 200
+c 162 39
+t 300
+s guru_edit_typed
+c 145 190
+t 600
+s guru_edit_saved
+# Delete is on the form, at the left, and asks first: Cancel keeps it...
+c 145 300
+t 400
+c 57 190
+t 400
+s guru_delete_confirm
+c 160 196
+t 400
+s guru_delete_cancelled
+# ...and Delete (the verb on the left) removes it from the list
+c 57 190
+t 400
+c 70 196
+t 800
+s guru_deleted
+# Menu > New habit: the same form, empty, with no Delete. Save adds the habit
+# at the end of its category (Gut, the first) if anything was written.
+c 226 12
+t 400
+s guru_menu_new
+c 60 86
+t 400
+s guru_new
+k Read a page
+c 120 130
+t 200
+k Ten minutes of paper.
+t 200
+s guru_new_typed
+c 145 190
+t 800
+s guru_new_saved
+# Home at the foot of the list: scrolled right to the end, the button sits
+# under the last habit (the list is full screen, so otherwise the only way out
+# is the small Home in the title bar). Scrolled all the way, its place does not
+# depend on how long the list is.
+d 120 300
+t 30
+m 120 230
+t 30
+m 120 160
+t 30
+m 120 90
+t 30
+u
+t 400
+d 120 300
+t 30
+m 120 230
+t 30
+m 120 160
+t 30
+m 120 90
+t 30
+u
+t 400
+d 120 300
+t 30
+m 120 230
+t 30
+m 120 160
+t 30
+m 120 90
+t 30
+u
+t 400
+d 120 300
+t 30
+m 120 230
+t 30
+m 120 160
+t 30
+m 120 90
+t 30
+u
+t 400
+d 120 300
+t 30
+m 120 230
+t 30
+m 120 160
+t 30
+m 120 90
+t 30
+u
+t 400
+d 120 300
+t 30
+m 120 230
+t 30
+m 120 160
+t 30
+m 120 90
+t 30
+u
+t 400
+s guru_list_end
+c 120 299
+t 400
+s guru_home_from_list
+c 120 160
+t 400
 c 200 12
 t 300
 # S3: Study, the spaced-repetition app. Launcher row 3 col 1 (the textbook).
 # The first open installs the demo course on the card and greets from the
 # strip (her portrait is the owner's own art). Then a whole day in the demo:
-# a lesson (five radical cards, then a quiz on them), two hours later (the
-# `A` command moves Study's clock, UI_DEVTOOLS only) the first reviews,
-# with a wrong answer taken back by Undo, and the next lesson, whose kanji
-# unlocked because their radicals are known now. Lessons, questions and the
+# a lesson (five kanji cards, then a quiz on each one's meaning and reading:
+# ten questions), two hours later (the `A` command moves Study's clock,
+# UI_DEVTOOLS only) the first reviews, with a wrong answer taken back by Undo,
+# and the next lesson. (No radicals since 2026-11-07: the demo teaches the
+# kanji themselves.) Lessons, questions and the
 # Card are full screen: no Graffiti strip, Home (200,12) and Menu (226,12) in
 # the title bar, the buttons along the bottom (y 295). B/E: leaving Study gives
 # back every byte of heap it took (SRS_PLAN.md S3's exit condition).
@@ -1672,6 +1377,26 @@ s study_quiz
 c 120 295
 t 300
 s study_quiz_answer
+c 180 295
+t 300
+c 120 295
+t 300
+c 180 295
+t 300
+c 120 295
+t 300
+c 180 295
+t 300
+c 120 295
+t 300
+c 180 295
+t 300
+c 120 295
+t 300
+c 180 295
+t 300
+c 120 295
+t 300
 c 180 295
 t 300
 c 120 295
@@ -1734,6 +1459,26 @@ c 120 295
 t 300
 c 180 295
 t 300
+c 120 295
+t 300
+c 180 295
+t 300
+c 120 295
+t 300
+c 180 295
+t 300
+c 120 295
+t 300
+c 180 295
+t 300
+c 120 295
+t 300
+c 180 295
+t 300
+c 120 295
+t 300
+c 180 295
+t 300
 s study_reviews_done
 c 120 260
 t 200
@@ -1754,8 +1499,8 @@ t 400
 s study_week
 c 120 100
 t 400
-# the next lesson: the last three radicals, then kanji -- whose reading
-# questions come on a black banner and answer in the kana font
+# the next lesson: five more kanji, whose reading questions come on a black
+# banner and answer in the kana font
 c 61 92
 t 400
 c 176 295
@@ -1774,14 +1519,14 @@ s study_quiz2
 c 226 12
 t 400
 s study_menu
-c 60 184
+c 60 158
 t 400
 s study_about_course
 c 120 160
 t 300
 c 226 12
 t 400
-c 60 210
+c 60 184
 t 600
 s study_check_course
 c 120 160
@@ -1790,7 +1535,7 @@ t 300
 # keeps the course, which the rest of the tour needs.
 c 226 12
 t 400
-c 60 236
+c 60 210
 t 400
 s p4_remove_course
 c 172 200
@@ -1854,7 +1599,7 @@ t 400
 # Auto-play"); on again, and a touch on the game takes it back.
 c 18 225
 t 300
-c 195 110
+c 195 56
 t 300
 B
 c 120 115
@@ -2162,7 +1907,7 @@ c 150 280
 t 300
 c 226 12
 t 300
-c 60 184
+c 60 158
 t 300
 s critters_bag
 c 150 280
@@ -2186,7 +1931,7 @@ t 300
 c 226 12
 t 300
 s critters_menu
-c 60 132
+c 60 106
 t 300
 s critters_auto_on
 t 4000
@@ -2196,19 +1941,19 @@ s critters_auto_later
 c 226 12
 t 300
 s critters_auto_menu
-c 60 132
+c 60 106
 t 600
 s critters_auto_stopped
 c 226 12
 t 300
-c 60 132
+c 60 106
 t 2000
 c 120 100
 t 600
 s critters_auto_touched
 c 226 12
 t 300
-c 60 262
+c 60 236
 t 300
 s critters_credits
 c 64 296
@@ -2222,7 +1967,7 @@ c 150 280
 t 300
 c 226 12
 t 300
-c 60 158
+c 60 132
 t 300
 s critters_party
 c 150 280
@@ -2230,7 +1975,7 @@ t 300
 J
 c 226 12
 t 300
-c 60 158
+c 60 132
 t 300
 s critters_party_full
 c 204 246
@@ -2330,20 +2075,20 @@ c 150 280
 t 300
 c 226 12
 t 300
-c 60 132
+c 60 106
 t 400
 s critters_auto_full
 c 120 100
 t 300
 c 226 12
 t 300
-c 60 210
+c 60 184
 t 300
 s critters_saved
 t 1500
 c 200 12
 t 400
-c 195 110
+c 195 56
 t 400
 E critters
 # The Dex (docs/DEX_PLAN.md), from the Games folder: the first run with no game
@@ -2360,7 +2105,7 @@ t 500
 s dex_no_save
 c 200 12
 t 400
-c 195 110
+c 195 56
 t 400
 E dex with no save
 D 1,2,3,5,7,14,15,18,21,22 1,2,5,14,21
@@ -2445,17 +2190,7 @@ t 300
 c 200 12
 t 500
 s dex_left
-c 195 110
+c 195 56
 t 400
 E the Dex
-# I2: Remove demo data -- LAST, since it clears the seed the tour above relied on.
-# (CI starts on a fresh /sdcard, so the seed + manifest exist here.)
-c 18 225
-t 300
-c 18 300
-t 400
-c 70 138
-t 150
-s demo_removed
-t 900
 q

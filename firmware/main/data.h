@@ -1,102 +1,50 @@
-/* data.h -- PDB data access for the UI (read records from SD as display rows). */
+/* data.h -- the Memos database (MemoDB.pdb on the SD card) for the UI.
+ *
+ * Memos is the only data app. Date Book, Address and To Do were archived with
+ * the iCloud sync on 2026-11-07 (git tag archive/pim-caldav). The `app`
+ * arguments below are kept so the list, detail and category code reads the
+ * way it did; APP_MEMO is the only value. */
 #ifndef DATA_H
 #define DATA_H
 #include <stdint.h>
-#include <time.h>
 #include "appinfo.h"   /* CatTable */
 
-/* seed demo PDBs on the SD card for any that are missing (so views have content
- * before a HotSync). safe to call every boot. */
-void data_seed_if_empty(void);
+/* Make sure the card has a MemoDB.pdb (an empty one with the standard
+ * categories if not; no demo records) and finish any interrupted rewrite.
+ * Safe to call every boot. */
+void data_init(void);
 
-/* demo-seed management. data_demo_present() is true while the untouched demo
- * seed is on the card; data_remove_demo() deletes exactly the seeded records
- * (never user-added / synced ones) and returns how many it removed. */
-int  data_demo_present(void);
-int  data_remove_demo(void);
-/* How many records of `app` were seeded as demo data (their uids are 1..n), or 0
- * once the seed has been removed. HotSync holds exactly these back from the
- * push, so the samples never reach a real account. */
-int  data_demo_count(int app);
-
-/* Delete the appointments seeded by the devtools "Add test events" item, matched
- * on the exact marker they carry in their note. Returns the number removed, 0 if
- * there were none, or -1 if the rewrite was refused because the working set could
- * not hold every surviving record (refusing beats writing back a truncated PDB).
- * Safe to call at every boot: with nothing to remove it does not touch the file. */
-int  data_remove_test_events(void);
-/* how many Date Book records the last data_remove_test_events() actually examined,
- * so "found none" can be reported with the size of the search behind it. */
-int  data_testev_scanned(void);
-/* Header record count for one app's PDB, with what pdb_read can actually walk and
- * the file size. A mismatch means a truncated database. */
-int  data_db_stat(int app, int *walked, long *bytes);
-
-enum { APP_CAL, APP_ADDR, APP_TODO, APP_MEMO };
+enum { APP_MEMO = 3 };
 
 /* per-record display callback: record uid + primary line + optional secondary. */
 typedef void (*data_row_cb)(uint32_t uid, const char *primary, const char *secondary, void *ctx);
 
-/* absolute SD path of an app's PDB (for global Find over the raw files). */
+/* absolute SD path of the database (for Find over the raw file). */
 const char *data_db_path(int app);
 
-/* iterate records of each app, decoding to display strings. */
-void data_datebook(data_row_cb cb, void *ctx);
-/* PalmOS Day view: only appointments on y/m/d, primary "HH:MM  desc" (sortable). */
-void data_cal_day(int y, int m, int d, data_row_cb cb, void *ctx);
-/* PalmOS Month view: marks[1..31]=1 for each day in month y/m that has an event. */
-void data_cal_month_marks(int y, int m, uint8_t marks[32]);
-/* Events whose alarm came due in (from, to], local time: cb(uid, "HH:MM  desc",
- * "YYYY-MM-DD" of that occurrence) once per occurrence, repeats expanded, at most the last
- * DATA_ALARM_DAYS days of the span. The alarm is the start less the
- * record's advance (minutes, hours or days). Returns how many. Ignores the
- * category filter: a reminder is owed whatever the list is showing. */
-#define DATA_ALARM_DAYS 7
-int data_cal_alarms(time_t from, time_t to, data_row_cb cb, void *ctx);
-void data_address(data_row_cb cb, void *ctx);
-void data_todo(data_row_cb cb, void *ctx);
+/* every memo in the current category, as its first line. */
 void data_memo(data_row_cb cb, void *ctx);
 
 /* Memo records are plain text: read/write the whole memo string. */
 int data_get_memo(uint32_t uid, char *out, int cap);        /* 1 if found */
 int data_save_memo(uint32_t uid, int cat, const char *text); /* uid 0 = new */
 
-/* format the full detail of one record (by app + uid) into out. 1 if found. */
+/* the full text of one memo into out. 1 if found. */
 int data_detail(int app, uint32_t uid, char *out, int cap);
 
-/* --- editing: load a record into a struct, save it back to the PDB --- */
-#include "palm.h"
-int data_get_cal(uint32_t uid, Appt *out);   /* 1 if found */
-int data_get_addr(uint32_t uid, Addr *out);
-int data_get_todo(uint32_t uid, Todo *out);
-/* write the record back (uid==0 => create new). cat = category index, or -1 to
- * keep the record's current category. sets the Palm dirty bit. 1 on success. */
-int data_save_cal(uint32_t uid, int cat, const Appt *in);
-int data_save_addr(uint32_t uid, int cat, const Addr *in);
-int data_save_todo(uint32_t uid, int cat, const Todo *in);
 /* the uid the last save that CREATED a record gave it (0 before any). A form
  * saved on the way out reopens on its record, and a new one has no uid until
  * the card has assigned it. */
 uint32_t data_last_new_uid(void);
 /* category index of a record (attr nibble), or -1 if not found */
 int data_record_category(int app, uint32_t uid);
-/* toggle a to-do's completed flag (and save). 1 on success. */
-int data_toggle_todo(uint32_t uid);
-/* delete a record by uid. In an app that syncs, the next sync takes it off the
- * device only: nothing is ever deleted on the server (bridge/dav.h). */
+/* delete a memo by uid. 1 on success. */
 int data_delete(int app, uint32_t uid);
-/* 1 if this app's database syncs to an account (so a delete is device-only). */
-int data_app_syncs(int app);
-/* 1 if this app's records can't be changed on the device: Address while it
- * syncs. A contact edit is merged into iCloud's copy, photo and all, and a
- * copy bigger than the device can send would stay here unsent; until every
- * edit can reach the server, none is made (README, "Contacts are read-only"). */
-int data_app_readonly(int app);
 
-/* categories: read the app's category table; get/set the active list filter
- * (-1 = All). List iterators honor the filter. */
+/* categories: read the category table; get/set the active list filter
+ * (-1 = All). The list iterator honours the filter. */
 int  data_get_categories(int app, CatTable *t);
-/* write the app's category table back (preserving records). 1 on success. */
+/* write the category table back (preserving records). 1 on success. */
 int  data_set_categories(int app, const CatTable *t);
 void data_set_category(int cat);
 int  data_get_category(void);

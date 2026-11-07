@@ -31,7 +31,7 @@
 
 EMSCRIPTEN_KEEPALIVE void sim_boot(void){
     mkdir("/sdcard", 0777);            /* no-op if the IDBFS mount restored it */
-    data_seed_if_empty();              /* seeds only PDBs that don't exist yet */
+    data_init();                       /* an empty Memos database if there is none */
     clock_set_tz(appcfg()->timezone);
     sim_init();
     ui_init();

@@ -32,16 +32,17 @@
 <body>
 <main>
   <h1>Install CYD Palm on your board</h1>
-  <p class="lead">CYD Palm is a Palm-style organiser for the ESP32 "Cheap Yellow
-    Display". It syncs its Date Book, To Do and Address apps with iCloud. This
-    page writes it onto your board over USB. You don't need to install any
+  <p class="lead">CYD Palm is a Palm-style handheld for the ESP32 "Cheap Yellow
+    Display": Memos, Graffiti, Study, Guru, Coach, games and a news reader,
+    offline, with a HotSync for the clock, news and weather. This page writes it
+    onto your board over USB. You don't need to install any
     tools.</p>
 
   <h2>What you need</h2>
   <ul>
     <li>An <b>ESP32-2432S028R</b>, the base CYD without PSRAM, with 4 MB of flash.</li>
     <li>A USB cable that carries data, not just power.</li>
-    <li>A microSD card. Your records are stored on it.</li>
+    <li>A microSD card. Your memos, progress and courses are stored on it.</li>
     <li><b>Chrome, Edge or Chromium on a computer.</b> The page talks to the
       board over Web Serial, which Firefox, Safari and phones don't have.</li>
   </ul>
@@ -71,10 +72,10 @@
       page before.
       <ul>
         <li><b>CYD Palm is already on it</b>, however it got there: leave the
-          box clear. Erasing wipes your saved Wi-Fi and account passwords,
+          box clear. Erasing wipes your saved Wi-Fi passwords,
           the clock and the touch calibration, and you'd have to set them up
-          again. Your records are on the microSD card, so they're safe either
-          way.</li>
+          again. Your memos and progress are on the microSD card, so they're
+          safe either way.</li>
         <li><b>Anything else</b>, such as the factory demo: tick the box.</li>
       </ul></li>
     <li>The install takes about a minute. The board restarts when it's done.
@@ -89,12 +90,10 @@
     land in the wrong place, hold a finger on the screen while the board
     starts and it will ask again. It also asks again after an install with
     <b>erase</b> ticked.</p>
-  <p>Put the microSD card in. The first time it starts, the device adds a few
-    sample records so the apps aren't empty. Open <b>Settings</b> and set up
-    <b>Wi-Fi</b>, then <b>Accounts</b>. Accounts needs your Apple ID and an
-    app-specific password, which you create at
-    <a href="https://appleid.apple.com">appleid.apple.com</a> under
-    <i>Sign-In &amp; Security</i>. Then run a HotSync.</p>
+  <p>Put the microSD card in. Open <b>Settings</b> (the first icon) and set up
+    <b>Wi-Fi</b>: pick your network and type its password. Then run a
+    <b>HotSync</b> to set the clock and fetch the news and the weather. No
+    account is needed.</p>
 
   <h2>If the port doesn't appear</h2>
   <ul>

@@ -1,11 +1,11 @@
 /* hotsync_stub.c -- simulator stand-in for firmware/main/hotsync.c.
  *
- * The sim has no Wi-Fi/TLS, so the iCloud PIM sync can't run here. But the RSS
- * reader's feed fetch CAN be demoed offline: "Sync Now" rebuilds the News store
+ * The sim has no Wi-Fi/TLS. But the RSS reader's feed fetch CAN be demoed
+ * offline: "Sync Now" rebuilds the News store
  * from the enabled feeds (Preferences > News feeds) with placeholder articles, so
  * the whole News flow -- add/enable a feed, HotSync, swipe the reader -- works in
  * the web emulator exactly as it will on device (where the same step fetches the
- * feeds' real RSS). Discovery stays disabled (it needs the network). */
+ * feeds' real RSS). */
 #include "hotsync.h"
 #include "feeds.h"
 #include "news.h"
@@ -67,8 +67,6 @@ void hotsync_start(void){
         appcfg_wifi_pass(i, pw, sizeof pw);
         config_wipe(pw, sizeof pw);
     }
-    appcfg_dav_pass(pw, sizeof pw);
-    config_wipe(pw, sizeof pw);
     if(s_wifi_problem){
         snprintf(s_status, sizeof s_status, "%s",
                  saved ? "Wi-Fi failed" : "No Wi-Fi network saved");
@@ -126,33 +124,4 @@ int  wifi_scan_count(void){
 }
 const WifiAP *wifi_scan_get(int i){
     return (s_scanned && i >= 0 && i < wifi_scan_count()) ? &s_aps[i] : 0;
-}
-
-/* Discovery, like the Wi-Fi scan, runs here against a pretend account. It used
- * to answer "disabled in the simulator" with zero results, which meant the one
- * screen that exists to stop people pasting UUID paths was never once rendered
- * by the gate. The hrefs are shaped like the real thing -- a numeric principal
- * and a UUID -- because their whole point is that they are unreadable and must
- * never be typed; the NAMES are what the user picks from. Only the network is
- * missing here, and the network is not the part that gets designed wrong. */
-static const DiscColl s_disc[] = {
-    { "1234567890/calendars/home",                          "Home",        'c' },
-    { "1234567890/calendars/work",                          "Work",        'c' },
-    { "1234567890/calendars/1A2B3C4D-5E6F-7089-ABCD-EF0123456789", "Reminders", 'c' },
-    { "1234567890/carddavhome/card",                        "All Contacts",'a' },
-};
-static int s_disc_ran;
-
-void hotsync_discover_start(void){
-    s_disc_ran = 1;
-    snprintf(s_status, sizeof s_status, "Found %d collections",
-             (int)(sizeof s_disc / sizeof s_disc[0]));
-}
-int  hotsync_discover_busy(void)   { return 0; }
-int  hotsync_discover_done(void)   { return s_disc_ran; }
-int  hotsync_discover_count(void)  {
-    return s_disc_ran ? (int)(sizeof s_disc / sizeof s_disc[0]) : 0;
-}
-const DiscColl *hotsync_discover_get(int i){
-    return (s_disc_ran && i >= 0 && i < hotsync_discover_count()) ? &s_disc[i] : 0;
 }

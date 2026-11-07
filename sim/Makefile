@@ -25,10 +25,8 @@ BR := ../bridge
 # first -- and a developer's real credentials were compiled into the simulator
 # for months. There is no compile-time secrets.h at all now; see appcfg.c.)
 INC    := -I. -Iinclude -Ilvgl -I$(FW) -I$(BR)
-# UI_DEVTOOLS: the scripted-test hooks (`k` typing, Coach's seal escape).
-# UI_SEED_TESTEVENTS: the "Add test events" menu item (mass-generates records
-# against the heap/pool ceilings). The firmware never defines the second, and
-# defines the first only with CONFIG_CYD_DEVTOOLS (firmware/main/Kconfig.projbuild).
+# UI_DEVTOOLS: the scripted-test hooks (`k` typing, Coach's seal escape). The
+# firmware defines it only with CONFIG_CYD_DEVTOOLS (firmware/main/Kconfig.projbuild).
 #
 # Defined ONCE, here, because smoke32 rebuilds CFLAGS from scratch and a second
 # hand-copied list is exactly how a build flag silently stops applying to half
@@ -38,7 +36,7 @@ INC    := -I. -Iinclude -Ilvgl -I$(FW) -I$(BR)
 # Passed as a bare token and made a string there: a quoted -D does not survive
 # smoke32, which hands CFLAGS to a sub-make inside double quotes.
 APP_VER := $(shell git describe --tags --always --dirty 2>/dev/null || echo unknown)
-SIMDEF := -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS -DUI_SEED_TESTEVENTS -DSIM_APP_VERSION_RAW=$(APP_VER)
+SIMDEF := -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS -DSIM_APP_VERSION_RAW=$(APP_VER)
 CFLAGS := -O2 -g -Wall $(SIMDEF) $(INC)
 
 # the REAL firmware UI + data layer + portable modules, unchanged
@@ -48,8 +46,7 @@ APP_SRCS := \
     $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(BR)/dash.c $(FW)/minesweeper.c $(FW)/wordie.c $(FW)/sudoku.c $(FW)/zip.c $(FW)/coach.c $(FW)/guru.c $(FW)/guru_pool.c $(FW)/gurupool.c $(FW)/course.c $(FW)/srs.c $(FW)/study.c $(FW)/study_demo.c \
     $(FW)/monster.c $(FW)/monster_play.c $(FW)/monster_bot.c $(FW)/ui_monster.c \
     $(FW)/ui_dex.c $(FW)/dex.c $(FW)/dex_art.c $(FW)/crt.c \
-    $(BR)/pdb.c $(BR)/datebook.c $(BR)/address.c $(BR)/todo.c $(BR)/appinfo.c \
-    $(BR)/ical.c $(BR)/vcard.c $(BR)/tz.c $(BR)/charset.c \
+    $(BR)/pdb.c $(BR)/appinfo.c \
     $(BR)/find.c $(BR)/calc.c $(BR)/config.c $(BR)/rss.c $(BR)/news.c $(BR)/feeds.c \
     stubs/hotsync_stub.c stubs/power_stub.c \
     sim_port.c heap_budget.c
@@ -313,11 +310,9 @@ build/coach_test: tests/coach_test.c $(FW)/coach.c $(FW)/coach.h $(FW)/daycal.h
 guru: build/guru_test
 	./build/guru_test
 
-# ---- data: the device's data layer (firmware/main/data.c) against a scratch
-# /sdcard -- tombstones, and the demo seed's uid range. ----
-DATA_SRCS := $(FW)/data.c $(FW)/appcfg.c $(FW)/secretstore.c $(FW)/clock.c $(BR)/config.c \
-    $(BR)/pdb.c $(BR)/datebook.c $(BR)/address.c $(BR)/todo.c $(BR)/appinfo.c \
-    $(BR)/ical.c $(BR)/vcard.c $(BR)/tz.c $(BR)/charset.c
+# ---- data: the device's data layer (firmware/main/data.c, Memos) against a
+# scratch /sdcard -- the empty database, saves, deletes, categories. ----
+DATA_SRCS := $(FW)/data.c $(BR)/pdb.c $(BR)/appinfo.c
 data: build/data_test
 	./build/data_test
 

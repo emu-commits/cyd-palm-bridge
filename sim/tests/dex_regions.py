@@ -39,11 +39,11 @@ SHOTS = ["dex_no_save", "dex_greet", "dex_list", "dex_list_p2", "dex_list_caught
          "dex_where_never", "dex_tall"]
 
 
-def striped(px, w, x0, x1):
+def striped(px, w, x0, x1, y0=40, y1=190):
     """Any column from x0 to x1 going dark, light, dark, light for 8 rows."""
     for x in range(x0, x1):
         run = 0
-        for y in range(40, 190):
+        for y in range(y0, y1):
             at = [sum(px[((y + k) * w + x) * 3:((y + k) * w + x) * 3 + 3]) for k in range(2)]
             prev = sum(px[((y - 1) * w + x) * 3:((y - 1) * w + x) * 3 + 3])
             flip = (at[0] < at[1]) != (prev < at[0]) and at[0] != at[1] and prev != at[0]
@@ -80,7 +80,10 @@ def main(d):
             fails += 1
     for shot in ("dex_menu",):
         wm, hm, px = ppm(d / (shot + ".ppm"))
-        if striped(px, wm, 12, 148):
+        # the menu is Options/Power, Dex/TV effect, About: it ends near y 150
+        # (one row shorter since Settings became a launcher tile), and below it
+        # the TV screen rightly has its scanlines
+        if striped(px, wm, 12, 148, 40, 146):
             print(f"dex_regions: {shot}: the menu has scanlines")
             fails += 1
         if not striped(px, wm, 160, 222):

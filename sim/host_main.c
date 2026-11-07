@@ -26,8 +26,6 @@
  *   P <who> <hex>   fail unless the store holds that password for <who>: `a` for
  *                   the account, or a Wi-Fi slot 1..4. Proves the typing landed,
  *                   so an X that finds nothing means "wiped", not "never typed"
- *   R <back> <ahead>  look for event reminders due over (now-back, now+ahead]
- *                   (ui_test_reminders), as a wake does over its dark time
  *   A <seconds>     move Study's clock on (ui_test_study_skew): reviews come
  *                   due hours after a lesson, and the tour can't wait for them
  *   G <area> <x> <y> <facing>  Critters: put the player there (mon_ui_test_place),
@@ -246,8 +244,8 @@ int main(int argc, char **argv){
         return 2;
     }
 
-    /* mirror app_main's boot order (minus hardware): seed -> tz -> LVGL -> UI */
-    data_seed_if_empty();
+    /* mirror app_main's boot order (minus hardware): data -> tz -> LVGL -> UI */
+    data_init();
     clock_set_tz(appcfg()->timezone);
     sim_init();
     ui_init();
@@ -317,10 +315,6 @@ int main(int argc, char **argv){
             int fl, coins;
             if(sscanf(line + 2, "%d %d", &fl, &coins) != 2){ fprintf(stderr, "script: bad F: %s", line); rc = 1; break; }
             mon_ui_test_give(fl, coins); sim_step(60);
-        }
-        else if(line[0] == 'R' && line[1] == ' '){
-            char *e; long back = strtol(line + 2, &e, 10), ahead = strtol(e, NULL, 10);
-            ui_test_reminders((int32_t)back, (int32_t)ahead); sim_step(100);
         }
         else if(line[0] == 'B' && (line[1] == '\n' || !line[1])){
             heap_mark = sim_heap_used();

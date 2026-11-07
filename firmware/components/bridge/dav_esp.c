@@ -1,12 +1,14 @@
-/* dav_esp.c -- on-device CalDAV/CardDAV transport (ESP32, mbedTLS).
+/* dav_esp.c -- the device's HTTPS transport (ESP32, mbedTLS), for HotSync's
+ * fetches: the news feeds, the weather and the location lookup, each spooled
+ * to a file on the card (dav_fetch_url).
  *
- * Implements the same dav.h contract as the host's curl-based dav.c, but over
- * esp_http_client (TLS via the Mozilla cert bundle, Basic auth, chunked decode
- * and redirects handled by the client). Response parsing is shared with the
- * host through dav_xml.c -- this file is only the transport.
- *
- * Verified: esp_http_client's method enum includes PROPFIND and REPORT, so the
- * WebDAV verbs the sync engine needs map directly onto it.
+ * It began as the CalDAV/CardDAV transport for the iCloud sync, which was
+ * archived on 2026-11-07 (git tag archive/pim-caldav, with the sync engine
+ * and the DAV requests). What is left is the part the fetches need: one
+ * keep-alive esp_http_client handle (TLS via the Mozilla cert bundle,
+ * chunked decode and redirects handled by the client), the body spooled to
+ * SD, and the circuit breaker in dav_break.c. The names keep their dav_
+ * prefix so the history reads straight.
  */
 #include <string.h>
 #include <stdlib.h>
@@ -15,10 +17,7 @@
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "esp_log.h"
-#include "mbedtls/base64.h"
-#include "mbedtls/platform_util.h"   /* mbedtls_platform_zeroize */
 #include "dav.h"
-#include "dav_xml.h"
 
 static const char *TAG = "dav";
 int dav_last_status = 0;
@@ -34,17 +33,13 @@ typedef struct {
 } RespAcc;
 
 /* --- persistent keep-alive connection ------------------------------------
- * Init/perform/cleanup per request meant a full TLS handshake (~1-3 s against
- * iCloud's cert chain) for EVERY DAV call -- ~2N handshakes to pull N records
- * (one GET per object for its UID, one more for its body, plus each PUT).
- * We now keep ONE client handle alive and reuse its TCP+TLS connection
- * (keep_alive_enable) across calls to the same origin, so the handshake happens
- * about once per network phase instead of once per request.
+ * Init/perform/cleanup per request meant a full TLS handshake (~1-3 s) for
+ * every request. ONE client handle is kept alive and its TCP+TLS connection
+ * reused (keep_alive_enable) across calls to the same origin, so the
+ * handshake happens about once per origin instead of once per request.
  *
- * RAM stays bounded exactly as before: dav_disconnect() (called from the engine's
- * sortFile(), i.e. immediately before every heap-heavy disk sort, and at end of
- * sync) tears the ~40 KB TLS working set back down so it never coexists with a
- * sort. The handle is bound to one origin (scheme://host[:port]); a request to a
+ * RAM stays bounded: dav_disconnect() (HotSync calls it between phases and
+ * before Wi-Fi goes down) tears the ~40 KB TLS working set back down. The handle is bound to one origin (scheme://host[:port]); a request to a
  * different origin transparently rebuilds it. s_acc carries the current call's
  * response accumulator to on_event (user_data can't, since the handle outlives
  * each call's stack frame). */
@@ -53,9 +48,6 @@ static char s_origin[128];
 static RespAcc *s_acc;
 /* when set, davreq streams the response body to this FILE (see RespAcc.spool). */
 static FILE *s_spoolfile;
-/* SD spool for a collection enumeration response (REPORT / PROPFIND); parsed in a
- * sliding window so a large collection never needs a full-body RAM buffer. */
-#define ENUM_SPOOL "/sdcard/state/.enum"
 
 /* scheme://host[:port] prefix of an absolute URL. */
 static void url_origin(const char*url, char*out, int cap){
@@ -96,20 +88,6 @@ static esp_err_t on_event(esp_http_client_event_t *e){
     return ESP_OK;
 }
 
-/* Build "Basic base64(user:pass)" for a proactive Authorization header (iCloud
- * wants auth on the first request rather than after a 401 challenge). */
-static void basic_auth(const DavCtx*d, char*out, int cap){
-    if(!d->user[0]){ if(cap) out[0]=0; return; }   /* public GET (empty user): no auth */
-    /* Base64 of user:pass IS the password, so every copy made here is wiped
-     * before it goes out of scope, and davreq wipes `out` when it is done. */
-    char up[192]; int n=snprintf(up,sizeof up,"%s:%s",d->user,d->pass);
-    unsigned char b64[288]; size_t bl=0;
-    if(mbedtls_base64_encode(b64,sizeof b64,&bl,(const unsigned char*)up,(size_t)n)!=0){ if(cap)out[0]=0; bl=0; }
-    else snprintf(out,cap,"Basic %.*s",(int)bl,(const char*)b64);
-    mbedtls_platform_zeroize(up, sizeof up);
-    mbedtls_platform_zeroize(b64, sizeof b64);
-}
-
 /* One request. `url` is absolute (scheme://host[:port]/path). body may be NULL.
  * depth: 0/1 => send that Depth header; <0 => none. Returns HTTP status or -1.
  * On success, resp holds the (truncated-to-cap) body, *respn its length, etag the
@@ -119,11 +97,9 @@ static int davreq(const DavCtx*d, esp_http_client_method_t method, const char*ur
                   const char*body, int bodylen,
                   char*resp, int respcap, int*respn,
                   char*etag, int etagcap, char*effurl, int effcap){
-    /* An allow-list, not a deny-list: reads, and PUT to create or edit. No
-     * request that can remove an object from the account leaves this device
-     * (dav.h), so a stray caller fails here rather than on someone's iCloud. */
-    if(method!=HTTP_METHOD_GET && method!=HTTP_METHOD_PUT &&
-       method!=HTTP_METHOD_PROPFIND && method!=HTTP_METHOD_REPORT){
+    /* An allow-list: GET is all HotSync's fetches need, and nothing else
+     * leaves this device. */
+    if(method!=HTTP_METHOD_GET){
         if(resp && respcap) resp[0]=0;
         if(respn) *respn = 0;
         if(etag && etagcap) etag[0]=0;
@@ -146,7 +122,7 @@ static int davreq(const DavCtx*d, esp_http_client_method_t method, const char*ur
     /* a request to a different origin than the live handle can't reuse it */
     if(s_client && strcmp(s_origin,origin)!=0) dav_disconnect();
 
-    char auth[320]; basic_auth(d,auth,sizeof auth);
+    (void)d;                                  /* public fetches: no Authorization */
     int status = -1;
 
     /* Try on the reused connection; if perform fails (e.g. the server dropped an
@@ -187,7 +163,6 @@ static int davreq(const DavCtx*d, esp_http_client_method_t method, const char*ur
         esp_http_client_delete_header(c,"Content-Type");
         esp_http_client_delete_header(c,"Depth");
         esp_http_client_delete_header(c,"If-Match");
-        if(auth[0]) esp_http_client_set_header(c,"Authorization",auth);
         if(ctype)   esp_http_client_set_header(c,"Content-Type",ctype);
         if(depth>=0){ char dh[4]={ depth?'1':'0', 0 }; esp_http_client_set_header(c,"Depth",dh); }
         if(ifmatch && ifmatch[0]){ char v[176]; snprintf(v,sizeof v,"\"%s\"",ifmatch);
@@ -216,77 +191,13 @@ static int davreq(const DavCtx*d, esp_http_client_method_t method, const char*ur
     if(respn) *respn = acc.len;
     if(acc.truncated) ESP_LOGW(TAG,"response truncated at %d bytes: %s", respcap, url);
     s_acc = NULL;
-    mbedtls_platform_zeroize(auth, sizeof auth);
-    /* connection is left OPEN for the next request; dav_disconnect() (engine
-     * sortFile / end of sync) frees it before the next heap-heavy sort. */
+    /* connection is left OPEN for the next request; dav_disconnect() frees it */
     return status;
 }
 
-/* ---- request-body builders (identical XML to the host) ---- */
-static int body_getetag(char*b,int cap){
-    return snprintf(b,cap,"<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\">"
-        "<d:prop><d:getetag/></d:prop></d:propfind>");
-}
-
-/* ============================ dav.h API ============================ */
-
-int dav_put(const DavCtx*d,const char*coll,const char*name,const char*ctype,
-            const char*bodyfile,const char*ifmatch,
-            char*etag_out,int etagcap,int*status_out){
-    /* read the body file into memory (bodies are small: one ICS/vCard) */
-    FILE*f=fopen(bodyfile,"rb"); if(!f) return -1;
-    fseek(f,0,SEEK_END); long n=ftell(f); if(n<0)n=0; fseek(f,0,SEEK_SET);
-    char*body=malloc((size_t)n+1); if(!body){ fclose(f); return -1; }
-    size_t got=fread(body,1,(size_t)n,f); body[got]=0; fclose(f);
-
-    char url[512]; snprintf(url,sizeof url,"%s/%s/%s",d->base,coll,name);
-    if(etag_out&&etagcap) etag_out[0]=0;
-    int st=davreq(d,HTTP_METHOD_PUT,url,-1,ctype,ifmatch,body,(int)got,
-                  NULL,0,NULL, etag_out,etagcap, NULL,0);
-    free(body);
-    if(st<0) return -1;
-    if(status_out) *status_out=st;
-    if(etag_out&&etagcap&&!etag_out[0]) dav_getetag(d,coll,name,etag_out,etagcap); /* fallback */
-    else if(etag_out) dav_strip_quotes(etag_out);
-    return 0;
-}
-
-int dav_getetag(const DavCtx*d,const char*coll,const char*name,char*etag,int cap){
-    char url[512]; snprintf(url,sizeof url,"%s/%s/%s",d->base,coll,name);
-    char body[128]; int bl=body_getetag(body,sizeof body);
-    char buf[1024]; int rn=0;
-    int st=davreq(d,HTTP_METHOD_PROPFIND,url,0,"application/xml",NULL,body,bl,
-                  buf,sizeof buf,&rn, NULL,0, NULL,0);
-    if(st<0){ if(etag&&cap)etag[0]=0; return -1; }
-    if(!dav_xml_text(buf,NULL,"getetag",etag,cap)){ if(etag&&cap)etag[0]=0; return -1; }
-    dav_strip_quotes(etag);
-    return 0;
-}
-
-int dav_get(const DavCtx*d,const char*coll,const char*name,char*out,int cap){
-    char url[512]; snprintf(url,sizeof url,"%s/%s/%s",d->base,coll,name);
-    int rn=0;
-    int st=davreq(d,HTTP_METHOD_GET,url,-1,NULL,NULL,NULL,0, out,cap,&rn, NULL,0, NULL,0);
-    if(st<0 || st>=400) return -1;
-    return rn;
-}
-
-/* An object streamed to an SD file, as dav_fetch_url does a feed, with auth. */
-int dav_get_file(const DavCtx*d,const char*coll,const char*name,const char*path){
-    char url[512]; snprintf(url,sizeof url,"%s/%s/%s",d->base,coll,name);
-    FILE *sp = fopen(path,"w+b"); if(!sp) return -1;
-    s_spoolfile = sp;
-    int st = davreq(d,HTTP_METHOD_GET,url,-1,NULL,NULL,NULL,0, NULL,0,NULL, NULL,0, NULL,0);
-    s_spoolfile = NULL;
-    fclose(sp);
-    return st;
-}
-
-/* Stream an arbitrary (public) https URL's body straight to an SD file -- used by
- * the News reader's HotSync fetch to spool a feed for the sliding-window RSS
- * parser, exactly as dav_list spools a PROPFIND. No auth, no size cap in RAM.
- * Returns the HTTP status, or -1. Device-only (dav.h declares it; dav.c/host has
- * no implementation because the host never fetches feeds). */
+/* Stream a public https URL's body straight to an SD file -- a feed for the
+ * sliding-window RSS parser, the weather CSV, the location reply. No auth, no
+ * size cap in RAM. Returns the HTTP status, or -1. Device-only. */
 int dav_fetch_url(const char *url, const char *path){
     FILE *sp = fopen(path,"w+b"); if(!sp) return -1;
     DavCtx pub; memset(&pub,0,sizeof pub);      /* empty user => no Authorization */
@@ -297,171 +208,3 @@ int dav_fetch_url(const char *url, const char *path){
     return st;
 }
 
-/* response buffer for listings; heap (freed per call) so it doesn't compete with
- * the ~40KB TLS handshake for long. */
-
-int dav_list(const DavCtx*d,const char*coll,dav_list_cb cb,void*ctx){
-    char url[512]; snprintf(url,sizeof url,"%s/%s/",d->base,coll);
-    char body[128]; int bl=body_getetag(body,sizeof body);
-    /* Spool the (possibly large) PROPFIND response to SD and parse it in a sliding
-     * window -- no full-collection RAM buffer, so the member list has no size cap. */
-    FILE*sp=fopen(ENUM_SPOOL,"w+b"); if(!sp){ ESP_LOGW(TAG,"PROPFIND %s: spool open failed",coll); return -1; }
-    s_spoolfile=sp;
-    int st=davreq(d,HTTP_METHOD_PROPFIND,url,1,"application/xml",NULL,body,bl,
-                  NULL,0,NULL, NULL,0, NULL,0);
-    s_spoolfile=NULL;
-    long rn = ftell(sp); rewind(sp);
-    int count = st<0 ? -1 : dav_parse_members_stream(sp,cb,ctx);
-    fclose(sp); remove(ENUM_SPOOL);
-    fprintf(stderr,"[dav] PROPFIND %s -> st=%d rn=%ld members=%d (stream)\n",coll,st,rn,count);
-    return count;
-}
-
-int dav_sync_report(const DavCtx*d,const char*coll,const char*token,
-                    dav_sync_cb cb,void*ctx,char*newtoken,int tokcap){
-    if(newtoken&&tokcap) newtoken[0]=0;
-    char body[1400];
-    int bl=snprintf(body,sizeof body,
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
-        "<d:sync-collection xmlns:d=\"DAV:\">"
-        "<d:sync-token>%s</d:sync-token><d:sync-level>1</d:sync-level>"
-        "<d:prop><d:getetag/></d:prop></d:sync-collection>", token?token:"");
-    char url[512]; snprintf(url,sizeof url,"%s/%s/",d->base,coll);
-    /* Spool the REPORT reply to SD and stream-parse it: the etag list + trailing
-     * sync-token can be far larger than any RAM buffer, and truncating would lose
-     * records + the token. Streaming removes the 8 KB enumeration cap entirely. */
-    FILE*sp=fopen(ENUM_SPOOL,"w+b"); if(!sp){ ESP_LOGW(TAG,"REPORT %s: spool open failed",coll); return -1; }
-    dav_check("rep-spool-open");
-    s_spoolfile=sp;
-    int st=davreq(d,HTTP_METHOD_REPORT,url,1,"application/xml",NULL,body,bl,
-                  NULL,0,NULL, NULL,0, NULL,0);
-    s_spoolfile=NULL;
-    dav_check("rep-req-done");
-    long rn = ftell(sp); rewind(sp);
-    int rc = st<0 ? -1 : dav_parse_report_stream(sp,st,cb,ctx,newtoken,tokcap);
-    dav_check("rep-parse-done");
-    fclose(sp); remove(ENUM_SPOOL);
-    fprintf(stderr,"[dav] REPORT %s tok=%s -> st=%d rn=%ld rc=%d (stream)\n",coll,token&&token[0]?"incr":"full",st,rn,rc);
-    return rc;
-}
-
-/* ---------------- discovery ---------------- */
-int dav_prop_href(const DavCtx*d,const char*path,const char*propOpen,
-                  const char*extra_ns,char*out,int cap){
-    if(out&&cap) out[0]=0;
-    char body[512];
-    int bl=snprintf(body,sizeof body,
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
-        "<d:propfind xmlns:d=\"DAV:\" %s><d:prop>%s</d:prop></d:propfind>",
-        extra_ns?extra_ns:"", propOpen);
-    char url[640]; snprintf(url,sizeof url,"%s%s",d->base,path);
-    char buf[4096]; int rn=0;
-    int st=davreq(d,HTTP_METHOD_PROPFIND,url,0,"application/xml",NULL,body,bl,
-                  buf,sizeof buf,&rn, NULL,0, NULL,0);
-    dav_last_status = st<0?0:st;
-    if(st<0) return -1;
-    return dav_parse_prop_href(buf,propOpen,out,cap);
-}
-
-int dav_effective_host(const DavCtx*d,const char*path,char*out,int cap){
-    if(out&&cap) out[0]=0;
-    char body[256];
-    int bl=snprintf(body,sizeof body,
-        "<d:propfind xmlns:d=\"DAV:\"><d:prop><d:current-user-principal/></d:prop></d:propfind>");
-    char url[640]; snprintf(url,sizeof url,"%s%s",d->base,path);
-    char eff[512]=""; char buf[2048]; int rn=0;
-    int st=davreq(d,HTTP_METHOD_PROPFIND,url,0,"application/xml",NULL,body,bl,
-                  buf,sizeof buf,&rn, NULL,0, eff,sizeof eff);
-    if(st<0) return -1;
-    const char*p=strstr(eff,"://"); if(!p) return -1;
-    const char*slash=strchr(p+3,'/'); int n = slash ? (int)(slash-eff) : (int)strlen(eff);
-    if(n>cap-1) n=cap-1;
-    memcpy(out,eff,n); out[n]=0;
-    return 0;
-}
-
-int dav_list_collections(const DavCtx*d,const char*path,dav_coll_cb cb,void*ctx){
-    char body[256];
-    int bl=snprintf(body,sizeof body,
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
-        "<d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/><d:displayname/></d:prop></d:propfind>");
-    char url[640]; snprintf(url,sizeof url,"%s%s",d->base,path);
-    /* Spool the home-set PROPFIND to SD and stream-parse it: an iCloud calendar
-     * home returns calendars + reminder lists + inbox/outbox/notification, which
-     * together overrun any small RAM buffer -- and the reminder lists trail the
-     * calendars, so a truncated buffer would silently drop them from discovery. */
-    FILE*sp=fopen(ENUM_SPOOL,"w+b"); if(!sp){ ESP_LOGW(TAG,"PROPFIND collections: spool open failed"); return -1; }
-    s_spoolfile=sp;
-    int st=davreq(d,HTTP_METHOD_PROPFIND,url,1,"application/xml",NULL,body,bl,
-                  NULL,0,NULL, NULL,0, NULL,0);
-    s_spoolfile=NULL;
-    long rn = ftell(sp); rewind(sp);
-    int count = st<0 ? -1 : dav_parse_collections_stream(sp,cb,ctx);
-    fclose(sp); remove(ENUM_SPOOL);
-    fprintf(stderr,"[dav] PROPFIND collections %s -> st=%d rn=%ld found=%d (stream)\n",path,st,rn,count);
-    return count;
-}
-
-/* ---------------- a time window, multiget, a probe ---------------- */
-static int query_members(const DavCtx*d,const char*coll,const char*body,int bl,
-                         dav_list_cb cb,void*ctx,const char*what){
-    char url[512]; snprintf(url,sizeof url,"%s/%s/",d->base,coll);
-    /* spooled and stream-parsed, as the other listings are */
-    FILE*sp=fopen(ENUM_SPOOL,"w+b"); if(!sp){ ESP_LOGW(TAG,"%s %s: spool open failed",what,coll); return -1; }
-    s_spoolfile=sp;
-    int st=davreq(d,HTTP_METHOD_REPORT,url,1,"application/xml; charset=utf-8",NULL,body,bl,
-                  NULL,0,NULL, NULL,0, NULL,0);
-    s_spoolfile=NULL;
-    long rn = ftell(sp); rewind(sp);
-    int count = st==207 ? dav_parse_members_stream(sp,cb,ctx) : -1;
-    fclose(sp); remove(ENUM_SPOOL);
-    fprintf(stderr,"[dav] %s %s -> st=%d rn=%ld members=%d\n",what,coll,st,rn,count);
-    return count;
-}
-int dav_query_window(const DavCtx*d,const char*coll,long long start,long long end,
-                     dav_list_cb cb,void*ctx){
-    char body[640]; int bl=dav_body_window(body,sizeof body,start,end);
-    if(bl<0) return -1;
-    return query_members(d,coll,body,bl,cb,ctx,"window");
-}
-int dav_query_todos(const DavCtx*d,const char*coll,long long doneSince,dav_list_cb cb,void*ctx){
-    char body[640];
-    int bl=dav_body_todos(body,sizeof body,0,0); if(bl<0) return -1;
-    int a=query_members(d,coll,body,bl,cb,ctx,"open to-dos"); if(a<0) return -1;
-    bl=dav_body_todos(body,sizeof body,1,doneSince); if(bl<0) return -1;
-    int b=query_members(d,coll,body,bl,cb,ctx,"recently done"); if(b<0) return -1;
-    return a+b;
-}
-
-int dav_multiget(const DavCtx*d,const char*coll,int card,const char*const*names,int n,
-                 const char*spool){
-    int cap = 512 + n*200;
-    char*body=malloc((size_t)cap); if(!body) return -1;
-    int bl=dav_body_multiget(body,cap,d->base,coll,card,names,n);
-    if(bl<0){ free(body); return -1; }
-    char url[512]; snprintf(url,sizeof url,"%s/%s/",d->base,coll);
-    FILE*sp=fopen(spool,"w+b"); if(!sp){ free(body); return -1; }
-    s_spoolfile=sp;
-    int st=davreq(d,HTTP_METHOD_REPORT,url,1,"application/xml; charset=utf-8",NULL,body,bl,
-                  NULL,0,NULL, NULL,0, NULL,0);
-    s_spoolfile=NULL;
-    long rn = ftell(sp);
-    fclose(sp); free(body);
-    fprintf(stderr,"[dav] multiget %s n=%d -> st=%d rn=%ld\n",coll,n,st,rn);
-    return st;
-}
-
-int dav_probe(const DavCtx*d,const char*coll,const char*name,char*etag,int cap){
-    if(etag&&cap) etag[0]=0;
-    char url[512]; snprintf(url,sizeof url,"%s/%s/%s",d->base,coll,name);
-    char body[128]; int bl=body_getetag(body,sizeof body);
-    char buf[1024]; int rn=0;
-    int st=davreq(d,HTTP_METHOD_PROPFIND,url,0,"application/xml",NULL,body,bl,
-                  buf,sizeof buf,&rn, NULL,0, NULL,0);
-    if(st<0) return -1;
-    if(st==207||st==200){
-        if(!dav_xml_text(buf,NULL,"getetag",etag,cap) || !etag[0]) return -1;
-        dav_strip_quotes(etag);
-    }
-    return st;
-}
