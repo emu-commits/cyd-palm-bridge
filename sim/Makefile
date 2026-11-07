@@ -25,10 +25,8 @@ BR := ../bridge
 # first -- and a developer's real credentials were compiled into the simulator
 # for months. There is no compile-time secrets.h at all now; see appcfg.c.)
 INC    := -I. -Iinclude -Ilvgl -I$(FW) -I$(BR)
-# UI_DEVTOOLS: the scripted-test hooks (`k` typing, Coach's seal escape).
-# UI_SEED_TESTEVENTS: the "Add test events" menu item (mass-generates records
-# against the heap/pool ceilings). The firmware never defines the second, and
-# defines the first only with CONFIG_CYD_DEVTOOLS (firmware/main/Kconfig.projbuild).
+# UI_DEVTOOLS: the scripted-test hooks (`k` typing, Coach's seal escape). The
+# firmware defines it only with CONFIG_CYD_DEVTOOLS (firmware/main/Kconfig.projbuild).
 #
 # Defined ONCE, here, because smoke32 rebuilds CFLAGS from scratch and a second
 # hand-copied list is exactly how a build flag silently stops applying to half
@@ -38,7 +36,7 @@ INC    := -I. -Iinclude -Ilvgl -I$(FW) -I$(BR)
 # Passed as a bare token and made a string there: a quoted -D does not survive
 # smoke32, which hands CFLAGS to a sub-make inside double quotes.
 APP_VER := $(shell git describe --tags --always --dirty 2>/dev/null || echo unknown)
-SIMDEF := -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS -DUI_SEED_TESTEVENTS -DSIM_APP_VERSION_RAW=$(APP_VER)
+SIMDEF := -DLV_CONF_INCLUDE_SIMPLE -DUI_DEVTOOLS -DSIM_APP_VERSION_RAW=$(APP_VER)
 CFLAGS := -O2 -g -Wall $(SIMDEF) $(INC)
 
 # the REAL firmware UI + data layer + portable modules, unchanged
@@ -48,8 +46,7 @@ APP_SRCS := \
     $(FW)/kana_data.c $(FW)/kana_strokes.c $(FW)/kana_write.c $(BR)/dash.c $(FW)/minesweeper.c $(FW)/wordie.c $(FW)/sudoku.c $(FW)/zip.c $(FW)/coach.c $(FW)/guru.c $(FW)/guru_pool.c $(FW)/gurupool.c $(FW)/course.c $(FW)/srs.c $(FW)/study.c $(FW)/study_demo.c \
     $(FW)/monster.c $(FW)/monster_play.c $(FW)/monster_bot.c $(FW)/ui_monster.c \
     $(FW)/ui_dex.c $(FW)/dex.c $(FW)/dex_art.c $(FW)/crt.c \
-    $(BR)/pdb.c $(BR)/datebook.c $(BR)/address.c $(BR)/todo.c $(BR)/appinfo.c \
-    $(BR)/ical.c $(BR)/vcard.c $(BR)/tz.c $(BR)/charset.c \
+    $(BR)/pdb.c $(BR)/appinfo.c \
     $(BR)/find.c $(BR)/calc.c $(BR)/config.c $(BR)/rss.c $(BR)/news.c $(BR)/feeds.c \
     stubs/hotsync_stub.c stubs/power_stub.c \
     sim_port.c heap_budget.c
@@ -60,7 +57,7 @@ WRAP_LD := -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free
 LVGL_SRCS := $(shell find lvgl/src -name '*.c' 2>/dev/null)
 LVGL_OBJS := $(patsubst lvgl/src/%.c,build/lvgl/%.o,$(LVGL_SRCS))
 
-.PHONY: host wasm smoke smoke32 secretscan poolparity data graf mines wordie sudoku zip clock coach guru gurupool dash course srs monster dex games clean lvgl-src
+.PHONY: host wasm smoke smoke32 secretscan poolparity data graf mines wordie sudoku zip clock coach guru gurupool dash course srs monster balance dex games clean lvgl-src
 
 # LVGL_SRCS is evaluated when make parses this file, so on a clean checkout the
 # source must be fetched BEFORE the build graph is used: the entry points fetch,
@@ -197,15 +194,18 @@ build/wordie_test: tests/wordie_test.c $(FW)/wordie.c $(FW)/wordie.h
 	$(CC) -O2 -Wall -I$(FW) tests/wordie_test.c $(FW)/wordie.c -o $@
 
 # ---- course: the Study course reader (firmware/main/course.c), pure C. Its
-# checks on the committed course files, then the round trip: the C reader's
+# checks on the committed course files (and that Knowledge's course source is
+# what tools/mkquest.py makes of its graph), then the round trip: the C reader's
 # dump of each file must equal tools/mkcourse.py's, byte for byte (the Python
 # side reads the file with its own reader, stdlib only). smoke32 runs the
 # checks again 32-bit, as on the device; make ftest fuzzes the reader. ----
-COURSE_FILES := ../courses/demo-kanji/course.srs ../tests/data/study/cards/course.srs \
+COURSE_FILES := ../courses/demo-kanji/course.srs ../courses/kq-numbers/course.srs \
+                ../tests/data/study/cards/course.srs \
                 ../tests/data/study/features/course.srs ../tests/data/study/remap-v1/course.srs \
                 ../tests/data/study/remap-v2/course.srs
 course: build/course_test
 	python3 ../tools/gen_study_demo.py --check
+	python3 ../tools/mkquest.py ../courses/kq-numbers --check
 	python3 ../tools/gen_font_2x.py --check
 	./build/course_test
 	@for f in $(COURSE_FILES); do \
@@ -256,6 +256,20 @@ build/monster_test: $(MONSTER_SRCS) $(FW)/monster.h $(FW)/monster_play.h $(FW)/m
 	@mkdir -p build
 	$(CC) -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all -I$(FW) -I$(BR) \
 	    $(MONSTER_SRCS) -lm -o $@
+
+# ---- balance: the balance run (docs/EFFECTS_PLAN.md section 3): every critter
+# against every critter at three levels, both sides choosing as Auto-play does,
+# compared with the accepted baseline (tests/data/balance.tsv). BALANCE_RECORD=1
+# records a new one; BALANCE_SEEDS changes the seeds a pair (20). Optimised and
+# without the sanitizers: it's 216,000 battles. ----
+BALANCE_SRCS := tests/balance.c $(FW)/monster.c $(FW)/monster_play.c $(FW)/monster_bot.c
+balance: build/balance_test
+	./build/balance_test
+	@echo "sim balance: OK"
+
+build/balance_test: $(BALANCE_SRCS) $(FW)/monster.h $(FW)/monster_play.h $(FW)/monster_bot.h $(BR)/safefile.h
+	@mkdir -p build
+	$(CC) -O2 -g -Wall -Wextra -I$(FW) -I$(BR) $(BALANCE_SRCS) -lm -o $@
 
 # ---- dex: what the Dex reads (docs/DEX_PLAN.md section 7), under ASan and UBSan. ----
 DEX_SRCS := tests/dex_test.c $(FW)/dex.c $(FW)/crt.c $(FW)/monster.c $(FW)/monster_play.c
@@ -313,11 +327,9 @@ build/coach_test: tests/coach_test.c $(FW)/coach.c $(FW)/coach.h $(FW)/daycal.h
 guru: build/guru_test
 	./build/guru_test
 
-# ---- data: the device's data layer (firmware/main/data.c) against a scratch
-# /sdcard -- tombstones, and the demo seed's uid range. ----
-DATA_SRCS := $(FW)/data.c $(FW)/appcfg.c $(FW)/secretstore.c $(FW)/clock.c $(BR)/config.c \
-    $(BR)/pdb.c $(BR)/datebook.c $(BR)/address.c $(BR)/todo.c $(BR)/appinfo.c \
-    $(BR)/ical.c $(BR)/vcard.c $(BR)/tz.c $(BR)/charset.c
+# ---- data: the device's data layer (firmware/main/data.c, Memos) against a
+# scratch /sdcard -- the empty database, saves, deletes, categories. ----
+DATA_SRCS := $(FW)/data.c $(BR)/pdb.c $(BR)/appinfo.c
 data: build/data_test
 	./build/data_test
 
@@ -341,7 +353,7 @@ gurupool: build/gurupool_test
 build/gurupool_test: tests/gurupool_test.c $(FW)/gurupool.c $(FW)/guru.c \
                      $(FW)/guru_pool.c $(FW)/gurupool.h $(FW)/guru.h
 	@mkdir -p build
-	$(CC) -O2 -Wall -I$(FW) tests/gurupool_test.c $(FW)/gurupool.c $(FW)/guru.c \
+	$(CC) -O2 -Wall -I$(FW) -I$(BR) tests/gurupool_test.c $(FW)/gurupool.c $(FW)/guru.c \
 	      $(FW)/guru_pool.c -o $@
 
 # ---- dash: the lock screen's freshness + age rules (needs libm for the moon). ----
@@ -353,7 +365,7 @@ build/dash_test: tests/dash_test.c $(BR)/dash.c $(BR)/dash.h
 	$(CC) -O2 -Wall -I$(BR) tests/dash_test.c $(BR)/dash.c -o $@ -lm
 
 # ---- games: every game's logic gate in one go (what CI runs). ----
-games: poolparity mines wordie sudoku zip clock coach guru gurupool dash course srs monster dex
+games: poolparity mines wordie sudoku zip clock coach guru gurupool dash course srs monster balance dex
 
 # ---- wasm: everything compiled by emcc in one shot (CI build; no local emcc needed).
 # 32-bit wasm => the TRUE device-sized pool applies (see lv_conf.h). main() boots

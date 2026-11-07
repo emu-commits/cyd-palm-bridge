@@ -68,9 +68,18 @@ int  st_undo(StSession *s, uint16_t *item);
 
 /* Write the built-in demo course to <root>/study/demo-kanji/ the first time
  * (then <root>/study/.demo marks it done, so removing the demo keeps it
- * removed), or whenever `force` is set (the "Reinstall demo" menu item).
+ * removed), when the card holds an older demo than this firmware's (the mark
+ * records which), or whenever `force` is set (the "Reinstall demo" menu item).
  * Returns 1 if it wrote the course, 0 if it didn't need to, < 0 on error. */
 int  st_install_demo(const char *root, int force);
+
+/* Knowledge's course (the launcher's tree; KNOWLEDGEQUEST_PLAN.md K0), built
+ * in like the demo: written to <root>/study/kq-numbers/ whenever it's missing
+ * or this firmware carries a different build of it (<root>/study/.kq records
+ * which). Returns 1 if it wrote the course, 0 if it didn't need to, < 0 on
+ * error. Study's own course list leaves it out: it's opened by Knowledge. */
+#define ST_KQ_ID "kq-numbers"
+int  st_install_kq(const char *root);
 
 /* Remove a course's folder: its course.srs and its progress. */
 int  st_remove_course(const char *root, const char *id);
@@ -143,5 +152,9 @@ typedef struct {
 } StGlance;
 /* Read every course's summary at `now`. Returns g->courses. */
 int  st_glance(const char *root, uint32_t now, StGlance *g);
+/* The same over some of the courses: with `only`, just course `id`; without,
+ * every course but `id` (NULL: every course, as st_glance). The launcher's
+ * badges: Study's counts its courses, Knowledge's its own. */
+int  st_glance_some(const char *root, uint32_t now, const char *id, int only, StGlance *g);
 
 #endif

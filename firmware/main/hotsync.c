@@ -1,22 +1,25 @@
-/* hotsync.c -- background sync to iCloud.
+/* hotsync.c -- HotSync: Wi-Fi up, set the clock, fetch the news, place the
+ * device, fetch the weather, Wi-Fi down.
  *
- * Reuses the proven engine (dav.h + sync.h). Runs on its own task with a live
- * status string the UI polls. DEFENSIVE: no ESP_ERROR_CHECK -- every step checks
- * its return and fails to a status message, so a network/RAM problem can't crash
- * the interactive UI. Wi-Fi is brought up only for the sync, beside the live
- * UI; the heap it leaves is logged at every phase (hs_heap_check).
+ * Runs on its own task with a live status string the UI polls. DEFENSIVE: no
+ * ESP_ERROR_CHECK -- every step checks its return and fails to a status
+ * message, so a network/RAM problem can't crash the interactive UI. Wi-Fi is
+ * brought up only for the run, beside the live UI; the heap it leaves is
+ * logged at every phase (hs_heap_check).
+ *
+ * Until 2026-11-07 it also synced Date Book, To Do and Address with iCloud
+ * (CalDAV/CardDAV). That was archived with those apps (git tag
+ * archive/pim-caldav); what is left needs a network and no account.
  */
 #include "hotsync.h"
-#include "data.h"       /* data_demo_count(): the seed is never pushed */
 #include "safefile.h"     /* weather.dat is replaced whole */
-#include "dav.h"
-#include "sync.h"
+#include "dav.h"          /* the HTTPS transport the fetches use */
+#include "mbedtls/platform_util.h"   /* mbedtls_platform_zeroize: the Wi-Fi password */
 #include "rss.h"          /* RSS reader: feed parser */
 #include "news.h"         /* RSS reader: on-SD article store */
 #include "feeds.h"        /* RSS reader: the enabled feed sources */
 #include "dash.h"         /* lock-screen dashboard: the WxCache it renders from */
 #include "wxfetch.h"      /* Open-Meteo CSV -> WxCache */
-#include "mbedtls/platform_util.h"   /* mbedtls_platform_zeroize */
 #include "appcfg.h"
 #include "geoip.h"
 #include "clock.h"
@@ -39,24 +42,13 @@
 
 static const char *TAG = "hotsync";
 
-/* The sync task's stack comes out of the same heap the TLS handshake needs, so
- * it was cut to 20 KB when heap was the binding constraint. That cut was made
- * against a high-water log from runs that FAILED EARLY and never walked the deep
- * path -- "3228 bytes of 20480 still free" measured a sync that gave up before
- * reading a single local record.
- *
- * Once the memory fixes let a collection actually run, buildLcRaw -> pdb_read
- * (which alone puts a PALM_REC_MAX = 4 KB record buffer on this stack, once per
- * record) went straight through the end of it. A task stack IS a heap
- * allocation, so the overflow did not fault: it wrote local record text into the
- * neighbouring heap blocks, and the damage surfaced later as a corrupt free list
- * -- once inside lwIP's receive path, once inside our own largest-free-block
- * logging. Two days of "out of memory" were this.
- *
- * Heap isn't the binding constraint (66 KB free at wifi-up), so the stack is
- * 32 KB, and hs_heap_check() now reports the high-water
- * mark at every phase, on runs that reach the end. Raise it only against THAT
- * log, and only from a run that completed. */
+/* The task's stack comes out of the same heap the TLS handshake needs. It was
+ * 32 KB for the iCloud sync engine, whose record walk put a 4 KB record buffer
+ * on it per record; an overflow did not fault but wrote into the neighbouring
+ * heap blocks, and cost days. The engine is gone (archived 2026-11-07), and
+ * the fetches left are lighter, but the size stays until a completed run's
+ * high-water log (hs_heap_check, the "stack:" line at the end) says what it
+ * can be cut to. Change it only against THAT log. */
 #define HOTSYNC_STACK 32768
 static volatile int s_busy;
 /* Cancellation. Both are plain ints written by one side and read by the other,
@@ -156,58 +148,10 @@ static void hs_heap(const char *where){
              (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
 }
 
-/* sync progress 0..100 for the UI status line. Each configured collection owns a
- * band [s_band_lo, s_band_lo+s_band_span]; the engine's per-record progress hook
- * (hs_prog_cb) fills that band, so the bar advances WITHIN a collection, not just
- * as each starts. -1 = idle/not started. */
+/* progress 0..100 for the UI status line, by stage; -1 = idle/not started */
 static volatile int s_prog = -1;
-static int s_band_lo, s_band_span;
 static void setprog(int p){ s_prog = p; }
 int hotsync_progress(void){ return s_prog; }
-/* engine progress hook: map done/total into the current collection's band. Runs
- * on the sync task; s_prog is a plain int read by the LVGL task (atomic write). */
-static void hs_prog_cb(int done,int total,void *ctx){
-    (void)ctx;
-    int frac = (total > 0) ? (done * 100 / total) : 0;
-    if(frac > 100) frac = 100;                 /* server-only pulls can exceed total */
-    s_prog = s_band_lo + frac * s_band_span / 100;
-}
-
-/* ---- per-app sync targets ------------------------------------------------
- * HotSync walks this table, syncing each configured app to its own iCloud
- * collection. The PDB/map paths and kinds are device-local constants; the
- * COLLECTION for each app is runtime config (appcfg(), from config.ini), so an
- * app with an empty collection stays off until it's configured. */
-/* the same paths the data layer uses */
-#define SYNC_PDB      "/sdcard/DatebookDB.pdb"
-#define SYNC_TODO_PDB "/sdcard/ToDoDB.pdb"
-#define SYNC_CARD_PDB "/sdcard/AddressDB.pdb"
-
-typedef struct {
-    const char *name;     /* label for the status line            */
-    const char *pdb;      /* PDB path on SD                        */
-    int         kind;     /* KIND_CAL | KIND_TODO | KIND_CARD      */
-    const char *map;      /* per-collection state map on SD        */
-    int         card;     /* 1 => CardDAV (uses the contacts host) */
-} SyncApp;
-
-static const SyncApp s_apps[] = {
-    { "Date Book", SYNC_PDB,      KIND_CAL,  "/sdcard/state/cal.map",  0 },
-    { "To Do",     SYNC_TODO_PDB, KIND_TODO, "/sdcard/state/todo.map", 0 },
-    { "Address",   SYNC_CARD_PDB, KIND_CARD, "/sdcard/state/card.map", 1 },
-};
-#define N_APPS ((int)(sizeof s_apps / sizeof s_apps[0]))
-
-/* The demo seed is held back from every push: it is sample data, and it must
- * never land in the user's real account. The seed is uids 1..n per app. */
-static int s_demo_n;
-static int hold_demo(uint32_t uid, void *ctx){ (void)ctx; return uid >= 1 && (int)uid <= s_demo_n; }
-static int app_of(int i){ return i==0 ? APP_CAL : i==1 ? APP_TODO : APP_ADDR; }
-
-/* the configured collection for app i (index matches s_apps order). */
-static const char* app_coll(const Config *c, int i){
-    return i==0 ? c->cal_coll : i==1 ? c->todo_coll : c->card_coll;
-}
 
 int hotsync_busy(void){ return s_busy; }
 const char *hotsync_status(void){ return s_status; }
@@ -411,15 +355,8 @@ static int clock_ok(void){
     return 1;
 }
 
-static char *abspath(char *href, DavCtx *d){
-    if(strncmp(href,"http",4)==0){ char *p=strstr(href,"://");
-        if(p){ char *s=strchr(p+3,'/'); if(s){ int n=(int)(s-href);
-            if(n<(int)sizeof d->base){ memcpy(d->base,href,n); d->base[n]=0; } return s; } } }
-    return href;
-}
-
 /* ---- News feeds -------------------------------------------------------------
- * After the PIM sync (Wi-Fi still up), stream each ENABLED feed to SD, parse it
+ * With Wi-Fi up and the clock set, stream each ENABLED feed to SD, parse it
  * in a sliding window, and rebuild the news store. Bounded RAM: the fetch spools
  * to SD (dav_fetch_url), the parser keeps only one item, news_add writes to SD.
  * Feed sources come from the on-SD feed list (bridge/feeds.c), edited in
@@ -742,254 +679,21 @@ static void hotsync_task(void *arg){
     ESP_LOGI(TAG,"location: latitude=%s longitude=%s",
              cfg->latitude[0]  ? cfg->latitude  : "(unset)",
              cfg->longitude[0] ? cfg->longitude : "(unset)");
-
-    /* The account password, out of the store for the length of this sync. It
-     * and dcard's copy are wiped at the one exit below, before wifi_down(). */
-    DavCtx d; memset(&d,0,sizeof d);
-    snprintf(d.base,sizeof d.base,"%s",cfg->dav_base);
-    snprintf(d.user,sizeof d.user,"%s",cfg->dav_user);
-    appcfg_dav_pass(d.pass,sizeof d.pass);
-    (void)abspath;
     char msg[208];
-
-    /* ---- what is account work, and what is merely internet ----------------
-     * The clock above and the news below need nothing but a network. The account
-     * stages -- host resolve, login, collections -- need iCloud credentials, and
-     * a device with none, or with wrong ones, must still come away with a
-     * corrected clock and fresh feeds. So a failure here SKIPS the rest of the
-     * account work; it doesn't end the sync. `dav_why` carries the reason
-     * into the final status line, because a silent skip reads as a silent
-     * success and would hide a bad password indefinitely. */
-    /* ntgt also sizes the progress bar: each configured collection owns a band
-     * [k/M], the per-app step being the coarse indicator (a finer intra-collection
-     * bar would need a callback through sync_collection). Zero of them is a
-     * skip reason in its own right -- there is nothing to log in to for. */
-    int ntgt=0; for(int i=0;i<N_APPS;i++){ const char*c=app_coll(cfg,i); if(c&&c[0]) ntgt++; }
-    int dav_ok = 0;
-    char dav_why[48] = "";
-
-    if(!cfg->dav_base[0] || !cfg->dav_user[0] || !d.pass[0]){
-        snprintf(dav_why,sizeof dav_why,"no account set up");
-        ESP_LOGW(TAG,"no iCloud credentials; internet-only sync");
-    } else if(!ntgt){
-        snprintf(dav_why,sizeof dav_why,"no collections chosen");
-        ESP_LOGW(TAG,"no collections configured; internet-only sync");
-    } else {
-        hs_heap("pre-tls");    /* last sample before the first HTTPS request */
-        setst("Resolving host...");
-        char host[256]="";
-        if(dav_effective_host(&d,"/",host,sizeof host)==0 && host[0]){
-            snprintf(d.base,sizeof d.base,"%s",host);
-            ESP_LOGI(TAG,"effective host: %s",host);
-        } else {
-            ESP_LOGW(TAG,"host resolve failed (HTTP %d); using %s",dav_last_status,d.base);
-        }
-
-        /* probe login first so we can tell an auth failure from a bad collection */
-        setst("Checking login...");
-        char principal[256]="";
-        if(dav_prop_href(&d,"/","<d:current-user-principal/>","",principal,sizeof principal)!=0 || !principal[0]){
-            /* A rejected password and an unreachable server are different faults;
-             * one line for both ("login failed (HTTP 0)") sends you looking at the
-             * password when the request never left. */
-            if(dav_last_status == 401 || dav_last_status == 403)
-                snprintf(dav_why,sizeof dav_why,"password rejected");
-            else if(dav_last_status == 0)
-                snprintf(dav_why,sizeof dav_why,"server unreachable");
-            else
-                snprintf(dav_why,sizeof dav_why,"login failed (HTTP %d)",dav_last_status);
-            ESP_LOGE(TAG,"iCloud: %s (HTTP %d)",dav_why,dav_last_status);
-            dav_disconnect();          /* drop the dead TLS handle before the news fetch */
-        } else {
-            ESP_LOGI(TAG,"principal: %s",principal);
-            dav_ok = 1;
-        }
-        /* THE number: a full handshake has completed, so min_ever now carries its peak.
-         * Compare min_ever here against the "pre-tls" sample -- the drop is the cost of
-         * mbedTLS with the whole UI still resident. */
-        hs_heap("post-tls");
-    }
-
-    /* Address book (CardDAV) lives on a separate iCloud host; resolve it lazily
-     * the first time a card target is reached. Same credentials as caldav. */
-    DavCtx dcard; int card_ready=0;
-    memset(&dcard,0,sizeof dcard);
-
-    SyncStats tot={0};
-    /* ---- declare the memory ceiling before anything allocates (sync.h) ------
-     * Measured on this device with Wi-Fi up: 44856 free, the TLS session costs
-     * 10096 steady, and a HANDSHAKE peaks around 30360 (min_ever fell to 14340
-     * from 44700 during login). The phase's own handshake happens before the
-     * scratch is taken, so it gets the whole heap; what has to be reserved is
-     * what the collection needs while it RUNS -- the sort buffers, and headroom
-     * for the session's own churn. A reconnect mid-collection is best-effort:
-     * nothing forces one any more (see sortFile), and if the server drops us the
-     * breaker ends the collection in seconds with local data untouched.
-     *
-     * Each open file also carries a FatFs sector cache of FF_MAX_SS bytes; with
-     * CONFIG_WL_SECTOR_SIZE_512 that is 512, not 4096. */
-    /* The sort is bounded whatever the collection's size (sync.c): a run is a
-     * 4 KB buffer and its 1 KB line index; a merge is 4 line buffers (2 KB)
-     * and five more open files (~3.2 KB). */
-    #define HS_SORT_RESERVE 6144
-    #define HS_FILE_CACHE   (6 * 512)       /* 5 held across the loop, +1 transient */
-    {
-        size_t freeh  = (size_t)esp_get_free_heap_size();
-        size_t need   = HS_SORT_RESERVE + HS_FILE_CACHE;
-        size_t budget = freeh > need ? freeh - need : 0;
-        sync_set_budget(budget);
-        /* Read-only is the owner's switch (Settings > Sync, config read_only),
-         * on for a new account: nothing is sent, edits wait on the device. */
-        sync_set_pull_only(cfg->read_only ? 1 : 0);
-        ESP_LOGI(TAG,"budget: free %u - sort %u - files %u = %u; sync needs %u -> %s"
-                     "  (%s)",
-                 (unsigned)freeh, (unsigned)HS_SORT_RESERVE, (unsigned)HS_FILE_CACHE,
-                 (unsigned)budget, (unsigned)sync_working_set(),
-                 sync_working_set() <= budget ? "fits" : "REFUSED",
-                 cfg->read_only ? "READ-ONLY: nothing is sent"
-                                : "two-way: edits are sent, merged (contacts: never)");
-    }
-
-    int did=0, failed=0, protec=0, oomed=0, diskerr=0, netdown=0, overbudget=0, toobig=0;
-    char toobig_name[24] = "";
-    ConflictPolicy pol = (ConflictPolicy)cfg->policy;
-    int step=0;
-    setprog(0);
-    sync_set_progress(hs_prog_cb, NULL);           /* engine drives the intra-collection bar */
-    for(int i=0; dav_ok && i<N_APPS; i++){
-        /* THE safe point. One collection is one merge: records are read, matched
-         * and written as a unit, so stopping between them leaves the card
-         * consistent and everything already synced stays synced. Stopping
-         * inside one would not. */
-        if(hs_stop()) break;
-        const SyncApp *t=&s_apps[i];
-        const char *coll=app_coll(cfg,i);
-        if(!coll || !coll[0]) continue;            /* app not configured -> skip */
-        step++;
-        /* this collection fills the band [(step-1)/ntgt .. step/ntgt] of the bar */
-        s_band_lo   = ntgt ? (step-1)*100/ntgt : 0;
-        s_band_span = ntgt ? 100/ntgt : 100;
-        setprog(s_band_lo);
-
-        DavCtx *ctx=&d;
-        if(t->card){
-            if(!card_ready){
-                memset(&dcard,0,sizeof dcard);
-                snprintf(dcard.base,sizeof dcard.base,"%s",cfg->dav_card_base);
-                snprintf(dcard.user,sizeof dcard.user,"%s",cfg->dav_user);
-                snprintf(dcard.pass,sizeof dcard.pass,"%s",d.pass);
-                char chost[256]="";
-                if(dav_effective_host(&dcard,"/",chost,sizeof chost)==0 && chost[0]){
-                    snprintf(dcard.base,sizeof dcard.base,"%s",chost);
-                    ESP_LOGI(TAG,"contacts host: %s",chost);
-                } else ESP_LOGW(TAG,"contacts host: no principal href in the reply "
-                                    "(HTTP %d); using %s",dav_last_status,dcard.base);
-                card_ready=1;
-            }
-            ctx=&dcard;
-        }
-
-        snprintf(msg,sizeof msg,"[%d/%d] Syncing %s...",step,ntgt,t->name); setst(msg);
-        ESP_LOGI(TAG,"sync %s coll=%s pdb=%s heap=%lu largest=%lu",t->name,coll,t->pdb,
-                 (unsigned long)esp_get_free_heap_size(),
-                 (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-        /* Re-arm the breaker per collection: a server that refused Date Book may
-         * still answer for Address, and one bad collection must not condemn the
-         * rest of the run. */
-        dav_transport_reset();
-        sync_set_check(hs_heap_check);
-        dav_set_check(hs_heap_check);
-        /* Date Book syncs a window of days around today, not the account's
-         * years of history (sync.h, sync_set_window). The window needs today's
-         * date: a clock that was never set would put it in 1970 and prune
-         * everything from the device, so without one Date Book waits. */
-        sync_set_window(0, 0);
-        if(t->kind == KIND_CAL && cfg->cal_ahead > 0){
-            time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
-            if(tm.tm_year + 1900 < 2025){
-                ESP_LOGW(TAG,"%s: the clock isn't set -- skipped this run (its window needs today's date)",t->name);
-                continue;
-            }
-            tm.tm_hour = tm.tm_min = tm.tm_sec = 0; tm.tm_isdst = -1;
-            long long mid = (long long)mktime(&tm);
-            sync_set_window(mid - (long long)cfg->cal_back * 86400LL,
-                            mid + (long long)(cfg->cal_ahead + 1) * 86400LL);
-            ESP_LOGI(TAG,"%s: window %d day(s) back, %d ahead",t->name,cfg->cal_back,cfg->cal_ahead);
-        }
-        /* To Do keeps the open tasks and those done in the last todo_done_days
-         * (sync.h, sync_set_todo_window). Without a set clock it syncs whole:
-         * a 1970 "lately" would only keep more, never prune what it shouldn't. */
-        sync_set_todo_window(0);
-        if(t->kind == KIND_TODO && cfg->todo_done_days > 0){
-            time_t now = time(NULL);
-            if(now > 1700000000){
-                sync_set_todo_window((long long)now - (long long)cfg->todo_done_days * 86400LL);
-                ESP_LOGI(TAG,"%s: open tasks, and those done in the last %d day(s)",t->name,cfg->todo_done_days);
-            }
-        }
-        /* Contacts are never sent, whatever the switch says: an edit is merged
-         * into iCloud's copy, photo and all, and a copy too big for this device
-         * to send would stay here unsent, so the device makes none (data.h,
-         * data_app_readonly). Anything changed before that rule waits here. */
-        sync_set_pull_only(cfg->read_only || t->kind == KIND_CARD);
-        SyncStats st={0};
-        s_demo_n = data_demo_count(app_of(i));
-        sync_set_hold(s_demo_n ? hold_demo : NULL, NULL);
-        int n = sync_collection(ctx, t->pdb, t->pdb, coll, t->kind, t->map, pol, &st);
-        sync_set_hold(NULL, NULL);
-        if(st.held) ESP_LOGI(TAG,"%s: %d demo record(s) kept on the device, not pushed",
-                             t->name, st.held);
-        /* n == -2: guard refused to overwrite a non-empty PDB with an empty result
-         * (data was protected). n == -1: local out-of-memory. n == -3: the output
-         * temp would not open (SD full, absent or read-only). n == -4: the
-         * transport gave up (DAV_FAIL_LIMIT consecutive unreachable requests) and
-         * the partial merge was discarded. n >= 0: records kept. They are counted
-         * apart because the status line names the cause, and naming the wrong one
-         * sends the next hour of debugging the wrong way. */
-        /* Nothing is ever deleted on the server (dav.h), so "up" has no minus:
-         * a record deleted here is logged as hidden, and bothDel (already gone
-         * on both sides) only when non-zero. Neither sent anything. */
-        { int fb = 0, fs = 0; sync_fetch_counts(&fb, &fs);
-          ESP_LOGI(TAG,"%s: rc=%d up +%d~%d down +%d~%d-%d hidden=%d unsent=%d%s pruned=%d fetched=%d batched+%d single heap=%lu",
-                   t->name,n, st.pushNew,st.pushMod, st.pullNew,st.pullMod,st.pullDel, st.hidden, st.unsent,
-                   st.bothDel ? " (+already gone)" : "", st.pruned, fb, fs,
-                   (unsigned long)esp_get_free_heap_size()); }
-        sync_set_window(0, 0);
-        sync_set_todo_window(0);
-        if(n == -2) protec++;
-        else if(n < 0){ failed++;
-            if(n == -3)      diskerr++;
-            else if(n == -4) netdown++;
-            else if(n == -5) overbudget++;
-            else if(n == -6){ toobig++;
-                if(!toobig_name[0]) snprintf(toobig_name,sizeof toobig_name,"%.23s",t->name);
-                ESP_LOGE(TAG,"%s is too large for this device: it asked for %ld bytes of "
-                             "contiguous RAM in one piece. Local data was NOT changed and "
-                             "the map was NOT updated -- retrying will not help.",
-                         t->name, sync_too_big_bytes()); }
-            else             oomed++; }
-        else { did++;
-            tot.pushNew+=st.pushNew; tot.pushMod+=st.pushMod; tot.hidden+=st.hidden; tot.unsent+=st.unsent;
-            tot.pullNew+=st.pullNew; tot.pullMod+=st.pullMod; tot.pullDel+=st.pullDel;
-            tot.bothDel+=st.bothDel; }
-    }
-
-    sync_set_progress(NULL, NULL);                 /* detach the hook */
-    sync_free_scratch();   /* hand the ~20 KB sync scratch back to the interactive UI */
-    /* The account phase leaves a keep-alive TLS session open and the heap
-     * fragmented; the news phase is ten short-lived handshakes that each need a
-     * contiguous block. Measured: largest8 fell 27 KB -> 17 KB -> 10 KB across the
-     * account work and feeds began failing at FETCH_HEADER. Drop the session
-     * explicitly so the feeds start from whatever the heap can actually give back. */
-    dav_disconnect();
+    setprog(10);
+    dav_transport_reset();
+    dav_set_check(hs_heap_check);
     hs_heap("pre-news");
-    /* Two more safe points. News and weather each replace a cache wholesale, so
+    /* The safe points. News and weather each replace a cache wholesale, so
      * skipping them on cancel loses nothing that was half-done -- the previous
-     * cache simply stays. Checked separately so a cancel during the account work
-     * does not still sit through ten feed fetches before noticing. */
+     * cache simply stays. */
     if(!hs_stop()){
         fetch_news();      /* RSS reader: fetch configured feeds while Wi-Fi is up */
+        setprog(60);
+    }
+    if(!hs_stop()){
         locate_by_ip(appcfg_mut());  /* no-op while the location is pinned */
+        setprog(75);
         fetch_weather(cfg);/* lock-screen dashboard: the last thing the network is for */
     }
     dav_disconnect();
@@ -1007,64 +711,24 @@ static void hotsync_task(void *arg){
     else
         snprintf(nws,sizeof nws,"no news (%.47s)", s_news_why[0] ? s_news_why : "all feeds failed");
 
-    if(!dav_ok)
-        /* The widths are a BUDGET, not decoration: msg is 208 bytes and the
-         * parts now add up to more than that if every one runs long. Adding the
-         * location note without re-cutting the others overflowed it, which
-         * ESP-IDF catches as -Werror=format-truncation and the simulator's
-         * plainer -Wall does not. 23+2+47+32+40+15+30 = 189. */
-        snprintf(msg,sizeof msg,"%.23s; %.47s%.32s%.40s; no records - %.30s",
-                 clk,nws,wxs,geo,dav_why);
-    else if(did==0 && failed>0){
-        /* Name the cause, not "low memory" for every failure: an SD card that
-         * won't take the output temp is not a RAM problem. */
-        if(toobig)
-            snprintf(msg,sizeof msg,"%.23s too big for this device - nothing changed",
-                     toobig_name[0] ? toobig_name : "Collection");
-        else if(overbudget)
-            snprintf(msg,sizeof msg,"Sync needs %u B, budget %u B - nothing was sent",
-                     (unsigned)sync_working_set(), (unsigned)(esp_get_free_heap_size()));
-        else if(netdown && !oomed && !diskerr)
-            snprintf(msg,sizeof msg,"Sync failed - server unreachable (%d collections)",
-                     netdown);
-        else if(diskerr && !oomed && !netdown)
-            snprintf(msg,sizeof msg,"Sync failed - SD card not writable (%d collections)",
-                     diskerr);
-        else if(oomed && !diskerr && !netdown)
-            snprintf(msg,sizeof msg,"Sync failed - out of memory (heap %lu, largest %lu)",
-                     (unsigned long)esp_get_free_heap_size(),
-                     (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-        else
-            snprintf(msg,sizeof msg,"Sync failed - %d out of memory, %d SD, %d unreachable",
-                     oomed, diskerr, netdown);
-    }
-    else
-        snprintf(msg,sizeof msg,"Done: +%d~%d up +%d~%d-%d down%.12s%.16s%.22s%.20s%.10s%.47s",
-                 tot.pushNew,tot.pushMod, tot.pullNew,tot.pullMod,tot.pullDel,
-                 cfg->read_only ? " (read-only)" : "",
-                 (failed||protec)?" (some skipped)":"",
-                 tot.unsent ? " - edits kept unsent" : "",
-                 s_clock_synced ? "" : " - CLOCK NOT SYNCED",
-                 s_news_added ? "" : " - no news",
-                 geo);   /* what the location lookup did, or why it did not */
+    /* The widths are a BUDGET, not decoration: msg is 208 bytes, and ESP-IDF
+     * catches an overflow as -Werror=format-truncation where the simulator's
+     * plainer -Wall does not. 23+2+47+32+40 = 144. */
+    snprintf(msg,sizeof msg,"%.23s; %.47s%.32s%.40s", clk,nws,wxs,geo);
     /* A cancelled run is neither a success nor a failure, and must not be dressed
      * as either: "Done" would claim work that was never attempted, and "failed"
      * would send someone debugging a network that was fine. Say what happened,
      * and say what DID land -- the collections that finished before the stop are
      * genuinely synced and the user should know not to worry about them. */
     if(hs_stop()){
-        if(did > 0) snprintf(msg,sizeof msg,
-                             "Cancelled - %d collection%s synced before stopping",
-                             did, did==1?"":"s");
-        else        snprintf(msg,sizeof msg,"Cancelled - nothing was synced");
+        snprintf(msg,sizeof msg,"Cancelled - %.23s%s", clk,
+                 s_news_added > 0 ? "; news fetched" : "");
         s_was_cancelled = 1;
     }
     ESP_LOGI(TAG,"%s",msg);
     setst(msg);
-    hs_heap("sync-done");  /* after sync_free_scratch(), before Wi-Fi goes away */
-    mbedtls_platform_zeroize(d.pass, sizeof d.pass);
-    mbedtls_platform_zeroize(dcard.pass, sizeof dcard.pass);
-    wifi_down();           /* also closes the last collection's keep-alive connection */
+    hs_heap("sync-done");  /* before Wi-Fi goes away */
+    wifi_down();           /* also closes the last keep-alive connection */
     /* Back in Mode A. If largestDMA here is much smaller than it was at "wifi-up",
      * a Wi-Fi cycle fragments the DMA region -- which is what would break a plan to
      * bring Wi-Fi up before LVGL allocates its contiguous draw buffer. */
@@ -1081,106 +745,6 @@ static void hotsync_task(void *arg){
      * (s_busy && s_cancel), and clearing in the other order would leave a
      * one-instruction window where a new run could be born already cancelled. */
     s_cancel = 0;
-    s_busy = 0;
-    vTaskDelete(NULL);
-}
-
-/* ---- collection discovery (Preferences) ----------------------------------
- * Same background-task slot as the sync (guarded by s_busy). Results land in a
- * small fixed array; the UI reads them after hotsync_discover_done(). */
-#define MAX_DISC 24
-static DiscColl s_disc[MAX_DISC];
-static volatile int s_disc_n;
-static volatile int s_disc_done;
-
-int hotsync_discover_busy(void){ return s_busy; }
-int hotsync_discover_done(void){ return s_disc_done; }
-int hotsync_discover_count(void){ return s_disc_n; }
-const DiscColl *hotsync_discover_get(int i){ return (i>=0 && i<s_disc_n) ? &s_disc[i] : NULL; }
-
-/* dav_list_collections callback: keep calendars + address books, normalise the
- * href to the "no leading/trailing slash" form sync expects (config.h). */
-static void disc_add(const char *href, int kind, const char *dn, void *ctx){
-    (void)ctx;
-    if((kind!='c' && kind!='a') || !href || !href[0]) return;
-    if(s_disc_n >= MAX_DISC){ ESP_LOGW(TAG,"discovery: more than %d collections; list truncated",MAX_DISC); return; }
-    const char *s = href; while(*s=='/') s++;
-    char tmp[192]; snprintf(tmp,sizeof tmp,"%s",s);
-    size_t n = strlen(tmp); while(n && tmp[n-1]=='/') tmp[--n]=0;
-    if(!tmp[0]) return;
-    DiscColl *e = &s_disc[s_disc_n++];
-    snprintf(e->href,sizeof e->href,"%s",tmp);
-    snprintf(e->name,sizeof e->name,"%s",(dn&&dn[0])?dn:"(unnamed)");
-    e->kind = kind;
-    ESP_LOGI(TAG,"discovered [%c] %s (%s)", (char)kind, e->name, e->href);
-}
-
-/* PROPFIND `prop` at `path` (which itself may be an absolute URL); retarget
- * d->base if either the request path or the returned href is a full URL, and
- * hand back the host-relative path portion. 0 on success, -1 on failure. */
-static int disc_prop(DavCtx *d, const char *path, const char *prop,
-                     const char *ns, char *out, int cap){
-    char pbuf[512]; snprintf(pbuf,sizeof pbuf,"%s",(path&&path[0])?path:"/");
-    char *rel = abspath(pbuf, d);
-    char href[512]="";
-    if(dav_prop_href(d, rel, prop, ns, href, sizeof href)!=0 || !href[0]) return -1;
-    char *hp = abspath(href, d);            /* retargets d->base when href is a URL */
-    snprintf(out, cap, "%s", hp);
-    return 0;
-}
-
-static void discover_task(void *arg){
-    (void)arg;
-    s_disc_n = 0; s_disc_done = 0;
-    setst("Connecting Wi-Fi...");
-    if(!wifi_up()){ setst("Wi-Fi failed"); s_disc_done=1; wifi_down(); s_busy=0; vTaskDelete(NULL); return; }
-    hs_heap("disc wifi-up");   /* second Mode B data point: discovery also does TLS */
-    const Config *cfg = appcfg();
-
-    /* --- CalDAV: calendars + reminders lists --- */
-    DavCtx d; memset(&d,0,sizeof d);
-    snprintf(d.base,sizeof d.base,"%s",cfg->dav_base);
-    snprintf(d.user,sizeof d.user,"%s",cfg->dav_user);
-    appcfg_dav_pass(d.pass,sizeof d.pass);      /* wiped below, before wifi_down() */
-    char host[256]="";
-    if(dav_effective_host(&d,"/",host,sizeof host)==0 && host[0]) snprintf(d.base,sizeof d.base,"%s",host);
-    setst("Finding calendars...");
-    char principal[512]="";
-    if(disc_prop(&d,"/","<d:current-user-principal/>","",principal,sizeof principal)==0){
-        char home[512]="";
-        if(disc_prop(&d,principal,"<c:calendar-home-set/>",
-                     "xmlns:c=\"urn:ietf:params:xml:ns:caldav\"",home,sizeof home)==0){
-            ESP_LOGI(TAG,"calendar-home: %s",home);
-            dav_list_collections(&d,home,disc_add,NULL);
-        } else ESP_LOGW(TAG,"calendar-home-set failed (HTTP %d)",dav_last_status);
-    } else ESP_LOGW(TAG,"caldav principal failed (HTTP %d)",dav_last_status);
-    int ncal = s_disc_n;
-
-    /* --- CardDAV: address books (separate iCloud host) --- */
-    setst("Finding address books...");
-    DavCtx dc; memset(&dc,0,sizeof dc);
-    snprintf(dc.base,sizeof dc.base,"%s",cfg->dav_card_base);
-    snprintf(dc.user,sizeof dc.user,"%s",cfg->dav_user);
-    snprintf(dc.pass,sizeof dc.pass,"%s",d.pass);
-    char chost[256]="";
-    if(dav_effective_host(&dc,"/",chost,sizeof chost)==0 && chost[0]) snprintf(dc.base,sizeof dc.base,"%s",chost);
-    char cprin[512]="";
-    if(disc_prop(&dc,"/","<d:current-user-principal/>","",cprin,sizeof cprin)==0){
-        char chome[512]="";
-        if(disc_prop(&dc,cprin,"<c:addressbook-home-set/>",
-                     "xmlns:c=\"urn:ietf:params:xml:ns:carddav\"",chome,sizeof chome)==0){
-            ESP_LOGI(TAG,"addressbook-home: %s",chome);
-            dav_list_collections(&dc,chome,disc_add,NULL);
-        } else ESP_LOGW(TAG,"addressbook-home-set failed (HTTP %d)",dav_last_status);
-    } else ESP_LOGW(TAG,"carddav principal failed (HTTP %d)",dav_last_status);
-
-    hs_heap("disc post-tls");  /* both hosts handshaked by here */
-    s_disc_done = 1;
-    if(s_disc_n==0) setst("No collections found - check login");
-    else { char m[80]; snprintf(m,sizeof m,"Found %d (%d cal, %d addr)",s_disc_n,ncal,s_disc_n-ncal); setst(m); }
-    mbedtls_platform_zeroize(d.pass, sizeof d.pass);
-    mbedtls_platform_zeroize(dc.pass, sizeof dc.pass);
-    wifi_down();           /* also closes the discovery keep-alive connection */
     s_busy = 0;
     vTaskDelete(NULL);
 }
@@ -1256,15 +820,6 @@ void wifi_scan_start(void){
     }
 }
 
-void hotsync_discover_start(void){
-    if(s_busy) return;
-    s_busy = 1; s_disc_done = 0; s_disc_n = 0;
-    setst("Starting...");
-    if(xTaskCreate(discover_task, "discover", HOTSYNC_STACK, NULL, 4, NULL) != pdPASS){
-        setst("Could not start discovery"); s_disc_done=1; s_busy = 0;
-    }
-}
-
 void hotsync_start(void){
     if(s_busy) return;
     s_busy = 1;
@@ -1272,15 +827,8 @@ void hotsync_start(void){
     s_was_cancelled = 0;
     s_wifi_problem = HS_WIFI_OK;
     setst("Starting...");
-    /* 32 KB stack. The task stack is malloc'd from the DRAM heap, so an overflow
-     * corrupts adjacent heap metadata -> a later alloc crashes deep in tlsf
-     * (block_locate_free) rather than a clean stack-canary trip. The streaming
-     * reconcile's merge loop calls DAV ops (each a full mbedTLS handshake, whose
-     * stack spikes past the ~8 KB estimate on iCloud's cert chain) from a frame
-     * that also holds the row structs + line buffers, and resolveServer nests a
-     * GET per relocated object -- 20 KB overflowed at ~30 records. 32 KB doesn't
-     * starve the heap: the streaming reconcile's S struct is ~3 KB, so the
-     * contiguous block it needs is small. */
+    /* HOTSYNC_STACK: see its note. The stack is malloc'd from the DRAM heap, so
+     * an overflow corrupts adjacent heap metadata rather than tripping a canary. */
     if(xTaskCreate(hotsync_task, "hotsync", HOTSYNC_STACK, NULL, 4, NULL) != pdPASS){
         setst("Could not start sync task"); s_busy = 0;
     }

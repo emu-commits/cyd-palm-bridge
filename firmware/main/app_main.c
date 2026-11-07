@@ -1,12 +1,6 @@
-/* app_main.c -- headless CYD Palm -> iCloud sync (first on-device bring-up).
- *
- * Flow: Wi-Fi STA -> SNTP (no RTC, TLS needs the clock) -> mount SD ->
- * resolve the iCloud effective host -> sync_collection() one collection between
- * a .pdb on the SD card and iCloud, over the shared codec + sync engine.
- *
- * Discovery/category-routing and a UI are deliberately out of scope for this
- * first flash: the point is to prove the codec + reconcile + TLS DAV + SD stack
- * end-to-end on hardware.
+/* app_main.c -- CYD Palm boot: NVS, the display and touch, the SD card, the
+ * clock, then the LVGL UI (which never returns). Wi-Fi and HotSync's fetches
+ * live in hotsync.c, on a background task, started from the UI.
  */
 #include <string.h>
 #include <time.h>
@@ -103,45 +97,15 @@ void app_main(void){
         ESP_LOGI(TAG,"loaded touch calibration from NVS (hold screen at boot to re-cal)");
     }
 
-    /* mount the SD card and seed demo PDBs so the views have content. */
+    /* mount the SD card and make sure Memos has a database to write to. */
     if(sd_mount()==ESP_OK){
-        data_seed_if_empty();
+        data_init();
         monster_install();   /* the flasher's optional Critters, once per new game */
-        /* Two-way sync is live, so anything sitting in the local Date Book gets
-         * pushed to the real account. The devtools "Add test events" seed must
-         * not be part of that. Clearing it at boot -- before any HotSync can run
-         * -- is what makes the ordering safe; with nothing to remove this does
-         * not touch the file. */
-        /* Two-way sync is live: a local database that reads short would be pushed
-         * to the server AS DELETIONS. Say what is actually on the card first. */
-        for(int ap=0; ap<3; ap++){
-            static const char *NM[3] = { "Date Book", "Address", "To Do" };  /* APP_CAL, APP_ADDR, APP_TODO */
-            int walked = 0; long bytes = 0;
-            int hdr = data_db_stat(ap, &walked, &bytes);
-            if(hdr < 0){ ESP_LOGW(TAG,"%s: no database on the card", NM[ap]); continue; }
-            if(hdr != walked)
-                ESP_LOGE(TAG,"%s DATABASE IS SHORT: header says %d records, only %d "
-                             "readable (%ld bytes). Do not sync -- the missing %d would "
-                             "be pushed as deletions.", NM[ap], hdr, walked, bytes, hdr-walked);
-            else
-                ESP_LOGI(TAG,"%s: %d records (%ld bytes)", NM[ap], hdr, bytes);
-        }
-        int nrm = data_remove_test_events();
-        if(nrm > 0)
-            ESP_LOGW(TAG,"removed %d seeded test event(s) of %d Date Book records",
-                     nrm, data_testev_scanned());
-        else if(nrm < 0)
-            ESP_LOGE(TAG,"test-event cleanup REFUSED: %d Date Book records will not fit "
-                         "the rewrite buffer, and a partial rewrite would lose real "
-                         "appointments. Nothing was changed.", data_testev_scanned());
-        else
-            ESP_LOGI(TAG,"no seeded test events found (%d Date Book records examined)",
-                     data_testev_scanned());
     } else {
-        ESP_LOGW(TAG,"no SD card -- data views will be empty");
+        ESP_LOGW(TAG,"no SD card -- Memos, Study and the rest will be empty");
     }
 
-    /* now that config.ini is readable, set the local timezone (so the Day view
+    /* now that config.ini is readable, set the local timezone (so the clock
      * shows the user's wall clock, not UTC) and start periodic clock checkpoints
      * so an abrupt power-off loses only ~2 min of accuracy. */
     clock_set_tz(appcfg()->timezone);

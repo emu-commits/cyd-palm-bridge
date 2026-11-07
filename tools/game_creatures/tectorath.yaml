@@ -1,0 +1,24 @@
+# Tectorath: drawn for the project by the owner (2026-11-05).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Tectorath
+description: >-
+  When it walks, the ground answers. Its third eye opens only when it's
+  angry, and it rarely is.
+category: Tectonic
+height_cm: 240
+weight_kg: 480
+drawing: tools/game_art/src/tectorath.jpg
+types: [earth, shadow]
+shape: brute
+stage: stage2
+experience_group: slow
+catch_rate: 25
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: rock}
+- {level_learned: 1, technique: assault}
+- {level_learned: 1, technique: greenstone}
+- {level_learned: 38, technique: entomb}
+- {level_learned: 44, technique: earthquake}

@@ -1,5 +1,7 @@
-/* hotsync.h -- run a sync to iCloud on a background task.
- * Isolated + defensive: failures set an error status, never crash the UI. */
+/* hotsync.h -- HotSync on a background task: Wi-Fi up, set the clock, fetch the
+ * news and the weather, Wi-Fi down. Isolated + defensive: failures set an
+ * error status, never crash the UI. (The iCloud sync it once ran was archived
+ * on 2026-11-07: git tag archive/pim-caldav.) */
 #ifndef HOTSYNC_H
 #define HOTSYNC_H
 
@@ -16,12 +18,11 @@ int         hotsync_progress(void);  /* coarse 0..100, or -1 when idle */
  * button, and a half-written PDB on the card is a worse outcome than a sync that
  * takes another few seconds to notice.
  *
- * Safe points are between collections and between the major stages (news,
- * weather) -- never inside one collection's merge, and never mid-write. So the
- * worst case is one collection's latency, not instant.
+ * Safe points are between the stages (news, location, weather) -- never
+ * mid-write. So the worst case is one stage's latency, not instant.
  *
  * A cancelled run finishes tidily: Wi-Fi comes down, the status reads as
- * cancelled rather than failed, and whatever HAD already synced stays synced.
+ * cancelled rather than failed, and whatever HAD already been fetched stays.
  * hotsync_cancelled() reports that the last completed run ended this way, which
  * is what lets the UI say "Cancelled" instead of leaving the user to wonder
  * whether it broke. */
@@ -34,17 +35,6 @@ int  hotsync_cancelled(void);        /* 1 if the LAST finished run was cancelled
  * status line. Cleared when a run starts. */
 enum { HS_WIFI_OK, HS_WIFI_NONE_SAVED, HS_WIFI_NO_JOIN };
 int  hotsync_wifi_problem(void);
-
-/* ---- collection discovery (Preferences "Discover collections") -----------
- * Brings Wi-Fi up, walks the iCloud CalDAV + CardDAV homes, and collects the
- * account's calendars / reminders lists / address books so the user can pick
- * one per role instead of pasting UUID paths. Runs on the same background task
- * slot as the sync (only one at a time); the UI polls hotsync_status(). */
-typedef struct {
-    char href[192];   /* collection path (no leading/trailing slash), as stored in config */
-    char name[64];    /* display name                                                     */
-    int  kind;        /* 'c' = calendar/reminders (CalDAV), 'a' = address book (CardDAV)   */
-} DiscColl;
 
 /* ---- Wi-Fi scan (Settings ▸ Wi-Fi, "choose a nearby network") -------------
  * An SSID is a value you cannot be asked to type: it is case-sensitive, often
@@ -67,11 +57,5 @@ int           wifi_scan_busy(void);   /* 1 while scanning */
 int           wifi_scan_done(void);   /* 1 once a run has finished (results valid) */
 int           wifi_scan_count(void);  /* networks found, 0..WIFI_SCAN_MAX */
 const WifiAP *wifi_scan_get(int i);   /* i in [0,count); NULL out of range */
-
-void            hotsync_discover_start(void);  /* begin a discovery run (no-op if busy) */
-int             hotsync_discover_busy(void);   /* 1 while discovering */
-int             hotsync_discover_done(void);   /* 1 once a run has finished (results valid) */
-int             hotsync_discover_count(void);  /* number of collections found */
-const DiscColl *hotsync_discover_get(int i);   /* i in [0,count); NULL if out of range */
 
 #endif

@@ -16,6 +16,320 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-07 — Knowledge: the tree at launcher position 6, and a 40-step pilot (KnowledgeQuest K0)
+
+The owner: position 6 is a cute tree labelled Knowledge, launching the KnowledgeQuest plan's content; first test,
+40 linear steps where each builds on the one before. Built in the simulator; nothing on the device yet.
+
+- **The tile.** `tools/gen_knowledge_icon.py` (24×22 A8, art as text): a lobed canopy in ink with two eyes and a
+  smile knocked out, a trunk, the ground. First drawn white in the black disc like Study's book; at 1x that read
+  as a round face, so it's ink on nothing. `APPS[5]` = "Knowledge".
+- **The course.** `courses/kq-numbers/`: 40 concepts in four parts (counting and place value, fractions, ratios
+  and rates, proportion and percent), each node's only prerequisite the node before it. Written by Claude, every
+  answer checked by hand, **not reviewed by a person**: all 40 are `"review": "draft"`, and the build marks the
+  course `0.1-draft`. Text only (Latin-1, × and ÷ included): 16,168 B, no pictures.
+- **`tools/mkquest.py`** (plan §5): `quest.json` + `nodes.jsonl` → `course.json` + `items.jsonl` (title → term,
+  idea → meaning, explanation → `mnemonic_meaning`, question/answer → the example and its translation, `after` →
+  `built_from`; `lessons.batch` 1; `unlock.level_percent` 0 with `by_links`, so only the links gate; stages at
+  1/3/7/21/60 days with `known` 1, so passing a step's check opens the next at once). It refuses unreviewed cards
+  without `--drafts`, a step before what it builds on, repeated ids, unknown regions, and text too long for the
+  screen. `--check` for the gates; `tests/mkquest_test.py`.
+- **On the device** the course rides in `study_demo.c` beside the demo (`gen_study_demo.py` now emits both), and
+  `st_install_kq()` writes it to `/study/kq-numbers/` whenever it's missing (the app is the course) or this
+  firmware's build differs (`.kq` holds the size; a course copied over it is left alone while the mark stands).
+  `install_builtin()`/`mark_size()` are shared with `st_install_demo()`, whose behaviour is unchanged (its tests
+  pass as they were).
+- **The screens** are Study's (`show_knowledge()` opens the course with `g_st->kq` set); what differs: "Knowledge"
+  in the title, "Part 2 of 4" and the next step's part, "Next step 12" on the door, "x of 40 steps explored",
+  no greeting (her lines are about batches of five); a card headed "Step 1 of 40" with "Builds on: <the step
+  before>", "Explanation", "Try it" and "Answer: …"; the idea never twice size; the check ("Step 1 · Check")
+  asks the step's question and shows its answer big; the menu has This week, About and Check only. After a
+  step, `st_show_unlocked()`: "Explored: Counting", "Newly open: Zero", "38 more beyond" (the fog, counted), Next
+  step / Done. Study's course list leaves `kq-numbers` out and doesn't record it as the last course; each tile's
+  badge counts its own (`st_glance_some()`; the lock's STUDY row still counts every course).
+- Gates: `poolparity nosecrets secretscan data graf mines wordie sudoku zip clock coach guru gurupool dash course
+  srs monster dex smoke smoke32`, `wasm`, `tests/mkcourse_test.py` (now rebuilds `kq-numbers` too),
+  `tests/mkquest_test.py`, the firmware build (ESP-IDF v5.5, local). The smoke tour gains a Knowledge section
+  after S5 (`knowledge_*`, looked at); B/E: leaving Knowledge gives back every byte (9,824 marked, 9,824 after).
+  Static DRAM unchanged at 131,368 B. The app image is 0x1c9130 (1,872,176 B), 40 % of the 3 MB partition free;
+  the course adds 16,168 B of flash data.
+- Open: the owner's review of the 40 cards; whether explored steps should come back as reviews (on, lightly, for
+  now); the device check (`BACKLOG.md`). K1's other parts (the reverse-link section, the map) aren't built.
+
+### 2026-11-07 — The lock screen after the archive: AHEAD fits its one row; the moon drawn the right way round
+
+Asked afterwards: did removing Date Book and To Do leave bugs behind? One that shows: the lock screen's AHEAD zone
+was still three rows tall (NEXT, DUE, STUDY) with only STUDY in it, so two empty rows sat in the middle of the
+screen (`r5_locked`, `study_lock_*` before). The rest (reminders, the Day view's writing, Coach's calendar block)
+left nothing on screen; only comments pointing at code that is gone (`due_cal_cb`, "the Date Book's calendar",
+"like To Do"), now reworded.
+
+- **AHEAD** closes at y 240 (`DASH_H_AGENDA` 58 → 32). **SUN & MOON** starts at 242 and gets the 28 px: Rise / Set
+  on one line (`DASH_Y_SUNROW` 259), the moon on the next by name and fraction ("Waning crescent · 5% lit",
+  `DASH_Y_MOONROW` 279; the name was worked out and then overwritten before), and the disc at r 15 (was 10).
+  The moon line doesn't need the weather, so it shows before the first HotSync.
+- **The moon disc was inverted** (older than this branch): `dash_moon_draw()` put the terminator at
+  `span·(2k−1)`, so a 5 % crescent drew nearly full and a full moon dark. Now `span·(1−2k)`; checked by drawing
+  5/50/95 % waxing and 5/50 % waning from the same loop on the host, and in `r5_locked` (a thin left sliver at
+  5 % waning).
+- Gates: `poolparity`, `dash`, `smoke`, `smoke32`, `wasm`, the firmware build (ESP-IDF v5.5, local). Static DRAM
+  unchanged at 131,368 B. Labels: the moon line replaces the "% lit" label one for one, so the lock screen's
+  object count doesn't change.
+
+### 2026-11-07 — Memos, Settings on the launcher, Guru editing; Date Book, Address, To Do and the iCloud sync archived
+
+The owner's list, built in the simulator on `claude/memos-settings-guru-edit`. **The archive:** the git tag
+`archive/pim-caldav` (at `origin/main` `07fe31d`) holds everything that left: Date Book, Address and To Do (their
+screens, edit forms, pickers, the lock screen's NEXT and DUE rows, reminders, writing on the Day view), the
+CalDAV/CardDAV sync (`bridge/sync.c`, `objfile.c`, the DAV client and XML parsers, `ical.c`, `vcard.c`, `datebook.c`,
+`address.c`, `todo.c`, `tz.c`, `charset.c`, `bridge_cli`), HotSync's account phase and collection discovery, the
+Accounts and Sync tiles in Settings, the demo records and "Add test events", and the Radicale gates (`run_gates.sh`,
+`nodelete.sh`, `incremental`, `synctoken`, `category`, `bigsync`, `multiapp`, `uidmatch`, `idempotent`, `massdel`,
+`streamparse`, `objfile_test`, `recur_test`, `toobig`, `sort_test`, `window`, `fidelity`, `todos`, `mget_test`,
+`probe_partial`). The owner's word: "abandon this idea as it's pointless to compete with smartphones".
+
+What stays and changed:
+- **Memos** is the Planner without To Do: `data.c` is Memo-only, a card with no `MemoDB.pdb` gets an empty one
+  with the standard categories, and old cards' Date Book, Address and To Do databases are left alone. Find
+  searches memos. A memo's checklist lines are the device's to-do list now.
+- **HotSync** is Wi-Fi, the clock, the news, the location and the weather. `dav_esp.c` keeps only the HTTPS fetch
+  (GET only, no Authorization) and the keep-alive handle; `dav_break.c`'s breaker stays.
+- **The launcher**: Settings (a new gear, `icon_settings`, drawn in `tools/gen_settings_icons.py`), HotSync, Games /
+  News, Memos, a free cell / Study, Guru, Coach. Settings left the Options menu, so every menu is one row shorter.
+- **Guru**: Home at the foot of her list (the table sits in a scroller, its height its rows'); Edit on a habit's
+  page opens a form with the Graffiti strip (category by tap, name, why) and turns into Save; Delete on the form
+  with a confirm; Menu ▸ New habit. `gurupool_put()` / `gurupool_remove()` write the whole list to `guru.txt`
+  through safefile and read it back; a broken card file is kept as `guru.txt.bak`; `guru_forget()` clears a
+  deleted habit's tick. Gate: `make -C sim gurupool` (12 new checks).
+- **Study's demo** has no radicals: 64 items (24 kanji, 40 words), `course.srs` 81,760 → 79,264 B. Kanji are
+  built from nothing, so a level's kanji open together; words still wait for their kanji. The radicals' lines stay
+  in `ids.tsv`. `st_install_demo()` writes the demo's size into `study/.demo` and replaces an older demo on a card
+  that still has it (a removed demo stays removed). Gates: `srs_test` (unlocks rewritten, 4 new card checks),
+  `course_test` (64 items, the word links).
+- `confirm_open()` is the one Palm confirm alert (Delete Memo, Delete Habit).
+
+Measured with ESP-IDF v5.5 here (`idf.py build` and `idf.py size`, this branch against `origin/main` built the same
+way, both from clean):
+
+| | `origin/main` | this branch | change |
+|---|---|---|---|
+| Total image | 1,942,595 B | 1,852,819 B | −89,776 B |
+| Flash code | 1,324,988 B | 1,256,204 B | −68,784 B |
+| Flash data | 501,348 B | 480,468 B | −20,880 B |
+| Static DRAM used | 145,136 B (80.3 %) | 131,368 B (72.7 %) | −13,768 B |
+| Static DRAM free | 35,600 B | 49,368 B | +13,768 B |
+
+The simulator: `smoke` and `smoke32` pass (the tour rewritten for the new grid; the 32-bit pool's low-water is
+7,092 B, at `p7_graffiti_help`). Two lessons:
+
+- **A shorter menu moves every tap below the row that left.** Settings was the second Options row, so every menu
+  in the tour (launcher, Coach, Study, Critters, the Dex) lost 26 px under it; and `dex_regions.py` scanned the
+  Dex menu down to y 190 for "no scanlines", which the shorter menu no longer covers.
+- **A single tile on a grid row is centred.** Seven Settings tiles leave About alone on the third row, so it is at
+  x 120, not under Wi-Fi; the first tour's tap at x 46 photographed the grid. The same tour found an older miss:
+  "Screen off ▸ 1 minute" was tapped at y 121, which is "2 minutes".
+### 2026-11-06 — Critters: the Mere, and progress without grinding
+
+`BACKLOG.md` item 3. The measure first: `make -C sim monster` now counts, per game, the wild battles Auto-play
+fights only to train ("training for a level N keeper") between one keeper and the next.
+
+| Step | Training battles, five games | Worst before one keeper | Losses |
+|---|---|---|---|
+| E5's end | 676 | 97 (Anoleaf, before Warden Ivy) | 90 |
+| the Mere, tiers 1-2 | 571 | 59 (before Keeper Iris's rematch) | 102 |
+| Auto-play takes a keeper it can beat first | 385 | 119 (Anoleaf, before Ashe) | 104 |
+| the Mere's third tier (36-38) | 252 | 40 | 170 |
+| ...comfortably beatable (2 levels over) first | **300** | **40** (Cardiling, before Ben) | **101** |
+
+- **The Mere** (`tools/game_maps/mere.json`, our layout, 30 x 20): in from Larkhollow's west road through Hermit
+  Bryn's gate (gone once Keeper Tom is beaten); a path through two meadows to her cottage and Fisher Ola's pond.
+  Ten optional keepers in three tiers, the grass table `mere` stepping to `mere_b` and `mere_c` with the story.
+- **First tries that failed:** Tuxemon's `spyder_routec`, which Route 1's west edge leads to, is open sea (it also
+  had a warp into Dragon's Cave); `mkgame.py` learnt flipped tiles for it on the way, and kept that. The healer stood
+  behind all four keepers' sight lines, so a worn-out Auto-play bounced at the door: she's at the entrance now.
+- **A gift person** (kind 4, format 2.3): gives `level[0]` of item `mon[0]` once, by its flag (`MP_EV_GIFT`).
+- **prop_healing tried again** with a new `move_edits` field for its proportion: Hibernate at 0.33 left 111
+  battles unended, at 0.2 still 64 (Vamporm against Vamporm). It stays off.
+- `smoke32` ran in an Ubuntu container (this PC has no gcc-multilib): OK, the device-sized pool too.
+
+### 2026-11-06 — Critters: Kestrel, a Ring town
+
+`BACKLOG.md` item 2 of 2026-11-06: Kestrel used Larkhollow's sheets the same way and read as the same village. It
+keeps the two sheets (both clean), but its ground is `core_outdoor`'s dry-earth family (the same layout 16 columns
+over, so the autotile's edges move by 16 too) with sandy roads; the Ring's floor is flagstones in a frame from
+`core_city_and_country`, walled in stone with two banners; and a new market square (flagstones, the awning stall,
+fruit crates, a fountain) takes six new rows south. Every person, door and the drove road keep their places; the
+south exit moves from (12,20) to (12,26), and the tunnel's warp now lands at (12,25).
+
+Measured: at most **79 different tiles on one screen** (was 64; the area's tile cache holds 96, with people taking
+two each). The statue and two of the four crates came out to get there from 87. Auto-play's games are unchanged
+but for Kestrel's longer walk (Agnite 37,145 → 37,709 actions). The game file is 836,400 B.
+
+### 2026-11-06 — Critters: the drove road's gate
+
+`BACKLOG.md` item 1 of 2026-11-06. The road between Larkhollow and Kestrel was two warps with drovers standing on
+them. Now a gate stands across it at each end: two "people" drawn as a gate's leaves (`gate`, `gate_right`, our CC0
+sheets from `tools/gen_gate_sheet.py`, every frame the same), present until `beat_ivy`. A drover beside each end
+gives the story's reason before, and another says what changed after. Auto-play still finds its way: a warp with a
+flagged person beside it was already a gate to it (`MbWarp.gate`), and its five games are unchanged.
+
+Found on the way: a person with no name said ": " before their words. `ev_text` filled the name in the same
+`snprintf` that tested it, so whether the test saw the old or the new name was up to the compiler. Fixed.
+
+### 2026-11-06 — Critters: E5, the effects that aren't statuses, and the rules tested
+
+| Step | Moves kept | Unended | Mean turns | Longest | Moved most (points) |
+|---|---|---|---|---|---|
+| E4's end | 113 | 0 | 3.55 | 39 | |
+| remove | 115 | 0 | 3.54 | 39 | Noctalo 1.9 |
+| splash | 122 | 0 | 3.49 | 39 | Pigabyte 3.6 |
+| multiattack | 123 | 0 | 3.49 | 39 | Paladrax 1.0 |
+| appear | 125 | 0 | 3.48 | 39 | Agnidon 2.9 |
+| disappear | 126 | 0 | 3.49 | 39 | Pigabyte 2.6 |
+| statchange | 128 | 0 | 3.52 | 39 | Eyesore 3.4 |
+| switch | 130 | 0 | 3.51 | 39 | Anoleaf 1.9 |
+| prop_damage | 131 | 0 | 3.49 | 39 | Agnidon 4.9 |
+| prop_healing | 133 | **244** | 4.17 | 400 | **failed**: left off the list |
+
+- **prop_healing stays off the list** (the plan's second choice): with it the Vamporm line has two heals, Refresh
+  and Hibernate (66 % of its HP, and asleep), and every unended battle was among that line. Hibernate at recharge 8
+  still left 189. The proportion isn't a field `move_edits` can change. The firmware plays it; two moves, Hibernate
+  and Shadow Blast, stay out (`game_region.json`'s `effects_note`). **131 of the critters' 133 moves are in.**
+- **The game, over four seeds a starter (20 games): 415 losses against E0's 420** (262 against 257 to keepers).
+  Seed 1 alone: Agnite 22, Anoleaf 33, Cardiling 9, Vamporm 5, Nut 21 (90 against 87).
+- **Festering, corrected:** Tuxemon's festering stops a potion (`heal.py`), and its healing moves never check it.
+  It had been written the other way round. Now a potion heals a festering critter nothing (a cure still cures) and
+  moves heal as before. Found by the new rules test: no move here heals without giving a status first, which would
+  replace festering anyway.
+- **The rules tested** (`make -C sim monster`, section 9, on the game that ships): exhausted's and charged up's
+  multipliers, charged up becoming exhausted on use and exhausted ending at the next move; asleep never moving,
+  never longer than its five turns (200 seeds: at most 5), and ending; stuck halving a touch move; festering and
+  potions; lifeleech's drain; diehard's 1 HP; revenge striking back; the battle's end clearing a battle-only
+  status and a switched type; a move that disappears going out of reach and landing the next turn.
+- Shot `critters_badges`: Asleep on ours, two of five turns gone, and Lifeleech on the foe. The width test covers
+  every status in the game (20): 117 px of 126.
+
+### 2026-11-06 — Critters: E4, shields and comebacks
+
+| Step | Moves kept | Unended | Mean turns | Longest | Moved most (points) |
+|---|---|---|---|---|---|
+| E3's end (the policy row) | 107 | 0 | 3.57 | 39 | |
+| elementalshield | 110 | 0 | 3.57 | 39 | Dune Pincher 3.8 |
+| diehard | 112 | 0 | 3.54 | 39 | Arthrobolt 2.0 |
+| revenge | 113 | 0 | 3.55 | 39 | Anoleaf 2.4 |
+| retaliate, prickly, spiky | 113 | 0 | 3.55 | 39 | none: no critter's move gives them |
+
+- **A gate fixed:** diehard failed on Nut and Bolt "past the baseline's best" (76.5 % against 76.3) though they moved
+  under 2 points: they were near the top already. The field limit applies only to a critter that moved more than 10
+  points now.
+- **One seed a starter is too noisy to judge a step.** E4's game had 176 losses on seed 1 against E3's 126, yet the
+  keeper it lost to most (Captain Rook, 76 times) had the same team in both. `BOT_SEEDS=n` now plays each starter on
+  seeds 1..n and prints the total (`MONSTER_REGION` names another game file). Over four seeds a starter (20 games):
+  **E0 420 losses (257 to keepers), E4 572 (392), +36 %**, within the plan's 50 %. Over the same 20 games E5 comes
+  back to 415 (next entry).
+
+### 2026-11-06 — Critters: E3, damage over time and no healing
+
+| Step | Moves kept | Unended | Mean turns | Longest | Moved most (points) |
+|---|---|---|---|---|---|
+| E2's end | 102 | 0 | 3.67 | 39 | |
+| festering | 105 | 0 | 3.65 | 39 | Selmatek 5.4 |
+| lifeleech | 107 | 0 | 3.66 | 39 | Vamporm 3.5 |
+| wasting | 107 | 0 | 3.66 | 39 | none: no critter's move gives it |
+| Auto-play's policy (below) | 107 | 0 | 3.57 | 39 | Eyesore 5.9; Amnesia's use 36.3 → 43.4 % |
+
+All three passed the balance run, but **the game gate failed**: Auto-play's five games lost 170 times (+95 % on
+E0's 87), Nut's 53 and Anoleaf's 49, mostly to Captain Rook and Ringman Pell at their highest margin (52 losses
+there). Neither keeper's team had changed. Auto-play's own critters had: the Vamporm line learns Proboscis, a weak
+blow that gives lifeleech, and the policy valued any status at a third of a blow even in a fight its best blow would
+end in two turns. **Now a status is worth something only in a fight that lasts** (the foe has more than twice the
+best blow's HP), weighted by the move's potency (`worth()` in `monster_bot.c`). Losses: Agnite 26, Anoleaf 40,
+Cardiling 29, Vamporm 10, Nut 21; **126 in all, +45 %**. The policy is both sides' in the balance run, so that run
+moved too (the last row); it's recorded as the baseline E4 is measured against, a policy change, not an effect.
+
+### 2026-11-06 — Critters: E2, the statuses that cost turns
+
+| Step | Moves kept | Unended | Mean turns | Longest | Moved most (points) |
+|---|---|---|---|---|---|
+| E1's end | 89 | 0 | 3.45 | 70 | |
+| stuck | 93 | 0 | 3.47 | 70 | Cateye 3.9, after the Mind Vise edit |
+| grabbed | 94 | 0 | 3.47 | 70 | Zunna 5.1 |
+| noddingoff (asleep) | 95 | 0 | 3.50 | 70 | Eyenemy 3.4 |
+| teams (a status to a team or both sides) | 102 | 0 | 3.67 | 39 | Arthrobolt 17.6 (its moves changed) |
+| flinching, confused, harpooned | 102 | 0 | 3.67 | 39 | none: no critter's move gives them |
+
+- **One tune:** Mind Vise gave stuck every turn at recharge 1 and was chosen in 54.9 % of its users' turns, past the
+  field's most chosen move; recharge 2 brings it to 40.5 %.
+- **Asleep was to have its own balance review with the owner** (plan §4, E2). By the run it's the quietest of the
+  three: the mean battle moves 3.47 → 3.50 turns and no critter more than 3.4 points. It ships switched on; taking
+  it off again is one line in `"effects"` and a rebuild. Its bench item stays the owner's.
+- **Auto-play learnt to leave a status that costs turns** (plan §6): asleep or weakened, it uses a Cureall if it
+  has one (asleep only), or sends out a healthy critter within 3 levels. Before that, E2 had Anoleaf's game losing
+  56 times (42 to keepers) against 27 at E0, and 130 losses in all (+49 %); after, **103 (+18 %)**: Agnite 15,
+  Anoleaf 23, Cardiling 33, Vamporm 10, Nut 22. The balance run doesn't swap, so its numbers don't move.
+- Shot `critters_badges`: Asleep on ours with three dots (two of its five turns gone), Stuck on the foe.
+
+### 2026-11-06 — Critters: E1, the stat multipliers switched on
+
+One effect per step, each run against the step before it (`make -C sim balance`, 216,000 battles, 20 seeds a pair at
+levels 10/25/40, seeds fixed by `balance.c`), accepted into `tests/data/balance.tsv` only when it passed:
+
+| Step | Moves kept | Unended | Mean turns | Longest | Moved most (points) |
+|---|---|---|---|---|---|
+| E0 baseline | 69 | 0 | 3.59 | 41 | |
+| exhausted | 72 | 0 | 3.57 | 41 | Arthrobolt 9.6, after the Thunderclap edit |
+| blinded | 77 | 0 | 3.46 | 39 | Pigabyte 43.0 (its moves changed) |
+| enraged | 81 | 0 | 3.38 | 39 | Noctula 10.0 |
+| hardshell | 84 | 0 | 3.45 | 39 | Arthrobolt 16.5 (its moves changed) |
+| sniping | 87 | 0 | 3.45 | 70 | Agnidon 5.2 |
+| slow, softened, focused | 87 | 0 | 3.45 | 70 | none: no move gives them yet without E3-E5's effects |
+| chargedup | 88 | 0 | 3.45 | 70 | Agnigon 1.9 |
+| charging | 89 | 0 | 3.45 | 70 | Nebulet 0.7 |
+
+- **One tune**, Thunderclap (`move_edits`): at Tuxemon's power 1.25 and potency 0.75 exhausted's step moved
+  Arthrobolt 13.4 points and Nut 11.6; power 1.1 and potency 0.5 passes.
+- **The gates were refined (mine, for the owner, decision 2).** Blinded moved Pigabyte from 32 % to 75 % and the
+  Nut line 16 points, but not by the effect: those moves are the first ranged or second level-1 moves these critters
+  have had (Pigabyte had one move at level 1). The field already runs from 15 % (Noctula) to 85 % (Vamporm). So a
+  critter whose moves changed may move more than 10 points as long as it stays within the baseline's best, and a move
+  of such a critter, or a new move, may not pass the baseline's most chosen move (Water Blast, 55 %). A critter
+  whose moves didn't change still has the 10-point gate, and an old move may cross 40 % by 5 points at most.
+  `balance.tsv` now records each critter's moves (a CRC of their names) so the run can tell.
+- **The game still plays:** Auto-play finishes with every starter. Losses, E0 then E1: Agnite 9 → 24, Anoleaf 27 → 24,
+  Cardiling 22 → 32, Vamporm 5 → 5, Nut 24 → 22; 87 → 107 in all (+23 %, within the plan's 50 %; Agnite alone is
+  over, from a small count).
+- **The badge, measured:** with E1's names the status line ran 142 px into a 126 px card. Our card's third line now
+  drops the "HP" word while a status shows ("72/72  Charged Up"), and elementalshield says "Shield": 117 px. The
+  positive badge's dotted frame was a column alternating every row, which the Dex's scanline check (rightly) took
+  for the TV effect in `critters_menu`; it's dashed in 2-px steps now. Shot `critters_badges` (Berserk on ours,
+  Exhausted on the foe), looked at.
+
+### 2026-11-06 — Critters: E0, the foundation for Tuxemon's move effects
+
+`EFFECTS_PLAN.md` E0, on "work through the effects plan and the backlog": nothing new is switched on, and the
+game plays exactly as before. Measured:
+
+- **Game format 2.3.** `STAT` keeps its 24 B and gives its reserved bytes meanings (chance, duration, ranges, two
+  flags); a new section, `STEX`, holds each status's five multipliers, what it becomes after use, and its badge. MOVE's
+  effects gain kinds 4-12 and a target "both". A 2.2 file still reads. The save stays at version 4: no new status
+  outlasts a battle (decision 6), so nothing new is saved. `game.bin` is 807,372 B (was 807,232: STEX's three badges).
+- **The `"effects"` list** in `game_region.json`: a move is built only if each effect it needs is on it. With the list
+  empty the build keeps the same 69 moves as before; with every effect on, all 133 the critters learn.
+- **The rules for every effect** (`monster_play.c`; `GAME_FORMAT.md` §2), off until a step switches them on. Proof
+  that E0 changed nothing: `make -C sim monster`'s recorded battle transcript is byte for byte the same, and the five
+  Auto-play games end with the same actions, battles, losses and parties as before (seed 1: Agnite 36,334 actions,
+  1,641 battles, 9 lost; Anoleaf 42,090, 1,574, 27; Cardiling 28,658, 986, 22; Vamporm 15,265, 703, 5; Nut 31,897,
+  874, 24).
+- **The badge** on each battle card (11 x 11, our CC0 pictures from `tools/gen_status_icons.py`; a negative status
+  on red with a solid frame, a positive on green with a dotted one; dots for the turns left of a status with a
+  duration) and the status's word on our card's third line. Shot `critters_badges`, looked at. The smoke's `W`
+  command sets the statuses, and measures every critter's name at level 100 and every status word against the badge:
+  103 px of 116 and 123 of 126. It fails the smoke if either runs over.
+- **`make -C sim balance`** (`sim/tests/balance.c`): every critter against every critter at levels 10, 25 and 40,
+  20 seeds a pair, both sides choosing as Auto-play does (`mb_pick`). The baseline, `tests/data/balance.tsv`:
+  **216,000 battles, 0 unended, a mean of 3.59 turns, the longest 41**, in about 35 s on this PC (-O2). The plan
+  guessed minutes, so no sampling is needed.
+
 ### 2026-11-04 — Critters: the backlog of the owner's requests
 
 Built on "build through the CYD-critters backlog items", in the simulator. `BACKLOG.md` has each one and what's

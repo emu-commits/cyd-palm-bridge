@@ -48,7 +48,7 @@
 #include "crt.h"   /* Games: Critters, the monster game's screens          */
 #include "lvgl.h"
 #include <string.h>
-#include <strings.h>      /* strncasecmp for the Address Look Up filter */
+#include <strings.h>      /* strcasecmp for sorting the memo list */
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -126,16 +126,19 @@ static uint8_t g_greet_last[GREET_NSPEAKER];  /* index of the line last shown   
  *
  * Anything that reads a launcher position -- notably sim/tests/smoke.txt, which
  * taps cells by coordinate -- must be re-pointed when this changes. */
-/* The Planner is To Do and Memo in one tile (list_view switches between them),
- * which is what freed position 7 for Study (docs/SRS_PLAN.md); Guru and Coach
- * stay where people's thumbs already know them. A NULL would be an empty cell
- * that keeps its place in the grid. */
-static const char *APPS[] = { "Date Book", "Address", "Planner",
-                              "News", "HotSync", "Games",
+/* The grid since 2026-11-07, when Date Book, Address and To Do were archived
+ * with the iCloud sync: Settings first (it was a menu item; Palm's Prefs was
+ * an app), then HotSync and Games, News where it was, Memos (the Planner
+ * without To Do) in the middle, and Study, Guru and Coach where people's
+ * thumbs already know them. Position 6, freed by the archive, is Knowledge
+ * (the tree): KNOWLEDGEQUEST_PLAN.md's graph of ideas, one step at a time,
+ * on Study's engine. A NULL would be an empty cell that keeps its place. */
+static const char *APPS[] = { "Settings", "HotSync", "Games",
+                              "News", "Memos", "Knowledge",
                               "Study", "Guru", "Coach" };
-/* authentic Palm app launcher icons (from PumpkinOS), Guru's and Study's drawn to match */
-static const lv_image_dsc_t *APP_ICONS[] = { &icon_datebook, &icon_address, &icon_planner,
-                                             &icon_news, &icon_hotsync, &icon_games,
+/* Palm icons (from PumpkinOS) where Palm had the app; the rest drawn to match */
+static const lv_image_dsc_t *APP_ICONS[] = { &icon_settings, &icon_hotsync, &icon_games,
+                                             &icon_news, &icon_memo, &icon_knowledge,
                                              &icon_study, &icon_guru, &icon_coach };
 #define NAPPS ((int)(sizeof(APPS)/sizeof(APPS[0])))
 
@@ -143,6 +146,7 @@ static void show_launcher(void);
 /* Study, at a glance: the lock's STUDY row and the launcher's badge */
 static void st_glance_text(char *b, int cap, uint32_t *change);
 static uint32_t st_glance_due(void);
+static uint32_t st_glance_due_some(int kq);
 static uint32_t st_now(void);                 /* Study's clock (the smoke tour can move it) */
 static void show_trainer(void);
 static void show_kana(void);
@@ -159,6 +163,7 @@ static void show_minesweeper(void);
 static void show_wordie(void);
 static void show_sudoku(void);
 static void show_study(void);
+static void show_knowledge(void);   /* Study's engine, on Knowledge's course */
 static void st_free(void);       /* Study's session, when the screen leaves it */
 static void st_menu(lv_obj_t *panel);
 static int  g_st_open;
@@ -234,18 +239,10 @@ static void app_cb(lv_event_t *e){ show_app((const char *)lv_event_get_user_data
 /* apps backed by real data (name -> app id + iterator) */
 typedef struct { const char *name; int app; void (*iter)(data_row_cb, void *); } AppDef;
 static const AppDef APPDEFS[] = {
-    { "Date Book",  APP_CAL,  data_datebook },
-    { "Address",    APP_ADDR, data_address  },
-    { "To Do List", APP_TODO, data_todo     },
-    { "Memo Pad",   APP_MEMO, data_memo     },
+    { "Memos",      APP_MEMO, data_memo     },
 };
 #define NAPPDEFS ((int)(sizeof(APPDEFS)/sizeof(APPDEFS[0])))
-#define APPDEF_TODO (&APPDEFS[2])
-#define APPDEF_MEMO (&APPDEFS[3])
-/* The Planner remembers which half was open last, for the life of the boot, so
- * the tile goes back to where you were. */
-static int g_planner_memo;
-static int is_planner(const AppDef *ad){ return ad && (ad->app == APP_TODO || ad->app == APP_MEMO); }
+#define APPDEF_MEMO (&APPDEFS[0])
 static const AppDef *cur_app;   /* the data app whose list/detail is showing */
 static uint32_t cur_uid;        /* the record currently in detail/edit (0 = none) */
 
@@ -280,20 +277,17 @@ static void      secret_key(char c);   /* ...and how a key reaches it */
  * stale by every content_clear(), so it only survives if the screen that
  * cleared the content set it again; a sub-screen nobody can rebuild falls
  * back to its app's own entry. */
-enum { RV_NONE, RV_LIST, RV_DETAIL, RV_EDIT, RV_DAY, RV_WEEK, RV_MONTH };
+enum { RV_NONE, RV_LIST, RV_DETAIL, RV_EDIT };
 typedef struct {
     char     app[16];           /* show_app() name, "Find", "Settings", or "" */
     uint8_t  view;              /* RV_*, valid while !stale */
     uint8_t  stale;
     int8_t   appdef;            /* APPDEFS index for the data views */
     uint32_t uid;
-    int16_t  y; int8_t m, d;    /* Date Book's day, week or month */
 } Resume;
 static Resume g_resume;
 static int g_edit_live;
 static uint32_t g_autosaved_uid;  /* the record the last content_clear() saved, or 0 */
-static int g_day_open;          /* Date Book's Day view is the screen (write to New) */
-static int g_new_hour = -1;     /* a New event's start hour, written on the Day view */
 static const AppDef *g_edit_app;  /* the form's app and field count, kept apart: */
 static int g_edit_nf;            /* screens reset cur_app and g_nfields before they clear */
 static int g_locking;           /* ui_show_lock() is clearing the content */
@@ -302,79 +296,25 @@ static void resume_app(const char *name){
     snprintf(g_resume.app, sizeof g_resume.app, "%s", name ? name : "");
     g_resume.view = RV_NONE; g_resume.stale = 1;
 }
-static void resume_view(int view, uint32_t uid, int y, int m, int d);
-
-/* To Do due-date picker state: edited via the due popup, written on Save. */
-static int g_due_has, g_due_y, g_due_m, g_due_d;
-/* the SAME date popup now serves the To Do's due date and the Date Book's
- * event date. One popup, one set of state, one label -- writing a second
- * calendar is how the two end up disagreeing about which day a tap means, and
- * this one carries a hard-won fix (see due_cal_cb on
- * lv_event_get_current_target). The only real difference is that a To Do may
- * have no due date and an event must have a date, so "No Date" is offered to
- * one and not the other. */
-static int g_due_optional = 1;
-/* the event's start time, picked from a list. Kept beside the date for the
- * same reason -- the form holds it until Save, and nothing types it. */
-static int g_ev_h, g_ev_m;
-static lv_obj_t *g_time_lbl;
-static lv_obj_t *g_due_lbl;            /* label on the edit-form Due trigger */
-
-/* Date Book Details: alarm on/off + repeat type, edited in the Details sheet and
- * applied to the Appt on Save (the codec already round-trips VALARM/RRULE). */
-static int g_ev_alarm, g_ev_repeat;
-static const char *repeat_name(int rt){
-    switch(rt){
-        case repeatDaily:  return "Daily";
-        case repeatWeekly: return "Weekly";
-        case repeatMonthlyByDay: case repeatMonthlyByDate: return "Monthly";
-        case repeatYearly: return "Yearly";
-        default:           return "None";
-    }
-}
-static int repeat_next(int rt){   /* cycle None->Daily->Weekly->Monthly->Yearly->None */
-    switch(rt){
-        case repeatNone:   return repeatDaily;
-        case repeatDaily:  return repeatWeekly;
-        case repeatWeekly: return repeatMonthlyByDate;
-        case repeatMonthlyByDate: case repeatMonthlyByDay: return repeatYearly;
-        default:           return repeatNone;
-    }
-}
+static void resume_view(int view, uint32_t uid);
 
 static void list_view(const AppDef *ad);
 static void show_detail(uint32_t uid);
 static void show_edit(uint32_t uid);
 static void show_prefs(void);
-static void show_settings(void);        /* Menu > Settings, the nine tiles */
+static void show_settings(void);        /* the launcher's first tile: the Settings grid */
 static void show_dash_settings(void);                          /* Lock Screen settings sub-screen */
 static void world_tag(const char *zone, char *out, int cap);   /* 3-letter world-clock tag */
 static lv_obj_t *pf_add(lv_obj_t *list, const char *text, lv_event_cb_t cb, int ud);
-static void show_discover(void);
 static void show_feeds(void);
 static void show_feed_edit(int idx);
 static void update_cat_trigger(void);
 static void cat_trigger_cb(lv_event_t *e);
 static void details_open(void);
 static void toast_show(const char *msg);   /* transient save/delete feedback */
-static void due_open(void);
-static void due_btn_cb(lv_event_t *e);
-static void due_set_label(void);
-static void time_btn_cb(lv_event_t *e);   /* the start-time list */
-static void time_set_label(void);
-static void time_close(void);
 static void br_open(void);
 
-/* Date Book uses PalmOS's date-centric views (Day/Week/Month) instead of a flat
- * list of every event -- see show_datebook_day / show_datebook_week /
- * show_datebook_month. g_cal_* holds the currently-viewed day so navigation +
- * "return from a record" land back on it. Tapping the centre label of a view
- * zooms out one level (Day -> Week -> Month); a day tap zooms back in. */
-static void show_datebook_day(int y, int m, int d);
-static void show_datebook_week(int y, int m, int d);
-static void show_datebook_month(int y, int m);
-static void app_reopen(const AppDef *a);   /* back to an app's main view (Day view for Date Book) */
-static int  g_cal_y, g_cal_m, g_cal_d;
+static void app_reopen(const AppDef *a);   /* back to an app's main view */
 
 /* HotSync screen state (status label + polling timer live in `content`) */
 static lv_obj_t *hs_status;
@@ -390,10 +330,6 @@ static void kill_hs(void){ if(hs_timer){ lv_timer_delete(hs_timer); hs_timer=NUL
                            hs_confirm_close(); hs_status=NULL; hs_btn=hs_btn_lbl=NULL;
                            g_hs_what=NULL; }
 
-/* Discovery screen state (a status label + polling timer, like HotSync) */
-static lv_obj_t *disc_status;
-static lv_timer_t *disc_timer;
-static int disc_built;
 
 /* tear down per-form / per-screen state when navigating away. Text entry is
  * Graffiti-only (no on-screen keyboard), so there's no overlay to drop here. */
@@ -415,7 +351,7 @@ static lv_obj_t *g_barta;
  * kept beside the field rather than guessed from its label, and looked up by
  * the Graffiti path and the tap path both. content_clear() empties it with the
  * screen, so a stale entry can never outlive the textarea it names. */
-enum { TA_PLAIN, TA_CAP_FIRST, TA_CAP_WORDS, TA_KEYPAD };
+enum { TA_PLAIN, TA_CAP_FIRST, TA_CAP_WORDS };
 #define TA_MODES_MAX 16
 static struct { lv_obj_t *ta; uint8_t mode; const char *name; } g_tamode[TA_MODES_MAX];
 static int g_ntamode;
@@ -498,6 +434,7 @@ static GuruState g_gu;               /* durable state; mirrors /sdcard/guru.sav 
 static int  g_gu_loaded;             /* guru.sav has been read this boot         */
 static int  g_gu_open;               /* a Guru screen is the live view (menu)    */
 static lv_obj_t *g_gu_tbl;           /* the habit list (one lv_table, see below) */
+static lv_obj_t *g_gu_wrap;          /* ...and the scroller it sits in, Home under it */
 static lv_obj_t *g_gu_cnt;           /* the "N of M today" header, retitled live */
 static lv_obj_t *g_gu_stk;           /* ...and the streak beside it, likewise    */
 /* Row -> task id for the list, 0 meaning "this row is a category heading". The
@@ -529,8 +466,6 @@ static void kill_kb(void){
     free_rowuids();
     free_finds();
     kill_hs();
-    if(disc_timer){ lv_timer_delete(disc_timer); disc_timer=NULL; }
-    disc_status=NULL;
     wifi_scan_kill();            /* same reason as disc_timer: it polls a screen */
 }
 
@@ -551,57 +486,15 @@ static uint32_t *g_rowuids;
 static int       g_rowuid_n;
 static void free_rowuids(void){ free(g_rowuids); g_rowuids=NULL; g_rowuid_n=0; }
 
-/* per-app "lens" state (parallels the Date Book's date-centric navigation):
- *  - Address: a Graffiti "Look Up" prefix filter on the name (Palm's signature
- *    Address navigation aid) + a Name | Phone two-column layout.
- *  - To Do: a checkbox column (tap col 0 = toggle done) + a Show Completed
- *    toggle in the Options menu.
- * g_listtbl is the live record table, kept so the Address filter can rebuild
- * just the table without tearing down the Look Up field. */
-static char      g_lookup[24];        /* Address Look Up prefix (Graffiti) */
-static int       g_todo_show_done = 1;/* To Do: include completed items      */
-static int       g_todo_sort_due  = 0;/* To Do: 0 = by priority, 1 = by due  */
-
-/* used by the Date Book day view, whose list is bounded to one day's events */
-static void row_cb(lv_event_t *e){
-    show_detail((uint32_t)(uintptr_t)lv_event_get_user_data(e));
-}
-
-/* keep predicate shared by the count + fill passes (reads cur_app). Must be
- * applied identically in both passes so g_rowuids is sized to what's shown. */
-static int row_keep(const char *primary){
-    if(!cur_app) return 1;
-    if(cur_app->app==APP_ADDR && g_lookup[0]){
-        /* Palm Look Up matches by last OR first name. primary is "Last, First"
-         * (or just a name/company), so test the whole string and, if present,
-         * the first-name token after ", ". */
-        size_t n = strlen(g_lookup);
-        int hit = (strncasecmp(primary, g_lookup, n) == 0);
-        if(!hit){
-            const char *comma = strstr(primary, ", ");
-            if(comma) hit = (strncasecmp(comma + 2, g_lookup, n) == 0);
-        }
-        if(!hit) return 0;
-    }
-    if(cur_app->app==APP_TODO && !g_todo_show_done)
-        if(primary[0]=='[' && primary[1]=='x') return 0;   /* completed = "[x] ..." */
-    return 1;
-}
-
 static void tbl_count_cb(uint32_t uid,const char*p,const char*s,void*ctx){
-    (void)uid;(void)s; if(row_keep(p)) (*(int*)ctx)++;
+    (void)uid;(void)p;(void)s; (*(int*)ctx)++;
 }
 
-/* Collected row for sorting. Palm sorts these lists (Address by name, To Do by
- * priority, Memo alphabetically) rather than showing raw PDB order, so we buffer
- * the display text + a sort key, qsort, then fill the table in order. The buffer
- * is transient (freed after fill) and only lives in interactive mode (no TLS), so
- * the RAM is available. */
+/* Collected row for sorting. Palm sorts Memo alphabetically rather than in
+ * database order, so we buffer the display text + a sort key, qsort, then fill
+ * the table in order. The buffer is transient (freed after the fill). */
 typedef struct {
     uint32_t uid;
-    int      done;        /* To Do completed (sorts incomplete first) */
-    int      pri;         /* To Do priority 1..5 (1 = highest)         */
-    int      due;         /* To Do due date YYYYMMDD (0 = none)         */
     char     c1[96];      /* main display text                          */
     char     sort[48];    /* case-folded sort key                       */
 } SRow;
@@ -609,44 +502,15 @@ typedef struct { SRow *rows; int n; int cap; } Collect;
 
 static void collect_cb(uint32_t uid,const char*primary,const char*secondary,void*ctx){
     Collect *co = (Collect*)ctx;
-    if(!row_keep(primary) || co->n >= co->cap) return;
+    if(co->n >= co->cap) return;
     SRow *r = &co->rows[co->n++];
-    r->uid=uid; r->done=0; r->pri=99; r->due=0;
-    if(cur_app && cur_app->app==APP_TODO){
-        r->done = (primary[0]=='[' && primary[1]=='x');
-        const char *txt = (primary[0]=='[') ? primary+4 : primary;
-        if(!secondary || sscanf(secondary,"pri %d due %d",&r->pri,&r->due)<1){ r->pri=99; r->due=0; }
-        /* Just the words. The priority and the due date are columns of their own
-         * now (build_record_table fills them, list_draw_cb styles them), rather
-         * than a digit and a date run together into the description -- reading
-         * "1 Renew passport 9/20" as one line is what made the list look like a
-         * data dump instead of a list of things to do. */
-        snprintf(r->c1,sizeof r->c1,"%.95s",txt);
-        snprintf(r->sort, sizeof r->sort, "%s", txt);
-    } else {
-        if(secondary && secondary[0]) snprintf(r->c1,sizeof r->c1,"%s  (%s)",primary,secondary);
-        else                          snprintf(r->c1,sizeof r->c1,"%s",primary);
-        snprintf(r->sort, sizeof r->sort, "%s", primary);
-    }
+    r->uid=uid;
+    if(secondary && secondary[0]) snprintf(r->c1,sizeof r->c1,"%s  (%s)",primary,secondary);
+    else                          snprintf(r->c1,sizeof r->c1,"%s",primary);
+    snprintf(r->sort, sizeof r->sort, "%s", primary);
 }
-static int cmp_name(const void *a,const void *b){        /* Address, Memo */
+static int cmp_name(const void *a,const void *b){
     return strcasecmp(((const SRow*)a)->sort, ((const SRow*)b)->sort);
-}
-static int cmp_todo(const void *a,const void *b){        /* incomplete, then priority, then text */
-    const SRow *x=a, *y=b;
-    if(x->done != y->done) return x->done - y->done;
-    if(x->pri  != y->pri ) return x->pri  - y->pri;
-    return strcasecmp(x->sort, y->sort);
-}
-/* due-date sort: incomplete first, then earliest due (undated last), then priority. */
-static int cmp_todo_due(const void *a,const void *b){
-    const SRow *x=a, *y=b;
-    if(x->done != y->done) return x->done - y->done;
-    int xd = x->due ? x->due : 99999999;     /* undated sinks to the bottom */
-    int yd = y->due ? y->due : 99999999;
-    if(xd != yd) return xd - yd;
-    if(x->pri != y->pri) return x->pri - y->pri;
-    return strcasecmp(x->sort, y->sort);
 }
 /* ---- list chrome: what turns a table into a list --------------------------
  * Every scrolling list in this app is one lv_table, for the pool reason spelled
@@ -669,7 +533,7 @@ static int cmp_todo_due(const void *a,const void *b){
  *   LIST_BOX   -- this row has a checkbox
  *   LIST_TICK  -- ...and it is ticked (done / checked / enabled)
  *   LIST_HEAD  -- a section heading: banded and bold, no box
- *   LIST_DIM   -- the text is spent (a completed To Do): grey, struck through
+ *   LIST_DIM   -- the text is spent (a ticked memo line): grey, struck through
  * CUSTOM_1..4 are LVGL's own per-cell user bits; nothing else in this file uses
  * them, and they are the reason this needs no parallel array. */
 #define LIST_TICK  LV_TABLE_CELL_CTRL_CUSTOM_1
@@ -677,10 +541,9 @@ static int cmp_todo_due(const void *a,const void *b){
 #define LIST_HEAD  LV_TABLE_CELL_CTRL_CUSTOM_3
 #define LIST_DIM   LV_TABLE_CELL_CTRL_CUSTOM_4
 #define COL_RULE   lv_color_hex(0xC8C8C8)  /* hairline between rows   */
-#define COL_DIM    lv_color_hex(0x8C8C8C)  /* spent text (done To Do) */
+#define COL_DIM    lv_color_hex(0x8C8C8C)  /* spent text (a ticked line) */
 #define LIST_BOX_W 13                      /* checkbox side, px       */
 #define LIST_BOX_X 8                       /* ...from the row's left  */
-#define LIST_DUE_W 40                      /* To Do's due-date column */
 
 /* LVGL renamed the "OR these bits into the cell" call between the simulator's
  * 9.2 and the firmware's 9.5 (add_ -> set_); the bodies are identical, both OR.
@@ -705,7 +568,8 @@ static void list_draw_cb(lv_event_t *e){
     lv_draw_dsc_base_t *b = lv_draw_task_get_draw_dsc(task);
     if(!b || b->part != LV_PART_ITEMS) return;
     /* the descriptor names the object being drawn, so there is no guessing about
-     * targets here (see due_cal_cb for what guessing costs) */
+     * targets here (a target guessed wrong once made a calendar tap pick the
+     * wrong day) */
     lv_obj_t *t = b->obj;
     if(!t) return;
 
@@ -751,11 +615,8 @@ static void list_draw_cb(lv_event_t *e){
     if(!list_row_is(t, row, LIST_BOX)) return;
 
     /* Column 1 is what the row is ABOUT; any other column on a checkbox row is
-     * something about it -- To Do's priority (column 0, beside the box) and its
-     * due date (column 2, at the right margin). Those are set quiet and pushed
-     * to their column's right edge, so each forms its own vertical line and the
-     * description is the only thing at full weight. The other lists put no text
-     * in those columns, so this costs them nothing. */
+     * something about it, set quiet and pushed to its column's right edge, so
+     * the description is the only thing at full weight. */
     if(col != 1){
         ld->align = LV_TEXT_ALIGN_RIGHT;
         ld->color = COL_DIM;
@@ -771,10 +632,9 @@ static void list_draw_cb(lv_event_t *e){
  * row, and the draw hook above. Call it on every list table so they cannot
  * drift apart -- a list that skips this is a list that looks like a table. */
 /* ONE wall-clock formatter, because "12-hour or 24-hour" is a setting and a
- * setting that half the screens ignore is worse than no setting. The Date Book
- * had two different hard-coded answers -- the day list printed "18:00" and the
- * week list printed "6:00p" -- so the same event read differently depending on
- * which way you had zoomed into it, and Settings ▸ Date & Time changed neither.
+ * setting that half the screens ignore is worse than no setting. The old Date
+ * Book (archived 2026-11-07) had two different hard-coded answers -- "18:00" in
+ * one view and "6:00p" in another -- and Settings ▸ Date & Time changed neither.
  *
  * `pad` zero-pads the hour, which the 24-hour form always wants and the 12-hour
  * form never does. */
@@ -810,7 +670,7 @@ static void list_table_style(lv_obj_t *t){
     lv_obj_add_event_cb(t, list_draw_cb, LV_EVENT_DRAW_TASK_ADDED, NULL);
 }
 
-/* Mark one row's checkbox. `on` ticks it; To Do also dims the text it has
+/* Mark one row's checkbox. `on` ticks it; a memo checklist also dims the text it has
  * finished with. The flags live on column 0 -- see list_draw_cb. */
 static void list_set_box(lv_obj_t *t, int row, int on, int dim){
     list_cell_ctrl_set(t, (uint32_t)row, 0, LIST_BOX);
@@ -832,13 +692,8 @@ static void tbl_click_cb(lv_event_t *e){
     uint32_t r=LV_TABLE_CELL_NONE, c=LV_TABLE_CELL_NONE;
     lv_table_get_selected_cell(t, &r, &c);
     if(r==LV_TABLE_CELL_NONE || !g_rowuids || (int)r >= g_rowuid_n) return;
-    uint32_t uid = g_rowuids[r];
-    if(cur_app && cur_app->app==APP_TODO && c==0){   /* tap the checkbox = toggle */
-        data_toggle_todo(uid);
-        if(cur_app) app_reopen(cur_app);
-    } else {
-        show_detail(uid);
-    }
+    (void)c;
+    show_detail(g_rowuids[r]);
 }
 /* NOTE: lv_table selection must be read on LV_EVENT_VALUE_CHANGED, NOT
  * LV_EVENT_CLICKED: on RELEASED the table sends VALUE_CHANGED and then resets the
@@ -846,143 +701,68 @@ static void tbl_click_cb(lv_event_t *e){
  * handler always reads CELL_NONE and does nothing. VALUE_CHANGED is sent only on
  * a genuine tap (not a scroll drag), so it behaves like a click for our purpose. */
 
-/* Which apps get a top bar (see list_top_bar below), and how tall it is. One
- * predicate and one number, shared by the builder and by the table sizing here,
- * so the two can never disagree about whether there is a strip to leave room
- * for. */
+/* The height of the list's top bar (see list_top_bar below), shared by the
+ * builder and by the table sizing here. */
 #define LIST_BAR_H 30
 /* The longest record the quick-add bar will make. Well under the 256 a Todo
  * description or a memo holds, because this is the one-line bar, not the form --
  * anything longer wants the form, and New on an empty field opens it. */
 #define QUICK_ADD_MAX 128
-static int list_bar_app(const AppDef *ad){
-    return ad && (ad->app == APP_ADDR || ad->app == APP_TODO || ad->app == APP_MEMO);
-}
 
-/* (re)build just the record table for cur_app. Callers set the title / any
- * filter bar first; the Address Look Up field calls this on each keystroke. */
+/* (re)build just the record table for cur_app. */
 static void build_record_table(void){
     free_rowuids();
     if(g_listtbl){ lv_obj_del(g_listtbl); g_listtbl=NULL; }
-    int todo = (cur_app && cur_app->app==APP_TODO);
 
     int n = 0;
-    cur_app->iter(tbl_count_cb, &n);          /* pass 1: count (filtered) */
+    cur_app->iter(tbl_count_cb, &n);          /* pass 1: count */
 
     lv_obj_t *t = lv_table_create(content);
     g_listtbl = t;
     list_table_style(t);
-    /* To Do is three columns: the box (with the priority tucked against its
-     * right edge), the description, and the due date at the right margin. The
-     * widths are set BEFORE any cell is written, because lv_table indexes cells
-     * by row*col_cnt and growing the column count later reshuffles them. */
-    if(todo){ lv_table_set_column_width(t, 0, 34);
-              lv_table_set_column_width(t, 1, LCD_W-46-LIST_DUE_W);
-              lv_table_set_column_width(t, 2, LIST_DUE_W); }
-    else    { lv_table_set_column_width(t, 0, LCD_W-8); }
-    /* Address, To Do and Memo all reserve the top strip for a bar (Look Up, or
-     * quick add); the Date Book list fills the content area. The height is in
-     * pixels rather than the percentage this used to be, because the bar's
-     * height is a fixed number and the table's job is "whatever is left" --
-     * lv_pct(84) only ever happened to equal that. */
-    if(list_bar_app(cur_app)){
-        lv_obj_set_size(t, lv_pct(100), (PDA_H - TITLE_H) - LIST_BAR_H);
-        lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, 0);
-    } else { lv_obj_set_size(t, lv_pct(100), lv_pct(100)); }
+    lv_table_set_column_width(t, 0, LCD_W-8);
+    /* the top strip is the quick-add bar; the table is whatever is left */
+    lv_obj_set_size(t, lv_pct(100), (PDA_H - TITLE_H) - LIST_BAR_H);
+    lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_add_event_cb(t, tbl_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
-    /* An empty list still has To Do's 34px box column, so the message has to be
-     * merged across it or it wraps one word per line inside the gutter. */
-    if(n <= 0){ list_empty_msg(t, todo, "(no records)"); return; }
+    if(n <= 0){ list_empty_msg(t, 0, "(no memos)"); return; }
 
     SRow *rows = calloc(n, sizeof *rows);
     g_rowuids  = calloc(n, sizeof *g_rowuids);
     if(!rows || !g_rowuids){                    /* out of RAM -> degrade, don't crash */
         free(rows); free_rowuids();
-        list_empty_msg(t, todo, "(low memory)");
+        list_empty_msg(t, 0, "(low memory)");
         return;
     }
     Collect co = { rows, 0, n };
     cur_app->iter(collect_cb, &co);             /* pass 2: collect rows */
-    qsort(rows, co.n, sizeof *rows,
-          todo ? (g_todo_sort_due ? cmp_todo_due : cmp_todo) : cmp_name);
+    qsort(rows, co.n, sizeof *rows, cmp_name);
 
     g_rowuid_n = co.n;
     for(int i=0;i<co.n;i++){
-        if(todo){
-            lv_table_set_cell_value(t, i, 1, rows[i].c1);
-            if(rows[i].pri >= 1 && rows[i].pri <= 5){      /* 99 = "no priority" */
-                char p[4]; snprintf(p, sizeof p, "%d", rows[i].pri);
-                lv_table_set_cell_value(t, i, 0, p);
-            }
-            if(rows[i].due){
-                char d[12]; snprintf(d, sizeof d, "%d/%d",
-                                     (rows[i].due/100)%100, rows[i].due%100);
-                lv_table_set_cell_value(t, i, 2, d);
-            }
-            list_set_box(t, i, rows[i].done, 1);           /* the box is drawn, not typed */
-        }
-        else      lv_table_set_cell_value(t, i, 0, rows[i].c1);
+        lv_table_set_cell_value(t, i, 0, rows[i].c1);
         g_rowuids[i] = rows[i].uid;
     }
     free(rows);
 }
 
-/* Address Look Up: mirror the field text into g_lookup and refilter the table */
-static void lookup_ta_cb(lv_event_t *e){
-    lv_obj_t *ta = lv_event_get_target(e);
-    snprintf(g_lookup, sizeof g_lookup, "%s", lv_textarea_get_text(ta));
-    build_record_table();
-}
-
 /* ---- the record list's top bar ------------------------------
- * [ word ][ field ][ New ] across the top of a list, and ONE builder for all
- * three apps that have one. Two bars that merely resemble each other drift:
- * one gains a couple of pixels of padding, and a year later nobody can tell
- * which is the right one.
- *
- * The bar is the same everywhere; what differs is what the FIELD means, and
- * that is a real difference, not drift:
- *   Address -- the field is a FILTER (Palm's Look Up), so typing narrows the
- *              list and New opens the blank form.
- *   To Do   -- the field is the RECORD. Type, tap New, a row appears.
- *   Memo    -- the same, via literally the same callback.
- *
- * Costs three pool objects per list (label, textarea, button+its label). The
- * Address list already paid for two of them. */
+ * [ word ][ field ][ New ] across the top of the Memos list. The field is the
+ * RECORD: write, tap New, a row appears. Costs three pool objects (label,
+ * textarea, button + its label). */
 #define LIST_BAR_LBLW 60   /* the word's slot -- fixed, so the fields line up */
 #define LIST_BAR_NEWW 46   /* the New button                                  */
 
-/* How much the bar's field holds. These are NOT the same number and sharing one
- * was a real bug: the quick-add bar inherited Look Up's 23 and silently clipped
- * "Pick up the dry cleaning" to "...cleanin" -- saved, listed, and wrong, with
- * nothing on screen to say so. A filter is bounded by the buffer it mirrors into
- * (g_lookup); a record is bounded by what quick_add_cb can carry. */
-#define LIST_BAR_FIND_MAX ((int)sizeof g_lookup - 1)
+/* How much the bar's field holds: what quick_add_cb can carry. */
 #define LIST_BAR_ADD_MAX  (QUICK_ADD_MAX - 1)
 
-/* `on_word` makes the word a button (the Planner's To Do / Memo switch); NULL
- * leaves it a label. `on_new` NULL: no New button (a read-only Address), and
- * the field takes its room. */
+/* `on_new` NULL: no New button, and the field takes its room. */
 static lv_obj_t *list_top_bar(const char *word, const char *seed, int maxlen,
-                              lv_event_cb_t on_type, lv_event_cb_t on_new,
-                              lv_event_cb_t on_word){
-    if(on_word){
-        lv_obj_t *wb = lv_button_create(content);
-        lv_obj_set_size(wb, LIST_BAR_LBLW - 6, 28);
-        lv_obj_set_pos(wb, 2, 1);
-        lv_obj_set_style_radius(wb, 0, 0);
-        lv_obj_set_style_pad_all(wb, 0, 0);
-        lv_obj_t *wl = lv_label_create(wb);
-        lv_label_set_text(wl, word);
-        lv_obj_set_style_text_font(wl, &lv_font_palm_bold, 0);
-        lv_obj_center(wl);
-        lv_obj_add_event_cb(wb, on_word, LV_EVENT_CLICKED, NULL);
-    } else {
-        lv_obj_t *l = lv_label_create(content);
-        lv_label_set_text(l, word);
-        lv_obj_set_pos(l, 4, 8);
-    }
+                              lv_event_cb_t on_type, lv_event_cb_t on_new){
+    lv_obj_t *l = lv_label_create(content);
+    lv_label_set_text(l, word);
+    lv_obj_set_pos(l, 4, 8);
 
     if(on_new){
         lv_obj_t *nb = lv_button_create(content);
@@ -1005,15 +785,14 @@ static lv_obj_t *list_top_bar(const char *word, const char *seed, int maxlen,
     return ta;
 }
 
-/* Quick add: make a record out of whatever is in the field, clear
- * it, and rebuild the list so the new row is visible immediately. To Do and
- * Memo share this body rather than having one each.
+/* Quick add: make a memo out of whatever is in the field, clear it, and
+ * rebuild the list so the new row is visible immediately.
  *
  * An EMPTY field opens the full form instead of doing nothing -- New is never
  * a dead button, and the long way in is still one tap from here.
  *
- * The record is filed under the category the list is FILTERED to, not always
- * Unfiled: adding a to do while looking at one category and having it land
+ * The memo is filed under the category the list is FILTERED to, not always
+ * Unfiled: adding one while looking at a category and having it land
  * somewhere you cannot see is indistinguishable from the add having failed. */
 static void quick_add_cb(lv_event_t *e){ (void)e;
     if(!cur_app || !g_barta) return;
@@ -1027,64 +806,25 @@ static void quick_add_cb(lv_event_t *e){ (void)e;
 
     int rc  = data_get_category();
     int cat = rc < 0 ? 0 : rc;                        /* All -> Unfiled, as show_edit does */
-    if(cur_app->app == APP_TODO){
-        Todo t; memset(&t, 0, sizeof t);
-        t.priority = 1;                               /* Palm's default for a new to do */
-        snprintf(t.description, sizeof t.description, "%s", txt + a);
-        data_save_todo(0, cat, &t);
-    } else {
-        data_save_memo(0, cat, txt + a);
-    }
+    data_save_memo(0, cat, txt + a);
     lv_textarea_set_text(g_barta, "");
     build_record_table();
 }
 
-/* New on the Address bar: the blank edit form. The field there is a filter, so
- * there is nothing to seed the record with. */
-static void list_new_cb(lv_event_t *e){ (void)e; if(cur_app) show_edit(0); }
-
-/* scrolling list of records for one app (virtualized lv_table + per-app lens) */
-/* The Planner's switch: To Do <-> Memo. Categories belong to each half's own
- * database (a To Do category is not a Memo one), so the filter resets to All. */
-static void list_view(const AppDef *ad);
-static void planner_switch_cb(lv_event_t *e){
-    (void)e;
-    if(!cur_app) return;
-    data_set_category(-1);
-    list_view(cur_app->app == APP_TODO ? APPDEF_MEMO : APPDEF_TODO);
-}
-
+/* the Memos list (virtualized lv_table under the quick-add bar) */
 static void list_view(const AppDef *ad){
     kill_kb();
     cur_app = ad;
     cur_uid = 0;
     content_clear();
-    resume_view(RV_LIST, 0, 0, 0, 0);
+    resume_view(RV_LIST, 0);
     g_listtbl = NULL;
-    if(is_planner(ad)) g_planner_memo = (ad->app == APP_MEMO);
-    lv_label_set_text(title_lbl, is_planner(ad) ? "Planner" : ad->name);
+    lv_label_set_text(title_lbl, ad->name);
 
-    /* The top bar. Graffiti writes into whichever field the bar put there --
-     * the Look Up filter on Address, the new record on To Do and Memo. */
-    if(ad->app == APP_ADDR){
-        active_ta = list_top_bar("Look Up:", g_lookup, LIST_BAR_FIND_MAX, lookup_ta_cb,
-                                 data_app_readonly(APP_ADDR) ? NULL : list_new_cb, NULL);
-    } else {
-        g_lookup[0] = 0;                               /* filter only applies to Address */
-        /* The Planner: the word at the left of the bar says which half this
-         * is, and tapping it switches to the other -- the one control the merge
-         * added, where the eye already goes to see what the field will make. */
-        if(ad->app == APP_TODO)
-            active_ta = list_top_bar("To Do", "", LIST_BAR_ADD_MAX, NULL, quick_add_cb,
-                                     planner_switch_cb);
-        else if(ad->app == APP_MEMO)
-            active_ta = list_top_bar("Memo",  "", LIST_BAR_ADD_MAX, NULL, quick_add_cb,
-                                     planner_switch_cb);
-        /* the quick-add field IS the record's first line, so it starts with
-         * a capital. Look Up (above) does not: it is a filter, not text. */
-        if(ad->app == APP_TODO || ad->app == APP_MEMO)
-            ta_mode_set(active_ta, TA_CAP_FIRST, NULL);
-    }
+    /* the quick-add field IS the memo's first line, so it starts with a
+     * capital, and Graffiti writes into it straight away */
+    active_ta = list_top_bar("Memo", "", LIST_BAR_ADD_MAX, NULL, quick_add_cb);
+    ta_mode_set(active_ta, TA_CAP_FIRST, NULL);
 
     build_record_table();
     update_cat_trigger();
@@ -1094,12 +834,6 @@ static void done_cb(lv_event_t *e){ (void)e; if(cur_app) app_reopen(cur_app); }
 
 static void edit_cb(lv_event_t *e){ show_edit((uint32_t)(uintptr_t)lv_event_get_user_data(e)); }
 
-/* ToDo detail: flip completed and redraw the detail so the status updates */
-static void todo_toggle_detail_cb(lv_event_t *e){
-    uint32_t u = (uint32_t)(uintptr_t)lv_event_get_user_data(e);
-    data_toggle_todo(u);
-    show_detail(u);
-}
 
 /* ---- delete a record (with confirmation, like PalmOS) ----
  * PalmOS never deletes without a "Delete <record>?" alert; we mirror that so a
@@ -1136,16 +870,14 @@ static void dlg_title(lv_obj_t *panel, int panel_w, int pad_x, int pad_y, const 
 }
 #define DLG_TITLE_H 18                                   /* what the strip takes */
 
-static void ask_delete(uint32_t uid){
-    if(g_confirm || !cur_app || data_app_readonly(cur_app->app)) return;
-    del_uid = uid;
-    const char *what = cur_app->app==APP_CAL ? "event"
-                     : cur_app->app==APP_ADDR ? "address"
-                     : cur_app->app==APP_TODO ? "item" : "memo";
-    const char *title = cur_app->app==APP_CAL ? "Delete Event"
-                      : cur_app->app==APP_ADDR ? "Delete Address"
-                      : cur_app->app==APP_TODO ? "Delete To Do" : "Delete Memo";
-
+/* A Palm confirm alert: the operation named in the strip, the question in
+ * bold, an optional note under it, then the verb that answers it on the left
+ * and Cancel beside it. A tap outside is Cancel, the least destructive answer,
+ * as Palm's default button is. `yes` runs on the verb; it closes the alert
+ * itself (confirm_close) before doing the work. */
+static void confirm_open(const char *title, const char *question, const char *note,
+                         const char *verb, lv_event_cb_t yes){
+    if(g_confirm) return;
     g_confirm = lv_obj_create(lv_layer_top());
     lv_obj_set_size(g_confirm, LCD_W, LCD_H);
     lv_obj_set_style_bg_color(g_confirm, COL_LINE, 0);
@@ -1157,8 +889,7 @@ static void ask_delete(uint32_t uid){
 
     lv_obj_t *panel = lv_obj_create(g_confirm);
     lv_obj_set_width(panel, 200);
-    int dev_only = data_app_syncs(cur_app->app);
-    lv_obj_set_height(panel, (dev_only ? 112 : 96) + DLG_TITLE_H);   /* fixed: LV_SIZE_CONTENT collapses under the bottom-aligned buttons */
+    lv_obj_set_height(panel, (note ? 112 : 96) + DLG_TITLE_H);   /* fixed: LV_SIZE_CONTENT collapses under the bottom-aligned buttons */
     lv_obj_center(panel);
     lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
     lv_obj_set_style_border_width(panel, 1, 0);
@@ -1172,32 +903,35 @@ static void ask_delete(uint32_t uid){
     lv_obj_t *q = lv_label_create(panel);
     lv_label_set_long_mode(q, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(q, 180);
-    lv_label_set_text_fmt(q, "Delete this %s?", what);
+    lv_label_set_text(q, question);
     lv_obj_set_style_text_font(q, &lv_font_palm_bold, 0);
     lv_obj_align(q, LV_ALIGN_TOP_LEFT, 0, DLG_TITLE_H - 2);
-    if(dev_only){
-        lv_obj_t *note = lv_label_create(panel);
-        lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(note, 180);
-        lv_label_set_text(note, "From this device only. The copy in your account is kept.");
-        lv_obj_set_style_text_font(note, &lv_font_palm, 0);
-        lv_obj_align(note, LV_ALIGN_TOP_LEFT, 0, DLG_TITLE_H + 18);
+    if(note){
+        lv_obj_t *nl = lv_label_create(panel);
+        lv_label_set_long_mode(nl, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(nl, 180);
+        lv_label_set_text(nl, note);
+        lv_obj_set_style_text_font(nl, &lv_font_palm, 0);
+        lv_obj_align(nl, LV_ALIGN_TOP_LEFT, 0, DLG_TITLE_H + 18);
     }
 
-    /* Palm's order: the button that answers the question with its own verb on
-     * the left, Cancel beside it. A tap outside stays Cancel, the least
-     * destructive answer, as Palm's default button is. */
     lv_obj_t *cancel = lv_button_create(panel);
     lv_obj_set_size(cancel, 82, 30);
     lv_obj_align(cancel, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
     lv_obj_t *cl = lv_label_create(cancel); lv_label_set_text(cl, "Cancel"); lv_obj_center(cl);
     lv_obj_add_event_cb(cancel, confirm_cancel_cb, LV_EVENT_CLICKED, NULL);
 
-    lv_obj_t *del = lv_button_create(panel);
-    lv_obj_set_size(del, 82, 30);
-    lv_obj_align(del, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-    lv_obj_t *dll = lv_label_create(del); lv_label_set_text(dll, "Delete"); lv_obj_center(dll);
-    lv_obj_add_event_cb(del, confirm_delete_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *ok = lv_button_create(panel);
+    lv_obj_set_size(ok, 82, 30);
+    lv_obj_align(ok, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_t *okl = lv_label_create(ok); lv_label_set_text(okl, verb); lv_obj_center(okl);
+    lv_obj_add_event_cb(ok, yes, LV_EVENT_CLICKED, NULL);
+}
+
+static void ask_delete(uint32_t uid){
+    if(g_confirm || !cur_app) return;
+    del_uid = uid;
+    confirm_open("Delete Memo", "Delete this memo?", NULL, "Delete", confirm_delete_cb);
 }
 static void del_btn_cb(lv_event_t *e){ ask_delete((uint32_t)(uintptr_t)lv_event_get_user_data(e)); }
 
@@ -1205,15 +939,12 @@ static void del_btn_cb(lv_event_t *e){ ask_delete((uint32_t)(uintptr_t)lv_event_
  * A memo can hold checklist lines as well as text: "[ ] " or "[x] " at the start
  * of a line. They are PLAIN TEXT in the memo, so nothing about how a memo is
  * stored changes, a memo stays readable anywhere a Palm memo is, and it stays on
- * the device like every memo (memos have no server copy). Tapping an item --
- * its box or its words -- ticks or unticks it.
- *
- * There is no "make this line a To Do": To Do has one server list, so an item
- * moved out of its memo would lose the project the memo is (BACKLOG.md,
- * Parked).
+ * the device like every memo. Tapping an item -- its box or its words -- ticks or
+ * unticks it. (Since To Do was archived, 2026-11-07, these lines are the
+ * device's to-do list.)
  *
  * The detail screen shows such a memo as a list -- the same one lv_table and the
- * same drawn boxes as the To Do list, so no screen gains a per-line object. The
+ * same drawn boxes as Guru's list, so no screen gains a per-line object. The
  * memo is read again for every change and written back whole; the list keeps
  * only which LINE each row is (in g_rowuids, freed on the way out like any
  * list's). */
@@ -1315,13 +1046,12 @@ static void show_detail(uint32_t uid){
     if(!data_detail(cur_app->app, uid, buf, sizeof buf)) snprintf(buf,sizeof buf,"(not found)");
 
     content_clear();
-    resume_view(RV_DETAIL, uid, 0, 0, 0);
+    resume_view(RV_DETAIL, uid);
     int ch = PDA_H - TITLE_H;
-    int istodo = (cur_app->app == APP_TODO);
-    /* leave room for the action row (and a second row for ToDo's Mark Done) */
-    if(cur_app->app != APP_MEMO || !memo_checklist(uid, ch - 40)){
+    /* leave room for the action row */
+    if(!memo_checklist(uid, ch - 40)){
         lv_obj_t *box = lv_obj_create(content);   /* scrolls if text overflows */
-        lv_obj_set_size(box, LCD_W, ch - (istodo ? 78 : 40));
+        lv_obj_set_size(box, LCD_W, ch - 40);
         lv_obj_set_pos(box, 0, 0);
         lv_obj_set_style_radius(box, 0, 0);
         lv_obj_set_style_border_width(box, 0, 0);
@@ -1340,17 +1070,6 @@ static void show_detail(uint32_t uid){
     lv_label_set_text(dl, "Done"); lv_obj_center(dl);
     lv_obj_add_event_cb(done, done_cb, LV_EVENT_CLICKED, NULL);
 
-    /* A read-only Address (data_app_readonly) says so where Delete and Edit
-     * would be, so their absence reads as a decision and not a fault. */
-    if(data_app_readonly(cur_app->app)){
-        lv_obj_t *ro = lv_label_create(content);
-        lv_label_set_long_mode(ro, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(ro, LCD_W - 92);
-        lv_label_set_text(ro, "Read-only: edit contacts on your phone");
-        lv_obj_align(ro, LV_ALIGN_BOTTOM_RIGHT, -4, -3);
-        return;
-    }
-
     lv_obj_t *del = lv_button_create(content);
     lv_obj_set_size(del, 72, 34);
     lv_obj_align(del, LV_ALIGN_BOTTOM_MID, 0, -3);
@@ -1364,176 +1083,16 @@ static void show_detail(uint32_t uid){
     lv_obj_t *el = lv_label_create(edit);
     lv_label_set_text(el, "Edit"); lv_obj_center(el);
     lv_obj_add_event_cb(edit, edit_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)uid);
-
-    /* ToDo: a full-width row above toggles completion (replaces the inline checkbox) */
-    if(istodo){
-        Todo t; int isdone = data_get_todo(uid,&t) ? t.completed : 0;
-        lv_obj_t *mk = lv_button_create(content);
-        lv_obj_set_size(mk, LCD_W - 8, 34);
-        lv_obj_align(mk, LV_ALIGN_BOTTOM_MID, 0, -41);
-        lv_obj_t *ml = lv_label_create(mk);
-        lv_label_set_text(ml, isdone ? "Mark Not Done" : "Mark Done"); lv_obj_center(ml);
-        lv_obj_add_event_cb(mk, todo_toggle_detail_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)uid);
-    }
 }
 
 /* ------------------------- edit form ------------------------- */
 
-/* ---- the phone keypad ------------------------------------------------------
- * Phone and Zip are digits, and writing digits one Graffiti stroke at a time is
- * the slowest way there is to enter a phone number. Tapping either field opens
- * this: the classic 3x4 phone pad, read across -- 1 2 3 / 4 5 6 / 7 8 9 /
- * * 0+ # -- with a row underneath for the separators a number is written with
- * and a delete.
- *
- * `0+` types 0 on a tap and + when held, as on a phone. Every key fires on
- * RELEASE (CLICK_TRIG), which is what makes that possible: a key that typed on
- * press would already have put the 0 down by the time the hold was recognised.
- *
- * It writes straight into the form's own textarea, so there is nothing to copy
- * back and nothing to lose: Done just closes it. Full screen on lv_layer_top(),
- * as the Calculator is -- which is why it names its own font (that layer
- * inherits nothing from the screen). content_clear() closes it, so it cannot
- * outlive the form it is typing into. The keys are painted by calc_draw_cb:
- * digits grey, the rest white -- the same reading as the Calculator's. */
-static void calc_draw_cb(lv_event_t *e);
-static lv_obj_t *g_kp, *g_kp_disp, *g_kp_ta;
-static int g_kp_held;                       /* the hold on 0+ already typed '+' */
-static void kp_close(void){
-    if(g_kp){ lv_obj_del(g_kp); g_kp = NULL; }
-    g_kp_disp = NULL; g_kp_ta = NULL; g_kp_held = 0;
-}
-static void kp_refresh(void){
-    if(!g_kp_disp || !g_kp_ta) return;
-    const char *t = lv_textarea_get_text(g_kp_ta);
-    lv_label_set_text(g_kp_disp, t[0] ? t : "");
-}
-static void kp_type(const char *key){
-    if(!g_kp_ta || !key) return;
-    if(!strcmp(key, "Del"))        lv_textarea_delete_char(g_kp_ta);
-    else if(!strcmp(key, "Space")) lv_textarea_add_char(g_kp_ta, ' ');
-    else                           lv_textarea_add_char(g_kp_ta, (uint32_t)key[0]);
-    kp_refresh();
-}
-static void kp_bm_cb(lv_event_t *e){
-    lv_obj_t *bm = lv_event_get_target(e);
-    uint32_t id = lv_buttonmatrix_get_selected_button(bm);
-    if(id == LV_BUTTONMATRIX_BUTTON_NONE) return;
-    const char *txt = lv_buttonmatrix_get_button_text(bm, id);
-    if(lv_event_get_code(e) == LV_EVENT_LONG_PRESSED){
-        if(txt && txt[0] == '0'){ lv_textarea_add_char(g_kp_ta, '+'); kp_refresh(); g_kp_held = 1; }
-        return;
-    }
-    if(g_kp_held){ g_kp_held = 0; return; }    /* the release that ends the hold */
-    kp_type(txt);
-}
-static void kp_done_cb(lv_event_t *e){ (void)e; kp_close(); }
-
-static void kp_open(lv_obj_t *ta, const char *name){
-    kp_close();
-    g_kp_ta = ta;
-    lv_textarea_set_cursor_pos(ta, LV_TEXTAREA_CURSOR_LAST);
-
-    lv_obj_t *k = g_kp = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(k, LCD_W, LCD_H);
-    lv_obj_set_pos(k, 0, 0);
-    lv_obj_set_style_bg_color(k, COL_BODY, 0);
-    lv_obj_set_style_border_width(k, 0, 0);
-    lv_obj_set_style_radius(k, 0, 0);
-    lv_obj_set_style_pad_all(k, 4, 0);
-    lv_obj_set_style_pad_row(k, 4, 0);
-    lv_obj_set_style_text_font(k, &lv_font_palm, 0);
-    lv_obj_clear_flag(k, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_flex_flow(k, LV_FLEX_FLOW_COLUMN);
-
-    lv_obj_t *hdr = lv_obj_create(k);
-    lv_obj_set_size(hdr, lv_pct(100), 26);
-    lv_obj_set_style_bg_opa(hdr, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(hdr, 0, 0);
-    lv_obj_set_style_pad_all(hdr, 0, 0);
-    lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *ttl = lv_label_create(hdr);
-    lv_label_set_text(ttl, name ? name : "Number");
-    lv_obj_set_style_text_font(ttl, &lv_font_palm_bold, 0);
-    lv_obj_align(ttl, LV_ALIGN_LEFT_MID, 2, 0);
-    lv_obj_t *hint = lv_label_create(hdr);
-    lv_label_set_text(hint, "hold 0 for +");
-    lv_obj_set_style_text_color(hint, COL_DIM, 0);
-    lv_obj_align(hint, LV_ALIGN_CENTER, 6, 0);
-    lv_obj_t *done = lv_button_create(hdr);
-    lv_obj_set_size(done, 56, 26);
-    lv_obj_set_style_radius(done, 0, 0);
-    lv_obj_align(done, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_t *dl = lv_label_create(done);
-    lv_label_set_text(dl, "Done");
-    lv_obj_center(dl);
-    lv_obj_add_event_cb(done, kp_done_cb, LV_EVENT_CLICKED, NULL);
-
-    lv_obj_t *disp = lv_obj_create(k);
-    lv_obj_set_size(disp, lv_pct(100), 40);
-    lv_obj_set_style_bg_color(disp, COL_BODY, 0);
-    lv_obj_set_style_border_width(disp, 1, 0);
-    lv_obj_set_style_border_color(disp, COL_LINE, 0);
-    lv_obj_set_style_radius(disp, 0, 0);
-    lv_obj_set_style_pad_all(disp, 6, 0);
-    lv_obj_clear_flag(disp, LV_OBJ_FLAG_SCROLLABLE);
-    g_kp_disp = lv_label_create(disp);
-    lv_label_set_long_mode(g_kp_disp, LV_LABEL_LONG_CLIP);
-    lv_obj_set_width(g_kp_disp, lv_pct(100));
-    lv_obj_set_style_text_font(g_kp_disp, &lv_font_palm_bold, 0);
-    lv_obj_set_style_text_align(g_kp_disp, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_align(g_kp_disp, LV_ALIGN_RIGHT_MID, 0, 0);
-    kp_refresh();
-
-    static const char *km[] = {
-        "1", "2", "3", "\n",
-        "4", "5", "6", "\n",
-        "7", "8", "9", "\n",
-        "*", "0 +", "#", "\n",
-        "-", "Space", "Del", "" };
-    lv_obj_t *bm = lv_buttonmatrix_create(k);
-    lv_obj_set_width(bm, lv_pct(100));
-    lv_obj_set_flex_grow(bm, 1);
-    lv_buttonmatrix_set_map(bm, km);
-    /* on release, and no auto-repeat -- except Del, where holding to clear a
-     * wrong number is what a thumb expects */
-    /* Keys type on PRESS, as the Calculator's do: typing on release made fast
-     * entry feel late and doubled what a missed lift cost. The one exception is
-     * 0+, which has to wait for the release to know whether it was a tap (0)
-     * or a hold (+). No auto-repeat -- except Del, where holding to clear a
-     * wrong number is what a thumb expects. */
-    lv_buttonmatrix_set_button_ctrl_all(bm, LV_BUTTONMATRIX_CTRL_NO_REPEAT);
-    lv_buttonmatrix_set_button_ctrl(bm, 10, LV_BUTTONMATRIX_CTRL_CLICK_TRIG);
-    lv_buttonmatrix_clear_button_ctrl(bm, 14, LV_BUTTONMATRIX_CTRL_NO_REPEAT);
-    lv_obj_set_style_text_font(bm, &lv_font_palm_bold, 0);
-    lv_obj_set_style_radius(bm, 0, 0);
-    lv_obj_set_style_border_width(bm, 0, 0);
-    lv_obj_set_style_pad_all(bm, 0, 0);
-    lv_obj_set_style_pad_row(bm, 4, 0);
-    lv_obj_set_style_pad_column(bm, 4, 0);
-    lv_obj_set_style_radius(bm, 4, LV_PART_ITEMS);
-    lv_obj_set_style_border_width(bm, 1, LV_PART_ITEMS);
-    lv_obj_set_style_border_color(bm, COL_LINE, LV_PART_ITEMS);
-    lv_obj_set_style_bg_opa(bm, LV_OPA_COVER, LV_PART_ITEMS);
-    lv_obj_set_style_bg_color(bm, COL_BODY, LV_PART_ITEMS);
-    lv_obj_set_style_shadow_width(bm, 0, LV_PART_ITEMS);
-    lv_obj_add_flag(bm, LV_OBJ_FLAG_SEND_DRAW_TASK_EVENTS);
-    lv_obj_add_event_cb(bm, calc_draw_cb, LV_EVENT_DRAW_TASK_ADDED, NULL);
-    lv_obj_add_event_cb(bm, kp_bm_cb, LV_EVENT_VALUE_CHANGED, NULL);
-    lv_obj_add_event_cb(bm, kp_bm_cb, LV_EVENT_LONG_PRESSED, NULL);
-}
-
-/* tapping a field just makes it the Graffiti target (and shows its cursor);
- * there is no on-screen keyboard -- all text entry is via the Graffiti strip.
- * except Phone and Zip, which open the keypad above as well. */
 static void ta_click_cb(lv_event_t *e){
     lv_obj_t *ta = (lv_obj_t *)lv_event_get_target(e);
     if(active_ta && active_ta != ta) lv_obj_clear_state(active_ta, LV_STATE_FOCUSED);
     active_ta = ta;
     lv_obj_add_state(ta, LV_STATE_FOCUSED);
     if(g_form) lv_obj_scroll_to_view(ta, LV_ANIM_ON);
-    const char *name = NULL;
-    if(ta_mode(ta, &name) == TA_KEYPAD) kp_open(ta, name);
 }
 
 /* give the field just added by form_field() its input mode. */
@@ -1541,112 +1100,14 @@ static void field_mode(int mode, const char *name){
     if(g_nfields > 0) ta_mode_set(g_fields[g_nfields - 1], mode, name);
 }
 
-/* ---- To Do priority, tapped rather than typed ------------------------------
- * Four targets, 1 to 4, in one button matrix (one object), one checked at a
- * time. Palm allows 5; a record that arrives from a sync at 5 shows nothing
- * picked and keeps its 5 unless a number is tapped -- the form must never
- * rewrite a value it was not asked to change. */
-static int g_todo_pri;
-static void pri_cb(lv_event_t *e){
-    lv_obj_t *bm = lv_event_get_target(e);
-    uint32_t id = lv_buttonmatrix_get_selected_button(bm);
-    if(id != LV_BUTTONMATRIX_BUTTON_NONE && id < 4) g_todo_pri = (int)id + 1;
-}
-
-/* a labeled one-line textarea; advances *y and records the textarea */
-static void form_field(lv_obj_t *form, const char *label, const char *val, int maxlen, int *y){
-    lv_obj_t *lb = lv_label_create(form);
-    lv_label_set_text(lb, label);
-    lv_obj_set_pos(lb, 2, *y);
-    lv_obj_t *ta = lv_textarea_create(form);
-    lv_textarea_set_one_line(ta, true);
-    lv_textarea_set_max_length(ta, maxlen);
-    lv_textarea_set_text(ta, val ? val : "");
-    lv_obj_set_width(ta, LCD_W - 16);
-    lv_obj_set_pos(ta, 2, *y + 15);
-    lv_obj_add_event_cb(ta, ta_click_cb, LV_EVENT_CLICKED, NULL);
-    g_fields[g_nfields++] = ta;
-    *y += 52;
-}
-
-/* fill a fresh appointment with today's date + the next half hour (Palm default) */
-static void default_appt(Appt *a){
-    memset(a,0,sizeof *a);
-    time_t now=0; time(&now);
-    struct tm tmv; localtime_r(&now,&tmv);
-    if(tmv.tm_year+1900 < 2024){ tmv.tm_year=2026-1900; tmv.tm_mon=0; tmv.tm_mday=1; tmv.tm_hour=9; tmv.tm_min=0; }
-    int h=tmv.tm_hour, m=tmv.tm_min;
-    if(m<30) m=30; else { m=0; h=(h+1)%24; }          /* round up to next :00/:30 */
-    a->hasTime=1; a->sH=h; a->sM=m; a->eH=(h+1)%24; a->eM=m;
-    a->year=tmv.tm_year+1900; a->month=tmv.tm_mon+1; a->day=tmv.tm_mday;
-    /* a new event defaults to the day the user is looking at (Palm "New" on a day) */
-    if(g_cal_y >= 2024){ a->year=g_cal_y; a->month=g_cal_m; a->day=g_cal_d; }
-}
-
 static const char *fv(int i){ return lv_textarea_get_text(g_fields[i]); }
-static const char *iv(Addr *a, const char *s){ return (s && s[0]) ? AddrIntern(a, s) : NULL; }
 
 /* Write the open edit form to the card. 1 on success. Navigation is the
  * caller's: Done reopens the app, a departure (content_clear) goes on to
  * wherever it was going. */
 static int edit_commit(void){
     if(!cur_app) return 0;
-    int ok = 0;
-    if(cur_app->app == APP_CAL){
-        Appt a; if(!data_get_cal(edit_uid,&a)) default_appt(&a);
-        snprintf(a.description,sizeof a.description,"%s",fv(0));
-        /* picked, not parsed. The old sscanf pair accepted anything that
-         * looked vaguely like a date or a time and silently kept the record's
-         * previous value when it did not -- so a mistyped date looked saved and
-         * was not. A picked value cannot be malformed. */
-        if(g_due_has){ a.year = g_due_y; a.month = g_due_m; a.day = g_due_d; }
-        a.hasTime = 1; a.sH = g_ev_h; a.sM = g_ev_m;
-        a.eH = (g_ev_h + 1) % 24; a.eM = g_ev_m;   /* an hour long, as it always was */
-        snprintf(a.note,sizeof a.note,"%s",fv(1));
-        a.hasAlarm = g_ev_alarm;                          /* Details sheet: alarm + repeat */
-        if(g_ev_alarm && a.alarmAdv <= 0){ a.alarmAdv = 5; a.alarmUnit = 0; }  /* default 5 min */
-        if(g_ev_repeat == repeatNone){ a.hasRepeat = 0; a.repeatType = repeatNone; }
-        else {
-            a.hasRepeat = 1; a.repeatType = g_ev_repeat; if(a.repeatFreq <= 0) a.repeatFreq = 1;
-            /* The Details sheet picks a repeat but no end, so it repeats for
-             * ever unless the record already ends. Without this the end
-             * date packed as zeros, which reads back as 1920, and the event
-             * occurred on no day at all. */
-            if(!a.repeatForever && a.endYear < 1904) a.repeatForever = 1;
-        }
-        ok = data_save_cal(edit_uid,edit_cat,&a);
-    } else if(cur_app->app == APP_TODO){
-        Todo t; if(!data_get_todo(edit_uid,&t)) memset(&t,0,sizeof t);
-        snprintf(t.description,sizeof t.description,"%s",fv(0));
-        snprintf(t.note,sizeof t.note,"%s",fv(1));
-        if(g_todo_pri >= 1) t.priority = g_todo_pri;
-        t.hasDue = g_due_has;
-        if(g_due_has){ t.dueY=g_due_y; t.dueM=g_due_m; t.dueD=g_due_d; }
-        ok = data_save_todo(edit_uid,edit_cat,&t);
-    } else if(cur_app->app == APP_ADDR){
-        Addr old; int have=data_get_addr(edit_uid,&old);
-        Addr a; memset(&a,0,sizeof a);
-        a.fields[F_name]=iv(&a,fv(0));
-        a.fields[F_firstName]=iv(&a,fv(1));
-        a.fields[F_title]=iv(&a,fv(2));
-        a.fields[F_company]=iv(&a,fv(3));
-        a.fields[F_phone1]=iv(&a,fv(4)); a.phoneLabel[0]=have?old.phoneLabel[0]:workLabel;
-        a.fields[F_address]=iv(&a,fv(5));
-        a.fields[F_city]=iv(&a,fv(6));
-        a.fields[F_state]=iv(&a,fv(7));
-        a.fields[F_zip]=iv(&a,fv(8));
-        a.fields[F_note]=iv(&a,fv(9));
-        if(have){   /* preserve fields the form still doesn't expose */
-            for(int k=1;k<5;k++) if(old.fields[F_phone1+k]){ a.fields[F_phone1+k]=iv(&a,old.fields[F_phone1+k]); a.phoneLabel[k]=old.phoneLabel[k]; }
-            static const int keep[]={F_country,F_custom1,F_custom2,F_custom3,F_custom4};
-            for(unsigned k=0;k<sizeof keep/sizeof keep[0];k++) if(old.fields[keep[k]]) a.fields[keep[k]]=iv(&a,old.fields[keep[k]]);
-            a.displayPhone=old.displayPhone;
-        }
-        ok = data_save_addr(edit_uid,edit_cat,&a);
-    } else if(cur_app->app == APP_MEMO){
-        ok = data_save_memo(edit_uid,edit_cat,fv(0));
-    }
-    return ok;
+    return data_save_memo(edit_uid,edit_cat,fv(0));
 }
 /* At least one character in any field: Palm's minimum for a record to keep. */
 static int edit_has_text(void){
@@ -1702,7 +1163,6 @@ static void memo_box_btn_cb(lv_event_t *e){
 }
 
 static void show_edit(uint32_t uid){
-    if(cur_app && data_app_readonly(cur_app->app)){ toast_show("Contacts are read-only"); return; }
     if(!cur_app) return;
     edit_uid = uid; cur_uid = uid; g_nfields = 0;
     int rc = uid ? data_record_category(cur_app->app, uid) : data_get_category();
@@ -1737,147 +1197,7 @@ static void show_edit(uint32_t uid){
     lv_obj_set_style_border_width(form, 0, 0);
     lv_obj_set_style_bg_color(form, COL_BODY, 0);
 
-    int y = 2;
-    if(cur_app->app == APP_CAL){
-        Appt a; if(!data_get_cal(uid,&a)) default_appt(&a);
-        g_ev_alarm  = a.hasAlarm;                              /* Details sheet state */
-        g_ev_repeat = a.hasRepeat ? a.repeatType : repeatNone;
-        /* the date and the time were TYPED, in two formats a person had
-         * to know -- "M/D/YYYY" and "h:mm" -- and a typo in either was accepted
-         * silently by sscanf and written to the record. Both are now taps: the
-         * date on the calendar the To Do due picker already uses, the time from
-         * a list of half-hours. The Description and the Note stay typed, which
-         * is right: they are prose, and no list can offer them. */
-        g_due_has = 1; g_due_y = a.year; g_due_m = a.month; g_due_d = a.day;
-        g_due_optional = 0;                       /* an event must have a date */
-        g_ev_h = a.hasTime ? a.sH : 9;
-        g_ev_m = a.hasTime ? a.sM : 0;
-        if(!uid && g_new_hour >= 0){ g_ev_h = g_new_hour; g_ev_m = 0; }
-        g_new_hour = -1;
-        form_field(form,"Description",a.description,255,&y);
-        field_mode(TA_CAP_FIRST, NULL);
-
-        lv_obj_t *dlab = lv_label_create(form);
-        lv_label_set_text(dlab, "Date"); lv_obj_set_pos(dlab, 2, y);
-        lv_obj_t *db = lv_button_create(form);
-        lv_obj_set_size(db, LCD_W - 16, 30);
-        lv_obj_set_pos(db, 2, y + 15);
-        lv_obj_set_style_radius(db, 0, 0);
-        g_due_lbl = lv_label_create(db);
-        lv_obj_align(g_due_lbl, LV_ALIGN_LEFT_MID, 4, 0);
-        lv_obj_add_event_cb(db, due_btn_cb, LV_EVENT_CLICKED, NULL);
-        due_set_label();
-        y += 52;
-
-        lv_obj_t *tlab = lv_label_create(form);
-        lv_label_set_text(tlab, "Time"); lv_obj_set_pos(tlab, 2, y);
-        lv_obj_t *tb = lv_button_create(form);
-        lv_obj_set_size(tb, LCD_W - 16, 30);
-        lv_obj_set_pos(tb, 2, y + 15);
-        lv_obj_set_style_radius(tb, 0, 0);
-        g_time_lbl = lv_label_create(tb);
-        lv_obj_align(g_time_lbl, LV_ALIGN_LEFT_MID, 4, 0);
-        lv_obj_add_event_cb(tb, time_btn_cb, LV_EVENT_CLICKED, NULL);
-        time_set_label();
-        y += 52;
-
-        form_field(form,"Note",a.note,500,&y);
-        field_mode(TA_CAP_FIRST, NULL);
-    } else if(cur_app->app == APP_TODO){
-        Todo t; if(!data_get_todo(uid,&t)) memset(&t,0,sizeof t);
-        g_due_has=t.hasDue; g_due_y=t.dueY; g_due_m=t.dueM; g_due_d=t.dueD;
-        g_due_optional = 1;                    /* a To Do may have no due date */
-        /* Description, then Due and Priority as compact
-         * rows with the label BESIDE the control -- the way Palm's own To Do
-         * Details laid them out -- then Note. Stacked label-over-field, four rows
-         * are 208 px against 146 of form, so Priority would have been below the
-         * fold of a scrolling form, which is design rule 2's complaint exactly.
-         * This way everything you PICK fits without scrolling; only the Note,
-         * the one optional thing here, is partly under the fold. Note is still
-         * the second textarea created, so it is still fv(1) in save_cb. */
-        form_field(form,"Description",t.description,255,&y);
-        field_mode(TA_CAP_FIRST, NULL);
-
-        #define TD_ROW_X 64                            /* control column */
-        #define TD_ROW_W (LCD_W - 16 - (TD_ROW_X - 2))
-        /* Due-date trigger (Palm's To Do due popup). A button, not a text field,
-         * so it isn't in g_fields; the picked date lives in g_due_* until Save. */
-        lv_obj_t *dlab = lv_label_create(form);
-        lv_label_set_text(dlab, "Due"); lv_obj_set_pos(dlab, 2, y + 7);
-        lv_obj_t *db = lv_button_create(form);
-        lv_obj_set_size(db, TD_ROW_W, 30);
-        lv_obj_set_pos(db, TD_ROW_X, y);
-        lv_obj_set_style_radius(db, 0, 0);
-        g_due_lbl = lv_label_create(db);
-        lv_obj_align(g_due_lbl, LV_ALIGN_LEFT_MID, 4, 0);
-        lv_obj_add_event_cb(db, due_btn_cb, LV_EVENT_CLICKED, NULL);
-        due_set_label();
-        y += 36;
-
-        /* priority. A new to do starts at 1, which is what the quick-add
-         * bar has always filed it under and what Palm defaults to. */
-        g_todo_pri = uid ? t.priority : 1;
-        lv_obj_t *plab = lv_label_create(form);
-        lv_label_set_text(plab, "Priority"); lv_obj_set_pos(plab, 2, y + 7);
-        static const char *pm[] = { "1", "2", "3", "4", "" };
-        lv_obj_t *pb = lv_buttonmatrix_create(form);
-        lv_buttonmatrix_set_map(pb, pm);
-        lv_buttonmatrix_set_button_ctrl_all(pb, LV_BUTTONMATRIX_CTRL_CHECKABLE);
-        lv_buttonmatrix_set_one_checked(pb, true);
-        if(g_todo_pri >= 1 && g_todo_pri <= 4)
-            lv_buttonmatrix_set_button_ctrl(pb, (uint32_t)(g_todo_pri - 1),
-                                            LV_BUTTONMATRIX_CTRL_CHECKED);
-        lv_obj_set_size(pb, TD_ROW_W, 30);
-        lv_obj_set_pos(pb, TD_ROW_X, y);
-        lv_obj_set_style_text_font(pb, &lv_font_palm_bold, 0);
-        lv_obj_set_style_radius(pb, 0, 0);
-        lv_obj_set_style_border_width(pb, 0, 0);
-        lv_obj_set_style_bg_opa(pb, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_pad_all(pb, 0, 0);
-        lv_obj_set_style_pad_column(pb, 6, 0);
-        lv_obj_set_style_radius(pb, 0, LV_PART_ITEMS);
-        lv_obj_set_style_border_width(pb, 1, LV_PART_ITEMS);
-        lv_obj_set_style_border_color(pb, COL_LINE, LV_PART_ITEMS);
-        lv_obj_set_style_shadow_width(pb, 0, LV_PART_ITEMS);
-        lv_obj_set_style_bg_opa(pb, LV_OPA_COVER, LV_PART_ITEMS);
-        lv_obj_set_style_bg_color(pb, COL_BODY, LV_PART_ITEMS);
-        lv_obj_set_style_text_color(pb, COL_LINE, LV_PART_ITEMS);
-        lv_obj_set_style_bg_color(pb, COL_LINE, LV_PART_ITEMS | LV_STATE_CHECKED);
-        lv_obj_set_style_text_color(pb, COL_BODY, LV_PART_ITEMS | LV_STATE_CHECKED);
-        lv_obj_add_event_cb(pb, pri_cb, LV_EVENT_VALUE_CHANGED, NULL);
-        y += 36;
-        #undef TD_ROW_X
-        #undef TD_ROW_W
-
-        form_field(form,"Note",t.note,500,&y);
-        field_mode(TA_CAP_FIRST, NULL);
-    } else if(cur_app->app == APP_ADDR){
-        Addr a; if(!data_get_addr(uid,&a)) memset(&a,0,sizeof a);
-        /* the scrollable form now exposes the common Palm Address fields (was just
-         * 5); fv() indices below must stay in lock-step with save_cb's APP_ADDR arm */
-        /* the name-like fields capitalise Each Word, the note only its first
-         * letter; Phone and Zip open the keypad when tapped. */
-        form_field(form,"Last",a.fields[F_name],40,&y);       /* fv0 */
-        field_mode(TA_CAP_WORDS, NULL);
-        form_field(form,"First",a.fields[F_firstName],40,&y); /* fv1 */
-        field_mode(TA_CAP_WORDS, NULL);
-        form_field(form,"Title",a.fields[F_title],40,&y);     /* fv2 */
-        field_mode(TA_CAP_WORDS, NULL);
-        form_field(form,"Company",a.fields[F_company],60,&y); /* fv3 */
-        field_mode(TA_CAP_WORDS, NULL);
-        form_field(form,"Phone",a.fields[F_phone1],40,&y);    /* fv4 */
-        field_mode(TA_KEYPAD, "Phone");
-        form_field(form,"Address",a.fields[F_address],60,&y); /* fv5 */
-        field_mode(TA_CAP_WORDS, NULL);
-        form_field(form,"City",a.fields[F_city],40,&y);       /* fv6 */
-        field_mode(TA_CAP_WORDS, NULL);
-        form_field(form,"State",a.fields[F_state],20,&y);     /* fv7 */
-        field_mode(TA_CAP_WORDS, NULL);
-        form_field(form,"Zip",a.fields[F_zip],20,&y);         /* fv8 */
-        field_mode(TA_KEYPAD, "Zip");
-        form_field(form,"Note",a.fields[F_note],200,&y);      /* fv9 */
-        field_mode(TA_CAP_FIRST, NULL);
-    } else if(cur_app->app == APP_MEMO){
+    {
         static char mtext[MEMO_CAP];
         if(!data_get_memo(uid, mtext, sizeof mtext)) mtext[0]=0;
         lv_obj_t *ta = lv_textarea_create(form);       /* one big multi-line field */
@@ -1888,7 +1208,7 @@ static void show_edit(uint32_t uid){
         lv_obj_add_event_cb(ta, ta_click_cb, LV_EVENT_CLICKED, NULL);
         g_fields[g_nfields++] = ta;
         field_mode(TA_CAP_FIRST, NULL);
-        /* The Planner: a checkbox button, because "[ ] " is four Graffiti
+        /* A checkbox button, because "[ ] " is four Graffiti
          * strokes, two of them punctuation, and nobody should have to know that
          * is how a checklist is written. It sits IN the action row, so the text
          * keeps the whole form: Done and Cancel give up 8 px each and the
@@ -1910,7 +1230,7 @@ static void show_edit(uint32_t uid){
     /* focus the first field so Graffiti has a target immediately */
     if(g_nfields > 0){ active_ta = g_fields[0]; lv_obj_add_state(g_fields[0], LV_STATE_FOCUSED); }
     g_edit_live = 1; g_edit_app = cur_app; g_edit_nf = g_nfields;
-    resume_view(RV_EDIT, uid, 0, 0, 0);
+    resume_view(RV_EDIT, uid);
 }
 
 /* HotSync screen (Sync Now + a status line polled from the background task) */
@@ -1998,12 +1318,12 @@ static void hs_confirm_open(void){
 
     /* Say what survives. The fear a confirmation has to answer is "will this
      * corrupt what it already did", and the honest answer is no -- it stops
-     * between collections, so finished ones stay finished. */
+     * between steps, and each cache is replaced whole or not at all. */
     lv_obj_t *body = lv_label_create(panel);
     lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(body, 180);
-    lv_label_set_text(body, "Anything already synced stays synced. "
-                            "It stops after the current item, so this "
+    lv_label_set_text(body, "Anything already fetched is kept. "
+                            "It stops after the current step, so this "
                             "can take a moment.");
     lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, DLG_TITLE_H + 16);
 
@@ -2081,45 +1401,27 @@ static void show_hotsync(void){
     lv_label_set_long_mode(hs_status, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(hs_status, LCD_W - 12);
     lv_obj_align(hs_status, LV_ALIGN_TOP_MID, 0, 56);
-    /* A finished sync's status is several lines -- clock, news, weather,
-     * location, and why the account was skipped -- and it grows DOWNWARDS from
+    /* A finished sync's status is several lines -- clock, news, weather and
+     * location -- and it grows DOWNWARDS from
      * here into the space the explanation above was using. That is why the
      * explanation goes away on the first tap rather than being made smaller. */
     lv_obj_set_style_text_align(hs_status, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(hs_status, hotsync_status());
 
-    /* what a sync will do RIGHT NOW, given what is configured. A sync doesn't
-     * need iCloud: the clock and the news need nothing but a network, and they
-     * are the two things that go stale fastest. So this says what you will get either way, and
-     * mentions the account as the thing that ADDS records, not as a precondition
-     * that is missing. It is read before the button is pressed, which is the
-     * moment the question is actually being asked. */
-    { const Config *cf = appcfg();
-      int acct = cf->dav_base[0] && cf->dav_user[0] && cf->dav_has_pass;
-      int coll = cf->cal_coll[0] || cf->todo_coll[0] || cf->card_coll[0];
-      g_hs_what = lv_label_create(content);
+    /* what a sync will do, read before the button is pressed, which is the
+     * moment the question is actually being asked. HotSync needs nothing but a
+     * network: no account, since the iCloud sync was archived (2026-11-07). */
+    { g_hs_what = lv_label_create(content);
       lv_obj_t *what = g_hs_what;
       lv_label_set_long_mode(what, LV_LABEL_LONG_WRAP);
       lv_obj_set_width(what, LCD_W - 16);
       lv_obj_set_style_text_align(what, LV_TEXT_ALIGN_CENTER, 0);
       lv_obj_align(what, LV_ALIGN_TOP_MID, 0, 88);
-      /* Three lines is the whole budget: the status line is above and the
-       * button is below. */
-      if(acct && coll)
-          lv_label_set_text(what, "Clock, news, weather, and your\n"
-                                  "calendar and contacts.");
-      else if(acct)
-          lv_label_set_text(what, "Clock and news. Settings > Sync\n"
-                                  "chooses which calendars to use.");
-      else
-          lv_label_set_text(what, "Clock and news. No account needed.\n"
-                                  "The records in the apps are samples\n"
-                                  "until Settings > Accounts has yours.");
+      lv_label_set_text(what, "Sets the clock, and fetches the\n"
+                              "news and the weather.");
       /* IT ANSWERS "what happens if I tap this", so it belongs to the moment
        * BEFORE the tap. Once a sync has run, the status line below is a result
-       * -- several lines of it -- and the two were drawn on top of each other.
-       * The answer is not to squeeze both in: it is that the question has been
-       * answered and the explanation has done its job. */
+       * -- several lines of it -- and the two were drawn on top of each other. */
       if(g_hs_ran || hotsync_busy()) lv_obj_add_flag(what, LV_OBJ_FLAG_HIDDEN);
     }
 
@@ -2135,267 +1437,19 @@ static void show_hotsync(void){
     hs_timer = lv_timer_create(hs_tick, 400, NULL);
 }
 
-/* ===================== Date Book: PalmOS Day + Month views =====================
- * A flat list of every event doesn't scale (and isn't how Palm works). Instead the
- * Date Book opens on a Day view -- one day's time-sorted agenda, naturally bounded
- * -- with prev/next-day nav and a Month view (a calendar grid, days-with-events
- * dotted) to jump anywhere. This mirrors DateBook's Day/Week/Month views. */
 static const char *CAL_MON[] = {"","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
-static const char *CAL_WD[]  = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
 
-static void cal_today(int *y,int *m,int *d){
-    time_t now=0; time(&now); struct tm t; localtime_r(&now,&t);
-    if(t.tm_year+1900 < 2024){ *y=2026; *m=1; *d=1; return; }
-    *y=t.tm_year+1900; *m=t.tm_mon+1; *d=t.tm_mday;
-}
-static int cal_wday(int y,int m,int d){
-    struct tm t={0}; t.tm_year=y-1900; t.tm_mon=m-1; t.tm_mday=d; t.tm_hour=12;
-    mktime(&t); return t.tm_wday;
-}
-static void cal_add_days(int *y,int *m,int *d,int delta){
-    struct tm t={0}; t.tm_year=*y-1900; t.tm_mon=*m-1; t.tm_mday=*d+delta; t.tm_hour=12;
-    time_t tt=mktime(&t); struct tm n; localtime_r(&tt,&n);
-    *y=n.tm_year+1900; *m=n.tm_mon+1; *d=n.tm_mday;
-}
-
-/* --- Day view --- */
-#define DAY_MAX 24                              /* events/day materialized (bounded) */
-typedef struct { uint32_t uid; char txt[92]; } DayRow;
-static DayRow g_dayrows[DAY_MAX];
-static int    g_ndayrows;
-static void day_collect(uint32_t uid,const char *primary,const char *secondary,void *ctx){
-    (void)secondary;(void)ctx;
-    if(g_ndayrows>=DAY_MAX) return;
-    g_dayrows[g_ndayrows].uid=uid;
-    snprintf(g_dayrows[g_ndayrows].txt,sizeof g_dayrows[0].txt,"%s",primary);
-    g_ndayrows++;
-}
-/* "HH:MM  desc" -> "6:00p  desc" under a 12-hour clock, in place. An untimed
- * event arrives as "--:--" and stays: it is already the right thing to read. */
-static void day_row_clock(char *txt, int cap){
-    if(appcfg()->clock24) return;                  /* already the wanted form */
-    int h, m;
-    if(sscanf(txt, "%2d:%2d", &h, &m) != 2) return;   /* "--:--", or not a time */
-    if(h < 0 || h > 23 || m < 0 || m > 59) return;
-    char hm[12]; fmt_hm(h, m, hm, sizeof hm);
-    /* Built in a local and copied back with an EXPLICIT precision: the rewrite
-     * is shorter than the original under a 12-hour clock and never longer, but
-     * gcc cannot know that and -Wformat-truncation is an error on the device. */
-    char out[160];
-    snprintf(out, sizeof out, "%s%s", hm, txt + 5);              /* past "HH:MM" */
-    snprintf(txt, cap, "%.*s", cap - 1, out);
-}
-static int day_cmp(const void *a,const void *b){
-    return strcmp(((const DayRow*)a)->txt,((const DayRow*)b)->txt);   /* "HH:MM " prefix => chrono */
-}
-static void day_prev_cb(lv_event_t *e){ (void)e; cal_add_days(&g_cal_y,&g_cal_m,&g_cal_d,-1); show_datebook_day(g_cal_y,g_cal_m,g_cal_d); }
-static void day_next_cb(lv_event_t *e){ (void)e; cal_add_days(&g_cal_y,&g_cal_m,&g_cal_d, 1); show_datebook_day(g_cal_y,g_cal_m,g_cal_d); }
-static void day_week_cb(lv_event_t *e){ (void)e; show_datebook_week(g_cal_y,g_cal_m,g_cal_d); }  /* zoom out to the week */
-static void day_new_cb(lv_event_t *e){ (void)e;
-    cur_app = &APPDEFS[0];          /* Date Book, so the form builds the event arm */
-    show_edit(0);
-}
-
-static void show_datebook_day(int y,int m,int d){
-    kill_kb();
-    g_cal_y=y; g_cal_m=m; g_cal_d=d;
-    cur_app=&APPDEFS[0]; cur_uid=0;     /* Date Book context (menu New/Categories) */
-    content_clear();
-    resume_view(RV_DAY, 0, y, m, d);
-    g_day_open = 1;
-    char t[36]; snprintf(t,sizeof t,"%s %d/%d",CAL_WD[cal_wday(y,m,d)],m,d);
-    lv_label_set_text(title_lbl,t);
-    update_cat_trigger();
-
-    lv_obj_t *prev=lv_button_create(content); lv_obj_set_size(prev,40,28); lv_obj_align(prev,LV_ALIGN_TOP_LEFT,2,2);
-    lv_obj_t *pl=lv_label_create(prev); lv_label_set_text(pl,"<"); lv_obj_center(pl);
-    lv_obj_add_event_cb(prev,day_prev_cb,LV_EVENT_CLICKED,NULL);
-    lv_obj_t *next=lv_button_create(content); lv_obj_set_size(next,40,28); lv_obj_align(next,LV_ALIGN_TOP_RIGHT,-2,2);
-    lv_obj_t *nl=lv_label_create(next); lv_label_set_text(nl,">"); lv_obj_center(nl);
-    lv_obj_add_event_cb(next,day_next_cb,LV_EVENT_CLICKED,NULL);
-    lv_obj_t *mon=lv_button_create(content); lv_obj_set_size(mon,130,28); lv_obj_align(mon,LV_ALIGN_TOP_MID,0,2);
-    lv_obj_t *ml=lv_label_create(mon); lv_label_set_text_fmt(ml,"%s %d, %d",CAL_MON[m],d,y); lv_obj_center(ml);
-    lv_obj_add_event_cb(mon,day_week_cb,LV_EVENT_CLICKED,NULL);   /* tap the date -> Week view */
-
-    g_ndayrows=0;
-    data_cal_day(y,m,d,day_collect,NULL);
-    qsort(g_dayrows,g_ndayrows,sizeof g_dayrows[0],day_cmp);
-    /* The data layer hands these over as "HH:MM  description", zero-padded so a
-     * lexical sort IS a chronological one -- which is why the rewrite happens
-     * here, after the sort, rather than there. The sortable form and the
-     * readable form are two different jobs, and the data layer owns the first. */
-    for(int i=0;i<g_ndayrows;i++) day_row_clock(g_dayrows[i].txt, sizeof g_dayrows[0].txt);
-
-    /* the list gives up its last row so New can be a FIXED button rather
-     * than the final entry in a scrolling list. A day with eight events would
-     * have pushed that entry below the fold, and "add an event" is the one
-     * thing on this screen that must never be hidden by how full the day is. */
-    lv_obj_t *list=lv_list_create(content);
-    lv_obj_set_size(list,LCD_W,FORM_FULL-30);
-    lv_obj_set_pos(list,0,34);
-    lv_obj_set_style_radius(list,0,0); lv_obj_set_style_border_width(list,0,0); lv_obj_set_style_pad_all(list,0,0);
-    if(g_ndayrows==0){
-        lv_obj_t *b=lv_list_add_button(list,NULL,"(no events)"); lv_obj_set_style_radius(b,0,0);
-    } else for(int i=0;i<g_ndayrows;i++){
-        lv_obj_t *b=lv_list_add_button(list,NULL,g_dayrows[i].txt);
-        lv_obj_set_style_radius(b,0,0);
-        lv_obj_add_event_cb(b,row_cb,LV_EVENT_CLICKED,(void*)(uintptr_t)g_dayrows[i].uid);
-    }
-
-    /* A new event lands on the day you are looking at, not on today --
-     * default_appt() already reads g_cal_*, which is what makes this button a
-     * one-tap answer to "something is happening on Thursday" rather than a
-     * date-correcting exercise. Until now New existed only under Menu, which
-     * is exactly the kind of thing nobody finds. */
-    lv_obj_t *nb=lv_button_create(content);
-    lv_obj_set_size(nb,LCD_W-8,26);
-    lv_obj_set_pos(nb,4,(PDA_H-TITLE_H)-28);
-    lv_obj_set_style_radius(nb,0,0);
-    lv_obj_t *nbl=lv_label_create(nb); lv_label_set_text(nbl,"New event"); lv_obj_center(nbl);
-    lv_obj_add_event_cb(nb,day_new_cb,LV_EVENT_CLICKED,NULL);
-}
-
-/* --- Week view (7-day agenda: one scrollable list, a count per day, today tinted).
- * Sits between Day and Month in the zoom hierarchy: tap a day row to zoom in to
- * that Day, tap the centre range label to zoom out to the Month. Pool-safe --
- * plain list buttons + labels, no draw-layer widgets. g_wk_* is the week start
- * (its Sunday) so prev/next page whole weeks. */
-static int g_wk_y, g_wk_m, g_wk_d;
-static struct { int y,m,d; } g_wkdays[7];
-static int g_wk_count;
-static void wk_count_cb(uint32_t uid,const char *p,const char *s,void *ctx){
-    (void)uid;(void)p;(void)s;(void)ctx; g_wk_count++;
-}
-static void wk_day_cb(lv_event_t *e){
-    int i=(int)(uintptr_t)lv_event_get_user_data(e);
-    show_datebook_day(g_wkdays[i].y,g_wkdays[i].m,g_wkdays[i].d);
-}
-static void week_prev_cb(lv_event_t *e){ (void)e; cal_add_days(&g_wk_y,&g_wk_m,&g_wk_d,-7); show_datebook_week(g_wk_y,g_wk_m,g_wk_d); }
-static void week_next_cb(lv_event_t *e){ (void)e; cal_add_days(&g_wk_y,&g_wk_m,&g_wk_d, 7); show_datebook_week(g_wk_y,g_wk_m,g_wk_d); }
-static void week_month_cb(lv_event_t *e){ (void)e; show_datebook_month(g_wk_y,g_wk_m); }
-
-static void show_datebook_week(int y,int m,int d){
-    kill_kb();
-    cur_app=&APPDEFS[0]; cur_uid=0;
-    /* snap (y,m,d) back to the Sunday that starts its week */
-    g_wk_y=y; g_wk_m=m; g_wk_d=d;
-    cal_add_days(&g_wk_y,&g_wk_m,&g_wk_d, -cal_wday(y,m,d));
-    content_clear();
-    resume_view(RV_WEEK, 0, y, m, d);
-    lv_label_set_text(title_lbl,"Week");
-    update_cat_trigger();
-
-    /* materialise the 7 days up front (used by the range label and each row) */
-    for(int i=0;i<7;i++){
-        g_wkdays[i].y=g_wk_y; g_wkdays[i].m=g_wk_m; g_wkdays[i].d=g_wk_d;
-        cal_add_days(&g_wkdays[i].y,&g_wkdays[i].m,&g_wkdays[i].d, i);
-    }
-
-    lv_obj_t *prev=lv_button_create(content); lv_obj_set_size(prev,38,28); lv_obj_align(prev,LV_ALIGN_TOP_LEFT,2,2);
-    lv_obj_t *pl=lv_label_create(prev); lv_label_set_text(pl,"<"); lv_obj_center(pl);
-    lv_obj_add_event_cb(prev,week_prev_cb,LV_EVENT_CLICKED,NULL);
-    lv_obj_t *next=lv_button_create(content); lv_obj_set_size(next,38,28); lv_obj_align(next,LV_ALIGN_TOP_RIGHT,-2,2);
-    lv_obj_t *nl=lv_label_create(next); lv_label_set_text(nl,">"); lv_obj_center(nl);
-    lv_obj_add_event_cb(next,week_next_cb,LV_EVENT_CLICKED,NULL);
-    lv_obj_t *rng=lv_button_create(content); lv_obj_set_size(rng,150,28); lv_obj_align(rng,LV_ALIGN_TOP_MID,0,2);
-    lv_obj_t *rl=lv_label_create(rng); lv_obj_center(rl);
-    if(g_wkdays[0].m==g_wkdays[6].m)
-        lv_label_set_text_fmt(rl,"%s %d-%d",CAL_MON[g_wkdays[0].m],g_wkdays[0].d,g_wkdays[6].d);
-    else
-        lv_label_set_text_fmt(rl,"%s %d - %s %d",CAL_MON[g_wkdays[0].m],g_wkdays[0].d,CAL_MON[g_wkdays[6].m],g_wkdays[6].d);
-    lv_obj_add_event_cb(rng,week_month_cb,LV_EVENT_CLICKED,NULL);   /* tap the range -> Month view */
-
-    int ty,tm,td; cal_today(&ty,&tm,&td);
-    lv_obj_t *list=lv_list_create(content);
-    lv_obj_set_size(list,LCD_W,FORM_FULL);
-    lv_obj_set_pos(list,0,34);
-    lv_obj_set_style_radius(list,0,0); lv_obj_set_style_border_width(list,0,0); lv_obj_set_style_pad_all(list,0,0);
-    for(int i=0;i<7;i++){
-        g_wk_count=0;
-        data_cal_day(g_wkdays[i].y,g_wkdays[i].m,g_wkdays[i].d,wk_count_cb,NULL);
-        char row[48];
-        if(g_wk_count==0)
-            snprintf(row,sizeof row,"%s %d/%d",CAL_WD[cal_wday(g_wkdays[i].y,g_wkdays[i].m,g_wkdays[i].d)],g_wkdays[i].m,g_wkdays[i].d);
-        else
-            snprintf(row,sizeof row,"%s %d/%d   %d event%s",
-                     CAL_WD[cal_wday(g_wkdays[i].y,g_wkdays[i].m,g_wkdays[i].d)],g_wkdays[i].m,g_wkdays[i].d,
-                     g_wk_count, g_wk_count==1?"":"s");
-        lv_obj_t *b=lv_list_add_button(list,NULL,row);
-        lv_obj_set_style_radius(b,0,0);
-        if(g_wkdays[i].y==ty && g_wkdays[i].m==tm && g_wkdays[i].d==td)
-            lv_obj_set_style_bg_color(b,COL_GRAF,0);   /* tint today's row (bg fill only -> pool-safe) */
-        lv_obj_add_event_cb(b,wk_day_cb,LV_EVENT_CLICKED,(void*)(uintptr_t)i);
-    }
-}
-
-/* --- Month view (lv_calendar: one light widget, days-with-events highlighted) --- */
-static lv_calendar_date_t g_cal_hl[31];   /* persists: LVGL keeps the pointer */
-static void month_pick_cb(lv_event_t *e){
-    lv_obj_t *cal=(lv_obj_t*)lv_event_get_current_target(e);
-    lv_calendar_date_t dd;
-    if(lv_calendar_get_pressed_date(cal,&dd)==LV_RESULT_OK)
-        show_datebook_day(dd.year,dd.month,dd.day);
-}
-static void month_prev_cb(lv_event_t *e){ (void)e; if(--g_cal_m<1){ g_cal_m=12; g_cal_y--; } show_datebook_month(g_cal_y,g_cal_m); }
-static void month_next_cb(lv_event_t *e){ (void)e; if(++g_cal_m>12){ g_cal_m=1;  g_cal_y++; } show_datebook_month(g_cal_y,g_cal_m); }
-static void month_today_cb(lv_event_t *e){ (void)e; int y,m,d; cal_today(&y,&m,&d); show_datebook_day(y,m,d); }
-
-static void show_datebook_month(int y,int m){
-    kill_kb();
-    g_cal_y=y; g_cal_m=m;
-    cur_app=&APPDEFS[0]; cur_uid=0;
-    content_clear();
-    resume_view(RV_MONTH, 0, y, m, 1);
-    lv_label_set_text(title_lbl,"Date Book");
-    update_cat_trigger();
-
-    lv_obj_t *prev=lv_button_create(content); lv_obj_set_size(prev,38,26); lv_obj_align(prev,LV_ALIGN_TOP_LEFT,2,2);
-    lv_obj_t *pl=lv_label_create(prev); lv_label_set_text(pl,"<"); lv_obj_center(pl);
-    lv_obj_add_event_cb(prev,month_prev_cb,LV_EVENT_CLICKED,NULL);
-    lv_obj_t *next=lv_button_create(content); lv_obj_set_size(next,38,26); lv_obj_align(next,LV_ALIGN_TOP_RIGHT,-2,2);
-    lv_obj_t *nl=lv_label_create(next); lv_label_set_text(nl,">"); lv_obj_center(nl);
-    lv_obj_add_event_cb(next,month_next_cb,LV_EVENT_CLICKED,NULL);
-    lv_obj_t *lbl=lv_label_create(content); lv_label_set_text_fmt(lbl,"%s %d",CAL_MON[m],y);
-    lv_obj_set_style_text_font(lbl,&lv_font_palm_bold,0); lv_obj_align(lbl,LV_ALIGN_TOP_MID,0,8);
-
-    lv_obj_t *cal=lv_calendar_create(content);
-    lv_obj_set_size(cal, LCD_W-6, FORM_FULL-30);
-    lv_obj_align(cal, LV_ALIGN_TOP_MID, 0, 32);
-    int ty,tm,td; cal_today(&ty,&tm,&td);
-    lv_calendar_set_today_date(cal,ty,tm,td);
-    lv_calendar_set_showed_date(cal,y,m);
-    uint8_t marks[32]; data_cal_month_marks(y,m,marks);
-    int n=0; for(int dd=1; dd<=31 && n<31; dd++) if(marks[dd]){ g_cal_hl[n].year=y; g_cal_hl[n].month=m; g_cal_hl[n].day=dd; n++; }
-    lv_calendar_set_highlighted_dates(cal, g_cal_hl, n);
-    lv_obj_add_event_cb(cal, month_pick_cb, LV_EVENT_VALUE_CHANGED, NULL);
-
-    lv_obj_t *tb=lv_button_create(content); lv_obj_set_size(tb,70,26); lv_obj_align(tb,LV_ALIGN_BOTTOM_MID,0,-2);
-    lv_obj_t *tl=lv_label_create(tb); lv_label_set_text(tl,"Today"); lv_obj_center(tl);
-    lv_obj_add_event_cb(tb,month_today_cb,LV_EVENT_CLICKED,NULL);
-}
-
-/* return to an app's main view after a record action (Day view for Date Book). */
+/* return to an app's main view after a record action. */
 static void app_reopen(const AppDef *a){
-    if(a && a->app==APP_CAL) show_datebook_day(g_cal_y,g_cal_m,g_cal_d);
-    else if(a)               list_view(a);
-    else                     show_launcher();
+    if(a) list_view(a);
+    else  show_launcher();
 }
 
 static void show_app(const char *name){
+    if(!strcmp(name, "Settings")){ show_settings(); return; }   /* it says resume_app itself */
     resume_app(name);
-    if(!strcmp(name, "Date Book")){                 /* PalmOS Day view, not a flat list */
-        data_set_category(-1);
-        int y,m,d; cal_today(&y,&m,&d);
-        show_datebook_day(y,m,d);
-        return;
-    }
     for(int i=0;i<NAPPDEFS;i++)
         if(!strcmp(name, APPDEFS[i].name)){ data_set_category(-1); list_view(&APPDEFS[i]); return; }
-    if(!strcmp(name, "Planner")){
-        data_set_category(-1);
-        list_view(g_planner_memo ? APPDEF_MEMO : APPDEF_TODO);
-        return;
-    }
     if(!strcmp(name, "HotSync")){ show_hotsync(); return; }
     if(!strcmp(name, "Graffiti")){ show_trainer(); return; }
     if(!strcmp(name, "News")){ show_news(); return; }
@@ -2403,6 +1457,7 @@ static void show_app(const char *name){
     if(!strcmp(name, "Coach")){ show_coach(); return; }
     if(!strcmp(name, "Guru")){ show_guru(); return; }
     if(!strcmp(name, "Study")){ show_study(); return; }
+    if(!strcmp(name, "Knowledge")){ show_knowledge(); return; }
     if(!strcmp(name, "Critters")){ show_critters(); return; }
     if(!strcmp(name, "Dex")){ show_dex(); return; }
     cur_app = NULL;
@@ -2414,12 +1469,11 @@ static void show_app(const char *name){
     lv_obj_center(l);
 }
 
-static void resume_view(int view, uint32_t uid, int y, int m, int d){
+static void resume_view(int view, uint32_t uid){
     g_resume.view   = (uint8_t)view;
     g_resume.stale  = 0;
     g_resume.appdef = cur_app ? (int8_t)(cur_app - APPDEFS) : -1;
     g_resume.uid    = uid;
-    g_resume.y = (int16_t)y; g_resume.m = (int8_t)m; g_resume.d = (int8_t)d;
 }
 static void show_find(void);
 /* What unlock shows: the view that was up when the lock went over it, else its
@@ -2436,12 +1490,8 @@ static void resume_show(void){
         case RV_LIST:   list_view(cur_app); return;
         case RV_DETAIL: if(there){ show_detail(u); return; } break;
         case RV_EDIT:
-            if(data_app_readonly(app)) break;
             if(!u || there){ show_edit(u); return; }
             break;
-        case RV_DAY:   show_datebook_day(g_resume.y, g_resume.m, g_resume.d); return;
-        case RV_WEEK:  show_datebook_week(g_resume.y, g_resume.m, g_resume.d); return;
-        case RV_MONTH: show_datebook_month(g_resume.y, g_resume.m); return;
         }
         app_reopen(cur_app);
         return;
@@ -3351,7 +2401,7 @@ static void news_seed_if_empty(void){
     if(!news_begin()) return;
     struct { const char *feed,*title,*body; } S[] = {
       {"CYD News","Palm PDA lives again","A base ESP32 CYD now runs a PalmOS-style "
-        "PDA that two-way syncs to iCloud -- and swipes through the news like this."},
+        "PDA that works offline -- and swipes through the news like this."},
       {"Tech","No PSRAM, no problem","The whole UI fits beside Wi-Fi and TLS in ~80 KB "
         "of heap by time-multiplexing: rich UI offline, a status line during HotSync."},
       {"Tech","Graffiti, recognised","A $1 unistroke recognizer turns strokes into "
@@ -3502,7 +2552,7 @@ static void show_news(void){
 }
 
 /* ONE icon cell, for BOTH icon grids -- the launcher's nine apps and Settings'
- * nine tiles. They were duplicated boilerplate that happened to agree, which is
+ * seven tiles. They were duplicated boilerplate that happened to agree, which is
  * the arrangement that drifts: the two grids are supposed to look identical
  * (Settings is an app, as Prefs was on Palm), so they are one function.
  *
@@ -3582,6 +2632,7 @@ static void show_launcher(void){
         if(APPS[i]){
             lv_obj_t *cell = icon_cell(grid, APP_ICONS[i], APPS[i], app_cb, (void *)APPS[i]);
             if(APP_ICONS[i] == &icon_study) st_badge(cell, st_glance_due());
+            if(APP_ICONS[i] == &icon_knowledge) st_badge(cell, st_glance_due_some(1));
             continue;
         }
         lv_obj_t *gap = lv_obj_create(grid);           /* a free slot, held open */
@@ -3676,17 +2727,12 @@ static lv_obj_t *tips_btn(lv_obj_t *par, const char *text){
     lv_obj_add_event_cb(b, tips_cb, LV_EVENT_CLICKED, (void *)text);
     return b;
 }
-static const char TIPS_DETAILS_CAL[] =
-    "\xC2\xB7 Alarm: when it's due, Reminders lists it, even if the screen was off.\n"
-    "\xC2\xB7 Repeat: each tap steps None, Daily, Weekly, Monthly, Yearly.\n"
-    "\xC2\xB7 On the Day view, write a number to start an event at that hour, "
-    "or a letter to start its description.";
 static const char TIPS_DETAILS[] =
     "\xC2\xB7 Category files this record; the list's category (top right) shows one at a time.\n"
     "\xC2\xB7 Tap a screen's title for its menu.";
 static const char TIPS_FIND[] =
-    "\xC2\xB7 Find looks in Date Book, Address, To Do and Memo for words that start "
-    "with what you write: \"the\" finds \"Then\", not \"Lathe\".\n"
+    "\xC2\xB7 Find looks in Memos for words that start with what you write: "
+    "\"the\" finds \"Then\", not \"Lathe\".\n"
     "\xC2\xB7 Tap a result to open it.";
 
 /* a transient, auto-dismissing confirmation (Palm-style). Unlike alert_show
@@ -3729,8 +2775,7 @@ static void toast_show(const char *msg){
  * already once pushed it past LVGL's 24 KB pool (see show_prefs), so they are
  * reached from Lock Screen instead. Without them the only way to set a weather
  * location was to pull the SD card and edit config.ini on a computer. */
-enum { PF_SSID, PF_WPASS, PF_USER, PF_PASS, PF_CALB, PF_CARDB,
-       PF_CAL, PF_TODO, PF_CARD, PF_TZ, PF_N,
+enum { PF_SSID, PF_WPASS, PF_TZ, PF_N,
        PF_LAT = PF_N, PF_LON, PF_OWNER,
        /* Wi-Fi slots 2..4. Slot 1 is PF_SSID/PF_WPASS above. These sit PAST
         * PF_N deliberately, like latitude and owner: everything below PF_N is
@@ -3739,8 +2784,7 @@ enum { PF_SSID, PF_WPASS, PF_USER, PF_PASS, PF_CALB, PF_CARDB,
         * the device-sized build). They are reached from the Wi-Fi tile. */
        PF_SSID2, PF_WPASS2, PF_SSID3, PF_WPASS3, PF_SSID4, PF_WPASS4, PF_MAX };
 static const char *PF_LABELS[PF_MAX] = {
-    "Wi-Fi SSID", "Wi-Fi pass", "Apple ID", "App pass", "CalDAV host",
-    "CardDAV host", "Calendar coll", "Reminders coll", "Address coll", "Time zone",
+    "Wi-Fi SSID", "Wi-Fi pass", "Time zone",
     "Latitude", "Longitude", "Owner name",
     "Network 2 name", "Network 2 pass", "Network 3 name", "Network 3 pass",
     "Network 4 name", "Network 4 pass",
@@ -3751,7 +2795,7 @@ static int pf_wifi_pass(int s){ return s == 0 ? PF_WPASS : PF_WPASS2 + (s-1)*2; 
 /* A password is never shown, anywhere, in any list. One predicate, because the
  * two list builders that mask them are not the only places that will ever ask. */
 static int pf_is_secret(int i){
-    return i == PF_PASS || i == PF_WPASS || i == PF_WPASS2
+    return i == PF_WPASS || i == PF_WPASS2
         || i == PF_WPASS3 || i == PF_WPASS4;
 }
 /* Which screen an edit returns to.
@@ -3764,15 +2808,9 @@ enum { RET_PREFS = -1, RET_DASH = -2, RET_WIFI = -3 };  /* >= 0 is a tile index 
 static int g_set_ret = RET_PREFS;
 static int g_wifi_slot;    /* which network's screen RET_WIFI goes back to */
 static void set_return(void);
-static const char *pol_name(int p){
-    return p==CFG_POL_LOCAL ? "device wins"
-         : p==CFG_POL_BOTH  ? "keep both"
-         :                    "iCloud wins";
-}
 /* Is a password stored for secret field i? The Config holds a flag, never the
  * password itself (appcfg.h). */
 static int pf_secret_set(const Config *c, int i){
-    if(i == PF_PASS) return c->dav_has_pass;
     for(int s = 0; s < CFG_WIFI_N; s++) if(i == pf_wifi_pass(s)) return c->wifi[s].has_pass;
     return 0;
 }
@@ -3785,12 +2823,6 @@ static char *pf_buf(Config *c, int i, int *cap){
         case PF_SSID2:  *cap=sizeof c->wifi[1].ssid; return c->wifi[1].ssid;
         case PF_SSID3:  *cap=sizeof c->wifi[2].ssid; return c->wifi[2].ssid;
         case PF_SSID4:  *cap=sizeof c->wifi[3].ssid; return c->wifi[3].ssid;
-        case PF_USER:  *cap=sizeof c->dav_user;      return c->dav_user;
-        case PF_CALB:  *cap=sizeof c->dav_base;      return c->dav_base;
-        case PF_CARDB: *cap=sizeof c->dav_card_base; return c->dav_card_base;
-        case PF_CAL:   *cap=sizeof c->cal_coll;      return c->cal_coll;
-        case PF_TODO:  *cap=sizeof c->todo_coll;     return c->todo_coll;
-        case PF_CARD:  *cap=sizeof c->card_coll;     return c->card_coll;
         case PF_TZ:    *cap=sizeof c->timezone;      return c->timezone;
         case PF_LAT:   *cap=sizeof c->latitude;      return c->latitude;
         case PF_LON:   *cap=sizeof c->longitude;     return c->longitude;
@@ -3809,10 +2841,6 @@ static void pf_edit_save_cb(lv_event_t *e){ (void)e;
     int wslot = -1;
     for(int s = 0; s < CFG_WIFI_N; s++) if(pf_edit_idx == pf_wifi_ssid(s)) wslot = s;
     int cap=0; char *dst = pf_buf(cfg, pf_edit_idx, &cap);
-    /* A DIFFERENT ACCOUNT STARTS READ-ONLY: its first syncs only read from it,
-     * whatever the last account was set to (config.h, read_only). */
-    int newAcct = pf_edit_idx == PF_USER && dst && strcmp(dst, lv_textarea_get_text(g_fields[0])) && !cfg->read_only;
-    if(newAcct) cfg->read_only = 1;
     if(wslot >= 0) appcfg_set_wifi_ssid(wslot, lv_textarea_get_text(g_fields[0]));
     else if(dst && cap) snprintf(dst, cap, "%s", lv_textarea_get_text(g_fields[0]));
     /* TYPING A COORDINATE PINS IT. Everything else that fills the location is a
@@ -3826,7 +2854,7 @@ static void pf_edit_save_cb(lv_event_t *e){ (void)e;
     }
     appcfg_save();            /* persist to SD now -> survives reboot */
     pf_edit_back();
-    toast_show(newAcct ? "New account: read-only for now" : "Saved");   /* same transient feedback as record save/delete */
+    toast_show("Saved");      /* same transient feedback as record save/delete */
 }
 
 /* on-screen keyboard for the Preferences fields. Entering a 19-character
@@ -4001,8 +3029,7 @@ static void secret_save_cb(lv_event_t *e){ (void)e;
     if(!g_secret) { pf_edit_back(); return; }
     if(!secret_len()){ pf_edit_back(); toast_show("Unchanged"); return; }
     int r = -1;
-    if(g_secret_idx == PF_PASS) r = appcfg_set_dav_pass(g_secret);
-    else for(int s = 0; s < CFG_WIFI_N; s++)
+    for(int s = 0; s < CFG_WIFI_N; s++)
         if(g_secret_idx == pf_wifi_pass(s)) r = appcfg_set_wifi_pass(s, g_secret);
     config_wipe(g_secret, 2 * SECRET_CAP);           /* now, not when the screen goes */
     appcfg_save();
@@ -4059,7 +3086,7 @@ static void show_secret_edit(int i){
 
 /* ---- News feeds manager (Preferences -> "News feeds...") --------------------
  * The RSS reader's sources: an lv_table (the pool-safe record-list widget) with a
- * checkbox column (tap col 0 = enable/disable, like To Do) and a name column (tap
+ * checkbox column (tap col 0 = enable/disable, like Guru's list) and a name column (tap
  * = edit). "Add" opens the same editor for a new feed. The URL is typed on the tap
  * keyboard (the Preferences field pattern); the name is auto-derived from the host.
  * The list persists to feeds.txt on every change, and HotSync fetches the enabled
@@ -4353,14 +3380,7 @@ static void pf_row_open_cb(lv_event_t *e){
     if(i == PF_TZ){ show_zone_picker(ZTGT_TZ); return; }   /* zone -> picker, not text entry */
     show_pref_edit(i);
 }
-static void pf_pol_row_cb(lv_event_t *e){ (void)e;
-    Config *c = appcfg_mut(); c->policy = (c->policy + 1) % 3; appcfg_save(); show_prefs();
-}
 static void pf_dash_row_cb(lv_event_t *e){ (void)e; show_dash_settings(); }
-static void pf_disc_row_cb(lv_event_t *e){ (void)e;
-    if(hotsync_busy()){ alert_show("A sync is in progress; try again in a moment."); return; }
-    show_discover();
-}
 static void pf_bright_row_cb(lv_event_t *e){ (void)e; br_open(); }
 static void pf_feeds_row_cb(lv_event_t *e){ (void)e; show_feeds(); }
 static void pf_saverow_cb(lv_event_t *e){ (void)e;
@@ -4407,11 +3427,8 @@ static void show_prefs(void){
         snprintf(row, sizeof row, "%s: %s", PF_LABELS[i], shown);
         pf_add(list, row, pf_row_open_cb, i);
     }
-    snprintf(row, sizeof row, "Conflicts: %s", pol_name(c->policy));
-    pf_add(list, row, pf_pol_row_cb, 0);
     snprintf(row, sizeof row, "Brightness: %d%%", c->brightness);
     g_pf_bright_btn = pf_add(list, row, pf_bright_row_cb, 0);
-    pf_add(list, "Discover collections...", pf_disc_row_cb, 0);
     snprintf(row, sizeof row, "News feeds... (%d on)", feeds_enabled_count());
     pf_add(list, row, pf_feeds_row_cb, 0);
     /* the lock-screen dashboard settings live behind ONE sub-screen row (like News
@@ -4422,25 +3439,24 @@ static void show_prefs(void){
     pf_add(list, "Save to config.ini", pf_saverow_cb, 0);
 }
 
-/* ============ Settings -- nine tiles instead of one long list ============
+/* ============ Settings -- tiles instead of one long list ============
  *
  * Menu > Preferences is now Menu > Settings, and it opens an icon grid rather
  * than a fourteen-row list. Two reasons, and the second is the real one:
  *
  *   * The list had outgrown the screen. Fourteen rows in a 184px content area
  *     is a scroll, and scrolling is the interaction this hardware is worst at
- *     (a resistive panel plus LVGL's drag threshold). Nine tiles fit outright.
- *   * A flat list of "Calendar coll" and "CardDAV host" asks the user to know
- *     what those ARE. Grouping them behind Accounts and Sync means a wizard can
- *     later ask a question instead of naming a field -- which is what the
- *     Wi-Fi, Accounts and Location wizards do. The grid is the seam that makes that replacement one tile at a
- *     time instead of one big rewrite.
+ *     (a resistive panel plus LVGL's drag threshold). Seven tiles fit outright.
+ *   * A flat list of field names asks the user to know what those ARE.
+ *     Grouping them behind tiles means a wizard can ask a question instead of
+ *     naming a field -- which is what the Wi-Fi and Location wizards do.
  *
  * The grid is show_launcher()'s geometry deliberately: same 68x52 cells, same
- * ROW_WRAP flex, same SPACE_EVENLY. Nine tiles land on the same centres as the
- * nine apps, which is why a Settings tile can be tapped at the coordinates the
+ * ROW_WRAP flex, same SPACE_EVENLY, so the tiles land on the same centres as
+ * the launcher's apps and a Settings tile can be tapped at the coordinates the
  * smoke script already uses for a launcher cell. It also means Settings LOOKS
- * like the launcher, which is the point -- on Palm, Prefs was an app.
+ * like the launcher, which is the point -- on Palm, Prefs was an app (and
+ * since 2026-11-07 it is the launcher's first tile).
  *
  * Home exits, as it does everywhere else. There is no Back button: a Back
  * button below the fold makes leaving the hardest thing on the screen, and the
@@ -4450,15 +3466,13 @@ static void show_prefs(void){
  * from a tile, but it stays reachable from Settings > About while the wizards
  * are still lists -- it is the one screen that can show every setting at once,
  * which is worth something when a config.ini is wrong and you need to see why. */
-enum { SET_WIFI, SET_ACCT, SET_NEWS, SET_TIME, SET_DISP,
-       SET_LOC, SET_SYNC, SET_OWNER, SET_ABOUT, SET_N,
-       /* Not a tile -- there are nine of those and there is no tenth icon.
-        * SET_ADVANCED is a panel reached only from Accounts, and it sits past
-        * SET_N so that everything iterating the grid stops before it. */
-       SET_ADVANCED, SET_PANEL_N };
+/* Seven tiles since 2026-11-07: Accounts and Sync went with the iCloud sync. */
+enum { SET_WIFI, SET_NEWS, SET_TIME, SET_DISP,
+       SET_LOC, SET_OWNER, SET_ABOUT, SET_N,
+       SET_PANEL_N = SET_N };
 static const char *SET_NAMES[SET_N] = {
-    "Wi-Fi", "Accounts", "News", "Date & Time", "Display",
-    "Location", "Sync", "Owner", "About",
+    "Wi-Fi", "News", "Date & Time", "Display",
+    "Location", "Owner", "About",
 };
 /* what the Assistant says when a tile opens. Each one says what the setting
  * IS FOR -- the thing you cannot work out from the field names, and the thing
@@ -4468,8 +3482,6 @@ static const char *SET_NAMES[SET_N] = {
 static const char *SET_BLURB[SET_N] = {
     /* Wi-Fi     */ "The networks this device joins. It remembers four and tries "
                     "the one that worked last, first.",
-    /* Accounts  */ "Your Apple ID, so the calendar and contacts here are the same "
-                    "ones on your phone.",
     /* News      */ "The feeds HotSync collects. They are read here, offline, and "
                     "need no account at all.",
     /* Date&Time */ "The clock, the zone it keeps, and the two world clocks on the "
@@ -4478,16 +3490,14 @@ static const char *SET_BLURB[SET_N] = {
                     "backlight is most of the battery.",
     /* Location  */ "Where you are, so the lock screen can show your weather. A "
                     "sync sharpens this unless you have set it yourself.",
-    /* Sync      */ "How much of your calendar HotSync keeps, which calendars "
-                    "it uses, and who wins when both sides changed.",
     /* Owner     */ "Your name, on the lock screen, so a device found on a desk "
                     "can be given back.",
     /* About     */ "What this is, what it was built from, and the licence it "
                     "ships under.",
 };
 static const lv_image_dsc_t *SET_ICONS[SET_N] = {
-    &icon_set_wifi, &icon_set_accounts, &icon_set_news, &icon_set_datetime,
-    &icon_set_display, &icon_set_location, &icon_set_sync, &icon_set_owner,
+    &icon_set_wifi, &icon_set_news, &icon_set_datetime,
+    &icon_set_display, &icon_set_location, &icon_set_owner,
     &icon_set_about,
 };
 static void show_settings(void);
@@ -4521,7 +3531,6 @@ static void sp_fmt_cb(lv_event_t *e){ (void)e;
     show_set_panel(SET_TIME);
 }
 static void sp_prefs_cb(lv_event_t *e){ (void)e; show_prefs(); }
-static void sp_advanced_cb(lv_event_t *e){ (void)e; show_set_panel(SET_ADVANCED); }
 /* Two states, so this is a toggle rather than a pick screen -- the pick screen
  * exists to show you options you are not on, and with two there is only one. */
 static void sp_locauto_cb(lv_event_t *e){ (void)e;
@@ -4529,11 +3538,6 @@ static void sp_locauto_cb(lv_event_t *e){ (void)e;
     c->loc_auto = !c->loc_auto;
     appcfg_save();
     show_set_panel(SET_LOC);
-}
-/* Discovery, opened from a tile: the tile records itself as the way back. */
-static void sp_disc_cb(lv_event_t *e){
-    g_set_ret = (int)(intptr_t)lv_event_get_user_data(e);
-    pf_disc_row_cb(e);
 }
 static void sp_tile_cb(lv_event_t *e){
     show_set_panel((int)(intptr_t)lv_event_get_user_data(e));
@@ -4731,10 +3735,10 @@ static void show_set_clock(void){
                "second later -- this is for getting there first.");
 }
 
-/* The date, on the calendar the Date Book already uses. ONE calendar widget in
- * the build, reached from two places: writing a second one is how the two end up
- * disagreeing about which event a tap means (see due_cal_cb's note on
- * lv_event_get_current_target -- that bug is not worth having twice). */
+/* The date, on LVGL's calendar. The tap is read off
+ * lv_event_get_current_target, not lv_event_get_target: the latter is the
+ * button matrix inside the calendar, and reading the date off it picks the
+ * wrong day. */
 static void date_cal_cb(lv_event_t *e){
     lv_obj_t *cal = (lv_obj_t *)lv_event_get_current_target(e);
     lv_calendar_date_t d;
@@ -4767,10 +3771,9 @@ static void show_set_date(void){
     /* The header's month arrows are LV_SYMBOL glyphs, which live in montserrat
      * and NOT in lv_font_palm -- and this calendar is in `content`, which
      * inherits the Palm font from the screen, so both arrows drew as empty
-     * boxes. (The Date Book's due-date calendar has always looked right for the
-     * accidental reason that it sits on lv_layer_top(), which inherits nothing
-     * and therefore falls back to montserrat. Same mechanism as the greeting
-     * pane's font; see spk_pane.) The day numbers stay in the Palm font. */
+     * boxes; cal_arrows() names montserrat for them. (Same mechanism as the
+     * greeting pane's font; see spk_pane.) The day numbers stay in the Palm
+     * font. */
     cal_arrows(cal);
     lv_obj_add_event_cb(cal, date_cal_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
@@ -4786,7 +3789,7 @@ static void show_set_date(void){
 static void sp_clock_cb(lv_event_t *e){ (void)e; show_set_clock(); }
 static void sp_date_cb(lv_event_t *e){ (void)e; show_set_date(); }
 
-/* ---- the choices behind Display, Sync and Location ------------------- */
+/* ---- the choices behind Display and Location ------------------------- */
 
 /* Backlight timeout. The values are the ones a person actually wants, not a
  * range: anything under 15 s blanks while you are reading, and "never" has to be
@@ -4810,76 +3813,6 @@ static void sp_backlight_cb(lv_event_t *e){ (void)e;
 static const char *bl_name(int secs){
     for(int i = 0; i < BL_N; i++) if(BL_SECS[i] == secs) return BL_NAMES[i];
     return "custom";       /* a hand-edited config.ini may hold anything */
-}
-
-/* Conflict policy. The names say what HAPPENS, not what the setting is called:
- * "server" and "local" are words about the implementation, and the question
- * being answered is "you changed this in two places -- now what". */
-static const char *const POL_NAMES[] = {
-    "iCloud wins", "This device wins", "Keep both copies",
-};
-static void pol_done(int i){
-    if(i >= 0 && i < 3){ appcfg_mut()->policy = i; appcfg_save(); }
-    show_set_panel(SET_SYNC);
-}
-/* To Do: the open tasks and those done lately, or the whole list (sync.h,
- * sync_set_todo_window). A list years old is thousands of finished tasks. */
-static const char *const TD_NAMES[] = { "Open, and done in 2 weeks", "Everything (slow)" };
-static void td_done(int i){
-    if(i == 0 || i == 1){ appcfg_mut()->todo_done_days = i == 0 ? 14 : 0; appcfg_save(); }
-    show_set_panel(SET_SYNC);
-}
-static void sp_td_pick_cb(lv_event_t *e){ (void)e;
-    pick_open("To Do", "Which tasks the device keeps. Finished ones older than "
-                       "that stay in iCloud, untouched.",
-              TD_NAMES, 2, appcfg()->todo_done_days > 0 ? 0 : 1, td_done);
-}
-/* Read-only: whether a sync may change the account at all. On for a new
- * account (config.h, read_only), so its first syncs only ever read. */
-static const char *const RO_NAMES[] = { "Read-only", "Send my changes" };
-static void ro_done(int i){
-    if(i == 0 || i == 1){ appcfg_mut()->read_only = (i == 0); appcfg_save(); }
-    show_set_panel(SET_SYNC);
-}
-static void sp_ro_pick_cb(lv_event_t *e){ (void)e;
-    pick_open("Changes", "Read-only: a sync copies from iCloud and never changes "
-                         "it; your edits wait here. Contacts are never sent: edit "
-                         "them on your phone. Nothing is ever deleted in iCloud.",
-              RO_NAMES, 2, appcfg()->read_only ? 0 : 1, ro_done);
-}
-static void sp_pol_pick_cb(lv_event_t *e){ (void)e;
-    pick_open("Conflicts", "When the same thing changed on both sides since the "
-                           "last sync, this decides which copy survives.",
-              POL_NAMES, 3, appcfg()->policy, pol_done);
-}
-
-/* How much of the calendar the device keeps: a window from yesterday on, not
- * the account's years of history (sync.h, sync_set_window). Tight by default,
- * because every event in it is fetched, kept and sorted on this device. */
-static const char *const WIN_NAMES[] = {
-    "The next 2 weeks", "The next month", "The next 3 months", "Everything (slow)",
-};
-static const int WIN_DAYS[] = { 14, 31, 92, 0 };
-static int win_index(int ahead){
-    for(int i = 0; i < 4; i++) if(WIN_DAYS[i] == ahead) return i;
-    return -1;                                   /* a value set in config.ini */
-}
-static void win_label(char *b, size_t n, int ahead){
-    int i = win_index(ahead);
-    if(i == 0)      snprintf(b, n, "Calendar: next 2 weeks");
-    else if(i == 1) snprintf(b, n, "Calendar: next month");
-    else if(i == 2) snprintf(b, n, "Calendar: next 3 months");
-    else if(i == 3) snprintf(b, n, "Calendar: everything");
-    else            snprintf(b, n, "Calendar: next %d days", ahead);
-}
-static void win_done(int i){
-    if(i >= 0 && i < 4){ appcfg_mut()->cal_ahead = WIN_DAYS[i]; appcfg_save(); }
-    show_set_panel(SET_SYNC);
-}
-static void sp_win_pick_cb(lv_event_t *e){ (void)e;
-    pick_open("Calendar", "How far ahead Date Book keeps your iCloud calendar. "
-                          "Events outside it stay in iCloud, untouched.",
-              WIN_NAMES, 4, win_index(appcfg()->cal_ahead), win_done);
 }
 
 /* Location, as a list of places. The zone table carries each city's coordinates
@@ -5169,7 +4102,7 @@ static void show_set_panel(int tile){
     kill_kb();
     cur_app = NULL; cur_uid = 0; g_nfields = 0;
     content_clear();
-    lv_label_set_text(title_lbl, tile < SET_N ? SET_NAMES[tile] : "Advanced");
+    lv_label_set_text(title_lbl, SET_NAMES[tile]);
     update_cat_trigger();
 
     lv_obj_t *list = lv_list_create(content);
@@ -5192,21 +4125,6 @@ static void show_set_panel(int tile){
             pf_add(list, row, wifi_row_cb, i);
         }
         break;
-    case SET_ACCT:
-        /* two things to type and then a button that finds the rest. The two
-         * server addresses moved behind "Advanced": they default to iCloud,
-         * nobody with an Apple ID ever needs them, and sitting in the account
-         * flow they read as two more required fields. */
-        sp_field_row(list, tile, PF_USER);
-        sp_field_row(list, tile, PF_PASS);
-        pf_add(list, "Find my calendars...", sp_disc_cb, SET_ACCT);
-        pf_add(list, "Advanced (server addresses)", sp_advanced_cb, 0);
-        break;
-    case SET_ADVANCED:
-        sp_field_row(list, SET_ACCT, PF_CALB);
-        sp_field_row(list, SET_ACCT, PF_CARDB);
-        break;
-
     case SET_TIME: {
         /* the clock itself comes FIRST. Everything under it describes how the
          * time is displayed; these two are the time. Six rows, which is what fits
@@ -5264,25 +4182,6 @@ static void show_set_panel(int tile){
         sp_field_row(list, tile, PF_LON);
         }
         break;
-    case SET_SYNC:
-        win_label(row, sizeof row, c->cal_ahead);
-        pf_add(list, row, sp_win_pick_cb, 0);
-        snprintf(row, sizeof row, "Conflicts: %s", pol_name(c->policy));
-        pf_add(list, row, sp_pol_pick_cb, 0);
-        snprintf(row, sizeof row, "Changes: %s", c->read_only ? "read-only" : "sent to iCloud");
-        pf_add(list, row, sp_ro_pick_cb, 0);
-        if(c->todo_done_days > 0) snprintf(row, sizeof row, "To Do: open + done %d days", c->todo_done_days);
-        else                      snprintf(row, sizeof row, "To Do: everything");
-        pf_add(list, row, sp_td_pick_cb, 0);
-        sp_field_row(list, tile, PF_CAL);
-        sp_field_row(list, tile, PF_TODO);
-        sp_field_row(list, tile, PF_CARD);
-        pf_add(list, "Discover collections...", sp_disc_cb, SET_SYNC);
-        /* Most edits persist as they are made (the editor saves on Save), but
-         * Discover writes straight into the in-memory config, so this row is
-         * still the one that commits its results to the card. */
-        pf_add(list, "Save to config.ini", pf_saverow_cb, 0);
-        break;
     case SET_OWNER:
         sp_field_row(list, tile, PF_OWNER);
         break;
@@ -5307,10 +4206,7 @@ static void show_set_panel(int tile){
     /* she explains what this tile is FOR, every time it opens -- this is the
      * panel's caption, not a greeting, so it is not rationed to once per unlock.
      * It costs the screen nothing: the strip has no job on a panel of buttons. */
-    assist_say(tile < SET_N ? SET_BLURB[tile]
-                            : "Where the calendars live. These are already right "
-                              "for an Apple account -- change them only for a "
-                              "server that is not iCloud.");
+    assist_say(SET_BLURB[tile]);
 }
 
 /* See the no-Wi-Fi note by hs_check_done(). The Assistant's line REPLACES the
@@ -5346,162 +4242,9 @@ static void show_settings(void){
         icon_cell(grid, SET_ICONS[i], SET_NAMES[i], sp_tile_cb, (void *)(intptr_t)i);
 
     /* the Assistant, once per unlock session, standing OVER the finished grid
-     * rather than in place of it -- so the greeting costs the nine tiles no room
+     * rather than in place of it -- so the greeting costs the tiles no room
      * and dismissing her rebuilds nothing. */
     assistant_greet();
-}
-
-/* ---- collection discovery screen (chunk 3) ----
- * Kicks off hotsync_discover_start() and polls hotsync_status(); when the run
- * finishes it lists the found collections. Tapping one assigns it to a role
- * (Calendar / Reminders / Address) in the in-memory config; the assignment is
- * persisted when the user taps Save back on the Preferences form. */
-static lv_obj_t *g_rolepop;
-static void rolepop_close(void){ if(g_rolepop){ lv_obj_del(g_rolepop); g_rolepop=NULL; } }
-static void rolepop_backdrop_cb(lv_event_t *e){ (void)e; rolepop_close(); }
-static void disc_show_results(void);
-
-/* user_data packs (index<<8)|role, role in {'c'=cal,'t'=todo,'a'=addr} */
-static void role_pick_cb(lv_event_t *e){
-    intptr_t v = (intptr_t)lv_event_get_user_data(e);
-    int idx = (int)(v>>8); char role = (char)(v & 0xff);
-    const DiscColl *dc = hotsync_discover_get(idx);
-    rolepop_close();
-    if(!dc) return;
-    Config *c = appcfg_mut();
-    if(role=='c')      snprintf(c->cal_coll,  sizeof c->cal_coll,  "%s", dc->href);
-    else if(role=='t') snprintf(c->todo_coll, sizeof c->todo_coll, "%s", dc->href);
-    else if(role=='a') snprintf(c->card_coll, sizeof c->card_coll, "%s", dc->href);
-    appcfg_save();         /* persist to SD now -> survives reboot */
-    disc_show_results();   /* redraw so the new [role] tag shows */
-}
-static void role_btn(lv_obj_t *par, const char *txt, int idx, char role){
-    lv_obj_t *b = lv_button_create(par);
-    lv_obj_set_width(b, lv_pct(100));
-    lv_obj_set_style_radius(b, 0, 0);
-    lv_obj_set_style_pad_ver(b, 4, 0);
-    lv_obj_t *l=lv_label_create(b); lv_label_set_text(l,txt); lv_obj_align(l,LV_ALIGN_LEFT_MID,2,0);
-    lv_obj_add_event_cb(b, role_pick_cb, LV_EVENT_CLICKED,
-                        (void*)(intptr_t)((idx<<8)|(unsigned char)role));
-}
-static void disc_row_cb(lv_event_t *e){
-    int idx = (int)(intptr_t)lv_event_get_user_data(e);
-    const DiscColl *dc = hotsync_discover_get(idx);
-    if(!dc || g_rolepop) return;
-
-    g_rolepop = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(g_rolepop, LCD_W, LCD_H);
-    lv_obj_set_style_bg_color(g_rolepop, COL_LINE, 0);
-    lv_obj_set_style_bg_opa(g_rolepop, LV_OPA_30, 0);
-    lv_obj_set_style_border_width(g_rolepop, 0, 0);
-    lv_obj_set_style_pad_all(g_rolepop, 0, 0);
-    lv_obj_add_flag(g_rolepop, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(g_rolepop, rolepop_backdrop_cb, LV_EVENT_CLICKED, NULL);
-
-    lv_obj_t *panel = lv_obj_create(g_rolepop);
-    lv_obj_set_width(panel, 180);
-    lv_obj_set_height(panel, LV_SIZE_CONTENT);
-    lv_obj_center(panel);
-    lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
-    lv_obj_set_style_border_width(panel, 1, 0);
-    lv_obj_set_style_border_color(panel, COL_LINE, 0);
-    lv_obj_set_style_radius(panel, 0, 0);
-    lv_obj_set_style_pad_all(panel, 4, 0);
-    lv_obj_set_style_pad_row(panel, 2, 0);
-    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
-
-    lv_obj_t *hdr = lv_label_create(panel);
-    lv_label_set_long_mode(hdr, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(hdr, 172);
-    lv_label_set_text_fmt(hdr, "Use \"%s\" as:", dc->name);
-    lv_obj_set_style_text_font(hdr, &lv_font_palm_bold, 0);
-
-    if(dc->kind=='c'){
-        role_btn(panel, "Calendar (Date Book)", idx, 'c');
-        role_btn(panel, "Reminders (To Do)",    idx, 't');
-    } else {
-        role_btn(panel, "Address book",         idx, 'a');
-    }
-}
-/* back to whoever opened discovery -- the Accounts tile, the Sync tile, or
- * the one-list view. It always went to the Preferences list before, which was
- * the only caller there was; now it is the wrong answer two times out of three. */
-static void disc_back_cb(lv_event_t *e){ (void)e; set_return(); }
-
-static void disc_show_results(void){
-    disc_built = 1;
-    if(disc_timer){ lv_timer_delete(disc_timer); disc_timer=NULL; }
-    content_clear();
-    int n = hotsync_discover_count();
-
-    lv_obj_t *back = lv_button_create(content);
-    lv_obj_set_size(back, 60, 28); lv_obj_align(back, LV_ALIGN_TOP_LEFT, 2, 2);
-    lv_obj_t *bl=lv_label_create(back); lv_label_set_text(bl,"Back"); lv_obj_center(bl);
-    lv_obj_add_event_cb(back, disc_back_cb, LV_EVENT_CLICKED, NULL);
-
-    if(n==0){
-        lv_obj_t *l = lv_label_create(content);
-        lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(l, LCD_W - 16);
-        lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
-        lv_label_set_text(l, hotsync_status());
-        lv_obj_align(l, LV_ALIGN_CENTER, 0, 0);
-        return;
-    }
-
-    lv_obj_t *hint = lv_label_create(content);
-    lv_obj_align(hint, LV_ALIGN_TOP_RIGHT, -6, 8);
-    lv_label_set_text(hint, "tap to assign");
-    assist_say("Your calendars and address books, as the account reports them. "
-               "Tap one to say what this device should use it for.");
-
-    lv_obj_t *list = lv_list_create(content);
-    lv_obj_set_size(list, LCD_W, FORM_FULL);
-    lv_obj_set_pos(list, 0, 34);
-    lv_obj_set_style_radius(list, 0, 0);
-    lv_obj_set_style_border_width(list, 0, 0);
-    lv_obj_set_style_pad_all(list, 0, 0);
-
-    const Config *c = appcfg();
-    for(int i=0;i<n;i++){
-        const DiscColl *dc = hotsync_discover_get(i);
-        const char *tag = "";
-        if(dc->href[0] && !strcmp(dc->href, c->cal_coll))       tag = "  [Calendar]";
-        else if(dc->href[0] && !strcmp(dc->href, c->todo_coll)) tag = "  [Reminders]";
-        else if(dc->href[0] && !strcmp(dc->href, c->card_coll)) tag = "  [Address]";
-        char buf[128];
-        snprintf(buf,sizeof buf, "%s %s%s", dc->kind=='a'?"(A)":"(C)", dc->name, tag);
-        lv_obj_t *b = lv_list_add_button(list, NULL, buf);
-        lv_obj_set_style_radius(b, 0, 0);
-        lv_obj_add_event_cb(b, disc_row_cb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
-    }
-}
-
-static void disc_tick(lv_timer_t *t){ (void)t;
-    if(hotsync_discover_busy()){
-        if(disc_status) lv_label_set_text(disc_status, hotsync_status());
-        return;
-    }
-    if(!disc_built) disc_show_results();   /* run finished -> show the list */
-}
-
-static void show_discover(void){
-    kill_kb();
-    cur_app = NULL; cur_uid = 0; disc_built = 0;
-    content_clear();
-    lv_label_set_text(title_lbl, "Discover");
-    update_cat_trigger();
-
-    hotsync_discover_start();
-
-    disc_status = lv_label_create(content);
-    lv_label_set_long_mode(disc_status, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(disc_status, LCD_W - 16);
-    lv_obj_set_style_text_align(disc_status, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(disc_status, LV_ALIGN_CENTER, 0, 0);
-    lv_label_set_text(disc_status, "Discovering...");
-    disc_timer = lv_timer_create(disc_tick, 400, NULL);
 }
 
 /* ------------------------- menu bar ------------------------- */
@@ -5524,7 +4267,6 @@ static void act_delete(lv_event_t *e){ (void)e;
     if(u) ask_delete(u);   /* shared confirm dialog */
 }
 static void act_categories(lv_event_t *e){ (void)e; menu_close(); cat_trigger_cb(NULL); }
-static void act_prefs(lv_event_t *e){ (void)e; menu_close(); show_settings(); }
 static void act_tr_reset(lv_event_t *e){ (void)e; menu_close(); tr_reset_progress(); show_trainer(); }
 /* Coach: the session length cycles through the four lengths people actually use,
  * so setting it costs one tap and needs no picker screen.
@@ -5561,6 +4303,8 @@ static void act_co_goal(lv_event_t *e){ (void)e;
 static void act_co_marks(lv_event_t *e){ (void)e; menu_close(); show_coach_marks(); }
 static void act_co_week(lv_event_t *e){ (void)e; menu_close(); show_coach_report(); }
 static void act_gu_week(lv_event_t *e){ (void)e; menu_close(); show_guru_report(); }
+static void gu_edit(int id);
+static void act_gu_new(lv_event_t *e){ (void)e; menu_close(); gu_edit(0); }
 
 /* Put an editable copy of the habit list on the card. Deliberately refuses to
  * overwrite: once the file exists, it is the user's, and "export" must never be
@@ -5586,52 +4330,6 @@ static void act_co_reset(lv_event_t *e){ (void)e; menu_close();
     show_coach();
 }
 static void act_ka_reset(lv_event_t *e){ (void)e; menu_close(); ka_reset_progress(); show_kana(); }
-static void act_toggle_done(lv_event_t *e){ (void)e; menu_close();
-    g_todo_show_done = !g_todo_show_done; if(cur_app) app_reopen(cur_app); }
-static void act_toggle_sort(lv_event_t *e){ (void)e; menu_close();
-    g_todo_sort_due = !g_todo_sort_due; if(cur_app) app_reopen(cur_app); }
-
-/* debug: seed 30 test appointments into the Date Book so a >24-record collection
- * can be pushed to iCloud to exercise the streaming reconcile. Each is a new
- * record (uid 0 => data layer assigns a fresh uniqueID); the next HotSync pushes
- * all of them up. Development scaffolding.
- *
- * Guarded by UI_SEED_TESTEVENTS rather than UI_DEVTOOLS, and that define is set
- * for SIM BUILDS ONLY. It was harmless while the sync could not complete; now
- * that two-way sync is on, one tap would push 30 fabricated appointments into
- * the real iCloud account, and the records it leaves behind are ordinary ones
- * that "Remove demo data" does not track. The sim UI tour still exercises it. */
-#ifdef UI_SEED_TESTEVENTS
-static void act_gentest(lv_event_t *e){ (void)e; menu_close();
-    time_t now=0; time(&now);
-    struct tm base; localtime_r(&now,&base);
-    if(base.tm_year+1900 < 2024){ base.tm_year=2026-1900; base.tm_mon=0; base.tm_mday=1; }
-    base.tm_hour=9; base.tm_min=0; base.tm_sec=0;
-    for(int i=0;i<30;i++){
-        struct tm t=base; t.tm_mday += i;
-        time_t tt=mktime(&t); struct tm nt; localtime_r(&tt,&nt);
-        Appt a; memset(&a,0,sizeof a);
-        a.year=nt.tm_year+1900; a.month=nt.tm_mon+1; a.day=nt.tm_mday;
-        a.hasTime=1; a.sH=9; a.sM=0; a.eH=10; a.eM=0;
-        snprintf(a.description,sizeof a.description,"Test event %d",i+1);
-        snprintf(a.note,sizeof a.note,"generated for streaming-sync test");
-        data_save_cal(0, 0, &a);
-    }
-    if(cur_app && cur_app->app==APP_CAL) list_view(cur_app);
-    alert_show("Added 30 test events to Date Book.\nHotSync to push them to iCloud.");
-}
-#endif /* UI_SEED_TESTEVENTS */
-
-/* remove the demo seed before the first HotSync, so Johnny Appleseed and the
- * fake meetings never get pushed into the user's real iCloud. Deletes only the
- * seeded records (the manifest tracks them); user edits/additions are kept. */
-static void act_remove_demo(lv_event_t *e){ (void)e; menu_close();
-    g_edit_live = 0;              /* a demo record's open form goes with it */
-    int n = data_remove_demo();
-    if(cur_app) app_reopen(cur_app); else show_launcher();
-    char msg[40]; snprintf(msg, sizeof msg, "Removed %d demo record%s", n, n==1?"":"s");
-    toast_show(msg);
-}
 
 static lv_obj_t *g_about;
 static void about_close(void){ if(g_about){ lv_obj_del(g_about); g_about=NULL; } }
@@ -5683,8 +4381,8 @@ static void act_about(lv_event_t *e){ (void)e;
         else if(err[0])      /* edited, and rejected -- say which line and why */
             snprintf(src, sizeof src, "Your guru.txt was not used: %s", err);
         else                 /* no file on the card: the ordinary case */
-            snprintf(src, sizeof src, "Menu > Export habit list puts "
-                                      "guru.txt on the card to edit.");
+            snprintf(src, sizeof src, "Edit a habit from its page, or add one "
+                                      "with Menu > New habit.");
         snprintf(gbuf, sizeof gbuf,
                  /* paragraphs only: the label wraps at its own width, and hard
                   * breaks tuned for one font break wrongly in another (these
@@ -5701,11 +4399,10 @@ static void act_about(lv_event_t *e){ (void)e;
     else {
         char abuf[320];
         snprintf(abuf, sizeof abuf,
-                 "A pocket PDA that syncs to iCloud. Offline "
-                 "by default. HotSync when you want to. No feed. "
-                 "No ads.\n\n"
-                 "Memos stay on this device. To Dos sync as "
-                 "CalDAV tasks, not the Reminders app.\n\n"
+                 "A pocket PDA. Offline by default. HotSync "
+                 "fetches the news and the weather when you "
+                 "want it. No feed. No ads.\n\n"
+                 "Memos stay on this device.\n\n"
                  "Version %s - tap to close", esp_app_get_description()->version);
         lv_label_set_text(body, abuf);
     }
@@ -5714,8 +4411,8 @@ static void act_about(lv_event_t *e){ (void)e;
 
 /* Palm reopens the menu on the item chosen last, for as long as the same form
  * is up. "The same form" is the screen's identity in the resume record (the app
- * and its view), not one drawing of it: Show Completed redraws the To Do list,
- * and the list is still the form the choice was made on. */
+ * and its view), not one drawing of it: a list redrawn by a menu choice is
+ * still the form the choice was made on. */
 static struct {
     lv_event_cb_t cb;
     char    app[sizeof g_resume.app];
@@ -5993,7 +4690,7 @@ static void menu_open(void){
     lv_obj_set_style_pad_row(panel, 2, 0);
     lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);   /* absorb clicks (don't close) */
 
-    if(cur_app && !data_app_readonly(cur_app->app)){
+    if(cur_app){
         menu_header(panel, "Record");
         menu_item(panel, "New", act_new);
         if(cur_uid) menu_item(panel, "Delete", act_delete);
@@ -6007,11 +4704,7 @@ static void menu_open(void){
     }
     menu_header(panel, "Options");
     if(cur_app) menu_item(panel, "Categories", act_categories);
-    if(cur_app && cur_app->app==APP_TODO){
-        menu_item(panel, g_todo_show_done ? "Hide Completed" : "Show Completed", act_toggle_done);
-        menu_item(panel, g_todo_sort_due ? "Sort by Priority" : "Sort by Due Date", act_toggle_sort);
-    }
-    menu_item(panel, "Settings", act_prefs);
+    /* No Settings item: Settings is the launcher's first tile now. */
     menu_item(panel, "Power", act_power);
     if(g_on_launcher) menu_item(panel, "Lock", act_lock);
     if(g_trainer_open)
@@ -6019,6 +4712,7 @@ static void menu_open(void){
     if(g_kana_open)
         menu_item(panel, "Reset progress", act_ka_reset);   /* Kana trainer only */
     if(g_gu_open){                                          /* Guru only */
+        menu_item(panel, "New habit", act_gu_new);
         menu_item(panel, "This week", act_gu_week);
         menu_item(panel, "Export habit list", act_gu_export);
     }
@@ -6049,40 +4743,21 @@ static void menu_open(void){
         menu_item(panel, "New game", act_mon_new);
         menu_item(panel, "Credits", act_mon_credits);
     }
-    if(data_demo_present())
-        menu_item(panel, "Remove demo data", act_remove_demo);
-#ifdef UI_SEED_TESTEVENTS
-    menu_item(panel, "Add test events", act_gentest);
-#endif
     menu_item(panel, "About", act_about);
     crt_sync();
 }
 
-/* ------------------------- Find (global search, silkscreen) -------------
- * Palm's Find scans every app for words that start with the query. A Graffiti query field drives
- * bridge/find.c's streaming search over all four PDBs; results list as
- * "<app>: <snippet>", and tapping one opens that record in its app. Re-runs
- * live per keystroke (small PDBs, interactive mode -> no TLS competing). */
+/* ------------------------- Find (search, silkscreen) -------------
+ * Palm's Find scans for words that start with the query. A Graffiti query
+ * field drives bridge/find.c's streaming search over Memos (the one database
+ * left since Date Book, Address and To Do were archived); each hit lists as
+ * its snippet, and tapping one opens the memo. Re-runs live per keystroke. */
 static FindHit *g_finds;
 static int      g_finds_n, g_finds_cap;
 static char     g_findq[40];
 static void free_finds(void){ free(g_finds); g_finds=NULL; g_finds_n=0; g_finds_cap=0; }
 
-/* pair each app's PDB with its FIND_* code (enum orders differ) */
-static const struct { int app, findapp; } FIND_DBS[] = {
-    { APP_CAL, FIND_CAL }, { APP_ADDR, FIND_ADDR },
-    { APP_TODO, FIND_TODO }, { APP_MEMO, FIND_MEMO },
-};
-static const char *find_app_label(int findapp){
-    return findapp==FIND_CAL ? "Date" : findapp==FIND_TODO ? "ToDo"
-         : findapp==FIND_ADDR ? "Addr" : "Memo";
-}
-static const AppDef *find_appdef(int findapp){
-    int a = findapp==FIND_CAL ? APP_CAL : findapp==FIND_TODO ? APP_TODO
-          : findapp==FIND_ADDR ? APP_ADDR : APP_MEMO;
-    for(int i=0;i<NAPPDEFS;i++) if(APPDEFS[i].app==a) return &APPDEFS[i];
-    return NULL;
-}
+
 static void find_collect_cb(const FindHit *h, void *ctx){
     (void)ctx;
     if(g_finds_n < g_finds_cap) g_finds[g_finds_n++] = *h;
@@ -6092,9 +4767,8 @@ static void find_click_cb(lv_event_t *e){
     uint32_t r=LV_TABLE_CELL_NONE, c=LV_TABLE_CELL_NONE;
     lv_table_get_selected_cell(t, &r, &c);
     if(r==LV_TABLE_CELL_NONE || (int)r >= g_finds_n) return;
-    const AppDef *ad = find_appdef(g_finds[r].app);
     uint32_t uid = g_finds[r].uid;         /* capture before kill_kb frees g_finds */
-    if(ad){ cur_app = ad; show_detail(uid); }
+    cur_app = APPDEF_MEMO; show_detail(uid);
 }
 static void build_find_results(void){
     free_finds();
@@ -6107,19 +4781,14 @@ static void build_find_results(void){
     lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_add_event_cb(t, find_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
-    if(!g_findq[0]){ lv_table_set_cell_value(t, 0, 0, "Type to search all apps"); return; }
+    if(!g_findq[0]){ lv_table_set_cell_value(t, 0, 0, "Write to search your memos"); return; }
     g_finds_cap = 60;
     g_finds = calloc(g_finds_cap, sizeof *g_finds);
     if(!g_finds){ lv_table_set_cell_value(t, 0, 0, "(low memory)"); return; }
-    for(int i=0;i<(int)(sizeof FIND_DBS/sizeof FIND_DBS[0]) && g_finds_n<g_finds_cap;i++)
-        find_in_pdb(data_db_path(FIND_DBS[i].app), FIND_DBS[i].findapp,
-                    g_findq, find_collect_cb, NULL);
+    find_in_pdb(data_db_path(APP_MEMO), FIND_MEMO, g_findq, find_collect_cb, NULL);
     if(g_finds_n==0){ lv_table_set_cell_value(t, 0, 0, "(no matches)"); return; }
-    for(int i=0;i<g_finds_n;i++){
-        char row[128];
-        snprintf(row, sizeof row, "%s: %s", find_app_label(g_finds[i].app), g_finds[i].snippet);
-        lv_table_set_cell_value(t, i, 0, row);
-    }
+    for(int i=0;i<g_finds_n;i++)
+        lv_table_set_cell_value(t, i, 0, g_finds[i].snippet);
 }
 static void findq_ta_cb(lv_event_t *e){
     lv_obj_t *ta = lv_event_get_target(e);
@@ -6310,9 +4979,9 @@ static void calc_open(void){
 }
 static void calc_cb(lv_event_t *e){ (void)e; calc_open(); }
 
-/* see ui.h: the Calculator (when not hidden under the lock) or the keypad */
+/* see ui.h: the Calculator, when not hidden under the lock */
 int ui_discrete_taps(void){
-    return (g_calc && !lv_obj_has_flag(g_calc, LV_OBJ_FLAG_HIDDEN)) || g_kp != NULL;
+    return g_calc && !lv_obj_has_flag(g_calc, LV_OBJ_FLAG_HIDDEN);
 }
 
 /* ------------------------- category picker ------------------------- */
@@ -6517,29 +5186,6 @@ static void details_close(void){ if(g_details){ lv_obj_del(g_details); g_details
 static void details_backdrop_cb(lv_event_t *e){ (void)e; details_close(); }
 static void details_pick_cb(lv_event_t *e){ edit_cat = (int)(intptr_t)lv_event_get_user_data(e); details_close(); set_editcat_label(); }
 
-/* Date Book Details: Alarm on/off + Repeat cycle. Plain buttons that relabel in
- * place (pool-safe); the picked state lives in g_ev_* until Save. */
-static lv_obj_t *g_ev_alarm_lbl, *g_ev_repeat_lbl;
-static void ev_alarm_cb(lv_event_t *e){ (void)e;
-    g_ev_alarm = !g_ev_alarm;
-    if(g_ev_alarm_lbl) lv_label_set_text_fmt(g_ev_alarm_lbl, "Alarm: %s", g_ev_alarm?"On":"Off");
-}
-static void ev_repeat_cb(lv_event_t *e){ (void)e;
-    g_ev_repeat = repeat_next(g_ev_repeat);
-    if(g_ev_repeat_lbl) lv_label_set_text_fmt(g_ev_repeat_lbl, "Repeat: %s", repeat_name(g_ev_repeat));
-}
-static lv_obj_t *details_row(lv_obj_t *panel, const char *txt, lv_event_cb_t cb){
-    lv_obj_t *b = lv_button_create(panel);
-    lv_obj_set_width(b, lv_pct(100));
-    lv_obj_set_style_radius(b, 0, 0);
-    lv_obj_set_style_pad_ver(b, 4, 0);
-    lv_obj_t *l = lv_label_create(b);
-    lv_label_set_text(l, txt);
-    lv_obj_align(l, LV_ALIGN_LEFT_MID, 2, 0);
-    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
-    return l;
-}
-
 /* Details dialog: choose the record's category (Palm's per-record Details). */
 static void details_open(void){
     if(!cur_app || g_details) return;
@@ -6567,19 +5213,8 @@ static void details_open(void){
     lv_obj_set_style_pad_all(panel, 4, 0);
     lv_obj_set_style_pad_row(panel, 2, 0);
     lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_t *ti = tips_btn(panel, cur_app->app == APP_CAL ? TIPS_DETAILS_CAL : TIPS_DETAILS);
+    lv_obj_t *ti = tips_btn(panel, TIPS_DETAILS);
     lv_obj_align(ti, LV_ALIGN_TOP_RIGHT, 0, 0);
-
-    if(cur_app->app == APP_CAL){    /* Date Book: alarm + repeat above the category */
-        lv_obj_t *eh = lv_label_create(panel);
-        lv_label_set_text(eh, "Event:");
-        lv_obj_set_style_text_font(eh, &lv_font_palm_bold, 0);
-        char buf[24];
-        snprintf(buf, sizeof buf, "Alarm: %s", g_ev_alarm?"On":"Off");
-        g_ev_alarm_lbl = details_row(panel, buf, ev_alarm_cb);
-        snprintf(buf, sizeof buf, "Repeat: %s", repeat_name(g_ev_repeat));
-        g_ev_repeat_lbl = details_row(panel, buf, ev_repeat_cb);
-    }
 
     lv_obj_t *hdr = lv_label_create(panel);
     lv_label_set_text(hdr, "Category:");
@@ -6599,263 +5234,6 @@ static void details_open(void){
         }
     }
 }
-
-/* ------------------------- To Do due-date picker ------------------------- */
-/* Palm's To Do due popup: quick options (Today / Tomorrow / One week / No Date)
- * plus a calendar for an arbitrary day. Modal overlay over the edit form (like
- * Details) so the typed Description/Note underneath survive the pick. */
-static lv_obj_t *g_duepop;
-static void due_close(void){ if(g_duepop){ lv_obj_del(g_duepop); g_duepop=NULL; } }
-static void due_backdrop_cb(lv_event_t *e){ (void)e; due_close(); }
-
-void due_set_label(void){
-    if(!g_due_lbl) return;
-    if(g_due_has) lv_label_set_text_fmt(g_due_lbl, "%d/%d/%d", g_due_m, g_due_d, g_due_y);
-    else          lv_label_set_text(g_due_lbl, "No Date");
-}
-
-/* quick options: 0=today 1=tomorrow 2=one week 3=no date */
-static void due_quick_cb(lv_event_t *e){
-    int which = (int)(intptr_t)lv_event_get_user_data(e);
-    if(which == 3){ g_due_has = 0; }
-    else {
-        time_t now = 0; time(&now);
-        struct tm tmv; localtime_r(&now, &tmv);
-        if(tmv.tm_year + 1900 < 2024){          /* clock unset: anchor to a sane date */
-            tmv.tm_year = 2026 - 1900; tmv.tm_mon = 0; tmv.tm_mday = 1;
-        }
-        now = mktime(&tmv);
-        now += (time_t)(which == 1 ? 1 : which == 2 ? 7 : 0) * 86400;
-        localtime_r(&now, &tmv);
-        g_due_has = 1;
-        g_due_y = tmv.tm_year + 1900; g_due_m = tmv.tm_mon + 1; g_due_d = tmv.tm_mday;
-    }
-    due_set_label(); due_close();
-}
-
-/* Days in a month, so a picked date can be checked before it is believed. */
-static int due_month_len(int y, int m){
-    static const uint8_t len[12] = {31,28,31,30,31,30,31,31,30,31,30,31};
-    if(m < 1 || m > 12) return 0;
-    if(m == 2 && ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0)) return 29;
-    return len[m - 1];
-}
-
-/* A day tapped on the calendar.
- *
- * MUST be lv_event_get_current_target(): the calendar's button matrix carries
- * LV_OBJ_FLAG_EVENT_BUBBLE, so the VALUE_CHANGED that arrives here was SENT to
- * the button matrix and only bubbled up to the calendar. lv_event_get_target()
- * therefore hands back the BUTTON MATRIX, and lv_calendar_get_pressed_date()
- * casts whatever it is given straight to lv_calendar_t * -- with
- * LV_USE_ASSERT_OBJ off (it is off in both builds) nothing catches the wrong
- * type, so it reads the button matrix's fields at the calendar's offsets and
- * returns a date assembled from unrelated memory. That is the "bad data": a
- * junk day, month and year written into the record as if they had been picked.
- * The Date Book's month view (month_pick_cb) has always used current_target;
- * this is the same event and wants the same call.
- *
- * The range check behind it is not redundant. It is the one thing standing
- * between a bogus date and the PDB, and it is cheap. */
-static void due_cal_cb(lv_event_t *e){
-    lv_obj_t *cal = (lv_obj_t *)lv_event_get_current_target(e);
-    lv_calendar_date_t d;
-    if(lv_calendar_get_pressed_date(cal, &d) != LV_RESULT_OK) return;
-    if(d.year < 1904 || d.year > 2100) return;      /* 1904 = the Palm epoch */
-    if(d.day < 1 || d.day > due_month_len(d.year, d.month)) return;
-    g_due_has = 1; g_due_y = d.year; g_due_m = d.month; g_due_d = d.day;
-    due_set_label(); due_close();
-}
-
-static void due_quick_btn(lv_obj_t *par, const char *txt, int which){
-    lv_obj_t *b = lv_button_create(par);
-    lv_obj_set_width(b, lv_pct(48));
-    lv_obj_set_style_radius(b, 0, 0);
-    lv_obj_set_style_pad_ver(b, 4, 0);
-    lv_obj_t *l = lv_label_create(b); lv_label_set_text(l, txt); lv_obj_center(l);
-    lv_obj_add_event_cb(b, due_quick_cb, LV_EVENT_CLICKED, (void *)(intptr_t)which);
-}
-
-void due_open(void){
-    if(g_duepop) return;
-    g_duepop = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(g_duepop, LCD_W, LCD_H);
-    lv_obj_set_style_bg_color(g_duepop, COL_LINE, 0);
-    lv_obj_set_style_bg_opa(g_duepop, LV_OPA_30, 0);
-    lv_obj_set_style_border_width(g_duepop, 0, 0);
-    lv_obj_set_style_pad_all(g_duepop, 0, 0);
-    lv_obj_add_flag(g_duepop, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(g_duepop, due_backdrop_cb, LV_EVENT_CLICKED, NULL);
-
-    lv_obj_t *panel = lv_obj_create(g_duepop);
-    lv_obj_set_width(panel, LCD_W - 20);
-    lv_obj_set_height(panel, LV_SIZE_CONTENT);
-    lv_obj_set_style_max_height(panel, LCD_H - 16, 0);
-    lv_obj_center(panel);
-    lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_style_flex_main_place(panel, LV_FLEX_ALIGN_SPACE_BETWEEN, 0);
-    lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
-    lv_obj_set_style_border_width(panel, 1, 0);
-    lv_obj_set_style_border_color(panel, COL_LINE, 0);
-    lv_obj_set_style_radius(panel, 0, 0);
-    lv_obj_set_style_pad_all(panel, 4, 0);
-    lv_obj_set_style_pad_row(panel, 3, 0);
-    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
-
-    lv_obj_t *hdr = lv_label_create(panel);
-    lv_obj_set_width(hdr, lv_pct(100));
-    /* The popup is shared, so its title is not: a To Do has a DUE date and an
-     * event just has a date. Reuse that renames the thing it is reused for is
-     * the kind of small wrongness nobody files a bug about and everybody reads. */
-    lv_label_set_text(hdr, g_due_optional ? "Due Date:" : "Date:");
-    lv_obj_set_style_text_font(hdr, &lv_font_palm_bold, 0);
-
-    due_quick_btn(panel, "Today",    0);
-    due_quick_btn(panel, "Tomorrow", 1);
-    due_quick_btn(panel, "1 Week",   2);
-    /* An event that is on no day is not an event. A To Do with no due date is
-     * an ordinary thing to want, so the button appears for one and not both. */
-    if(g_due_optional) due_quick_btn(panel, "No Date",  3);
-
-    /* calendar for an arbitrary day, seeded to the current due (or today) */
-    lv_obj_t *cal = lv_calendar_create(panel);
-    lv_obj_set_width(cal, lv_pct(100));
-    lv_obj_set_height(cal, 180);
-    int sy = g_due_has ? g_due_y : 2026, sm = g_due_has ? g_due_m : 1, sd = g_due_has ? g_due_d : 1;
-    time_t now = 0; time(&now); struct tm tmv;
-    localtime_r(&now, &tmv);
-    if(tmv.tm_year + 1900 >= 2024){
-        lv_calendar_set_today_date(cal, tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday);
-        if(!g_due_has){ sy = tmv.tm_year + 1900; sm = tmv.tm_mon + 1; sd = tmv.tm_mday; }
-    }
-    lv_calendar_set_showed_date(cal, sy, sm);
-    cal_arrows(cal);          /* LV_SYMBOL arrows: see cal_arrows() */
-    lv_obj_add_event_cb(cal, due_cal_cb, LV_EVENT_VALUE_CHANGED, NULL);
-    (void)sd;
-}
-static void due_btn_cb(lv_event_t *e){ (void)e; due_open(); }
-
-/* ==== the start time, picked from a list ===============================
- * Every half hour from 8:00 AM to 9:00 PM -- 27 rows. That is more than fits,
- * and it is allowed to be: design rule 2 bars a scrolling PAGE, and singles out
- * a scrolling LIST as the acceptable case, because a list drags predictably
- * where a page does not. The window covers the hours people put things in;
- * anything outside it is typed, which is the documented fallback and not the
- * default path.
- *
- * The popup is the due-date picker's own furniture -- a dimmed backdrop and a
- * centred panel on lv_layer_top() -- for the same reason the due date and the
- * event date share one calendar: two popups that merely resemble each other drift.
- */
-/* THE WHOLE DAY, every half hour: 48 rows.
- *
- * It was 8:00 AM to 9:00 PM with four stepper buttons above it for anything
- * outside that, and the steppers were worse than useless: they changed a label
- * on the form UNDERNEATH the modal, so you could not see what you were
- * adjusting, and there was still no way to commit except tapping a row on the
- * half hour. A control with no visible feedback and no way to finish is not a
- * control. Deleted -- and with them the reason the window was narrow. The list
- * is an lv_table now, which is virtualised, so 48 rows cost exactly what 27
- * did; the popup opens scrolled to the time the event already has, so the
- * common case is still no scrolling at all. */
-#define TIME_FIRST_H  0
-#define TIME_LAST_H  23
-#define TIME_ROWS    (((TIME_LAST_H - TIME_FIRST_H + 1) * 60) / 30)
-
-void time_set_label(void){
-    if(!g_time_lbl) return;
-    char hm[12]; fmt_hm(g_ev_h, g_ev_m, hm, sizeof hm);
-    lv_label_set_text(g_time_lbl, hm);
-}
-
-static lv_obj_t *g_timepop;
-static void time_close(void){ if(g_timepop){ lv_obj_del(g_timepop); g_timepop=NULL; } }
-static void time_backdrop_cb(lv_event_t *e){ (void)e; time_close(); }
-/* The row index IS the time: row 0 is TIME_FIRST_H:00 and every row is another
- * half hour, which is the same arithmetic the zone picker does with its row
- * index and needs no per-row user_data to carry. */
-static void time_tbl_cb(lv_event_t *e){
-    lv_obj_t *t = lv_event_get_target(e);
-    uint32_t r = LV_TABLE_CELL_NONE, c = LV_TABLE_CELL_NONE;
-    lv_table_get_selected_cell(t, &r, &c);
-    if(r == LV_TABLE_CELL_NONE) return;
-    if((int)r >= TIME_ROWS) return;
-    int mins = TIME_FIRST_H * 60 + (int)r * 30;
-    g_ev_h = mins / 60; g_ev_m = mins % 60;
-    time_set_label();
-    time_close();
-}
-static void time_open(void){
-    if(g_timepop) return;
-    g_timepop = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(g_timepop, LCD_W, LCD_H);
-    lv_obj_set_style_bg_color(g_timepop, COL_LINE, 0);
-    lv_obj_set_style_bg_opa(g_timepop, LV_OPA_30, 0);
-    lv_obj_set_style_border_width(g_timepop, 0, 0);
-    lv_obj_set_style_pad_all(g_timepop, 0, 0);
-    lv_obj_add_flag(g_timepop, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(g_timepop, time_backdrop_cb, LV_EVENT_CLICKED, NULL);
-
-    lv_obj_t *panel = lv_obj_create(g_timepop);
-    lv_obj_set_width(panel, LCD_W - 20);
-    lv_obj_set_height(panel, 190);      /* header + the table, and nothing else:
-                                           the four stepper buttons that used to
-                                           sit above it are gone */
-    lv_obj_center(panel);
-    lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_style_flex_main_place(panel, LV_FLEX_ALIGN_SPACE_BETWEEN, 0);
-    lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
-    lv_obj_set_style_border_width(panel, 1, 0);
-    lv_obj_set_style_border_color(panel, COL_LINE, 0);
-    lv_obj_set_style_radius(panel, 0, 0);
-    lv_obj_set_style_pad_all(panel, 4, 0);
-    lv_obj_set_style_pad_row(panel, 3, 0);
-    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
-
-    lv_obj_t *hdr = lv_label_create(panel);
-    lv_obj_set_width(hdr, lv_pct(100));
-    lv_label_set_text(hdr, "Start time:");
-    lv_obj_set_style_text_font(hdr, &lv_font_palm_bold, 0);
-
-    /* ONE lv_table, NOT 27 lv_list buttons.
-     *
-     * The first version of this screen was a list, and it crashed the device the
-     * moment the Time field was tapped. lv_list_add_button materialises a button
-     * AND a label per row -- 54 objects here -- on top of an edit form that is
-     * already built and must stay built underneath (the popup exists precisely
-     * so the typed description survives). That exhausts the 32 KB object pool,
-     * which is this project's oldest and most repeated failure: the record list
-     * hit it, the zone picker hit it at ~24 rows, the Preferences list hit it at
-     * three extra rows, and the brightness popup hit it hardest because it fails
-     * as a WDT freeze rather than an error. lv_table is VIRTUALISED -- one
-     * object whatever the row count -- and the zone picker's comment says so in
-     * as many words. I wrote the list anyway; the gate now measures the pool so
-     * the next one cannot get as far as the glass (see sim/host_main.c). */
-    lv_obj_t *t = lv_table_create(panel);
-    lv_obj_set_width(t, lv_pct(100));
-    lv_obj_set_height(t, 160);
-    list_table_style(t);
-    lv_table_set_column_width(t, 0, LCD_W - 34);
-    int row = 0;
-    for(int h = TIME_FIRST_H; h <= TIME_LAST_H; h++){
-        for(int m = 0; m < 60; m += 30){
-            char txt[16];
-            fmt_hm(h, m, txt, sizeof txt);
-            lv_table_set_cell_value(t, row++, 0, txt);
-        }
-    }
-    lv_obj_add_event_cb(t, time_tbl_cb, LV_EVENT_VALUE_CHANGED, NULL);
-
-    /* Open on the time the event already has. Without this a 48-row list opens
-     * at midnight and every edit begins with the same scroll; with it, the row
-     * you most likely want is the one under your thumb. The row height is the
-     * table's own -- font line plus the cell padding list_table_style sets --
-     * rather than a number typed here that would drift from the style. */
-    int cur = (g_ev_h * 60 + g_ev_m) / 30;
-    int rowh = lv_font_get_line_height(&lv_font_palm) + 4 + 4 + 1;  /* pads + rule */
-    if(cur > 2) lv_obj_scroll_to_y(t, (cur - 2) * rowh, LV_ANIM_OFF);
-}
-static void time_btn_cb(lv_event_t *e){ (void)e; time_open(); }
 
 /* ------------------------- Preferences: brightness stepper ------------------------- */
 /* A [ - ]  75%  [ + ] popup that live-adjusts the backlight and persists on close.
@@ -7136,10 +5514,10 @@ static void cmd_run(char c){
     if(c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
     switch(c){
     case 'n':
-        if(cur_app && !data_app_readonly(cur_app->app)){ toast_show("New"); show_edit(0); return; }
+        if(cur_app){ toast_show("New"); show_edit(0); return; }
         break;
     case 'd':
-        if(cur_app && cur_uid && !data_app_readonly(cur_app->app)){ ask_delete(cur_uid); return; }
+        if(cur_app && cur_uid){ ask_delete(cur_uid); return; }
         break;
     case 'u':
         if(edit_undo()){ toast_show("Undo"); return; }
@@ -7160,24 +5538,6 @@ static void show_punct(int on){
     } else {
         lv_obj_add_flag(graf_punct_lbl, LV_OBJ_FLAG_HIDDEN);
     }
-}
-/* Palm's Date Book: "just write a 3 to create an event that starts at 3:00".
- * On the Day view no field has focus, so a character written there used to go
- * nowhere. Now the first one opens New event on the day shown: a digit is the
- * start hour, read inside a waking day (1-7 are 1-7 pm, 8 and 9 am, 0 is 10
- * am), and a letter is the description's first letter, typed as usual. New
- * stays on the screen for whoever doesn't know this.
- * Returns 0 if c isn't for it, 1 if it was taken whole (a digit), 2 if the
- * form is open and c should be typed into it (a letter). */
-static int day_write_to_new(char c){
-    if(!g_day_open) return 0;
-    int digit = c >= '0' && c <= '9';
-    int letter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-    if(!digit && !letter) return 0;
-    if(digit){ int d = c - '0'; g_new_hour = d == 0 ? 10 : d <= 7 ? d + 12 : d; }
-    cur_app = &APPDEFS[0];
-    show_edit(0);
-    return digit ? 1 : 2;
 }
 /* user_data: 0 = letters (abc pad), 1 = digits (123 pad) */
 static void graf_up_cb(lv_event_t *e){
@@ -7207,8 +5567,7 @@ static void graf_up_cb(lv_event_t *e){
         if(g_secret && graf_case == CASE_SHIFT){ graf_case = CASE_NONE; show_case(); }
         return;
     }
-    if(!active_ta && day_write_to_new(c) != 2){ graf_case = CASE_NONE; show_case(); return; }
-    if(!active_ta) return;
+    if(!active_ta){ graf_case = CASE_NONE; show_case(); return; }
     undo_snap(active_ta);                              /* Edit > Undo takes this back */
     if(c == '\b'){                                     /* backspace: keep caps lock */
         lv_textarea_delete_char(active_ta);
@@ -7423,9 +5782,9 @@ static void clock_tick(lv_timer_t *t){
 /* ===================== Lock-screen dashboard ================================
  * A full-screen, info-dense glance view drawn in the mono Palm LCD: big clock,
  * two world times, cached weather (temp / rain / air + a 6-hour strip), battery,
- * next event + next due, sunrise/sunset, and the moon phase. It renders entirely
+ * Study's due reviews, sunrise/sunset, and the moon phase. It renders entirely
  * OFFLINE -- weather comes from an SD snapshot refreshed on HotSync (dash.c); the
- * clock/agenda/astronomy are computed on-device. Pool-safe: one I1 canvas for all
+ * clock and the astronomy are computed on-device. Pool-safe: one I1 canvas for all
  * the graphics (clock digits, moon, rain bars) plus flat labels; no draw-layer
  * widgets. Swipe up to unlock into the launcher. */
 #define DASH_CW LCD_W
@@ -7447,12 +5806,20 @@ static void clock_tick(lv_timer_t *t){
 #define DASH_Y_WX       106              /* CONDITIONS header                */
 #define DASH_H_WX       98               /*   ...closing rule at 204         */
 #define DASH_Y_AGENDA   208              /* AHEAD header                     */
-#define DASH_H_AGENDA   58               /*   ...closing rule at 266         */
-#define DASH_Y_ROW1     224              /* AHEAD's rows: NEXT, DUE, STUDY   */
-#define DASH_ROW_H      14
-#define DASH_ROW_VX     (DASH_MARGIN+50) /* their values' column             */
-#define DASH_Y_SUN      268              /* SUN & MOON header, open-bottomed */
-#define DASH_H_SUN      36
+#define DASH_H_AGENDA   32               /*   ...closing rule at 240         */
+#define DASH_Y_ROW1     223              /* AHEAD's one row: STUDY           */
+#define DASH_ROW_VX     (DASH_MARGIN+50) /* its value's column               */
+/* AHEAD had three rows (NEXT, DUE, STUDY) until Date Book and To Do were
+ * archived (2026-11-07). The 28 px it gave up went to SUN & MOON, which had
+ * been squeezed onto one line: now the sun has a line, the moon a line (its
+ * phase by name), and the disc is bigger. */
+#define DASH_Y_SUN      242              /* SUN & MOON header, open-bottomed */
+#define DASH_H_SUN      62
+#define DASH_Y_SUNROW   259              /* Rise / Set                       */
+#define DASH_Y_MOONROW  279              /* the phase and how much is lit    */
+#define DASH_MOON_CX    214              /* the disc, at the zone's right    */
+#define DASH_MOON_CY    280
+#define DASH_MOON_R     15
 
 /* content baselines inside the weather zone. It gives 14 px to AHEAD's
  * STUDY row: the air quality sits beside the reading (and shortens, or goes,
@@ -7643,13 +6010,17 @@ static void world_tag(const char *zone, char *out, int cap){
     out[n]=0;
 }
 
-/* moon disc: illuminated fraction k=illum/100, lit on the right when waxing. */
+/* moon disc: illuminated fraction k=illum/100, lit on the right when waxing.
+ * The terminator on each row sits at xt: everything right of it is lit while
+ * waxing (left of -xt while waning). k=0 puts it at +span (nothing lit), k=1
+ * at -span (all lit). It had the sign the other way round until 2026-11-07, so
+ * a thin crescent drew as a nearly full disc and a full moon as a dark one. */
 static void dash_moon_draw(int cx,int cy,int r,int illum,int waxing){
     double k = illum/100.0;
     for(int dy=-r; dy<=r; dy++){
         double span = (r*r - dy*dy);
         span = span>0 ? sqrt(span) : 0;
-        double xt = span*(2.0*k - 1.0);
+        double xt = span*(1.0 - 2.0*k);
         for(int dx=-r; dx<=r; dx++){
             double dist = sqrt((double)(dx*dx + dy*dy));
             if(dist > r+0.5) continue;
@@ -7657,82 +6028,6 @@ static void dash_moon_draw(int cx,int cy,int r,int illum,int waxing){
             if(dist > r-0.9 || !lit) dpx(cx+dx, cy+dy);   /* outline + shadow are ink */
         }
     }
-}
-
-/* soonest upcoming appointment -> "2:30p  Dentist" (1 if found), a repeating
- * one at its next occurrence (appt_next_on), within the year ahead. */
-typedef struct { long best; char line[64]; int found; } NextEv;
-static void next_ev_cb(uint32_t uid,const char *pri,const char *sec,void *ctx){
-    (void)pri; (void)sec;
-    NextEv *n = ctx;
-    Appt a;
-    if(!data_get_cal(uid,&a)) return;
-    if(a.year < 2000) return;
-    {   /* the next occurrence from today (a timed one already begun today: from tomorrow) */
-        time_t now0=0; time(&now0); struct tm nt; localtime_r(&now0,&nt);
-        int y=nt.tm_year+1900, m=nt.tm_mon+1, d=nt.tm_mday, oy,om,od;
-        if(!appt_next_on(&a,y,m,d,366,&oy,&om,&od)) return;
-        if(a.hasTime && oy==y && om==m && od==d && (a.sH*60+a.sM) < nt.tm_hour*60+nt.tm_min){
-            appt_add_days(&y,&m,&d,1);
-            if(!appt_next_on(&a,y,m,d,366,&oy,&om,&od)) return;
-        }
-        a.year=oy; a.month=om; a.day=od;
-    }
-    struct tm ti; memset(&ti,0,sizeof ti);
-    ti.tm_year=a.year-1900; ti.tm_mon=a.month-1; ti.tm_mday=a.day;
-    ti.tm_hour=a.hasTime?a.sH:0; ti.tm_min=a.hasTime?a.sM:0; ti.tm_isdst=-1;
-    time_t t = mktime(&ti);
-    time_t now=0; time(&now);
-    if(a.hasTime){
-        if(t < now) return;                     /* timed event already started/passed */
-    } else {                                    /* all-day: keep only today or later */
-        struct tm nt; localtime_r(&now,&nt);
-        long ad = (a.year*10000L)+(a.month*100L)+a.day;
-        long nd = ((nt.tm_year+1900)*10000L)+((nt.tm_mon+1)*100L)+nt.tm_mday;
-        if(ad < nd) return;
-    }
-    if(n->found && t >= n->best) return;
-    n->best=(long)t; n->found=1;
-    if(a.hasTime){
-        char hm[12]; fmt_hm(a.sH, a.sM, hm, sizeof hm);
-        snprintf(n->line,sizeof n->line,"%s  %.40s", hm, a.description);
-    } else {
-        snprintf(n->line,sizeof n->line,"all day  %.40s",a.description);
-    }
-}
-static int dash_next_event(char *out,int cap){
-    NextEv n; n.best=0; n.found=0; n.line[0]=0;
-    data_datebook(next_ev_cb,&n);
-    if(!n.found) return 0;
-    snprintf(out,cap,"%s",n.line); return 1;
-}
-
-/* soonest-due incomplete to-do (overdue sorts first) -> "Today  Pay rent". */
-typedef struct { long best; char line[64]; int found; } NextTd;
-static void next_td_cb(uint32_t uid,const char *pri,const char *sec,void *ctx){
-    (void)pri; (void)sec;
-    NextTd *n = ctx;
-    Todo t;
-    if(!data_get_todo(uid,&t)) return;
-    if(t.completed || !t.hasDue) return;
-    struct tm ti; memset(&ti,0,sizeof ti);
-    ti.tm_year=t.dueY-1900; ti.tm_mon=t.dueM-1; ti.tm_mday=t.dueD; ti.tm_isdst=-1;
-    time_t due = mktime(&ti);
-    if(n->found && due >= n->best) return;
-    n->best=(long)due; n->found=1;
-    time_t now=0; time(&now); struct tm nt; localtime_r(&now,&nt);
-    const char *when;
-    char wb[16];
-    if(t.dueY==nt.tm_year+1900 && t.dueM==nt.tm_mon+1 && t.dueD==nt.tm_mday) when="Today";
-    else if(due < now){ when="Overdue"; }
-    else { struct tm dt; localtime_r(&due,&dt); snprintf(wb,sizeof wb,"%s %d",CAL_MON[t.dueM],t.dueD); when=wb; }
-    snprintf(n->line,sizeof n->line,"%s  %.40s",when,t.description);
-}
-static int dash_next_due(char *out,int cap){
-    NextTd n; n.best=0; n.found=0; n.line[0]=0;
-    data_todo(next_td_cb,&n);
-    if(!n.found) return 0;
-    snprintf(out,cap,"%s",n.line); return 1;
 }
 
 /* a small left-aligned label on the overlay at (x,y), Palm font, optional bold. */
@@ -7966,115 +6261,11 @@ static void dash_paint(void){
     /* moon disc (far right, clear of its label) */
     { int illum=0,wax=1;
       dash_moon(now,&illum,&wax,NULL);
-      dash_moon_draw(222,292,10,illum,wax); }
+      dash_moon_draw(DASH_MOON_CX,DASH_MOON_CY,DASH_MOON_R,illum,wax); }
 
     /* one invalidate for the whole canvas, instead of one per pixel */
     lv_obj_invalidate(g_dash_cv);
 }
-
-/* ---- reminders: Palm's Attention Manager, without the sound ---------------
- * An event's alarm used to be synced and kept and never shown: there's no
- * speaker. Palm's answer to "the handheld was off all day" was one list of
- * every reminder that came due, dismissed together, instead of a pile of
- * alerts. That needs no sound. Each wake (the lock is refreshed then) and
- * every 30 s while the screen is lit, the alarms due since the last look are
- * listed in one box over whatever is showing, the lock included. Like Palm's,
- * it's dismissed only by its OK: a stray tap mustn't lose a reminder nobody
- * read. The rows live in the box's labels; nothing stays resident but the
- * time of the last look. */
-#define REM_MAX 8
-static lv_obj_t *g_rem_box, *g_rem_list;
-static int       g_rem_n;
-static time_t    g_rem_seen;                 /* alarms up to here have been shown */
-#ifdef UI_DEVTOOLS
-static int32_t   g_rem_skew;                 /* the tour's clock, ahead of the real one */
-#endif
-static void rem_close_cb(lv_event_t *e){ (void)e;
-    if(g_rem_box){ lv_obj_del(g_rem_box); g_rem_box = g_rem_list = NULL; }
-    g_rem_n = 0;
-}
-static void rem_open(void){
-    g_rem_box = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(g_rem_box, LCD_W, LCD_H);
-    lv_obj_set_style_bg_color(g_rem_box, COL_LINE, 0);
-    lv_obj_set_style_bg_opa(g_rem_box, LV_OPA_30, 0);
-    lv_obj_set_style_border_width(g_rem_box, 0, 0);
-    lv_obj_set_style_radius(g_rem_box, 0, 0);
-    lv_obj_set_style_pad_all(g_rem_box, 0, 0);
-    lv_obj_add_flag(g_rem_box, LV_OBJ_FLAG_CLICKABLE);       /* absorbs taps; OK only */
-    lv_obj_t *p = lv_obj_create(g_rem_box);
-    lv_obj_set_width(p, 220);
-    lv_obj_set_height(p, LV_SIZE_CONTENT);
-    lv_obj_center(p);
-    lv_obj_set_style_bg_color(p, COL_BODY, 0);
-    lv_obj_set_style_border_width(p, 1, 0);
-    lv_obj_set_style_border_color(p, COL_LINE, 0);
-    lv_obj_set_style_radius(p, 0, 0);
-    lv_obj_set_style_pad_all(p, 10, 0);
-    lv_obj_set_style_pad_top(p, DLG_TITLE_H + 6, 0);
-    lv_obj_set_flex_flow(p, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(p, 8, 0);
-    lv_obj_clear_flag(p, LV_OBJ_FLAG_SCROLLABLE);
-    dlg_title(p, 220, 10, DLG_TITLE_H + 6, "Reminders");
-    g_rem_list = lv_obj_create(p);                         /* one row per reminder */
-    lv_obj_set_size(g_rem_list, 200, LV_SIZE_CONTENT);
-    lv_obj_set_style_border_width(g_rem_list, 0, 0);
-    lv_obj_set_style_pad_all(g_rem_list, 0, 0);
-    lv_obj_set_style_pad_row(g_rem_list, 4, 0);
-    lv_obj_set_flex_flow(g_rem_list, LV_FLEX_FLOW_COLUMN);
-    lv_obj_clear_flag(g_rem_list, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *ok = lv_button_create(p);
-    lv_obj_set_size(ok, 60, 28);
-    lv_obj_t *ol = lv_label_create(ok); lv_label_set_text(ol, "OK"); lv_obj_center(ol);
-    lv_obj_add_event_cb(ok, rem_close_cb, LV_EVENT_CLICKED, NULL);
-}
-/* one reminder: "HH:MM  desc" and its day from the data layer; the time as
- * the clock reads, and the day too when it isn't today (a long sleep, or an
- * alarm a day ahead of its event) */
-static void rem_row(uint32_t uid, const char *pri, const char *sec, void *ctx){
-    (void)uid; (void)ctx;
-    if(g_rem_n >= REM_MAX) return;
-    if(!g_rem_box) rem_open();
-    int h = 0, m = 0, y = 0, mo = 0, d = 0;
-    char hm[12] = "", when[40] = "";   /* room for any int (-Werror=format-truncation) */
-    if(sscanf(pri, "%2d:%2d", &h, &m) == 2) fmt_hm(h, m, hm, sizeof hm);
-    int ty, tm, td; cal_today(&ty, &tm, &td);
-    if(sec && sscanf(sec, "%d-%d-%d", &y, &mo, &d) == 3 && (y != ty || mo != tm || d != td))
-        snprintf(when, sizeof when, "%s %d/%d ", CAL_WD[cal_wday(y, mo, d)], mo, d);
-    const char *desc = strlen(pri) > 7 ? pri + 7 : "";
-    lv_obj_t *l = lv_label_create(g_rem_list);
-    lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(l, 200);
-    lv_label_set_text_fmt(l, "%s%s  %s", when, hm, desc[0] ? desc : "(no description)");
-    g_rem_n++;
-}
-static void rem_check_span(time_t from, time_t to){
-    if(to <= from) return;
-    g_rem_seen = to;
-    data_cal_alarms(from, to, rem_row, NULL);
-}
-/* What came due since the last look. The first look after boot only sets the
- * mark: what came due before the device was on is not a wake's to report. A
- * clock not yet set reports nothing; Coach's session owns the screen and the
- * reminders wait for it. */
-static void rem_check(void){
-    time_t now = time(NULL);
-#ifdef UI_DEVTOOLS
-    now += g_rem_skew;
-#endif
-    struct tm t; localtime_r(&now, &t);
-    if(t.tm_year + 1900 < 2024 || co_owns_screen()) return;
-    if(!g_rem_seen){ g_rem_seen = now; return; }
-    rem_check_span(g_rem_seen, now);
-}
-static void rem_tick(lv_timer_t *tm){ (void)tm; if(!power_screen_off()) rem_check(); }
-#ifdef UI_DEVTOOLS
-void ui_test_reminders(int32_t back, int32_t ahead){
-    time_t now = time(NULL) + g_rem_skew;
-    g_rem_skew += ahead;
-    rem_check_span(now - back, now + ahead);
-}
-#endif
 
 void ui_show_lock(void){
     /* COACH OWNS THE SCREEN: while a session runs the mark and the countdown are
@@ -8084,7 +6275,7 @@ void ui_show_lock(void){
      * answered by the dashboard -- and content_clear() below would have deleted
      * "how did it go" on the way past. */
     if(co_owns_screen()) return;
-    if(g_lock){ dash_paint(); rem_check(); return; }   /* already showing -> just refresh */
+    if(g_lock){ dash_paint(); return; }   /* already showing -> just refresh */
     /* the lock is a child of the SCREEN, and the Calculator (like every
      * modal) lives on lv_layer_top(), which LVGL always draws above the screen
      * -- so the lock would come up UNDERNEATH an open calculator. Hide it
@@ -8104,9 +6295,7 @@ void ui_show_lock(void){
     about_close();
     confirm_close();
     alert_close();
-    rolepop_close();
     details_close();
-    due_close();
     br_close();
     hs_confirm_close();
     /* Free whatever app view is in the content area first. The lock covers the whole
@@ -8226,23 +6415,15 @@ void ui_show_lock(void){
         dash_lbl(DASH_MARGIN+4,DASH_Y_WXNOW,"Weather syncs on HotSync",0);
     }
 
-    /* ---- agenda ---- */
+    /* ---- agenda: what is ahead is Study's reviews (the NEXT and DUE rows
+     * went with Date Book and To Do, 2026-11-07) ---- */
     { char e[64];
-      /* the two rows share a label column so the values line up under each
-       * other; the zone header already says what the block is, so the row
-       * labels shrink to their job of distinguishing the two. */
-      const int y1 = DASH_Y_ROW1, y2 = y1 + DASH_ROW_H, y3 = y2 + DASH_ROW_H;
-      dash_lbl(DASH_MARGIN+4,y1,"NEXT",1);
-      dash_lbl(DASH_MARGIN+4,y2,"DUE",1);
-      dash_lbl(DASH_MARGIN+4,y3,"STUDY",1);
-      if(dash_next_event(e,sizeof e)) dash_lbl(DASH_ROW_VX,y1,e,0);
-      else                            dash_lbl(DASH_ROW_VX,y1,"nothing upcoming",0);
-      if(dash_next_due(e,sizeof e))   dash_lbl(DASH_ROW_VX,y2,e,0);
-      else                            dash_lbl(DASH_ROW_VX,y2,"nothing due",0);
+      const int y1 = DASH_Y_ROW1;
+      dash_lbl(DASH_MARGIN+4,y1,"STUDY",1);
       /* the reviews due in every course, from their summaries -- no course
        * is opened. dash_paint() counts again when the next one comes due. */
       st_glance_text(e, sizeof e, &g_dash_study_at);
-      g_dash_study = dash_lbl(DASH_ROW_VX,y3,e,0); }
+      g_dash_study = dash_lbl(DASH_ROW_VX,y1,e,0); }
 
     /* ---- sun + moon ---- */
     if(havewx && wx.sunrise_min>=0){
@@ -8251,15 +6432,17 @@ void ui_show_lock(void){
         /* one line rather than two stacked: the zone is the shortest on the
          * screen and the moon has to share it. */
         fmt_hm(rh, rm, sun, sizeof sun);
-        dash_lbl(DASH_MARGIN+4,286,"Rise",1); dash_lbl(DASH_MARGIN+36,286,sun,0);
+        dash_lbl(DASH_MARGIN+4,DASH_Y_SUNROW,"Rise",1); dash_lbl(DASH_MARGIN+36,DASH_Y_SUNROW,sun,0);
         fmt_hm(sh, sm, sun, sizeof sun);
-        dash_lbl(DASH_MARGIN+80,286,"Set",1); dash_lbl(DASH_MARGIN+106,286,sun,0);
+        dash_lbl(DASH_MARGIN+80,DASH_Y_SUNROW,"Set",1); dash_lbl(DASH_MARGIN+106,DASH_Y_SUNROW,sun,0);
     }
+    /* the moon needs no weather: it is worked out on the device, so its line
+     * is there even before the first HotSync. The disc is drawn on the canvas
+     * in dash_paint(). */
     { int illum=0; const char *nm="";
-      dash_moon(now,&illum,NULL,&nm);       /* the disc is drawn on the canvas in dash_paint() */
-      char ml[24]; snprintf(ml,sizeof ml,"%s",nm);
-      snprintf(ml,sizeof ml,"%d%% lit",illum);
-      lv_obj_t*o=dash_lbl(0,286,ml,0); lv_obj_align(o,LV_ALIGN_TOP_RIGHT,-42,286); }
+      dash_moon(now,&illum,NULL,&nm);
+      char ml[48]; snprintf(ml,sizeof ml,"%s \xC2\xB7 %d%% lit",nm,illum);
+      dash_lbl(DASH_MARGIN+4,DASH_Y_MOONROW,ml,0); }
 
     /* ---- unlock hint ---- */
     /* ---- the bottom line: the way in, and whose device this is ----
@@ -8293,7 +6476,6 @@ void ui_show_lock(void){
       } }
 
     dash_paint();
-    rem_check();
 }
 
 /* keep the locked clock fresh (minute tick); no-op while unlocked. */
@@ -9121,13 +7303,12 @@ static void content_clear(void){
         if(edit_has_text() && edit_commit()){
             uint32_t u = edit_uid ? edit_uid : data_last_new_uid();
             g_autosaved_uid = u;
-            if(g_locking) resume_view(RV_EDIT, u, 0, 0, 0);   /* reopen it on unlock */
+            if(g_locking) resume_view(RV_EDIT, u);   /* reopen it on unlock */
             else          toast_show("Saved");
         }
         cur_app = was; g_nfields = was_nf;
     }
     if(!g_locking) g_resume.stale = 1;   /* the next screen says what it is */
-    g_day_open = 0;
     free(g_undo_txt); g_undo_txt = NULL; g_undo_ta = NULL;   /* its field is going */
     lv_obj_clean(content);
     /* only the screen that asks for it keeps it; Study, swapping one of its
@@ -9149,18 +7330,14 @@ static void content_clear(void){
 
     /* edit / preferences forms */
     g_pw_body = NULL;
-    g_form = NULL; active_ta = NULL; edit_cat_lbl = NULL; g_due_lbl = NULL;
-    /* the time popup is on lv_layer_top(), so leaving the form does not take
-     * it with it -- the same trap the HotSync confirmation documents. */
-    time_close(); g_time_lbl = NULL;
+    g_form = NULL; active_ta = NULL; edit_cat_lbl = NULL;
     for(int i = 0; i < 12; i++) g_fields[i] = NULL;
     g_nfields = 0;
     g_ntamode = 0;        /* the modes named fields that are gone */
-    kp_close();           /* the keypad is on lv_layer_top(): not in `content` */
     /* record + search tables */
     g_listtbl = NULL; g_findtbl = NULL;
-    /* HotSync / discovery status lines */
-    hs_status = NULL; hs_btn = hs_btn_lbl = NULL; disc_status = NULL;
+    /* the HotSync status line */
+    hs_status = NULL; hs_btn = hs_btn_lbl = NULL;
     g_hs_watch = 0;       /* a run left behind must not pull you back later */
     /* Graffiti + Kana trainers */
     tr_guide = tr_prompt = tr_score = tr_feedback = tr_mode_lbl = NULL;
@@ -9182,7 +7359,7 @@ static void content_clear(void){
      * what keeps a session sealed while the shell changes underneath it. */
     g_co_cv = g_co_time = g_co_sub = g_co_status = g_co_hold_lbl = NULL;
     /* Guru */
-    g_gu_tbl = g_gu_cnt = g_gu_stk = NULL;
+    g_gu_tbl = g_gu_wrap = g_gu_cnt = g_gu_stk = NULL;
     /* Study: its pictures' buffers now that their canvases are gone, and the
      * whole session unless a Study screen is replacing this one */
     st_free();
@@ -9988,7 +8165,7 @@ static void co_finish(int result, int blocker){
     r.outcome     = co_pack(result, blocker);
     co_log_append(&r);
     /* the note screen runs AFTER the live session is cleared, so hold on to what
-     * the Memo/Date Book records need */
+     * the memo needs */
     g_co_last_start = r.start;
     g_co_last_min   = r.actual_min ? r.actual_min : r.planned_min;
 
@@ -10022,8 +8199,7 @@ int ui_keep_awake(void){ return mon_ui_keep_awake(); }
  * recogniser makes once it has settled on a letter (graf_commit, below). Going
  * character by character rather than setting the whole string is the point: the
  * field's VALUE_CHANGED fires per keystroke exactly as it does on the glass,
- * which is what makes the Address Look Up filter testable and not just the
- * quick-add bars. */
+ * which is what makes the quick-add bar and Find's live search testable. */
 void ui_test_type(const char *text){
     if(g_secret){                               /* the password editor (no textarea) */
         if(!text){ while(secret_len()) secret_key('\b'); return; }
@@ -10032,8 +8208,6 @@ void ui_test_type(const char *text){
     }
     /* the letter after a command stroke runs the command, as graf_up_cb does */
     if(g_cmd && text && *text){ g_cmd = 0; show_punct(0); cmd_run(*text++); }
-    /* the Day view takes its first character as the recogniser hands it over */
-    if(!active_ta && text && *text && day_write_to_new(*text) == 1) text++;
     if(!active_ta) return;
     if(!text){ lv_textarea_set_text(active_ta, ""); return; }   /* clear */
     for(const unsigned char *p = (const unsigned char *)text; *p; p++){
@@ -10334,8 +8508,8 @@ static void co_show_reflect(void){
 }
 
 /* ------------------------------------------------------------------ the note */
-/* The note is not a scratchpad: it becomes a real Memo Pad record, and the
- * session becomes a Date Book block, so both ride the next HotSync to iCloud. */
+/* The note is not a scratchpad: it becomes a real memo. (The session was also
+ * written to Date Book as a block until Date Book was archived, 2026-11-07.) */
 static void co_write_exports(const char *note){
     char buf[160];
     time_t st = (time_t)(g_co_last_start ? g_co_last_start : (uint32_t)time(NULL));
@@ -10347,18 +8521,6 @@ static void co_write_exports(const char *note){
                  coach_domain_name(g_co.domain), coach_result_name(g_co_res), note);
         data_save_memo(0, 0, buf);
     }
-    /* Appt is ~900 bytes; this runs from a button callback, never from ui_init,
-     * so it is nowhere near the main task's stack ceiling. */
-    Appt a;
-    memset(&a, 0, sizeof a);
-    a.hasTime = 1;
-    a.year = lt.tm_year + 1900; a.month = lt.tm_mon + 1; a.day = lt.tm_mday;
-    a.sH = lt.tm_hour; a.sM = lt.tm_min;
-    int endm = lt.tm_hour * 60 + lt.tm_min + (int)g_co_last_min;
-    a.eH = (endm / 60) % 24; a.eM = endm % 60;
-    snprintf(a.description, sizeof a.description, "Focus  %s  %s",
-             coach_domain_name(g_co.domain), coach_intent_name(g_co.intent));
-    data_save_cal(0, 0, &a);
 }
 
 static void co_note_save_cb(lv_event_t *e){ (void)e;
@@ -10706,7 +8868,7 @@ static const char *greet_pick(const char *const *lines, int n, uint8_t *last){
 
 /* ==== a greeting that does NOT take the screen away ====================
  * Coach and Guru greet you over their own week screen, which works because they
- * HAVE one: a page you were going to look at anyway. Settings has nine tiles and
+ * HAVE one: a page you were going to look at anyway. Settings has seven tiles and
  * no such page, and the pair (portrait + tail + balloon) is 164 px tall against a
  * 184 px content area -- so the Coach arrangement would bury the grid it is
  * introducing, which is design rule 2's complaint exactly (docs/BACKLOG.md §W).
@@ -10836,7 +8998,7 @@ static void speaker_aside(const lv_image_dsc_t *face, const char *line,
  * rendering in montserrat_14; see spk_pane() for why it was.) */
 static const char *const AS_GREETINGS[] = {
     "Where the device learns about your world -- network, account, where you are.",
-    "Nine things to set. Do the ones you need; none of it has to be done today.",
+    "Seven things to set. Do the ones you need; none of it has to be done today.",
     "What you set here is kept on the card in this device, and nowhere else.",
     "Wi-Fi and Accounts make the others work. The rest are preferences.",
     "Nothing here is permanent. Any of these can be opened again and put right.",
@@ -11297,26 +9459,56 @@ static void gu_build_header(void){
  * difference between this screen fitting in the 24 KB object pool and not: a
  * table is a single object that paints its cells, so forty habits cost one
  * object plus their cell strings, where forty containers-and-labels would be
- * eighty objects and would not fit. The record lists (To Do, Memo) already work
- * this way; this is the same trick applied to a fixed pool instead of a PDB.
+ * eighty objects and would not fit. The Memos list works this way; this is the
+ * same trick applied to a fixed pool instead of a PDB.
  *
- * Column 0 is the tick box and column 1 the name, exactly as To Do lays it out,
- * so the tap that toggles is in the place a Palm user already aims at. Category
+ * Column 0 is the tick box and column 1 the name, the way Palm's To Do laid it
+ * out, so the tap that toggles is in the place a Palm user already aims at. Category
  * headings are rows with an empty box column. */
+/* Home at the foot of the list, found by scrolling to the end of it: the
+ * list is full screen, so the only other way out is the small Home in the
+ * title bar. The table is as tall as its rows and the scroller around it does
+ * the scrolling, so the button sits after the last habit, not over it. A drag
+ * over the table scrolls the scroller and ticks nothing: lv_table only reports
+ * a selection on a release that wasn't a scroll. */
+static void gu_home_cb(lv_event_t *e){ (void)e; show_launcher(); }
+
 static void gu_build_list(void){
-    if(g_gu_tbl){ lv_obj_del(g_gu_tbl); g_gu_tbl = NULL; }
+    if(g_gu_wrap){ lv_obj_del(g_gu_wrap); g_gu_wrap = NULL; g_gu_tbl = NULL; }
 
     uint32_t now = (uint32_t)time(NULL);
     int tz = ui_tz();
 
-    lv_obj_t *t = lv_table_create(content);
+    lv_obj_t *w = lv_obj_create(content);
+    g_gu_wrap = w;
+    lv_obj_set_size(w, lv_pct(100), GU_FULL_H - GU_HDR_H);
+    lv_obj_align(w, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_radius(w, 0, 0);
+    lv_obj_set_style_border_width(w, 0, 0);
+    lv_obj_set_style_pad_all(w, 0, 0);
+    lv_obj_set_style_pad_bottom(w, 6, 0);
+    lv_obj_set_style_bg_opa(w, LV_OPA_TRANSP, 0);
+    lv_obj_set_scroll_dir(w, LV_DIR_VER);
+    lv_obj_set_flex_flow(w, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(w, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(w, 6, 0);
+
+    lv_obj_t *t = lv_table_create(w);
     g_gu_tbl = t;
     list_table_style(t);
     lv_table_set_column_width(t, 0, 34);
     lv_table_set_column_width(t, 1, LCD_W - 46);
-    lv_obj_set_size(t, lv_pct(100), GU_FULL_H - GU_HDR_H);
-    lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_size(t, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_clear_flag(t, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(t, gu_tbl_click_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_obj_t *hb = lv_button_create(w);
+    lv_obj_set_size(hb, 120, 30);
+    lv_obj_set_style_radius(hb, 0, 0);
+    lv_obj_add_event_cb(hb, gu_home_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *hl = lv_label_create(hb);
+    lv_label_set_text(hl, "Home");
+    lv_obj_center(hl);
 
     int row = 0;
     for(int c = 0; c < GU_NCAT; c++){
@@ -11359,7 +9551,7 @@ static void gu_toggle_row(int row, int id){
     gu_build_header();
 }
 
-/* Column 0 toggles, column 1 opens the task -- the split To Do already uses, so
+/* Column 0 toggles, column 1 opens the habit -- Palm's To Do split, so
  * the box is the box and the words are a link. See the note by tbl_click_cb on
  * why this must be VALUE_CHANGED rather than CLICKED. */
 static void gu_tbl_click_cb(lv_event_t *e){
@@ -11385,6 +9577,18 @@ static int g_gu_detail_id;
  * 3px inset and a 4px gap. */
 #define GU_WHY_Y 46
 #define GU_WHY_H (GU_FULL_H - 3 - 34 - 4 - GU_WHY_Y)
+/* the bottom row, on the page and on the edit form: a wide button at the
+ * left, then two narrow ones; the middle one is Edit on the page, Save on
+ * the form */
+#define GU_BTN_W1 106
+#define GU_BTN_W2 58
+#define GU_BTN_X2 (4 + GU_BTN_W1 + 6)
+/* the edit form, with the Graffiti strip up: 184 px of content */
+#define GU_ED_H     (PDA_H - TITLE_H)
+#define GU_ED_NAME_Y 34
+#define GU_ED_WHY_Y  72
+#define GU_ED_WHY_H  (GU_ED_H - 3 - 30 - 5 - GU_ED_WHY_Y)
+static void gu_edit_btn_cb(lv_event_t *e);
 
 static void gu_detail_back_cb(lv_event_t *e){ (void)e; show_guru(); }
 
@@ -11452,19 +9656,149 @@ static void gu_show_task(int id){
     lv_obj_set_pos(wy, 8, 0);
     lv_label_set_text(wy, k->why);
 
+    /* Did it, Edit, Back. Edit sits where the edit screen's Save will be,
+     * so the button reads as turning into Save. */
     lv_obj_t *tg = lv_button_create(content);
-    lv_obj_set_size(tg, 150, 34);
+    lv_obj_set_size(tg, GU_BTN_W1, 34);
     lv_obj_align(tg, LV_ALIGN_BOTTOM_LEFT, 4, -3);
     lv_obj_t *tl = lv_label_create(tg);
     lv_label_set_text(tl, on ? "Undo today" : "Did it today"); lv_obj_center(tl);
     lv_obj_add_event_cb(tg, gu_detail_toggle_cb, LV_EVENT_CLICKED, NULL);
 
+    lv_obj_t *ed = lv_button_create(content);
+    lv_obj_set_size(ed, GU_BTN_W2, 34);
+    lv_obj_align(ed, LV_ALIGN_BOTTOM_LEFT, GU_BTN_X2, -3);
+    lv_obj_t *el = lv_label_create(ed);
+    lv_label_set_text(el, "Edit"); lv_obj_center(el);
+    lv_obj_add_event_cb(ed, gu_edit_btn_cb, LV_EVENT_CLICKED, NULL);
+
     lv_obj_t *bk = lv_button_create(content);
-    lv_obj_set_size(bk, 72, 34);
+    lv_obj_set_size(bk, GU_BTN_W2, 34);
     lv_obj_align(bk, LV_ALIGN_BOTTOM_RIGHT, -4, -3);
     lv_obj_t *bl = lv_label_create(bk);
     lv_label_set_text(bl, "Back"); lv_obj_center(bl);
     lv_obj_add_event_cb(bk, gu_detail_back_cb, LV_EVENT_CLICKED, NULL);
+}
+
+/* ---- editing a habit, on the device ---------------------------------------
+ * Edit on a habit's page opens the Graffiti strip under a form: the category
+ * (tapped, it steps through the five), the name, and the why. Edit has become
+ * Save; Save writes the list to the card (gurupool_put: the whole list, the
+ * one change, read back) and goes back to the page with the strip hidden
+ * again. Delete asks first. Menu > New habit opens the same form empty, and
+ * its Save adds the habit, if anything was written.
+ *
+ * The category is a tap-to-step button rather than written text because the
+ * five categories are what the week screen analyses: a typed one could only
+ * be wrong. */
+static int g_gu_edit_id;             /* the habit being edited; 0 = a new one */
+static int g_gu_edit_cat;
+static lv_obj_t *g_gu_cat_lbl, *g_gu_ta_name, *g_gu_ta_why;
+
+static void gu_edit(int id);
+static void gu_cat_step_cb(lv_event_t *e){ (void)e;
+    g_gu_edit_cat = (g_gu_edit_cat + 1) % GU_NCAT;
+    if(g_gu_cat_lbl) lv_label_set_text(g_gu_cat_lbl, guru_cat_name(g_gu_edit_cat));
+}
+static void gu_edit_cancel_cb(lv_event_t *e){ (void)e;
+    if(g_gu_edit_id) gu_show_task(g_gu_edit_id); else show_guru();
+}
+static void gu_edit_save_cb(lv_event_t *e){ (void)e;
+    const char *nm = g_gu_ta_name ? lv_textarea_get_text(g_gu_ta_name) : "";
+    const char *wy = g_gu_ta_why  ? lv_textarea_get_text(g_gu_ta_why)  : "";
+    int blank = 1;
+    for(const char *p = nm; *p; p++) if(*p != ' ') blank = 0;
+    for(const char *p = wy; *p; p++) if(*p != ' ' && *p != '\n') blank = 0;
+    if(!g_gu_edit_id && blank){ show_guru(); return; }    /* nothing written: nothing added */
+    int id = gurupool_put(GURUPOOL_PATH, g_gu_edit_id, g_gu_edit_cat, nm, wy);
+    if(id < 0){ toast_show(gurupool_error()[0] ? gurupool_error() : "Could not save"); return; }
+    toast_show(g_gu_edit_id ? "Saved" : "Habit added");
+    if(g_gu_edit_id) gu_show_task(id); else show_guru();
+}
+static void gu_delete_yes_cb(lv_event_t *e){ (void)e;
+    int id = g_gu_edit_id;
+    confirm_close();
+    if(gurupool_remove(GURUPOOL_PATH, id) != 0){
+        toast_show(gurupool_error()[0] ? gurupool_error() : "Could not delete");
+        return;
+    }
+    guru_forget(&g_gu, id);
+    gu_save();
+    toast_show("Deleted");
+    show_guru();
+}
+static void gu_delete_cb(lv_event_t *e){ (void)e;
+    confirm_open("Delete Habit", "Delete this habit?",
+                 "Days you already ticked it stay counted.", "Delete", gu_delete_yes_cb);
+}
+static void gu_edit_btn_cb(lv_event_t *e){ (void)e; gu_edit(g_gu_detail_id); }
+
+/* the form's text areas: Graffiti writes into whichever was tapped last */
+static lv_obj_t *gu_field(int y, int h, int one_line, int max, const char *val){
+    lv_obj_t *ta = lv_textarea_create(content);
+    lv_textarea_set_one_line(ta, one_line);
+    lv_textarea_set_max_length(ta, max);
+    lv_textarea_set_text(ta, val ? val : "");
+    lv_obj_set_width(ta, LCD_W - 16);
+    if(h) lv_obj_set_height(ta, h);
+    lv_obj_set_pos(ta, 8, y);
+    lv_obj_add_event_cb(ta, ta_click_cb, LV_EVENT_CLICKED, NULL);
+    ta_mode_set(ta, TA_CAP_FIRST, NULL);
+    return ta;
+}
+
+static void gu_edit(int id){
+    const GuruTask *k = id ? guru_task_by_id(id) : NULL;
+    if(id && !k){ show_guru(); return; }
+    g_gu_edit_id  = id;
+    g_gu_edit_cat = k ? k->cat : 0;
+
+    kill_kb();
+    content_clear();                     /* the strip comes back: this screen is written on */
+    g_gu_open = 1;
+    lv_label_set_text(title_lbl, id ? "Edit Habit" : "New Habit");
+    update_cat_trigger();
+
+    lv_obj_t *cl = lv_label_create(content);
+    lv_label_set_text(cl, "Category");
+    lv_obj_set_pos(cl, 8, 8);
+    lv_obj_t *cb = lv_button_create(content);
+    lv_obj_set_size(cb, 140, 26);
+    lv_obj_set_pos(cb, LCD_W - 8 - 140, 2);
+    lv_obj_set_style_radius(cb, 0, 0);
+    lv_obj_add_event_cb(cb, gu_cat_step_cb, LV_EVENT_CLICKED, NULL);
+    g_gu_cat_lbl = lv_label_create(cb);
+    lv_label_set_text(g_gu_cat_lbl, guru_cat_name(g_gu_edit_cat));
+    lv_obj_center(g_gu_cat_lbl);
+
+    g_gu_ta_name = gu_field(GU_ED_NAME_Y, 0, 1, 30, k ? k->name : "");
+    g_gu_ta_why  = gu_field(GU_ED_WHY_Y, GU_ED_WHY_H, 0, 600, k ? k->why : "");
+    lv_obj_set_scroll_dir(g_gu_ta_why, LV_DIR_VER);
+
+    /* Delete, Save, Cancel: Save in Edit's place. A new habit has nothing to
+     * delete yet. */
+    if(id){
+        lv_obj_t *db = lv_button_create(content);
+        lv_obj_set_size(db, GU_BTN_W1, 30);
+        lv_obj_align(db, LV_ALIGN_BOTTOM_LEFT, 4, -3);
+        lv_obj_t *dl = lv_label_create(db); lv_label_set_text(dl, "Delete"); lv_obj_center(dl);
+        lv_obj_add_event_cb(db, gu_delete_cb, LV_EVENT_CLICKED, NULL);
+    }
+    lv_obj_t *sb = lv_button_create(content);
+    lv_obj_set_size(sb, GU_BTN_W2, 30);
+    lv_obj_align(sb, LV_ALIGN_BOTTOM_LEFT, GU_BTN_X2, -3);
+    lv_obj_t *sl = lv_label_create(sb); lv_label_set_text(sl, "Save"); lv_obj_center(sl);
+    lv_obj_add_event_cb(sb, gu_edit_save_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *xb = lv_button_create(content);
+    lv_obj_set_size(xb, GU_BTN_W2, 30);
+    lv_obj_align(xb, LV_ALIGN_BOTTOM_RIGHT, -4, -3);
+    lv_obj_t *xl = lv_label_create(xb); lv_label_set_text(xl, "Cancel"); lv_obj_center(xl);
+    lv_obj_add_event_cb(xb, gu_edit_cancel_cb, LV_EVENT_CLICKED, NULL);
+
+    /* the name first, so Graffiti has somewhere to write straight away */
+    active_ta = g_gu_ta_name;
+    lv_obj_add_state(g_gu_ta_name, LV_STATE_FOCUSED);
 }
 
 /* ---- the week ------------------------------------------------------------
@@ -11785,6 +10119,7 @@ typedef struct {
     Course    c;
     Srs       srs;
     uint8_t   course_ok, srs_ok;
+    uint8_t   kq;                             /* opened by Knowledge, on its course */
     char      id[ST_ID_MAX];
     /* a round: a lesson's cards and quiz, or reviews */
     StSession round;
@@ -11839,11 +10174,13 @@ static SrsSum *st_rescan(void){
     return u;
 }
 
-static uint32_t st_glance_due(void){
+/* the launcher's badges: Study's courses (kq 0), or Knowledge's (kq 1) */
+static uint32_t st_glance_due_some(int kq){
     StGlance g;
-    st_glance(ST_ROOT, st_now(), &g);
+    st_glance_some(ST_ROOT, st_now(), ST_KQ_ID, kq, &g);
     return g.due;
 }
+static uint32_t st_glance_due(void){ return st_glance_due_some(0); }
 
 /* the lock's STUDY row: "42 reviews due", "caught up · next 9:40p" */
 static void st_glance_text(char *b, int cap, uint32_t *change){
@@ -11923,6 +10260,12 @@ static void st_screen_full(const char *title){
     lv_label_set_text(title_lbl, title);
     update_cat_trigger();
 }
+
+/* Knowledge is Study's engine on one course (KNOWLEDGEQUEST_PLAN.md K0): the
+ * same screens, with its own name in the title bar and a concept's words on
+ * them -- "Step 12", "Builds on", "Explanation" -- where Study says "Lesson",
+ * "Built from" and "Remember the meaning". */
+static const char *st_app(void){ return g_st && g_st->kq ? "Knowledge" : "Study"; }
 
 /* ---- building blocks ---- */
 
@@ -12072,12 +10415,13 @@ static void st_term(lv_obj_t *par, int max_h){
  * into a scratch buffer, so the item on screen stays loaded. */
 static void st_links(lv_obj_t *par){
     static const char *const NAMES[] = { "", "Comes after", "Built from", "Family", "See also" };
+    const int kq = g_st->kq;                     /* a step names the steps it builds on */
     static const uint8_t ORDER[] = { CL_BUILT_FROM, CL_FAMILY, CL_RELATED, CL_UNLOCK_AFTER };
     uint8_t *tmp = NULL;
     for(size_t oi = 0; oi < sizeof ORDER; oi++){
         int type = ORDER[oi];
         char line[160];
-        int k = snprintf(line, sizeof line, "%s: ", NAMES[type]), any = 0;
+        int k = snprintf(line, sizeof line, "%s: ", kq && type == CL_BUILT_FROM ? "Builds on" : NAMES[type]), any = 0;
         for(uint16_t i = 0; i < g_st->it.n_links && k < (int)sizeof line - 24; i++){
             CourseLink l;
             course_link(g_st->buf, &g_st->it, i, &l);
@@ -12090,10 +10434,10 @@ static void st_links(lv_obj_t *par){
                 uint32_t pos = 0;
                 CourseField f;
                 while(course_field_next(tmp, t.text_len, &pos, &f) == 1)
-                    if(f.tag == CF_MEANING || (f.tag == CF_TERM && !(f.attr & (CF_A_PICTURE | CF_A_KANA)))){
+                    if((f.tag == CF_MEANING && !kq) || (f.tag == CF_TERM && !(f.attr & (CF_A_PICTURE | CF_A_KANA)))){
                         int m = f.len < (int)sizeof nb - 1 ? f.len : (int)sizeof nb - 1;
                         memcpy(nb, f.text, m); nb[m] = 0; name = nb;
-                        if(f.tag == CF_MEANING) break;
+                        if(f.tag == CF_MEANING || kq) break;
                     }
             }
             k += snprintf(line + k, sizeof line - k, "%s%s", any ? " + " : "", name);
@@ -12110,8 +10454,11 @@ static void st_links(lv_obj_t *par){
 static void st_card(lv_obj_t *page){
     char head[48];
     CourseItem *it = &g_st->it;
-    st_cap_kind(head, sizeof head, it->kind);
-    snprintf(head + strlen(head), sizeof head - strlen(head), "  \xC2\xB7  level %u", it->level);
+    if(g_st->kq) snprintf(head, sizeof head, "Step %u of %u", (unsigned)it->n + 1, (unsigned)g_st->c.n_items);
+    else {
+        st_cap_kind(head, sizeof head, it->kind);
+        snprintf(head + strlen(head), sizeof head - strlen(head), "  \xC2\xB7  level %u", it->level);
+    }
     lv_obj_t *h = st_label(page, head, NULL, 0);
     lv_obj_set_style_text_color(h, COL_DIM, 0);
     /* The term, centred. A picture gets a fixed box, centred in it: it's
@@ -12162,8 +10509,10 @@ static void st_card(lv_obj_t *page){
     also[0] = 0;
     for(pos = 0; course_field_next(g_st->buf, it->text_len, &pos, &f) == 1; ) if(f.tag == CF_MEANING){
         if(!nm++){
+            /* a step's idea is a sentence: bold, never twice size, so a short
+             * one doesn't shout and a long one doesn't look like small print */
             lv_obj_t *o = st_field(mcol, &f, &lv_font_palm_bold, ST_PIC_ROWS);
-            if(o && lv_obj_check_type(o, &lv_label_class) && !st_big_w(o, 2, mw)){
+            if(o && lv_obj_check_type(o, &lv_label_class) && (g_st->kq || !st_big_w(o, 2, mw))){
                 lv_obj_set_width(o, mw);
                 lv_obj_set_style_text_align(o, LV_TEXT_ALIGN_CENTER, 0);
             }
@@ -12229,10 +10578,13 @@ static void st_card(lv_obj_t *page){
     };
     for(size_t s = 0; s < sizeof SIDE / sizeof SIDE[0]; s++){
         int first = 1;
+        const char *head = SIDE[s].head;
+        if(g_st->kq && SIDE[s].tag == CF_MNEMONIC_MEANING) head = "Explanation";
+        if(g_st->kq && SIDE[s].tag == CF_EXAMPLE) head = "Try it";
         for(pos = 0; course_field_next(g_st->buf, it->text_len, &pos, &f) == 1; ){
             if(f.tag != SIDE[s].tag) continue;
-            if(first && SIDE[s].head){
-                lv_obj_t *l = st_label(page, SIDE[s].head, &lv_font_palm_bold, 0);
+            if(first && head){
+                lv_obj_t *l = st_label(page, head, &lv_font_palm_bold, 0);
                 lv_obj_set_style_pad_top(l, 4, 0);
             }
             first = 0;
@@ -12241,7 +10593,12 @@ static void st_card(lv_obj_t *page){
                 CourseField tr;
                 uint32_t p2 = pos;
                 if(course_field_next(g_st->buf, it->text_len, &p2, &tr) == 1 && tr.tag == CF_TRANSLATION){
-                    lv_obj_t *l = st_field(page, &tr, NULL, ST_PIC_ROWS);
+                    lv_obj_t *l;
+                    if(g_st->kq && !(tr.attr & CF_A_PICTURE)){   /* a step's answer, said as one */
+                        char a[96];
+                        snprintf(a, sizeof a, "Answer: %.*s", (int)tr.len, tr.text);
+                        l = st_label(page, a, NULL, LCD_W - 12);
+                    } else l = st_field(page, &tr, NULL, ST_PIC_ROWS);
                     lv_obj_set_style_text_color(l, COL_DIM, 0);
                 }
             }
@@ -12275,7 +10632,7 @@ static int st_open_course(const char *id){
     if(course_open(&g_st->c, path)){
         char m[200];
         snprintf(m, sizeof m, "The course \"%s\" can't be opened: %s.", id, g_st->c.err);
-        st_notice("Study", m);
+        st_notice(st_app(), m);
         return -1;
     }
     g_st->course_ok = 1;
@@ -12284,11 +10641,11 @@ static int st_open_course(const char *id){
         char m[240];
         snprintf(m, sizeof m, "Your progress in \"%s\" can't be read: %s. It has been left as it is.",
                  g_st->c.title, g_st->srs.err);
-        st_notice("Study", m);
+        st_notice(st_app(), m);
         return -1;
     }
     g_st->srs_ok = 1;
-    st_last_set(ST_ROOT, id);
+    if(strcmp(id, ST_KQ_ID)) st_last_set(ST_ROOT, id);   /* Study's last, not Knowledge's */
     return 0;
 }
 
@@ -12328,18 +10685,24 @@ static void st_lessons_cb(lv_event_t *e);
 static void st_reviews_cb(lv_event_t *e);
 
 static void st_show_dash(void){
-    if(!g_st || !g_st->course_ok || !g_st->srs_ok){ show_study(); return; }
-    st_screen("Study");
+    if(!g_st || !g_st->course_ok || !g_st->srs_ok){ if(g_st && g_st->kq) show_knowledge(); else show_study(); return; }
+    const int kq = g_st->kq;
+    st_screen(st_app());
     uint32_t now = st_now();
     free(st_rescan());
-    uint16_t level = 0;
-    int lessons = srs_lessons(&g_st->srs, NULL, 0, &level);
+    uint16_t level = 0, next = 0;
+    int lessons = srs_lessons(&g_st->srs, &next, 1, &level);
     Course *c = &g_st->c;
+    /* Knowledge opens every part at once and lets the links gate, so the
+     * part on show is the next step's, not the last one open */
+    CourseItem ni;
+    if(kq && lessons > 0 && !course_item(c, next, &ni)) level = ni.level;
 
     lv_obj_t *t = st_label(content, c->title, &lv_font_palm_bold, 170);
     lv_obj_set_pos(t, 6, 2);
     char b[96];
-    snprintf(b, sizeof b, "Level %u", level);
+    if(kq) snprintf(b, sizeof b, "Part %u of %u", level, (unsigned)c->n_levels);
+    else snprintf(b, sizeof b, "Level %u", level);
     lv_obj_t *lv = st_label(content, b, NULL, 0);
     lv_obj_align(lv, LV_ALIGN_TOP_RIGHT, -6, 2);
     /* the level's title, when it's text */
@@ -12366,7 +10729,9 @@ static void st_show_dash(void){
         return;
     }
     /* two big doors, the count on each */
-    snprintf(b, sizeof b, "Lessons\n%d", lessons);
+    if(!kq) snprintf(b, sizeof b, "Lessons\n%d", lessons);
+    else if(lessons > 0) snprintf(b, sizeof b, "Next step\n%u", (unsigned)next + 1);
+    else snprintf(b, sizeof b, "Next step\n-");
     lv_obj_t *lb = st_btn(content, 6, 40, 110, 56, b, st_lessons_cb, 0, 1);
     snprintf(b, sizeof b, "Reviews\n%u", (unsigned)g_st->srs.due_total);
     lv_obj_t *rb = st_btn(content, 124, 40, 110, 56, b, st_reviews_cb, 0, 1);
@@ -12390,16 +10755,19 @@ static void st_show_dash(void){
     else if(g_st->srs.next_due){
         st_span(g_st->srs.next_due - now, span, sizeof span);
         snprintf(b, sizeof b, "Next review in %s.", span);
-    } else snprintf(b, sizeof b, "%s", g_st->srs.started ? "Nothing is scheduled." : "Start with a lesson.");
+    } else snprintf(b, sizeof b, "%s", g_st->srs.started ? "Nothing is scheduled."
+                                     : kq ? "Start with step 1." : "Start with a lesson.");
     lv_obj_t *nx = st_label(content, b, NULL, 160);
     lv_obj_set_pos(nx, 6, 142);
-    snprintf(b, sizeof b, "%u of %u items started", (unsigned)g_st->srs.started, (unsigned)c->n_items);
+    snprintf(b, sizeof b, kq ? "%u of %u steps explored" : "%u of %u items started",
+             (unsigned)g_st->srs.started, (unsigned)c->n_items);
     lv_obj_t *st = st_label(content, b, NULL, 160);
     lv_obj_set_pos(st, 6, 160);
     lv_obj_set_style_text_color(st, COL_DIM, 0);
     st_btn(content, LCD_W - 72, 146, 66, 30, "Week", st_week_cb, 0, 0);
 
-    if(greet_due(GREET_STUDY)){
+    /* her lines are about Study's batches of five; Knowledge has none of that */
+    if(!kq && greet_due(GREET_STUDY)){
         greet_done(GREET_STUDY);
         char line[140];                          /* the balloon copies it */
         if(!g_st->srs.started) snprintf(line, sizeof line, "%s", ST_GREET_FIRST);
@@ -12534,7 +10902,11 @@ static void st_lessons_cb(lv_event_t *e){
     int batch = g_st->c.batch > 20 ? 20 : g_st->c.batch;
     int n = srs_lessons(&g_st->srs, g_st->lesson, batch, &level);
     if(n <= 0){
-        alert_titled("Lessons", g_st->srs.started >= g_st->c.n_items
+        if(g_st->kq) alert_titled("Next step", g_st->srs.started >= g_st->c.n_items
+                   ? "You've explored every step. Reviews keep it fresh."
+                   : "No step is open yet. Each one opens when you've passed the check "
+                     "on the step it builds on.");
+        else alert_titled("Lessons", g_st->srs.started >= g_st->c.n_items
                    ? "You've had every lesson in this course. Reviews keep it fresh."
                    : "No new lessons yet. More open as the ones you've learned "
                      "come through their reviews.");
@@ -12547,13 +10919,15 @@ static void st_lessons_cb(lv_event_t *e){
 
 static void st_show_card(void){
     char t[32];
-    snprintf(t, sizeof t, "Lesson %d of %d", g_st->card + 1, g_st->nlesson);
+    if(g_st->kq) snprintf(t, sizeof t, "Step %u", (unsigned)g_st->lesson[g_st->card] + 1);
+    else snprintf(t, sizeof t, "Lesson %d of %d", g_st->card + 1, g_st->nlesson);
     st_screen_full(t);
     lv_obj_t *page = st_page(0, ST_BTN_Y - 4);
     if(st_load(g_st->lesson[g_st->card])) st_label(page, g_st->c.err, NULL, 220);
     else st_card(page);
     if(g_st->card > 0) st_btn(content, 4, ST_BTN_Y, 96, ST_BTN_H, "< Back", st_card_nav_cb, -1, 0);
-    st_btn(content, LCD_W - 132, ST_BTN_Y, 128, ST_BTN_H, g_st->card + 1 < g_st->nlesson ? "Next >" : "Quiz >",
+    st_btn(content, LCD_W - 132, ST_BTN_Y, 128, ST_BTN_H,
+           g_st->card + 1 < g_st->nlesson ? "Next >" : g_st->kq ? "Check >" : "Quiz >",
            st_card_nav_cb, 1, 1);
 }
 
@@ -12621,15 +10995,21 @@ static void st_card_back_cb(lv_event_t *e){ (void)e; st_show_ask(); }
 static void st_show_ask(void){
     StQ q;
     if(!g_st || !g_st->round_on || !st_current(&g_st->round, &q)){ st_show_done(); return; }
-    st_screen_full(g_st->reviewing ? "Reviews" : "Quiz");
-    if(st_load(q.item)){ st_notice("Study", g_st->c.err); return; }
+    st_screen_full(g_st->reviewing ? "Reviews" : g_st->kq ? "Check" : "Quiz");
+    if(st_load(q.item)){ st_notice(st_app(), g_st->c.err); return; }
     const int reading = q.q == ST_READING;
 
     /* the banner: what's being asked. Reading is inverted, as WaniKani
      * marks it, so the two are told apart before the words are read. */
     char kind[32], b[64];
+    /* a step asks its own question and shows its own answer (its example
+     * and the example's translation), not "what does the term mean" */
+    CourseField kq_q, kq_a;
+    const int kq = g_st->kq && !reading && st_find(CF_EXAMPLE, 0, &kq_q) && !(kq_q.attr & CF_A_PICTURE)
+                   && st_find(CF_TRANSLATION, 0, &kq_a);
     st_cap_kind(kind, sizeof kind, g_st->it.kind);
-    snprintf(b, sizeof b, "%s  \xC2\xB7  %s", kind, reading ? "Reading" : "Meaning");
+    if(kq) snprintf(b, sizeof b, "Step %u  \xC2\xB7  Check", (unsigned)g_st->it.n + 1);
+    else snprintf(b, sizeof b, "%s  \xC2\xB7  %s", kind, reading ? "Reading" : "Meaning");
     lv_obj_t *ban = panel(content, 0, 0, LCD_W, ST_BAN_H, reading ? COL_LINE : COL_GRAF);
     lv_obj_t *bl = st_label(ban, b, &lv_font_palm_bold, 0);
     lv_obj_set_style_text_color(bl, reading ? COL_BODY : COL_LINE, 0);
@@ -12649,7 +11029,18 @@ static void st_show_ask(void){
     lv_obj_set_flex_flow(box, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(box, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
-    st_term(box, ST_ASK_PROMPT_H);
+    if(kq){
+        /* the step's name, small, over its question */
+        lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_row(box, 4, 0);
+        CourseField tf;
+        if(st_find(CF_TERM, 0, &tf) && !(tf.attr & CF_A_PICTURE)){
+            lv_obj_t *tl = st_label(box, st_ftext(&tf), NULL, 0);
+            lv_obj_set_style_text_color(tl, COL_DIM, 0);
+        }
+        lv_obj_t *ql = st_label(box, st_ftext(&kq_q), &lv_font_palm_bold, LCD_W - 24);
+        lv_obj_set_style_text_align(ql, LV_TEXT_ALIGN_CENTER, 0);
+    } else st_term(box, ST_ASK_PROMPT_H);
     char left[16];
     snprintf(left, sizeof left, "%d left", st_left(&g_st->round));
     lv_obj_t *ll = st_label(content, left, NULL, 0);
@@ -12683,6 +11074,10 @@ static void st_show_ask(void){
             if(o && lv_obj_check_type(o, &lv_label_class) && ((f.attr & CF_A_KANA) || !st_big(o, 2)))
                 lv_obj_set_style_text_align(o, LV_TEXT_ALIGN_CENTER, 0);
         }
+    } else if(kq){
+        lv_obj_t *o = st_field(ans, &kq_a, &lv_font_palm_bold, 60);
+        if(o && lv_obj_check_type(o, &lv_label_class) && !st_big(o, 2))
+            lv_obj_set_style_text_align(o, LV_TEXT_ALIGN_CENTER, 0);
     } else {
         if(st_find(CF_MEANING, CF_A_PRIMARY, &f) || st_find(CF_MEANING, 0, &f)){
             lv_obj_t *o = prim = st_field(ans, &f, &lv_font_palm_bold, 60);
@@ -12739,10 +11134,57 @@ static void st_card_over_cb(lv_event_t *e){
 
 static void st_done_cb(lv_event_t *e){ (void)e; st_show_dash(); }
 
+/* a step's name, into out (empty if it can't be read). Loads the item. */
+static void st_term_of(uint16_t n, char *out, int cap){
+    CourseField f;
+    out[0] = 0;
+    if(!st_load(n) && st_find(CF_TERM, 0, &f) && !(f.attr & CF_A_PICTURE))
+        snprintf(out, cap, "%.*s", (int)f.len, f.text);
+}
+
+/* Knowledge, after a step's check (the brief's "the session is complete"):
+ * what was explored, what that opened, and how much lies beyond it, counted
+ * but not named -- the fog. Then go on, or put the device down. */
+static void st_show_unlocked(void){
+    st_screen("Step done");
+    char b[200], name[48];
+    int k;
+    st_term_of(g_st->lesson[g_st->nlesson - 1], name, sizeof name);
+    snprintf(b, sizeof b, "Explored: %s", name);
+    lv_obj_t *h = st_label(content, b, &lv_font_palm_bold, LCD_W - 16);
+    lv_obj_set_pos(h, 8, 10);
+    uint16_t open[3];
+    int n = srs_lessons(&g_st->srs, open, 3, NULL);
+    if(n > 0){
+        k = snprintf(b, sizeof b, "Newly open: ");
+        for(int i = 0; i < n && i < 3 && k < (int)sizeof b - 8; i++){
+            st_term_of(open[i], name, sizeof name);
+            k += snprintf(b + k, sizeof b - k, "%s%s", i ? ", " : "", name);
+        }
+    } else if(g_st->srs.started >= g_st->c.n_items)
+        snprintf(b, sizeof b, "That was the last step. Reviews will bring them back now and then.");
+    else snprintf(b, sizeof b, "Nothing new opens yet.");
+    lv_obj_t *o = st_label(content, b, NULL, LCD_W - 16);
+    lv_obj_set_pos(o, 8, 46);
+    int beyond = (int)g_st->c.n_items - (int)g_st->srs.started - (n > 0 ? n : 0);
+    if(beyond > 0){
+        snprintf(b, sizeof b, "%d more beyond", beyond);
+        lv_obj_t *f = st_label(content, b, NULL, 0);
+        lv_obj_set_pos(f, 8, 84);
+        lv_obj_set_style_text_color(f, COL_DIM, 0);
+    }
+    if(n > 0){
+        lv_obj_t *nb = st_btn(content, 8, 112, 128, 36, "Next step >", st_lessons_cb, 0, 1);
+        (void)nb;
+        st_btn(content, LCD_W - 96, 112, 88, 36, "Done", st_done_cb, 0, 0);
+    } else st_btn(content, 60, 112, LCD_W - 120, 36, "Done", st_done_cb, 0, 1);
+}
+
 static void st_show_done(void){
     if(!g_st){ show_study(); return; }
     int reviewing = g_st->reviewing;
     if(g_st->round_on){ st_end(&g_st->round); g_st->round_on = 0; }
+    if(g_st->kq && !reviewing && g_st->learned && g_st->nlesson > 0){ st_show_unlocked(); return; }
     st_screen(reviewing ? "Reviews done" : "Lesson done");
     char line[160];
     char b[64];
@@ -12810,10 +11252,19 @@ static void st_reviews_cb(lv_event_t *e){
 
 /* ---- picking a course, and the empty card ---- */
 
+/* Study's courses: the card's, less Knowledge's (its own app opens it) */
+static int st_study_courses(char ids[][ST_ID_MAX], int max){
+    char all[9][ST_ID_MAX];
+    int n = st_list_courses(ST_ROOT, all, max + 1 < 9 ? max + 1 : 9), m = 0;
+    for(int i = 0; i < n && m < max; i++)
+        if(strcmp(all[i], ST_KQ_ID)) memcpy(ids[m++], all[i], ST_ID_MAX);
+    return m;
+}
+
 static void st_pick_cb(lv_event_t *e){
     int i = (int)(intptr_t)lv_event_get_user_data(e);
     char ids[8][ST_ID_MAX];
-    int n = st_list_courses(ST_ROOT, ids, 8);
+    int n = st_study_courses(ids, 8);
     if(!g_st || i >= n) return;
     if(!st_open_course(ids[i])) st_show_dash();
 }
@@ -12827,7 +11278,7 @@ static void st_reinstall_cb(lv_event_t *e){
 
 static void st_show_pick(void){
     char ids[8][ST_ID_MAX];
-    int n = st_list_courses(ST_ROOT, ids, 8);
+    int n = st_study_courses(ids, 8);
     st_screen("Courses");
     if(!n){
         lv_obj_t *l = st_label(content, "No courses on the card. Copy a course.srs into "
@@ -12845,14 +11296,29 @@ static void show_study(void){
         if(!g_st){ toast_show("(low memory)"); return; }
     }
     st_install_demo(ST_ROOT, 0);                 /* once, the first time */
+    if(g_st->kq){ st_close_course(); g_st->kq = 0; }   /* Knowledge had it: Study's own course */
     if(g_st->course_ok && g_st->srs_ok){ st_show_dash(); return; }
     char ids[8][ST_ID_MAX], last[ST_ID_MAX];
-    int n = st_list_courses(ST_ROOT, ids, 8), pick = -1;
+    int n = st_study_courses(ids, 8), pick = -1;
     if(st_last_get(ST_ROOT, last))
         for(int i = 0; i < n; i++) if(!strcmp(ids[i], last)) pick = i;
     if(pick < 0 && n == 1) pick = 0;
     if(pick < 0){ st_show_pick(); return; }
     if(!st_open_course(ids[pick])) st_show_dash();
+}
+
+/* Knowledge: the launcher's tree. Study's session and screens, opened on the
+ * built-in course (put back on the card if it's missing), never on another. */
+static void show_knowledge(void){
+    if(!g_st){
+        g_st = calloc(1, sizeof *g_st);
+        if(!g_st){ toast_show("(low memory)"); return; }
+    }
+    st_install_kq(ST_ROOT);
+    if(g_st->kq && g_st->course_ok && g_st->srs_ok){ st_show_dash(); return; }
+    st_close_course();
+    g_st->kq = 1;
+    if(!st_open_course(ST_KQ_ID)) st_show_dash();
 }
 
 /* ---- the menu's Study items ---- */
@@ -12940,7 +11406,15 @@ static void act_st_remove(lv_event_t *e){
 }
 
 static void st_menu(lv_obj_t *panel){
-    menu_header(panel, "Study");
+    menu_header(panel, st_app());
+    if(g_st && g_st->kq){                        /* one course: nothing to pick or remove */
+        if(g_st->course_ok){
+            if(g_st->srs_ok) menu_item(panel, "This week", act_st_week);
+            menu_item(panel, "About this course", act_st_info);
+            menu_item(panel, "Check course", act_st_check);
+        }
+        return;
+    }
     menu_item(panel, "Courses", act_st_courses);
     if(g_st && g_st->course_ok){
         if(g_st->srs_ok) menu_item(panel, "This week", act_st_week);
@@ -12969,8 +11443,8 @@ void ui_init(void){
      * weight. It is how "Remove demo data" came to be clipped in a menu sized
      * for the Palm font. The two overlays that had noticed (the greeting pane
      * and the Coach seal) name their own font and are unaffected; the one
-     * widget that NEEDS montserrat -- the due-date calendar's LV_SYMBOL month
-     * arrows -- now asks for it by name, as the Date & Time calendar does. */
+     * widget that NEEDS montserrat -- the Date & Time calendar's LV_SYMBOL
+     * month arrows -- asks for it by name (cal_arrows). */
     lv_obj_set_style_text_font(lv_layer_top(), &lv_font_palm, 0);
     lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -13008,7 +11482,6 @@ void ui_init(void){
     lv_obj_align(clock_lbl, LV_ALIGN_CENTER, 0, 0);
     clock_tick(NULL);
     lv_timer_create(clock_tick, 15000, NULL);
-    lv_timer_create(rem_tick, 30000, NULL);     /* reminders due while it's in use */
 
     /* category pop-up trigger (top-right, Palm convention) */
     cat_trigger = lv_button_create(bar);

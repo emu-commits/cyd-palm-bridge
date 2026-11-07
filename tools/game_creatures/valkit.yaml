@@ -1,0 +1,26 @@
+# Valkit: the heroic line's first stage. The owner's drawing (2026-11-05).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Valkit
+description: >-
+  It wins its first fight by refusing to quit. Its crest glows when a
+  friend is in trouble.
+category: Brave Kit
+height_cm: 40
+weight_kg: 6
+drawing: tools/game_art/src/valkit.png
+types: [heroic]
+shape: varmint
+stage: basic
+experience_group: default
+catch_rate: 100
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: gnaw}
+- {level_learned: 1, technique: lantern}
+- {level_learned: 5, technique: shadow_boxing}
+- {level_learned: 9, technique: fluff_up}
+- {level_learned: 12, technique: punch}
+evolutions:
+- {at_level: 16, monster_slug: valorix}

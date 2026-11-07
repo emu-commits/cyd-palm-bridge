@@ -1,0 +1,20 @@
+{
+  "scale": 5,
+  "mirror": ["back"],
+  "keep": [[226, 66, 34]],
+  "front": [
+    {"wipe": [10, 6, 12, 10], "at": [10, 6], "draw": [".D.", "DRD", "DRD", "DRD", ".D."], "colors": {"R": [226, 66, 34]}},
+    {"wipe": [6, 12, 9, 15], "at": [6, 12], "draw": ["DDDD", "YDYD", "YDYD", "DYYD"], "colors": {"Y": [251, 206, 97]}},
+    {"wipe": [13, 12, 16, 15], "at": [13, 12], "draw": ["DDDD", "DYDY", "DYDY", "DYYD"], "colors": {"Y": [251, 206, 97]}}
+  ],
+  "back": [],
+  "icon1": [
+    {"wipe": [9, 5, 12, 8], "at": [9, 5], "draw": [".DD.", "DRRD", "DRRD", ".DD."], "colors": {"R": [226, 66, 34]}},
+    {"wipe": [5, 10, 8, 13], "at": [5, 10], "draw": ["DDDD", "YDYD", "YDYD", "DYYD"], "colors": {"Y": [251, 206, 97]}},
+    {"wipe": [13, 10, 16, 13], "at": [13, 10], "draw": ["DDDD", "DYDY", "DYDY", "DYYD"], "colors": {"Y": [251, 206, 97]}}
+  ],
+  "icon2": [
+    {"wipe": [2, 6, 4, 11], "at": [2, 6], "draw": [".D.", "DRD", "DRD", "DRD", "DDD", ".D."], "colors": {"R": [226, 66, 34]}},
+    {"wipe": [6, 11, 9, 13], "at": [6, 11], "draw": ["DDDD", "YDYD", "DYYD"], "colors": {"Y": [251, 206, 97]}}
+  ]
+}

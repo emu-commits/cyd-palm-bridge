@@ -26,6 +26,11 @@ keep.**
 
 - **BLE + companion iOS app: DROPPED** (2026-07-19). Wi-Fi only. §2 keeps the
   reasoning so it isn't relitigated.
+- **No calendar, contacts or to-do sync** (2026-11-07). Date Book, Address,
+  To Do and their iCloud (CalDAV/CardDAV) sync were archived: competing with a
+  smartphone's PIM is pointless. The device is for learning, focus and
+  exploration, offline; HotSync fetches the clock, news and weather. The code
+  is at the git tag `archive/pim-caldav`.
 - **Aesthetic: strictly mono Palm** everywhere. No colour accents.
 - **Japanese route ends at Tier 2.** Tier 2 teaches stroke order, but tracing a model
   on glass doesn't build the muscle memory that transfers to pen and paper, and the
@@ -81,12 +86,15 @@ keep.**
 > section of `ui.c`, `clock_zone_hhmm()`, `power_battery_pct()`.
 
 This is the screen a buyer sees in the Etsy photos and the screen that's lit on their
-desk all day. Tiles: time + date, world time, weather now + next hours, battery, next
-calendar event, next to-do, moon phase, sunrise/sunset.
+desk all day. Tiles: time + date, world time, weather now + next hours, battery,
+Study's due reviews, sunrise/sunset, moon phase. (The next calendar event and the
+next to-do went with Date Book and To Do, 2026-11-07; AHEAD shrank to its one
+STUDY row and SUN & MOON took the space: the sun on one line, the moon's phase
+by name on the next, and a bigger disc.)
 
 **Weather is the one real dependency,** and it is built: **Open-Meteo**, free and
-keyless, fetched during the HotSync Wi-Fi window *after* the DAV sync releases its TLS
-buffers, `&format=csv` so there is no JSON parser and no new dependency, ~1.5 KB
+keyless, fetched during the HotSync Wi-Fi window, `&format=csv` so there is no JSON
+parser and no new dependency, ~1.5 KB
 spooled to SD and read a line at a time. The dashboard then renders entirely offline.
 
 **Remaining:** the live fetch on glass (needs `latitude`/`longitude` in `config.ini`)
@@ -115,8 +123,8 @@ Not doing this. Wi-Fi only. The analysis, so it isn't relitigated:
 only fixed profiles to an app-less accessory, and none carries Calendar or Reminders:
 - **PBAP** (Classic BT, as car kits use) gives **contacts, read-only**, after the user
   turns on "Sync Contacts". ESP-IDF has a PBAP client, and you can ask for fields
-  without photos. Edits on the device would never reach the phone, so it's only a
-  fallback if CardDAV can't cope with a large address book.
+  without photos. Edits on the device would never reach the phone, so it was never
+  more than a read-only fallback.
 - **ANCS** (BLE) gives live notifications, calendar alerts among them. That's alerts,
   not data: a possible extra, never a sync. ESP-IDF ships a `ble_ancs` example.
 - **MAP, HFP, A2DP, AVRCP, CTS**: messages, audio, time. Nothing for the PIM apps.
@@ -133,8 +141,8 @@ only fixed profiles to an app-less accessory, and none carries Calendar or Remin
   adding items, and stable IDs aren't guaranteed. It's fragile across iOS versions.
   Keep it as a fallback, should iCloud authentication ever become the blocker.
 
-So CalDAV/CardDAV over Wi-Fi stays the sync path. The hard part is syncing a large
-account both ways in about 100 KB of RAM, and Bluetooth doesn't make that easier.
+So Bluetooth was never the answer. (Then, 2026-11-07, the calendar and contacts
+sync itself was archived: see "Decisions locked".)
 
 ---
 
@@ -159,8 +167,8 @@ return." Ranked by impact on sellability, with current status.
 | # | Item | Status |
 |---|---|---|
 | 1 | **One-click flashing / pre-flashed units.** Ship pre-flashed, *and* provide a web flasher (ESP Web Tools over WebSerial). Add **OTA** so bugs are fixable post-sale. | **OPEN — highest impact after the dashboard.** Nothing built. |
-| 2 | **Zero-config setup.** The app-specific-password + `config.ini` flow is the biggest friction. | **IN PROGRESS** — this is exactly **P6**, the last unbuilt group in the active phase. A printed quick-start card is still open. |
-| 3 | **Alarms that actually fire.** We already *sync* VALARM data; make Date Book alarms wake the screen and buzz. | **BLOCKED on hardware** — no speaker/DAC (C3). |
+| 2 | **Zero-config setup.** With no account any more, setup is one Wi-Fi network (picked from a scan) and an optional location. | **MOSTLY DONE.** A first-run greeting and a printed quick-start card are still open. |
+| 3 | **Sound.** Short chirps for Study, games and HotSync. | **BLOCKED on hardware** until the speaker is tested (`BACKLOG.md`). |
 | 4 | **Power/battery honesty.** Calibrate the reading, warn on low, don't show a fake precise %. | **MOSTLY DONE** — gauge, discharge curve, rested-only sampling, `power.log`, on-device Power screen. Two loose ends in `BACKLOG.md` §Device. **No charge indicator is possible**: the TP4054's `CHRG` pin isn't broken out. |
 | 5 | **Personalization = perceived value.** Theme/watch-face options, a name on the lock screen, 12/24h, °C/°F, brightness schedule. | **OPEN.** Cheap to add, sells well. |
 | 6 | **Reliability / never-brick.** Graceful no-SD mode, factory reset, crash recovery, sane defaults. | **OPEN.** A returned device is worse than a lost sale. |
@@ -200,9 +208,9 @@ auto-advancing selectors (energy / domain / intention), one Graffiti mark, a sea
    *covered*. Giving up costs a five-second hold and breaks the streak. This is the
    "phone in a lockbox" mechanic in software, and it is the honest argument for owning
    a dedicated device instead of using the thing that interrupts you.
-3. **It produces something that outlives it.** Each session writes a Date Book block
-   (and an optional note as a Memo), so the next HotSync puts your real focus hours in
-   iCloud. For anyone who bills time, that alone justifies the purchase.
+3. **It produces something that outlives it.** A session's note becomes a Memo, and
+   the marks wall and the week screen keep the record. (Sessions were also written to
+   Date Book, and so to iCloud, until Date Book was archived, 2026-11-07.)
 
 **It cost almost nothing:** 226 bytes of static DRAM and **zero new canvas buffers** —
 sealed mode makes it impossible to open a game mid-session, so the sigil reuses
@@ -222,17 +230,15 @@ the thing we are selling against.
 1. **Lock-screen dashboard** — built + emulator-verified. ✅ *(Device-side weather
    fetch still needs a live run.)*
 2. **Battery/power honesty** — gauge and instrumentation shipped. ✅
-   **Alarms still blocked** on sound hardware.
 3. **Games** — all four shipped. ✅ *(On-glass ship gate open.)*
 4. **Coach** — built out of order (2026-08-17), ahead of 2 and 4, because it turned out
    to be the strongest single reason to pick the device up daily. ✅
 5. **The three speakers** — Coach greeting, the Guru app, the lock restyle, HotSync
-   cancel, the list restyle: all merged (#52). **P6, the Assistant onboarding, is the
-   last unbuilt group**, and it is also checklist item 2.
+   cancel, the list restyle: all merged (#52).
 6. **Next, for shipping:** web flasher + OTA (item 1), then personalization and
    reliability (5, 6), then brand/photo/name (8).
 
 Each item ships as its own PR through the existing branch/CI flow (firmware ESP-IDF +
 wasm gates green before merge), sim-verified where the sim can prove it — everything
-but real battery ADC, live weather, live sync and sound, which are device-bench
+but real battery ADC, live weather and news, and sound, which are device-bench
 verifies.

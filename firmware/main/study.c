@@ -132,22 +132,62 @@ int st_undo(StSession *s, uint16_t *item){
 
 static int file_exists(const char *p){ struct stat st; return stat(p, &st) == 0; }
 
-int st_install_demo(const char *root, int force){
-    char dir[96], path[128], mark[96];
+/* Write a built-in course's bytes to <root>/study/<id>/course.srs, through
+ * a safe file, and record its size in the mark. 1 written, < 0 on error. */
+static int install_builtin(const char *root, const char *id, const char *mark,
+                           const uint8_t *data, uint32_t size){
+    char dir[96], path[128];
     snprintf(dir, sizeof dir, "%s/study", root);
-    snprintf(mark, sizeof mark, "%s/study/.demo", root);
-    if(!force && file_exists(mark)) return 0;
     mkdir(dir, 0777);
-    snprintf(dir, sizeof dir, "%s/study/demo-kanji", root);
+    snprintf(dir, sizeof dir, "%s/study/%s", root, id);
     mkdir(dir, 0777);
-    snprintf(path, sizeof path, "%s/course.srs", dir);
+    snprintf(path, sizeof path, "%s/study/%s/course.srs", root, id);
     SafeFile sf;
     if(!sf_open(&sf, path, "wb")) return -1;
-    int ok = fwrite(study_demo_srs, 1, study_demo_size, sf.f) == study_demo_size;
+    int ok = fwrite(data, 1, size, sf.f) == size;
     if(sf_commit(&sf, ok)) return -1;
     FILE *m = fopen(mark, "wb");
-    if(m) fclose(m);
+    if(m){ fprintf(m, "%lu\n", (unsigned long)size); fclose(m); }
     return 1;
+}
+
+/* the size a built-in course's mark recorded: 0 if none or empty, -1 if no mark */
+static long mark_size(const char *mark){
+    if(!file_exists(mark)) return -1;
+    unsigned long had = 0;
+    FILE *m = fopen(mark, "rb");
+    if(m){ if(fscanf(m, "%lu", &had) != 1) had = 0; fclose(m); }
+    return (long)had;
+}
+
+/* The mark holds the size of the demo it installed. A firmware with a newer
+ * demo (a different size) replaces the course on a card that still has the
+ * old one, so an update reaches people who already opened Study; progress is
+ * kept apart from the course and stays. A demo the user removed stays
+ * removed: the mark is there but the folder is not. An empty mark is one
+ * written before the mark held anything, so it counts as an older demo. */
+int st_install_demo(const char *root, int force){
+    char path[128], mark[96];
+    snprintf(mark, sizeof mark, "%s/study/.demo", root);
+    snprintf(path, sizeof path, "%s/study/demo-kanji/course.srs", root);
+    long had = force ? -1 : mark_size(mark);
+    if(had >= 0){
+        if(had == (long)study_demo_size) return 0;            /* this demo, already */
+        if(!file_exists(path)) return 0;                      /* removed: stays so */
+    }
+    return install_builtin(root, "demo-kanji", mark, study_demo_srs, study_demo_size);
+}
+
+/* Knowledge's course is the app, not a sample in it, so a missing one is
+ * always put back. The mark works as the demo's otherwise: a firmware with a
+ * different build replaces it, and a course somebody copied over it (a
+ * reviewed edition, say) is left alone while this firmware's mark stands. */
+int st_install_kq(const char *root){
+    char path[128], mark[96];
+    snprintf(mark, sizeof mark, "%s/study/.kq", root);
+    snprintf(path, sizeof path, "%s/study/" ST_KQ_ID "/course.srs", root);
+    if(file_exists(path) && mark_size(mark) == (long)study_kq_size) return 0;
+    return install_builtin(root, ST_KQ_ID, mark, study_kq_srs, study_kq_size);
 }
 
 int st_remove_course(const char *root, const char *id){
@@ -452,12 +492,17 @@ static void glance_one(void *ctx, uint16_t m){
 }
 
 int st_glance(const char *root, uint32_t now, StGlance *g){
+    return st_glance_some(root, now, NULL, 0, g);
+}
+
+int st_glance_some(const char *root, uint32_t now, const char *id, int only, StGlance *g){
     memset(g, 0, sizeof *g);
     enum { MAXC = 16 };
     char (*ids)[ST_ID_MAX] = malloc(MAXC * ST_ID_MAX);
     if(!ids) return 0;
     int n = st_list_courses(root, ids, MAXC);
     for(int i = 0; i < n; i++){
+        if(id && !strcmp(ids[i], id) != !!only) continue;    /* only that course, or all but it */
         uint8_t h[SUM_HDR];
         FILE *f = sum_open(root, ids[i], h);
         if(!f) continue;

@@ -1,18 +1,19 @@
-/* find.h -- global streaming search across the Palm PIM databases.
+/* find.h -- streaming search of the Memos database.
  *
- * Palm's "Find" scans every app for words that start with the query and lists
- * the hits. This is the
- * portable, host-testable core: stream a PDB one record at a time (never fully
- * resident), decode it for the given app, and invoke a callback per match with
- * a short snippet for the results list. The firmware's Find silkscreen button
- * drives this over all four DBs; the host test proves the matching.
+ * Palm's "Find" scans for words that start with the query and lists the hits.
+ * This is the portable, host-testable core: stream a PDB one record at a time
+ * (never fully resident) and invoke a callback per match with a short snippet
+ * for the results list. The firmware's Find silkscreen button drives it over
+ * Memos, the one database left since Date Book, Address and To Do were
+ * archived (2026-11-07); the host test proves the matching.
  */
 #ifndef FIND_H
 #define FIND_H
 #include <stdint.h>
 
-/* which app a PDB holds (decides which fields are searched). */
-enum { FIND_CAL, FIND_TODO, FIND_ADDR, FIND_MEMO };
+/* which app a PDB holds. Memos is the only one; the value is kept from when
+ * there were four, so a FindHit reads the same. */
+enum { FIND_MEMO = 3 };
 
 typedef struct {
     int      app;            /* FIND_* of the PDB the hit came from      */

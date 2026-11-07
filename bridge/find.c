@@ -1,4 +1,4 @@
-/* find.c -- global streaming search across the Palm PIM databases. See find.h.
+/* find.c -- streaming search of the Memos database. See find.h.
  *
  * Records are streamed one at a time via pdb_read, so memory stays bounded no
  * matter how big the database is (the no-PSRAM device constraint). Matching is
@@ -8,10 +8,8 @@
  * search on each word": "the" finds "Then", not "Lathe"), so a short query
  * finds what it names rather than every word that happens to contain it.
  *
- * RAM: no scratch buffers. Text fields are matched in place -- codec strings are
- * already null-terminated in the (stack) unpacked struct, and memo bodies are
- * scanned directly in the reader's record buffer via a length-bounded matcher,
- * so nothing is copied.
+ * RAM: no scratch buffers. Memo bodies are scanned directly in the reader's
+ * record buffer via a length-bounded matcher, so nothing is copied.
  */
 #include <string.h>
 #include <ctype.h>
@@ -49,38 +47,16 @@ static void snippet_at(char *out, int cap, const char *base, int len, int off){
     out[n]=0;
 }
 
-/* match a null-terminated field; on hit fill the snippet and return 1. */
-static int hit_field(FindHit *h, const char *field, const char *query){
-    if(!field) return 0;
-    int len=(int)strlen(field);
-    int off=ci_find_n(field,len,query);
-    if(off<0) return 0;
-    snippet_at(h->snippet,(int)sizeof h->snippet,field,len,off);
-    return 1;
-}
-
 typedef struct { int app; const char *query; find_hit_cb cb; void *ctx; int n; } FindCtx;
 
 static int recCb(const PdbRec *r, int i, void *ctx){
     (void)i; FindCtx *f=ctx;
-    if(r->attr & REC_ATTR_DELETE) return 0;   /* deleted, awaiting its sync */
+    if(r->attr & REC_ATTR_DELETE) return 0;   /* marked deleted by an older build */
     FindHit h; memset(&h,0,sizeof h); h.app=f->app; h.uid=r->uniqueID;
     int matched=0;
-
-    if(f->app==FIND_CAL){
-        Appt a; if(ApptUnpack(r->data,r->len,&a)) return 0;
-        matched = hit_field(&h,a.description,f->query) || hit_field(&h,a.note,f->query);
-    } else if(f->app==FIND_TODO){
-        Todo t; if(ToDoUnpack(r->data,r->len,&t)) return 0;
-        matched = hit_field(&h,t.description,f->query) || hit_field(&h,t.note,f->query);
-    } else if(f->app==FIND_ADDR){
-        Addr a; if(AddrUnpack(r->data,r->len,&a)) return 0;
-        for(int fi=0; fi<F_COUNT && !matched; fi++)
-            matched = hit_field(&h,a.fields[fi],f->query);
-    } else { /* FIND_MEMO: record bytes are plain text -- scan them in place */
-        int off=ci_find_n((const char*)r->data, r->len, f->query);
-        if(off>=0){ snippet_at(h.snippet,(int)sizeof h.snippet,(const char*)r->data,r->len,off); matched=1; }
-    }
+    /* a memo is plain text: scan it in place */
+    int off=ci_find_n((const char*)r->data, r->len, f->query);
+    if(off>=0){ snippet_at(h.snippet,(int)sizeof h.snippet,(const char*)r->data,r->len,off); matched=1; }
 
     if(matched){ f->n++; if(f->cb) f->cb(&h,f->ctx); }
     return 0;

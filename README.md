@@ -1,37 +1,32 @@
-# CYD Palm: a pocket PDA that syncs to iCloud
+# CYD Palm: a pocket PDA for the curious
 
-A PalmOS-style organizer, with **Date Book, Address, a Planner (To Do and
-Memo) and Graffiti handwriting**, running on the "Cheap Yellow Display", an
-ESP32 board with a 2.8" touchscreen that costs about $15. It syncs both ways
-with your iCloud **calendars, reminders and contacts**. It works offline, and
-**HotSyncs** when you want it to. An open-source homage to the Palm Pilot:
-a little more charming, and a lot less demanding, than a smartphone.
+A PalmOS-style handheld with **Memos and Graffiti handwriting**, running on
+the "Cheap Yellow Display", an ESP32 board with a 2.8" touchscreen that
+costs about $15. It works offline, and **HotSyncs** when you want it to:
+the clock, the news and the weather. An open-source homage to the Palm
+Pilot: a little more charming, and a lot less demanding, than a smartphone.
 
-It also has a lock screen with the time, weather and what's coming up; a
+It also has a lock screen with the time, weather and what's due in Study; a
 news reader; games; **Study**, a spaced-repetition app for kanji or anything
-else, with courses on the SD card; and two coaches, **Guru** (daily habits)
-and **Coach** (focused work sessions).
+else, with courses on the SD card; and two coaches, **Guru** (daily habits,
+which you can edit on the device) and **Coach** (focused work sessions).
 
 <p>
-  <img src="docs/img/sim_launcher.png" width="180" alt="The launcher: Date Book, Address, Planner, News, HotSync, Games, Study, Guru, Coach">
+  <img src="docs/img/sim_launcher.png" width="180" alt="The launcher: Settings, HotSync, Games, News, Memos, Study, Guru, Coach">
   <img src="docs/img/sim_study.png" width="180" alt="A Study lesson card: the kanji for mouth, its readings and a mnemonic">
   <img src="docs/img/sim_guru.png" width="180" alt="Guru's habit list, with ticks">
   <img src="docs/img/sim_ink.png" width="180" alt="Graffiti handwriting, mid-stroke">
 </p>
 
 **Try it in your browser:** <https://emu-commits.github.io/cyd-palm-bridge/>.
-It's the real firmware UI, built for the web, and works on a phone. Sync is
-switched off there; everything else is the real thing.
+It's the real firmware UI, built for the web, and works on a phone. HotSync
+fills the news with samples there; everything else is the real thing.
 
 ## What you need
 
 - An **ESP32-2432S028R "Cheap Yellow Display"**: the base board, without PSRAM.
-- A **microSD card** of any small size. It holds your Palm databases, the
-  settings and Study's courses.
-- For sync, an **iCloud account** with an **app-specific password**. Make one
-  at appleid.apple.com under *Sign-In & Security → App-Specific Passwords*
-  (it needs two-factor authentication). It can be revoked at any time, and
-  your main Apple ID password never touches the device.
+- A **microSD card** of any small size. It holds your memos, the settings,
+  Guru's habit list and Study's courses.
 - A USB cable, and **Chrome or Edge** to install from the browser.
 
 ## Install
@@ -40,64 +35,32 @@ Open the [Install page](https://emu-commits.github.io/cyd-palm-bridge/flash.html
 press **Install** and pick the board's serial port. The page covers the
 snags (a Snap-packaged Chromium, a board that needs BOOT held to start
 flashing). Leave **Erase** clear when updating: erasing removes the saved
-Wi-Fi and account passwords.
+Wi-Fi passwords.
 
 To build and flash it yourself, see
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#the-firmware-built-yourself)
 (ESP-IDF v5.5).
 
-The first boot asks you to calibrate the touchscreen. The apps start with a
-few demo records, which are never sent to your account; **Menu ▸ Remove demo
-data** clears them.
+The first boot asks you to calibrate the touchscreen.
 
 ## Set it up
 
-1. **Wi-Fi:** **Settings ▸ Wi-Fi**. Pick a network and enter its password.
-2. **Your account:** **Settings ▸ Accounts**. Enter your Apple ID and the
-   app-specific password, then **Find my calendars...** lists your calendars,
-   reminders lists and address book. Assign one to each of Date Book, To Do
-   and Address.
-3. **Sync:** tap **HotSync**. Records you add on the device go up to iCloud,
-   and changes made on iCloud come down on the next sync (contacts only
-   come down; see below).
-
-Without an account, a HotSync still sets the clock and fetches news and
-weather.
+1. **Wi-Fi:** **Settings** (the first icon) **▸ Wi-Fi**. Pick a network and
+   enter its password.
+2. **HotSync:** tap **HotSync**. It sets the clock and fetches the news and
+   the weather. No account is needed.
 
 You can also prepare the card on a computer: copy
 [`firmware/config.ini.example`](firmware/config.ini.example) to the card as
 `config.ini` and fill it in. On the next boot the device moves any passwords
 into its own flash and blanks them on the card ([`SECURITY.md`](SECURITY.md)).
 
-**Your iCloud account is safe to try this with:**
-- **Nothing is ever deleted in iCloud.** Deleting on the device removes the
-  record from the device only.
-- **A new account starts read-only** (Settings ▸ Sync ▸ Changes): syncs
-  copy from iCloud and never change it, and your edits wait on the device
-  until you choose "Send my changes".
-- **An edit is merged into the iCloud copy**, so what the Palm can't show
-  (invitees, locations, extra alerts, the sixth phone number) is kept.
-- **Contacts are read-only on the device while Address syncs.** Edit them on
-  your phone; they come down on the next sync. An edited contact goes back
-  to iCloud whole, photo included, and one with a large photo is more than
-  the device can send today. So that no edit is ever left behind on the
-  device, none is made: Address has no New, Edit or Delete while it syncs,
-  and a sync never sends a contact. Without an account, Address is editable
-  as before.
+**Memos stay on the device.** A memo can hold checklist lines (`[ ]` and
+`[x]`), which is the device's to-do list.
 
-**Limits worth knowing:**
-- **Memos stay on the device.** iCloud Notes has no sync interface.
-- **To Do syncs to iCloud's CalDAV task lists.** The iPhone's Reminders app
-  shows them only if you add iCloud as a CalDAV account (Settings → Calendar
-  → Add CalDAV Account), not under the built-in iCloud reminders.
-- **Date Book keeps a window of your calendar**, by default from yesterday
-  to two weeks ahead (Settings ▸ Sync ▸ Calendar). Everything outside it
-  stays in iCloud, untouched; an event you add on the device further out
-  goes up to iCloud and then leaves the device. **To Do keeps the open
-  tasks** and those done in the last two weeks (Settings ▸ Sync ▸ To Do);
-  older finished ones stay in iCloud, untouched. Address syncs whole.
-- **A single moved occurrence of a repeating event** (one week's meeting
-  moved to Tuesday) shows on the device at the series' usual time.
+**Guru's habits** are edited from a habit's page (Edit), added with
+**Menu ▸ New habit**, and kept in `guru.txt` on the card
+([`docs/GURU_HABITS.md`](docs/GURU_HABITS.md)).
 
 ## Study courses
 
@@ -116,13 +79,14 @@ plain front/back deck (a `cards.tsv`) or a full WaniKani-style one;
 ## How it's built
 
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) covers the parts (`bridge/`,
-`firmware/`, `sim/`), the sync engine, how everything fits in the memory of a
-board with no PSRAM, and how to build and test each piece.
+`firmware/`, `sim/`), how everything fits in the memory of a board with no
+PSRAM, and how to build and test each piece.
 [`docs/BUILD_PROGRESS.md`](docs/BUILD_PROGRESS.md) is the changelog, with
 measurements; [`docs/BACKLOG.md`](docs/BACKLOG.md) is what's next.
 
 ## License
 
 The firmware and simulator are **GPLv3** (`LICENSE`): they use PumpkinOS's
-Palm fonts and icons. The sync engine and codecs in `bridge/` are written
-from scratch and are **MIT** (`bridge/LICENSE`). The demo course is **CC0**.
+Palm fonts and icons. The portable modules in `bridge/` (the PDB container,
+Find, the RSS reader and the rest) are written from scratch and are **MIT**
+(`bridge/LICENSE`). The demo course is **CC0**.

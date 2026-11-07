@@ -1,0 +1,25 @@
+# Oglet: drawn for the project by the owner (2026-11-05).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Oglet
+description: >-
+  It sees every way at once, so nothing has ever surprised it. Its bubbles
+  taste of the sea.
+category: Many-Eye
+height_cm: 40
+weight_kg: 9
+drawing: tools/game_art/src/oglet.jpg
+types: [water, shadow]
+shape: blob
+stage: basic
+experience_group: default
+catch_rate: 90
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: bubbles}
+- {level_learned: 5, technique: phantasmal_force}
+- {level_learned: 9, technique: water_bullet}
+- {level_learned: 14, technique: mobbing}
+evolutions:
+- {at_level: 24, monster_slug: oculoth}

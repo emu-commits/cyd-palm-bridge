@@ -1,4 +1,6 @@
 {
+  "effects_note": "2026-11-06 (EFFECTS_PLAN.md): prop_healing is played by the firmware but kept off this list. With it, the Vamporm line has two heals (Refresh and Hibernate, 66 % of its HP) and 189-244 of the balance run's 216,000 battles, all among that line, never end in 400 turns; Hibernate's recharge 8 didn't help, and its proportion isn't a field move_edits can change. It leaves Hibernate and Shadow Blast out.",
+  "effects": ["exhausted", "blinded", "enraged", "hardshell", "sniping", "slow", "softened", "focused", "chargedup", "charging", "stuck", "grabbed", "noddingoff", "teams", "flinching", "confused", "harpooned", "festering", "lifeleech", "wasting", "elementalshield", "diehard", "revenge", "retaliate", "prickly", "spiky", "remove", "splash", "multiattack", "appear", "disappear", "statchange", "switch", "prop_damage"],
   "title": "Critters",
   "note": "The first region (G3, 2026-10-16): Larkhollow, Route 1, Brideswood, Cotton Tunnel and Kestrel. Route 1, Brideswood and the tunnel are Tuxemon's Spyder maps from clean tilesets; the two towns are laid out for this game (tools/game_maps/) from the clean sheets. Route 1's east half doesn't reach Brideswood on foot in Tuxemon's map, so the way on is its open north edge. The story and every line of dialogue are ours.",
   "player": ["player", "player_green", "player_orange", "player_olive", "player_violet", "player_rose"],
@@ -50,7 +52,21 @@
       "ossicoil",
       "banewyrm",
       "propellercat",
-      "rivetron"
+      "rivetron",
+      "valkit",
+      "valorix",
+      "paladrax",
+      "starlet",
+      "nebulet",
+      "astrolune",
+      "geodot",
+      "quartzor",
+      "prismyth",
+      "pebblub",
+      "bouldrom",
+      "tectorath",
+      "oglet",
+      "oculoth"
     ],
     "descriptions": {
       "agnigon": "It's called a false dragon: it looks like a dragon, but evolved from a different line of reptiles.",
@@ -77,7 +93,14 @@
   "items": ["potion", "super_potion", "mega_potion", "revive", "cureall"],
   "money": {"start": 300, "per_level": 15},
   "keeper_bonus": 150,
+  "move_edits": {
+    "refresh": {"recharge": 8, "why": "2026-11-05: a level 6 Vamporm against a level 6 Vamporm never ended, because refresh (healing_power 3.0, recharge 3) healed a full bar every few turns. Recharge 8: 1,000 mirror battles at level 6 all end (the longest 176 turns, the mean 20); recharge 3 left 16% unended at 2,000 turns."},
+    "thunderclap": {"potency": 0.5, "why": "2026-11-06, E1 exhausted: the move exhausted unlocks is the Nut line's first ranged one, and at Tuxemon's power 1.25 and potency 0.75 the balance run moved Arthrobolt 13.4 points (31.6 to 45.0 %) and Nut 11.6. Power 1.1 and potency 0.5: Arthrobolt +9.6, within the 10-point gate.", "power": 1.1},
+    "mind_vise": {"recharge": 2, "why": "2026-11-06, E2 stuck: a weak blow that gives stuck every turn (recharge 1) was chosen in 54.9 % of its users' turns, past the field's most chosen move (Water Blast, 54.5 %). Recharge 2: see BUILD_PROGRESS.md."}
+  },
   "steps": [
+    {"flag": "beat_ivy",    "table": "mere",          "to": "mere_b"},
+    {"flag": "beat_ivy2",   "table": "mere_b",        "to": "mere_c"},
     {"flag": "beat_ivy",    "table": "spyder_route1", "to": "route1_b"},
     {"flag": "beat_ivy",    "table": "brideswood",    "to": "brideswood_b"},
     {"flag": "beat_ivy",    "table": "cotton_tunnel", "to": "tunnel_b"},
@@ -99,7 +122,8 @@
         {"at": [12, 0, 2, 1], "to": "spyder_route1", "x": 13, "y": 18, "facing": "up"},
         {"at": [6, 9], "to": "larkhollow_home", "x": 5, "y": 7, "facing": "up"},
         {"at": [17, 9], "to": "larkhollow_lab", "x": 5, "y": 7, "facing": "up"},
-        {"at": [23, 11, 1, 2], "to": "kestrel", "x": 1, "y": 16, "facing": "right"}
+        {"at": [23, 11, 1, 2], "to": "kestrel", "x": 1, "y": 16, "facing": "right"},
+        {"at": [0, 11, 1, 2], "to": "mere", "x": 28, "y": 6, "facing": "left"}
       ],
       "signs": [
         {"at": [15, 3, 2, 2], "facing": "up",
@@ -118,12 +142,22 @@
          "show_if": "beat_wren",
          "text": "The note's off the pot. Sit down and eat. And then go and open that gate behind Ashe, in Dragon's Cave: let them all go home to the Reach.",
          "after": ""},
-        {"at": [22, 11], "facing": "left", "sheet": "cooldude", "kind": "talk", "name": "Drover Lad",
+        {"at": [1, 11], "facing": "right", "sheet": "gate", "kind": "talk", "name": "", "hide_if": "beat_tom",
+         "text": "The path west to the Mere, gated. A sign: KEEPERS ONLY. Beat Keeper Tom in the Brideswood first: the Mere's keepers won't battle a beginner."},
+        {"at": [1, 12], "facing": "right", "sheet": "gate_right", "kind": "talk", "name": "", "hide_if": "beat_tom",
+         "text": "Hermit Bryn's gate. Past it, the Mere and its keepers."},
+        {"at": [22, 11], "facing": "left", "sheet": "gate", "kind": "talk", "name": "",
          "hide_if": "beat_ivy",
-         "text": "This is the drove road, and it's shut from this end. It opens when somebody's beaten the Warden. Go round by the road north."},
-        {"at": [22, 12], "facing": "left", "sheet": "miner", "kind": "talk", "name": "Drover Lad",
+         "text": "A gate across the drove road, chained and locked. A notice: CLOSED TO TRAVELLERS. The herds' road, kept by the Kestrel Ring. Opened on the Warden's word."},
+        {"at": [22, 12], "facing": "left", "sheet": "gate_right", "kind": "talk", "name": "",
          "hide_if": "beat_ivy",
-         "text": "Kestrel's just up this road. Shame you can't use it. North, then the Brideswood, then the tunnel."},
+         "text": "The gate's hinge post, new timber. Somebody means it to stay shut."},
+        {"at": [21, 10], "facing": "down", "sheet": "cooldude", "kind": "talk", "name": "Drover Lad",
+         "hide_if": "beat_ivy",
+         "text": "Wild critters took our herds on the drove road, so the Ring locked that gate. The Warden opens it for keepers who beat her. Travellers go north, by the tunnel."},
+        {"at": [21, 13], "facing": "up", "sheet": "cooldude", "kind": "talk", "name": "Drover Lad",
+         "show_if": "beat_ivy",
+         "text": "Word came from Kestrel: you beat the Warden, so the gate's open to you. Straight road, no tunnel. Keep the wild ones off the herds for us, will you?"},
         {"at": [14, 10], "facing": "down", "sheet": "scientist", "kind": "talk", "name": "Dr Wren",
          "hide_if": "beat_ashe", "flag": "met_wren",
          "text": "A keeper at last! The wild's been rising, bigger critters, closer to town, every season. I need someone who can win the Kestrel Ring. Go north.",
@@ -221,7 +255,7 @@
       ],
       "warps": [
         {"at": [3, 16, 1, 1], "to": "spyder_brideswood", "x": 36, "y": 1, "facing": "down"},
-        {"at": [35, 2, 1, 1], "to": "kestrel", "x": 12, "y": 19, "facing": "up"},
+        {"at": [35, 2, 1, 1], "to": "kestrel", "x": 12, "y": 25, "facing": "up"},
         {"at": [31, 2, 1, 1], "to": "spyder_route4", "x": 18, "y": 2, "facing": "up"}
       ],
       "zones": [
@@ -261,7 +295,7 @@
     {
       "map": "kestrel", "name": "Kestrel", "layout": "game_maps/kestrel.json",
       "warps": [
-        {"at": [12, 20, 2, 1], "to": "spyder_cotton_tunnel", "x": 35, "y": 3, "facing": "down"},
+        {"at": [12, 26, 2, 1], "to": "spyder_cotton_tunnel", "x": 35, "y": 3, "facing": "down"},
         {"at": [0, 16, 1, 2], "to": "larkhollow", "x": 22, "y": 11, "facing": "left"},
         {"at": [6, 15], "to": "kestrel_rest", "x": 5, "y": 7, "facing": "up"},
         {"at": [19, 15], "to": "kestrel_store", "x": 5, "y": 7, "facing": "up"}
@@ -271,12 +305,18 @@
          "text": "THE KESTREL RING. Warden Ivy takes on any keeper who reaches her."}
       ],
       "people": [
-        {"at": [1, 16], "facing": "right", "sheet": "miner", "kind": "talk", "name": "Drover Tam",
+        {"at": [1, 16], "facing": "right", "sheet": "gate_right", "kind": "talk", "name": "",
          "hide_if": "beat_ivy",
-         "text": "The old drove road, straight home to Larkhollow. Only the Warden's say-so opens it. Win in the Ring, and it's yours."},
-        {"at": [1, 17], "facing": "right", "sheet": "cooldude", "kind": "talk", "name": "Drover Lil",
+         "text": "A gate across the drove road, Kestrel's end. A notice: CLOSED TO TRAVELLERS. Opened on the Warden's word."},
+        {"at": [1, 17], "facing": "right", "sheet": "gate", "kind": "talk", "name": "",
          "hide_if": "beat_ivy",
-         "text": "It's shut. Beat Warden Ivy, at the top of the Ring, then come and walk it."},
+         "text": "The chain's padlocked, and the lock has the Ring's mark on it."},
+        {"at": [2, 15], "facing": "down", "sheet": "miner", "kind": "talk", "name": "Drover Tam",
+         "hide_if": "beat_ivy",
+         "text": "The old drove road, straight home to Larkhollow. Wild critters took the herds on it, so the Ring locked it. Warden Ivy keeps the key: beat her."},
+        {"at": [4, 18], "facing": "left", "sheet": "miner", "kind": "talk", "name": "Drover Tam",
+         "show_if": "beat_ivy",
+         "text": "The Warden had the gate opened for you. Larkhollow's straight down the road: no tunnel, no wood."},
         {"at": [19, 16], "facing": "down", "sheet": "shopassistant", "kind": "talk", "name": "Sam",
          "hide_if": "beat_ivy",
          "text": "The store opens next season. For now, there's only one thing worth buying in Kestrel: a win in the Ring."},
@@ -621,9 +661,93 @@
         {"at": [26, 31], "facing": "left", "sheet": "monk", "kind": "talk", "name": "Ranger Sol",
          "text": "A hundred years shut, and they're going home at last. The grass out there will settle now: you did that. Stay as long as you like, and catch them all."}
       ]
+    },
+    {
+      "map": "mere", "name": "The Mere", "layout": "game_maps/mere.json",
+      "warps": [
+        {"at": [29, 6, 1, 2], "to": "larkhollow", "x": 1, "y": 11, "facing": "right"}
+      ],
+      "signs": [
+        {"at": [27, 5, 1, 1], "facing": "any", "text": "THE MERE. Hermit Bryn's cottage, and Ola's fishing. Keepers train here."}
+      ],
+      "zones": [
+        {"at": [10, 3, 17, 2], "table": "mere", "chance": 10},
+        {"at": [10, 9, 18, 6], "table": "mere", "chance": 10}
+      ],
+      "people": [
+        {"at": [25, 5], "facing": "down", "sheet": "cooldude", "kind": "trainer", "name": "Angler Pip",
+         "sight": 3, "flag": "beat_pip", "team": [["gillpip", 8], ["noctula", 8]],
+         "text": "Mara sent us to keep the path. Nobody fishes the Mere without a battle first!",
+         "after": "Fair's fair. Go on, then."},
+        {"at": [20, 8], "facing": "up", "sheet": "miner", "kind": "trainer", "name": "Hiker Moss",
+         "sight": 3, "flag": "beat_moss", "team": [["pebblub", 9], ["sprigling", 9]],
+         "text": "I've walked this path every day for a month, for Mara. Let's see your legs!",
+         "after": "Mara's at the far end, by the cottage. She's tougher than me."},
+        {"at": [15, 5], "facing": "down", "sheet": "picnicker", "kind": "trainer", "name": "Twins Bee and Bo",
+         "sight": 3, "flag": "beat_twins", "team": [["cardiling", 10], ["zunna", 10]],
+         "text": "Two of us, one of you! Well, one critter each...",
+         "after": "We'll tell Mara you're coming."},
+        {"at": [9, 8], "facing": "up", "sheet": "catgirl", "kind": "trainer", "name": "Collector Mara",
+         "sight": 3, "flag": "mere_cleared", "team": [["oglet", 11], ["anoleaf", 11], ["vamporm", 11]],
+         "text": "So you're the one who walked through my keepers. The Mere's critters are mine to study. Prove you deserve to fish here!",
+         "after": "Hm. Ola can have her Mere back. I'll go and study the Brideswood instead."},
+        {"at": [12, 15], "facing": "up", "sheet": "monk", "kind": "trainer", "name": "Ranger Hollis",
+         "sight": 3, "show_if": "beat_ivy", "flag": "beat_hollis", "team": [["geodot", 20], ["rillotl", 21]],
+         "text": "Since the Warden's win, the strong ones come to the Mere to train. Show me why Ivy let you through.",
+         "after": "You'll do. The Old Keep's captain fights like this, but harder."},
+        {"at": [24, 15], "facing": "up", "sheet": "tennisplayer", "kind": "trainer", "name": "Diver Coral",
+         "sight": 3, "show_if": "beat_ivy", "flag": "beat_coral", "team": [["rillotl", 22], ["cirrup", 22]],
+         "text": "I dive the Mere for its rarest critters. My partners are the best of them!",
+         "after": "The Mere's deeper than it looks."},
+        {"at": [14, 8], "facing": "up", "sheet": "homemaker", "kind": "trainer", "name": "Old Tobin",
+         "sight": 3, "show_if": "beat_ivy", "flag": "beat_tobin", "team": [["sparkip", 23], ["skullick", 23], ["valkit", 24]],
+         "text": "I've kept critters since before the Ring was built. Come on, then, young one!",
+         "after": "You remind me of the Warden, when she started."},
+        {"at": [18, 15], "facing": "up", "sheet": "knightlord", "kind": "trainer", "name": "Champion Rhea",
+         "sight": 3, "show_if": "beat_ivy2", "flag": "beat_rhea", "team": [["valorix", 36], ["quartzor", 36], ["tempyre", 36]],
+         "text": "The Warden's beaten twice, they say. Ashe in the Dragon's Cave is another thing. Let me see if you're ready.",
+         "after": "You're ready. Ashe won't make it easy, mind."},
+        {"at": [21, 8], "facing": "up", "sheet": "monk", "kind": "trainer", "name": "Sage Orrin",
+         "sight": 3, "show_if": "beat_ivy2", "flag": "beat_orrin", "team": [["nebulet", 37], ["ossicoil", 37], ["grovarch", 37]],
+         "text": "I came to the Mere to think. You came to fight. Very well: one battle, then I go back to thinking.",
+         "after": "Well fought. Now let me think about that."},
+        {"at": [11, 5], "facing": "down", "sheet": "ninja", "kind": "trainer", "name": "Wyrmhand Ezra",
+         "sight": 3, "show_if": "beat_ivy2", "flag": "beat_ezra", "team": [["pyrewing", 37], ["maelstrotl", 38], ["fulminax", 38]],
+         "text": "I used to tend Ashe's critters in the cave. I know how they fight. Want a taste?",
+         "after": "Ashe's are stronger still. But you'll manage."},
+        {"at": [27, 8], "facing": "up", "sheet": "nurse", "kind": "healer", "name": "Hermit Bryn",
+         "text": "Off to face Mara's keepers? Rest a moment first, you and your critters. My cottage is at the far end, if you get that far."},
+        {"at": [5, 11], "facing": "right", "sheet": "florist", "kind": "talk", "name": "Fisher Ola", "hide_if": "mere_cleared",
+         "text": "Collector Mara and her keepers have claimed my Mere, and battle anyone on the path. Beat Mara, by the cottage, and I'll pay you in potions."},
+        {"at": [5, 11], "facing": "right", "sheet": "florist", "kind": "gift", "name": "Fisher Ola", "show_if": "mere_cleared",
+         "flag": "ola_paid", "gift": ["super_potion", 3],
+         "text": "Mara's gone off to the Brideswood! Here, as I promised. And come back when you're stronger: strong keepers come to the Mere once the Warden's been beaten.",
+         "after": "The fish are biting again. Thank you."}
+      ]
     }
   ],
   "encounters": {
+    "mere": [
+      {"creature": "gillpip", "levels": [7, 10], "rate": 25},
+      {"creature": "noctula", "levels": [7, 10], "rate": 20},
+      {"creature": "sprigling", "levels": [8, 11], "rate": 20},
+      {"creature": "pebblub", "levels": [8, 11], "rate": 20},
+      {"creature": "oglet", "levels": [9, 12], "rate": 15}
+    ],
+    "mere_c": [
+      {"creature": "rillotl", "levels": [31, 35], "rate": 25},
+      {"creature": "noctalo", "levels": [31, 35], "rate": 20},
+      {"creature": "wildbough", "levels": [32, 36], "rate": 20},
+      {"creature": "bouldrom", "levels": [32, 36], "rate": 20},
+      {"creature": "oculoth", "levels": [33, 37], "rate": 15}
+    ],
+    "mere_b": [
+      {"creature": "rillotl", "levels": [18, 22], "rate": 25},
+      {"creature": "noctalo", "levels": [18, 22], "rate": 20},
+      {"creature": "wildbough", "levels": [19, 23], "rate": 20},
+      {"creature": "bouldrom", "levels": [19, 23], "rate": 20},
+      {"creature": "oglet", "levels": [20, 24], "rate": 15}
+    ],
     "the_reach": [
       {"creature": "agnite", "levels": [34, 38], "rate": 8},
       {"creature": "anoleaf", "levels": [34, 38], "rate": 8},
@@ -638,14 +762,19 @@
       {"creature": "selket", "levels": [34, 38], "rate": 8},
       {"creature": "pigabyte", "levels": [34, 38], "rate": 8},
       {"creature": "gillpip", "levels": [34, 38], "rate": 8},
+      {"creature": "oglet",   "levels": [34, 38], "rate": 8},
       {"creature": "sprigling", "levels": [34, 38], "rate": 8},
       {"creature": "cateye", "levels": [34, 38], "rate": 8},
       {"creature": "dune_pincher", "levels": [34, 38], "rate": 8},
       {"creature": "djinnbo", "levels": [34, 38], "rate": 8},
       {"creature": "cinderkit", "levels": [34, 38], "rate": 8},
+      {"creature": "pebblub",   "levels": [34, 38], "rate": 8},
       {"creature": "skullick", "levels": [34, 38], "rate": 8},
+      {"creature": "geodot",   "levels": [34, 38], "rate": 8},
       {"creature": "propellercat", "levels": [34, 38], "rate": 8},
       {"creature": "rivetron", "levels": [34, 38], "rate": 8},
+      {"creature": "valkit", "levels": [34, 38], "rate": 8},
+      {"creature": "starlet", "levels": [34, 38], "rate": 8},
       {"creature": "agnidon", "levels": [38, 42], "rate": 6},
       {"creature": "gectile", "levels": [38, 42], "rate": 6},
       {"creature": "cardiwing", "levels": [38, 42], "rate": 6},
@@ -657,9 +786,14 @@
       {"creature": "eyesore", "levels": [38, 42], "rate": 6},
       {"creature": "selmatek", "levels": [38, 42], "rate": 6},
       {"creature": "rillotl", "levels": [38, 42], "rate": 6},
+      {"creature": "oculoth", "levels": [38, 42], "rate": 6},
       {"creature": "wildbough", "levels": [38, 42], "rate": 6},
       {"creature": "scorchvix", "levels": [38, 42], "rate": 6},
+      {"creature": "bouldrom",  "levels": [38, 42], "rate": 6},
       {"creature": "ossicoil", "levels": [38, 42], "rate": 6},
+      {"creature": "quartzor", "levels": [38, 42], "rate": 6},
+      {"creature": "valorix", "levels": [38, 42], "rate": 6},
+      {"creature": "nebulet", "levels": [38, 42], "rate": 6},
       {"creature": "agnigon", "levels": [42, 46], "rate": 5},
       {"creature": "velocitile", "levels": [42, 46], "rate": 5},
       {"creature": "cardinale", "levels": [42, 46], "rate": 5},
@@ -668,9 +802,13 @@
       {"creature": "maelstrotl", "levels": [42, 46], "rate": 5},
       {"creature": "grovarch", "levels": [42, 46], "rate": 5},
       {"creature": "pyrewing", "levels": [42, 46], "rate": 5},
+      {"creature": "tectorath", "levels": [42, 46], "rate": 5},
       {"creature": "banewyrm", "levels": [42, 46], "rate": 5},
+      {"creature": "prismyth", "levels": [42, 46], "rate": 5},
       {"creature": "fulminax", "levels": [42, 46], "rate": 5},
-      {"creature": "tempyre", "levels": [42, 46], "rate": 5}
+      {"creature": "tempyre", "levels": [42, 46], "rate": 5},
+      {"creature": "paladrax", "levels": [42, 46], "rate": 5},
+      {"creature": "astrolune", "levels": [42, 46], "rate": 5}
     ],
     "route1_d": [
       {"creature": "cardiling",  "levels": [8, 12], "rate": 25},
@@ -697,6 +835,8 @@
       {"creature": "noctula",   "levels": [3, 5], "rate": 15},
       {"creature": "zunna",     "levels": [3, 5], "rate": 20},
       {"creature": "sparkip",   "levels": [3, 5], "rate": 10},
+      {"creature": "valkit",    "levels": [3, 5], "rate": 10},
+      {"creature": "starlet",   "levels": [3, 5], "rate": 10},
       {"creature": "cirrup",   "levels": [3, 5], "rate": 10}
     ],
     "brideswood": [
@@ -706,6 +846,7 @@
       {"creature": "selket",    "levels": [5, 7], "rate": 20},
       {"creature": "pigabyte",  "levels": [6, 8], "rate": 10},
       {"creature": "gillpip",   "levels": [5, 7], "rate": 10},
+      {"creature": "oglet",     "levels": [5, 7], "rate": 10},
       {"creature": "sprigling",  "levels": [5, 7], "rate": 10}
     ],
     "cotton_tunnel": [
@@ -715,7 +856,9 @@
       {"creature": "noctula",      "levels": [6, 8], "rate": 20},
       {"creature": "djinnbo",      "levels": [7, 9], "rate": 10},
       {"creature": "cinderkit",    "levels": [6, 8], "rate": 10},
-      {"creature": "skullick",   "levels": [6, 8], "rate": 10}
+      {"creature": "pebblub",      "levels": [6, 8], "rate": 10},
+      {"creature": "skullick",   "levels": [6, 8], "rate": 10},
+      {"creature": "geodot",     "levels": [6, 8], "rate": 10}
     ],
     "spyder_route4": [
       {"creature": "noctula",      "levels": [14, 17], "rate": 20},
@@ -726,6 +869,7 @@
       {"creature": "selmatek",     "levels": [18, 20], "rate": 10},
       {"creature": "djinnbo",      "levels": [16, 19], "rate": 10},
       {"creature": "sparkip",      "levels": [14, 17], "rate": 10},
+      {"creature": "valkit",       "levels": [14, 17], "rate": 10},
       {"creature": "wildbough",  "levels": [17, 20], "rate": 10}
     ],
     "spyder_routea": [
@@ -737,7 +881,9 @@
       {"creature": "cateye",       "levels": [20, 24], "rate": 10},
       {"creature": "dune_pincher", "levels": [20, 24], "rate": 10},
       {"creature": "nimbolt",      "levels": [19, 22], "rate": 10},
-      {"creature": "cumulynx",   "levels": [19, 22], "rate": 10}
+      {"creature": "cumulynx",   "levels": [19, 22], "rate": 10},
+      {"creature": "valorix",    "levels": [19, 22], "rate": 10},
+      {"creature": "nebulet",    "levels": [19, 22], "rate": 10}
     ],
     "dragons_cave": [
       {"creature": "agnidon",      "levels": [30, 33], "rate": 15},
@@ -747,7 +893,8 @@
       {"creature": "eyesore",      "levels": [30, 34], "rate": 15},
       {"creature": "djinnbo",      "levels": [31, 34], "rate": 15},
       {"creature": "selmatek",     "levels": [30, 34], "rate": 10},
-      {"creature": "scorchvix",    "levels": [30, 32], "rate": 10}
+      {"creature": "scorchvix",    "levels": [30, 32], "rate": 10},
+      {"creature": "bouldrom",     "levels": [30, 32], "rate": 10}
     ],
     "route1_b": [
       {"creature": "cardiling",  "levels": [12, 15], "rate": 15},
@@ -758,8 +905,11 @@
       {"creature": "fluttaflap", "levels": [13, 16], "rate": 15},
       {"creature": "arthrobolt", "levels": [13, 16], "rate": 10},
       {"creature": "cinderkit",  "levels": [12, 15], "rate": 10},
+      {"creature": "pebblub",    "levels": [12, 15], "rate": 10},
       {"creature": "skullick",   "levels": [12, 15], "rate": 10},
-      {"creature": "cirrup",   "levels": [12, 15], "rate": 10}
+      {"creature": "geodot",     "levels": [12, 15], "rate": 10},
+      {"creature": "cirrup",   "levels": [12, 15], "rate": 10},
+      {"creature": "starlet",  "levels": [12, 15], "rate": 10}
     ],
     "brideswood_b": [
       {"creature": "noctula",    "levels": [14, 17], "rate": 20},
@@ -769,6 +919,7 @@
       {"creature": "pigabyte",   "levels": [15, 18], "rate": 15},
       {"creature": "fluttaflap", "levels": [15, 18], "rate": 15},
       {"creature": "gillpip",    "levels": [14, 17], "rate": 10},
+      {"creature": "oglet",      "levels": [14, 17], "rate": 10},
       {"creature": "sprigling",  "levels": [14, 17], "rate": 10}
     ],
     "tunnel_b": [
@@ -778,7 +929,9 @@
       {"creature": "noctalo",      "levels": [18, 20], "rate": 20},
       {"creature": "djinnbo",      "levels": [17, 20], "rate": 15},
       {"creature": "scorchvix",  "levels": [17, 20], "rate": 10},
+      {"creature": "bouldrom",   "levels": [17, 20], "rate": 10},
       {"creature": "ossicoil",   "levels": [17, 20], "rate": 10},
+      {"creature": "quartzor",   "levels": [17, 20], "rate": 10},
       {"creature": "rivetron",   "levels": [17, 20], "rate": 10}
     ],
     "route1_c": [
@@ -789,7 +942,9 @@
       {"creature": "zunna",      "levels": [22, 26], "rate": 20},
       {"creature": "fluttaflap", "levels": [22, 26], "rate": 15},
       {"creature": "rillotl",    "levels": [22, 26], "rate": 10},
-      {"creature": "cumulynx",   "levels": [22, 26], "rate": 10}
+      {"creature": "oculoth",    "levels": [22, 26], "rate": 10},
+      {"creature": "cumulynx",   "levels": [22, 26], "rate": 10},
+      {"creature": "nebulet",    "levels": [22, 26], "rate": 10}
     ],
     "brideswood_c": [
       {"creature": "noctalo",  "levels": [24, 28], "rate": 20},
@@ -799,6 +954,7 @@
       {"creature": "pigabyte", "levels": [24, 28], "rate": 15},
       {"creature": "agnidon",  "levels": [24, 28], "rate": 10},
       {"creature": "rillotl",  "levels": [24, 28], "rate": 10},
+      {"creature": "oculoth",  "levels": [24, 28], "rate": 10},
       {"creature": "wildbough",  "levels": [24, 28], "rate": 10}
     ],
     "tunnel_c": [
@@ -807,7 +963,8 @@
       {"creature": "dune_pincher", "levels": [26, 30], "rate": 20},
       {"creature": "noctalo",      "levels": [26, 30], "rate": 20},
       {"creature": "djinnbo",      "levels": [27, 30], "rate": 15},
-      {"creature": "nimbolt",      "levels": [26, 30], "rate": 10}
+      {"creature": "nimbolt",      "levels": [26, 30], "rate": 10},
+      {"creature": "valorix",      "levels": [26, 30], "rate": 10}
     ],
     "route2_c": [
       {"creature": "noctalo",      "levels": [26, 30], "rate": 20},
@@ -816,7 +973,8 @@
       {"creature": "pigabyte",     "levels": [26, 30], "rate": 15},
       {"creature": "fluttaflap",   "levels": [26, 30], "rate": 15},
       {"creature": "djinnbo",      "levels": [27, 30], "rate": 15},
-      {"creature": "scorchvix",   "levels": [26, 30], "rate": 10}
+      {"creature": "scorchvix",   "levels": [26, 30], "rate": 10},
+      {"creature": "bouldrom",    "levels": [26, 30], "rate": 10}
     ],
     "keep_c": [
       {"creature": "eyesore",      "levels": [28, 32], "rate": 15},
@@ -828,6 +986,7 @@
       {"creature": "dune_pincher", "levels": [29, 33], "rate": 10},
       {"creature": "agnidon",      "levels": [30, 34], "rate": 15},
       {"creature": "ossicoil",   "levels": [28, 32], "rate": 10},
+      {"creature": "quartzor",   "levels": [28, 32], "rate": 10},
       {"creature": "rivetron",   "levels": [28, 32], "rate": 10}
     ],
     "keep_d": [
@@ -840,6 +999,7 @@
       {"creature": "djinnbo",    "levels": [32, 36], "rate": 10},
       {"creature": "maelstrotl", "levels": [34, 36], "rate": 8},
       {"creature": "fulminax",   "levels": [34, 36], "rate": 8},
+      {"creature": "paladrax",   "levels": [34, 36], "rate": 8},
       {"creature": "grovarch",   "levels": [34, 36], "rate": 8}
     ],
     "cave_d": [
@@ -852,8 +1012,11 @@
       {"creature": "velocitile", "levels": [36, 38], "rate": 8},
       {"creature": "agnigon",    "levels": [36, 38], "rate": 9},
       {"creature": "pyrewing",     "levels": [36, 38], "rate": 8},
+      {"creature": "tectorath",    "levels": [36, 38], "rate": 8},
       {"creature": "banewyrm",   "levels": [36, 38], "rate": 8},
-      {"creature": "tempyre",   "levels": [36, 38], "rate": 8}
+      {"creature": "prismyth",   "levels": [36, 38], "rate": 8},
+      {"creature": "tempyre",   "levels": [36, 38], "rate": 8},
+      {"creature": "astrolune", "levels": [36, 38], "rate": 8}
     ]
   }
 }

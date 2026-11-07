@@ -1,7 +1,7 @@
 name: CI
 
-# Host gates run with nothing but a C compiler (+ Python/Radicale for the
-# server-backed sync gates); the firmware is compile-checked in the official
+# Host gates run with nothing but a C compiler; the firmware is compile-checked
+# in the official
 # ESP-IDF container. This catches the "host-green but firmware won't build"
 # class before flash day.
 
@@ -15,12 +15,12 @@ on:
 
 jobs:
   host-gates:
-    name: Host gates (codec + fuzz)
+    name: Host gates (PDB + parsers + fuzz)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Offline gates (codec / find / calc / config / streamparse)
+      - name: Offline gates (find / calc / config / feeds / news / safefile)
         run: make test
       - name: Fuzz gate (ASan + UBSan)
         run: make ftest
@@ -46,29 +46,16 @@ jobs:
         run: pip install -r tools/requirements-course.txt
       - name: Rebuild every course, ids.tsv rules, refusals
         run: python3 tests/mkcourse_test.py
-      - name: The demo course passes --check
-        run: python3 tools/mkcourse.py --check courses/demo-kanji/course.srs
+      - name: The built-in courses pass --check
+        run: |
+          python3 tools/mkcourse.py --check courses/demo-kanji/course.srs
+          python3 tools/mkcourse.py --check courses/kq-numbers/course.srs
+      - name: Knowledge's course source is what mkquest makes of its graph; bad graphs refused
+        run: python3 tests/mkquest_test.py
       - name: Pinned PyYAML (the game converter; same Pillow)
         run: pip install -r tools/requirements-game.txt
       - name: Rebuild the game fixture, ids rules, refusals (mkgame)
         run: python3 tests/mkgame_test.py
-
-  sync-gates:
-    name: Sync gates (Radicale)
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install Radicale into ./davvenv (the harness's expected venv)
-        run: |
-          python3 -m venv davvenv
-          ./davvenv/bin/pip install --quiet radicale
-      - name: Every gate against a throwaway Radicale (codec + fuzz + two-way sync + round-trip)
-        run: ./tests/run_gates.sh
 
   firmware-build:
     name: Firmware build (ESP-IDF v5.5)
@@ -126,7 +113,7 @@ jobs:
         run: make -C sim nosecrets
       - name: No password left in RAM after use (Settings, then a sync)
         run: make -C sim secretscan
-      - name: Data layer gate (tombstones, the demo seed's uids)
+      - name: Data layer gate (Memos: the empty database, saves, deletes)
         run: make -C sim data
       - name: Graffiti recognizer accuracy gate
         run: make -C sim graf
@@ -154,6 +141,8 @@ jobs:
         run: make -C sim srs
       - name: Monster game (reader, rules, saves; round trip with mkgame)
         run: make -C sim monster
+      - name: Critters balance run (every critter against every other; EFFECTS_PLAN.md 3)
+        run: make -C sim balance
       - name: Dex (the marks, the save, the speaker's lines)
         run: make -C sim dex
       - name: Build + run the scripted UI tour (real ui.c, screenshots)

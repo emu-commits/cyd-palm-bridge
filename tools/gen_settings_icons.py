@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Emit the nine Settings tile icons as LVGL A8 descriptors for palm_icons.c.
+"""Emit the Settings tile icons, and the launcher's Settings gear, as LVGL A8
+descriptors for palm_icons.c.
 
 24x22 A8 (0 = transparent, 255 = ink), the same frame as icon_guru, so they sit
 in the Settings grid on the launcher's own cell geometry without a colour-format
 conversion. W2 of the Settings phase; the tiles they belong to are the table in
 docs/BACKLOG.md under the W phase.
 
-ALL NINE IN ONE FILE, deliberately. The two icons that came before this
+ALL OF THEM IN ONE FILE, deliberately. (There were nine tiles until the
+Accounts and Sync tiles went with the iCloud sync, 2026-11-07; the gear for the
+launcher's Settings tile joined them then.) The two icons that came before this
 (gen_guru_icon.py, gen_zip_icon.py) are a script each, which was right for one
 icon and would be wrong for nine: these share a drawing toolkit and, far more
 importantly, they share a LOOK. Nine separate files drift -- one author picks a
@@ -152,8 +155,7 @@ def clip(g):
 
 
 # ------------------------------------------------------------------ tiles ----
-# Order matches the nine-tile table in docs/BACKLOG.md, which is the order they
-# are laid out on screen. Keep them in step.
+# Order matches the order the tiles are laid out on the Settings screen.
 
 def t_wifi():
     """Three arcs opening upward over a dot -- the universal fan.
@@ -171,22 +173,6 @@ def t_wifi():
     for r in (3.8, 7.2):
         band(g, 12, 16.2, r, 1.9, 208, 332, 0)
     disc(g, 12, 15.6, 1.35, 0)
-    return g
-
-
-def t_accounts():
-    """A key: bow, shaft, two teeth.
-
-    NOT a padlock, and not a person. A padlock says 'locked' (the lock screen
-    already owns that idea) and a person collides with the Owner tile three
-    cells away. A key says 'the credential that opens the account', which is
-    exactly what this wizard collects."""
-    g = disk()
-    band(g, 8.5, 11, 3.2, 2.2, 0, 359, 0)   # the bow
-    disc(g, 8.5, 11, 1.4, 255)              # ...its hole, painted back in
-    rect(g, 11, 10, 18, 11, 0)              # the shaft
-    rect(g, 15, 12, 16, 15, 0)              # two teeth, unequal, so it reads
-    rect(g, 17, 12, 18, 14, 0)              # as a key and not as a comb
     return g
 
 
@@ -262,28 +248,6 @@ def t_location():
     return g
 
 
-def t_sync():
-    """Two opposed straight arrows: one down, one up. Records going both ways.
-
-    TWO CHASING ARCS were the first design -- the round-trip mark everyone
-    draws -- and they do not work here. A ring knocked at r=5.6 has its only
-    surviving ink at the far left and far right, where the arcs' gaps fall; the
-    arrowheads then have to sit at those same ends, so they eat the last two ink
-    bridges and the whole interior floods white. Straight arrows put their heads
-    at the TOP and BOTTOM, where there is ink to spare, and leave the disk's
-    waist untouched.
-
-    It also stops this colliding with icon_hotsync in the launcher, which keeps
-    the circular mark. This tile is the sync SETTINGS -- conflict policy, which
-    collection is which -- and wants to be a relative, not a twin."""
-    g = disk()
-    rect(g, 8, 5, 9, 13, 0)                                # left shaft, down
-    tri(g, [(6.0, 12.5), (11.5, 12.5), (8.75, 17.5)], 0)
-    rect(g, 14, 9, 15, 17, 0)                              # right shaft, up
-    tri(g, [(12.5, 9.5), (18.0, 9.5), (15.25, 4.5)], 0)
-    return g
-
-
 def t_owner():
     """A bust: head and shoulders.
 
@@ -315,16 +279,28 @@ def t_about():
     return g
 
 
+def t_settings():
+    """A gear: the launcher's Settings tile (position 1), not one of the panel
+    tiles. Eight teeth and the ring knocked out of the disk, the hub painted
+    back in, so it reads as a cog and not as a sun."""
+    g = disk()
+    disc(g, 12, 11, 4.2, 0)                       # the body
+    for k in range(8):
+        a = math.radians(k * 45)
+        disc(g, 12 + 5.7 * math.cos(a), 11 + 5.7 * math.sin(a), 1.5, 0)    # a tooth
+    disc(g, 12, 11, 2.4, 255)                     # the hub
+    return g
+
+
 TILES = [
     ("icon_set_wifi",     "Wi-Fi",       t_wifi),
-    ("icon_set_accounts", "Accounts",    t_accounts),
     ("icon_set_news",     "News",        t_news),
     ("icon_set_datetime", "Date & Time", t_datetime),
     ("icon_set_display",  "Display",     t_display),
     ("icon_set_location", "Location",    t_location),
-    ("icon_set_sync",     "Sync",        t_sync),
     ("icon_set_owner",    "Owner",       t_owner),
     ("icon_set_about",    "About",       t_about),
+    ("icon_settings",     "Settings (launcher)", t_settings),
 ]
 
 
@@ -338,7 +314,7 @@ def main():
             print()
         return
 
-    print("/* the nine Settings tile icons -- tools/gen_settings_icons.py */")
+    print("/* the Settings tile icons and the launcher's gear -- tools/gen_settings_icons.py */")
     for name, label, fn in TILES:
         g = clip(fn())
         flat = ",".join(str(v) for row in g for v in row)

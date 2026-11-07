@@ -176,6 +176,10 @@ int guru_is_checked(const GuruState *s, int id, uint32_t now, int tz_off_min);
  * changes nothing and returns 0. */
 int guru_toggle(GuruState *s, int id, uint32_t now, int tz_off_min);
 
+/* Clear task `id`'s tick for today without touching the count: used when the
+ * habit is deleted, so a later habit given the same id starts unticked. */
+void guru_forget(GuruState *s, int id);
+
 /* ---- read-outs (all pure, all integer) ---- */
 /* checks completed on the local day containing `now` (0 once the day rolls). */
 int guru_today_n(const GuruState *s, uint32_t now, int tz_off_min);

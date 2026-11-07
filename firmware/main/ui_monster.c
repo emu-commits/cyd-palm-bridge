@@ -70,7 +70,7 @@
 #define BAND_PX    (240 * 40)       /* the display's draw buffer, lvgl_port.c: a narrower strip is taller */
 #define ICON_PX    (MG_ICON_SIZE * MG_ICON_SIZE)
 #define ICON_ROW   24               /* a party menu's lines, for the icons */
-#define NCACHE     96               /* tiles kept: Kestrel shows 60, and the people take two each */
+#define NCACHE     96               /* tiles kept: Kestrel shows 79 (2026-11-06, its market and Ring), and the people take two each */
 #define TICK_MS    30
 #define STEP_TICKS 4                /* a step: four frames of 4 px */
 #define BURST_TICKS 3               /* the timer runs before the refresh: past the first paint */
@@ -132,6 +132,11 @@ typedef struct {
     uint16_t sh_wild_mon, sh_wild_max;
     uint8_t  sh_wild_lv;
     char     keeper[NAME_LEN];      /* the trainer in this battle */
+    /* the status badges (EFFECTS_PLAN.md 5): each side's status as shown (position + 1),
+     * the turns it has had it, and its picture, read when it changes */
+    uint8_t  sh_st[2], sh_turn[2], badge_of[2];
+    uint16_t badge_pal[2][4];
+    uint8_t  badge_px[2][MG_SICON_BYTES];
 
     /* the area's pictures */
     uint16_t lut[256];
@@ -159,7 +164,7 @@ typedef struct {
     char     menu_txt[MENU_MAX * 48];
 
     /* the objects (children of the content area) */
-    lv_obj_t *view, *pad, *box, *text, *cursor, *card, *foe, *me, *mehp, *credits;
+    lv_obj_t *view, *pad, *box, *text, *cursor, *card, *foe, *me, *mehp, *mest, *credits;
     lv_timer_t *timer;
     char     *cred;
 
@@ -205,6 +210,20 @@ static const char *move_name(Mon *m, uint16_t mv, char *buf){
 static const char *status_name(Mon *m, uint16_t st, char *buf){
     if(st >= m->g.n_statuses || mtext(&m->g, m->g.statuses[st].name, buf, NAME_LEN)) snprintf(buf, NAME_LEN, "?");
     return buf;
+}
+
+/* A status as the battle says it: a few kinds have a plainer word than the name */
+static const char *status_word(Mon *m, uint16_t st, char *buf){
+    if(st < m->g.n_statuses){
+        switch(m->g.statuses[st].kind){
+        case MG_S_ASLEEP: snprintf(buf, NAME_LEN, "Asleep"); return buf;
+        case MG_S_THORNS:           /* "Elemental Shield" doesn't fit beside the HP */
+            if(m->g.statuses[st].ranges == 1u << MG_SPECIAL){ snprintf(buf, NAME_LEN, "Shield"); return buf; }
+            break;
+        default: break;
+        }
+    }
+    return status_name(m, st, buf);
 }
 
 /* ---- the tile cache and the area's pictures ---- */
@@ -431,6 +450,45 @@ static void card(Mon *m, const Rect *c, int bw, int x, int y, int w, int h, int 
     }
 }
 
+/* the badge's picture for side s, read when what it shows changes */
+static void badge_load(Mon *m, int s){
+    if(m->badge_of[s] == m->sh_st[s]) return;
+    m->badge_of[s] = m->sh_st[s];
+    if(!m->sh_st[s] || mg_status_icon(&m->g, m->sh_st[s] - 1u, m->badge_pal[s], m->badge_px[s]))
+        memset(m->badge_px[s], 0, sizeof m->badge_px[s]);
+}
+
+/* side s's status badge, 11 x 11 at (x, y): the 9 x 9 picture in a frame, on a
+ * red ground for a negative status (a solid frame) and a green one for a
+ * positive (dotted, so it reads without colour too); then a dot a turn left
+ * under it, for a status with a duration */
+static void badge(Mon *m, const Rect *c, int bw, int x, int y, int s){
+    if(!m->sh_st[s] || m->sh_st[s] > m->g.n_statuses) return;
+    const MgStatus *st = &m->g.statuses[m->sh_st[s] - 1];
+    int neg = st->flags & MG_SF_NEGATIVE;
+    uint16_t edge = rgb(0x303030), ground = rgb(neg ? 0xF4C4BC : 0xC8E8C0);
+    fill(m->band, bw, c, x, y, 11, 11, edge);
+    fill(m->band, bw, c, x + 1, y + 1, 9, 9, ground);
+    if(!neg)
+        for(int i = 2; i < 10; i += (i & 1) ? 3 : 1){    /* the dashed frame: 2-px gaps (2, 3, 6, 7); a
+                                                            1-px dot would read as the TV's scanlines */
+            fill(m->band, bw, c, x + i, y, 1, 1, ground); fill(m->band, bw, c, x + i, y + 10, 1, 1, ground);
+            fill(m->band, bw, c, x, y + i, 1, 1, ground); fill(m->band, bw, c, x + 10, y + i, 1, 1, ground);
+        }
+    for(int j = 0; j < MG_SICON; j++){
+        int py = y + 1 + j;
+        if(py < c->y1 || py > c->y2) continue;
+        for(int i = 0; i < MG_SICON; i++){
+            int n = j * MG_SICON + i, v = m->badge_px[s][n / 4] >> (2 * (n % 4)) & 3, px = x + 1 + i;
+            if(v && px >= c->x1 && px <= c->x2) m->band[(py - c->y1) * bw + (px - c->x1)] = m->badge_pal[s][v];
+        }
+    }
+    if(st->duration){
+        int left = st->duration > m->sh_turn[s] ? st->duration - m->sh_turn[s] : 0;
+        for(int i = 0; i < left; i++) fill(m->band, bw, c, x + 9 - 3 * i, y + 13, 2, 2, edge);
+    }
+}
+
 #define FOE_SPR_X  164
 #define FOE_SPR_Y  0
 #define ME_SPR_X   14
@@ -456,6 +514,8 @@ static void compose_battle(Mon *m, const Rect *c, int bw){
     MpCreature *me = &m->w.party[m->sh_active];
     hp_bar(m, c, bw, FOE_CARD_X + 7, FOE_CARD_Y + 22, CARD_W - 14, m->sh_wild_hp, m->sh_wild_max);
     hp_bar(m, c, bw, ME_CARD_X + 7, ME_CARD_Y + 22, CARD_W - 14, m->sh_hp[m->sh_active], me->stat[MG_HP]);
+    badge(m, c, bw, FOE_CARD_X + CARD_W - 17, FOE_CARD_Y + 5, 1);
+    badge(m, c, bw, ME_CARD_X + CARD_W - 17, ME_CARD_Y + 5, 0);
 }
 
 static void compose_pick(Mon *m, const Rect *c, int bw){
@@ -594,6 +654,7 @@ static void battle_labels(Mon *m){
         lv_obj_add_flag(m->foe, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(m->me, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(m->mehp, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(m->mest, LV_OBJ_FLAG_HIDDEN);
         return;
     }
     MpCreature *me = &m->w.party[m->sh_active];
@@ -601,11 +662,18 @@ static void battle_labels(Mon *m){
     lv_label_set_text(m->foe, t);
     snprintf(t, sizeof t, "%s  Lv %u", mon_name(m, m->sh_mon[m->sh_active], a), me->level);
     lv_label_set_text(m->me, t);
-    snprintf(t, sizeof t, "HP %u / %u", m->sh_hp[m->sh_active], me->stat[MG_HP]);
+    snprintf(t, sizeof t, m->sh_st[0] ? "%u/%u" : "HP %u / %u", m->sh_hp[m->sh_active], me->stat[MG_HP]);
     lv_label_set_text(m->mehp, t);
     lv_obj_clear_flag(m->foe, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(m->me, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(m->mehp, LV_OBJ_FLAG_HIDDEN);
+    if(m->sh_st[0]){
+        lv_label_set_text(m->mest, status_word(m, m->sh_st[0] - 1u, a));
+        lv_obj_clear_flag(m->mest, LV_OBJ_FLAG_HIDDEN);
+    }
+    else lv_obj_add_flag(m->mest, LV_OBJ_FLAG_HIDDEN);
+    badge_load(m, 0);
+    badge_load(m, 1);
 }
 
 /* what a battle shows = the rules' state (between scripts) */
@@ -618,6 +686,10 @@ static void shown_now(Mon *m){
     m->sh_wild_max = m->b.wild.stat[MG_HP];
     m->sh_me_gone = !m->w.party[m->b.active].hp;
     m->sh_wild_gone = !m->b.wild.hp;
+    m->sh_st[0] = m->w.party[m->b.active].status;
+    m->sh_st[1] = m->b.wild.status;
+    m->sh_turn[0] = m->w.party[m->b.active].sturn;
+    m->sh_turn[1] = m->b.wild.sturn;
 }
 
 static void battle_show(Mon *m){
@@ -766,7 +838,14 @@ static void party_menu(Mon *m, int kind, int back){
     int n = 0;
     for(int i = 0; i < m->w.n_party; i++, n++){
         MpCreature *c = &m->w.party[i];
-        if(c->hp) snprintf(lines[n], 48, "%s  Lv %u  HP %u/%u", mon_name(m, c->mon, a), c->level, c->hp, c->stat[MG_HP]);
+        if(c->hp && c->status && c->status <= m->g.n_statuses){
+            char sw[NAME_LEN], line[96];
+            snprintf(line, sizeof line, "%s  Lv %u  HP %u/%u  %s", mon_name(m, c->mon, a), c->level, c->hp, c->stat[MG_HP],
+                     status_word(m, c->status - 1u, sw));
+            memcpy(lines[n], line, 47);
+            lines[n][47] = 0;
+        }
+        else if(c->hp) snprintf(lines[n], 48, "%s  Lv %u  HP %u/%u", mon_name(m, c->mon, a), c->level, c->hp, c->stat[MG_HP]);
         else snprintf(lines[n], 48, "%s  Lv %u  fainted", mon_name(m, c->mon, a), c->level);
         ptr[n] = lines[n];
         icon_ready(m, n, c->mon, 0xFFFFFF);
@@ -883,7 +962,8 @@ static int ev_text(Mon *m, const MpEvent *e, char *t, size_t cap){
     }
     case MP_EV_TALK: {
         MgStr st = { e->n, e->b };
-        int k = snprintf(t, cap, "%s%s", person_name(m, e->a, a), a[0] ? ": " : "");
+        person_name(m, e->a, a);                    /* first: the next line reads a[0] */
+        int k = snprintf(t, cap, "%s%s", a, a[0] ? ": " : "");
         if(k < 0 || (size_t)k >= cap) k = 0;
         if(!e->b || mtext(&m->g, st, t + k, (uint32_t)(cap - (size_t)k))) return 0;
         redraw();                                   /* they turned to face the player */
@@ -901,12 +981,19 @@ static int ev_text(Mon *m, const MpEvent *e, char *t, size_t cap){
         m->sh_wild_hp = m->sh_wild_max = m->b.wild.mon == e->a ? m->b.wild.stat[MG_HP] : 1;
         if(m->b.wild.mon == e->a) m->sh_wild_hp = m->b.wild.hp;
         m->sh_wild_gone = 0;
+        m->sh_st[1] = 0;
         battle_show(m);
         snprintf(t, cap, "%s sends out %s!", m->keeper[0] ? m->keeper : "The keeper", mon_name(m, e->a, a)); return 1;
     case MP_EV_BEATEN:
         snprintf(t, cap, "You beat %s!", person_name(m, e->a, a)); return 1;
     case MP_EV_HEALED:
         snprintf(t, cap, "Your critters are rested."); return 1;
+    case MP_EV_GIFT: {
+        char it[NAME_LEN];
+        snprintf(t, cap, "%s gives you %u %s%s.", person_name(m, e->a, a), e->b, item_name(m, (uint16_t)e->n, it),
+                 e->b == 1 ? "" : "s");
+        return 1;
+    }
     case MP_EV_PRIZE:
         snprintf(t, cap, "%s pays you %u coins.", person_name(m, e->a, a), (unsigned)e->n); return 1;
     case MP_EV_ITEM: {
@@ -941,6 +1028,11 @@ static int ev_text(Mon *m, const MpEvent *e, char *t, size_t cap){
         battle_labels(m); redraw();
         snprintf(t, cap, "%s%s gains %u HP.", who, nm, (unsigned)e->n); return 1;
     case MP_EV_STATUS:
+        m->sh_st[s] = (uint8_t)(e->a + 1); m->sh_turn[s] = 0;
+        battle_labels(m); redraw();
+        if(e->a < m->g.n_statuses && m->g.statuses[e->a].kind == MG_S_ASLEEP){
+            snprintf(t, cap, "%s%s falls asleep.", who, nm); return 1;
+        }
         snprintf(t, cap, "%s%s gets %s.", who, nm, status_name(m, e->a, b)); return 1;
     case MP_EV_IMMUNE:
         snprintf(t, cap, "%s%s can't get %s.", who, nm, status_name(m, e->a, b)); return 1;
@@ -954,7 +1046,63 @@ static int ev_text(Mon *m, const MpEvent *e, char *t, size_t cap){
         battle_labels(m); redraw();
         snprintf(t, cap, "%s%s gains %u HP from %s.", who, nm, (unsigned)e->n, status_name(m, e->a, b)); return 1;
     case MP_EV_STATUS_END:
+        m->sh_st[s] = 0;
+        battle_labels(m); redraw();
+        if(e->a < m->g.n_statuses && m->g.statuses[e->a].kind == MG_S_ASLEEP){
+            snprintf(t, cap, "%s%s wakes up.", who, nm); return 1;
+        }
         snprintf(t, cap, "%s%s's %s ends.", who, nm, status_name(m, e->a, b)); return 1;
+    case MP_EV_REMOVED:
+        m->sh_st[s] = 0;
+        battle_labels(m); redraw();
+        snprintf(t, cap, "%s%s's %s is taken away.", who, nm, status_name(m, e->a, b)); return 1;
+    case MP_EV_ASLEEP:
+        if(m->sh_turn[s] < 255) m->sh_turn[s]++;
+        redraw();
+        snprintf(t, cap, "%s%s is fast asleep.", who, nm); return 1;
+    case MP_EV_FLINCH:
+        snprintf(t, cap, "%s%s flinches and can't move.", who, nm); return 1;
+    case MP_EV_CONFUSED:
+        snprintf(t, cap, "%s%s is confused!", who, nm); return 1;
+    case MP_EV_DRAIN: {
+        uint16_t *ohp = s ? &m->sh_hp[m->sh_active] : &m->sh_wild_hp;
+        *hp = (uint16_t)(*hp > e->n ? *hp - e->n : 0);
+        *ohp = (uint16_t)(*ohp + e->n);
+        if(!s && *ohp > m->sh_wild_max) *ohp = m->sh_wild_max;
+        if(s && *ohp > m->w.party[m->sh_active].stat[MG_HP]) *ohp = m->w.party[m->sh_active].stat[MG_HP];
+        battle_labels(m); redraw();
+        snprintf(t, cap, "%s loses %u HP to %s.", nm, (unsigned)e->n, status_name(m, e->a, b)); return 1;
+    }
+    case MP_EV_NO_HEAL:
+        snprintf(t, cap, "%s%s can't be healed: it's festering.", who, nm); return 1;
+    case MP_EV_HOLD_ON:
+        m->sh_st[s] = 0;
+        battle_labels(m); redraw();
+        snprintf(t, cap, "%s%s holds on with 1 HP!", who, nm); return 1;
+    case MP_EV_HIT_BACK:
+        *hp = (uint16_t)(*hp > e->n ? *hp - e->n : 0);
+        battle_labels(m); redraw();
+        snprintf(t, cap, "%s%s loses %u HP to the foe's %s.", who, nm, (unsigned)e->n, status_name(m, e->a, b)); return 1;
+    case MP_EV_VANISH:
+        snprintf(t, cap, "%s%s goes out of reach!", who, nm); return 1;
+    case MP_EV_OUT_OF_REACH:
+        snprintf(t, cap, "It can't reach its foe."); return 1;
+    case MP_EV_HITS:
+        snprintf(t, cap, "It hits %u time%s.", e->a, e->a == 1 ? "" : "s"); return 1;
+    case MP_EV_STAGE: {
+        static const char *X[MG_NX] = { "armour", "dodge", "melee", "ranged", "speed" };
+        int d = (int16_t)e->b;
+        snprintf(t, cap, "%s%s's %s %s%s.", who, nm, e->a < MG_NX ? X[e->a] : "?", d > 0 ? "rises" : "falls",
+                 d > 1 || d < -1 ? " sharply" : "");
+        return 1;
+    }
+    case MP_EV_TYPE: {
+        MgStr ty;
+        if(mg_type_name(&m->g, e->a, &ty) || mtext(&m->g, ty, b, NAME_LEN)) snprintf(b, NAME_LEN, "?");
+        if(e->b) snprintf(t, cap, "%s%s is %s already.", who, nm, b);
+        else snprintf(t, cap, "%s%s becomes %s.", who, nm, b);
+        return 1;
+    }
     case MP_EV_RECHARGE:
         snprintf(t, cap, "%s%s has to rest.", who, nm); return 1;
     case MP_EV_FAINT:
@@ -964,6 +1112,8 @@ static int ev_text(Mon *m, const MpEvent *e, char *t, size_t cap){
     case MP_EV_SWAP:
         m->sh_active = (uint8_t)e->a;
         m->sh_me_gone = 0;
+        m->sh_st[0] = m->w.party[e->a].status;
+        m->sh_turn[0] = m->w.party[e->a].sturn;
         battle_show(m);
         snprintf(t, cap, "Go, %s!", mon_name(m, m->sh_mon[e->a], a)); return 1;
     case MP_EV_THROW:
@@ -1246,6 +1396,11 @@ static int pause_read(Mon *m){
     }
     for(int s = 0; s < MP_MOVES; s++)
         if(b->wild.moves[s] != MP_NO_MOVE && b->wild.moves[s] >= m->g.n_moves) return 0;
+    for(int s = 0; s < 2; s++){
+        if(b->gone[s] > 1 || b->land[s] > MP_MOVES) return 0;
+        for(int k = 0; k < MG_NX; k++) if(b->stage[s][k] < -6 || b->stage[s][k] > 6) return 0;
+    }
+    if(b->wild.xtype > m->g.n_types || b->foe_set) return 0;
     MpCreature c = b->wild;
     if(mp_stats(&m->g, &c) || memcmp(c.stat, b->wild.stat, sizeof c.stat) || b->wild.hp > c.stat[MG_HP]) return 0;
     m->b = *b;
@@ -1934,6 +2089,11 @@ static void build(Mon *m, lv_obj_t *parent){
     lv_obj_set_pos(m->me, ME_CARD_X + 6, ME_CARD_Y + 4);
     m->mehp = label(m->view, &lv_font_palm, lv_color_hex(0x000000));
     lv_obj_set_pos(m->mehp, ME_CARD_X + 6, ME_CARD_Y + 28);
+    m->mest = label(m->view, &lv_font_palm, lv_color_hex(0x000000));
+    lv_obj_set_width(m->mest, CARD_W - 14);
+    lv_obj_set_style_text_align(m->mest, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_pos(m->mest, ME_CARD_X + 6, ME_CARD_Y + 28);
+    lv_obj_add_flag(m->mest, LV_OBJ_FLAG_HIDDEN);
 
     m->box = lv_obj_create(m->view);
     lv_obj_remove_style_all(m->box);
@@ -2085,7 +2245,9 @@ void mon_ui_set_auto(int on){
     if(!m || (on && (!m->started || m->scene == SC_ERROR))) return;
     auto_set(m, on);
 }
-int mon_ui_keep_awake(void){ return g_mon && power_on_usb(); }
+/* Auto-play keeps the screen awake on battery too: a lock or a touch ends it (auto_set 0),
+   so the flag is only set while the game is playing itself. */
+int mon_ui_keep_awake(void){ return g_mon && (g_mon->autoplay || power_on_usb()); }
 int mon_ui_playing(void){ return g_mon && g_mon->started; }
 
 int mon_ui_save(void){
@@ -2135,6 +2297,39 @@ void mon_ui_test_place(int area, int x, int y, int facing){
         return;
     }
     scene_map(m);
+}
+
+int mon_ui_test_status(int ours, int foe, int turns){
+    Mon *m = g_mon;
+    if(!m || !m->started || m->scene != SC_BATTLE) return 1;
+    MpCreature *c = &m->w.party[m->b.active];
+    c->status = (uint8_t)(ours >= 0 && ours < m->g.n_statuses ? ours + 1 : 0);
+    c->sturn = (uint8_t)(turns > 0 ? turns : 0);
+    m->b.wild.status = (uint8_t)(foe >= 0 && foe < m->g.n_statuses ? foe + 1 : 0);
+    /* the pixel test (EFFECTS_PLAN.md 5): every critter's name at level 100, and
+     * every status's word after the longest HP, must end before the badge */
+    int widest = 0, worst_st = 0;
+    char who[NAME_LEN + 12], nm[NAME_LEN];
+    for(uint32_t i = 0; i < m->g.n_mons; i++){
+        lv_point_t sz;
+        snprintf(who, sizeof who, "%s  Lv 100", mon_name(m, (uint16_t)i, nm));
+        lv_text_get_size(&sz, who, &lv_font_palm_bold, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        if(sz.x > widest) widest = sz.x;
+    }
+    for(uint32_t i = 0; i < m->g.n_statuses; i++){
+        lv_point_t sz, hp;
+        lv_text_get_size(&sz, status_word(m, (uint16_t)i, nm), &lv_font_palm, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        lv_text_get_size(&hp, "999/999  ", &lv_font_palm, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        if(sz.x + hp.x > worst_st) worst_st = sz.x + hp.x;
+    }
+    fprintf(stderr, "badge: the widest name line %d px of %d; the widest HP and status line %d px of %d\n",
+            widest, CARD_W - 17 - 6 - 1, worst_st, CARD_W - 14);
+    int fits = widest <= CARD_W - 17 - 6 - 1 && worst_st <= CARD_W - 14;
+    if(!fits) fprintf(stderr, "FAIL: a card's text runs into its badge\n");
+    shown_now(m);
+    battle_labels(m);
+    redraw();
+    return fits;
 }
 
 void mon_ui_test_full_party(void){

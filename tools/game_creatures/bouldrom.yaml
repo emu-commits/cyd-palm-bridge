@@ -1,0 +1,26 @@
+# Bouldrom: drawn for the project by the owner (2026-11-05).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Bouldrom
+description: >-
+  Its plates fit like a stone wall. The glow in its chest is warm, and
+  lost critters sleep beside it.
+category: Boulder
+height_cm: 150
+weight_kg: 210
+drawing: tools/game_art/src/bouldrom.jpg
+types: [earth]
+shape: brute
+stage: stage1
+experience_group: default
+catch_rate: 60
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: hammerhead}
+- {level_learned: 1, technique: rock}
+- {level_learned: 1, technique: ram}
+- {level_learned: 20, technique: assault}
+- {level_learned: 26, technique: greenstone}
+evolutions:
+- {at_level: 32, monster_slug: tectorath}

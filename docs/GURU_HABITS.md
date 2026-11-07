@@ -24,6 +24,29 @@ make -C sim gurupool        # the gate CI runs: generated file matches, parser a
 
 ## Editing it on the device
 
+Since 2026-11-07 the list is edited on the device itself:
+
+- **Change a habit:** open it from the list, tap **Edit**. The Graffiti strip
+  comes up under a form: the category (tap it to step through the five), the
+  name and the why. **Save** (where Edit was) writes the list to `guru.txt`
+  on the card and goes back to the habit, with the strip hidden again.
+- **Delete a habit:** **Delete** on the same form, then confirm. Days you
+  already ticked it stay counted.
+- **Add a habit:** **Menu > New habit** opens the same form, empty. Save adds
+  it at the end of its category, if anything was written; a habit needs both
+  a name and a why.
+
+Each change writes the **whole** list, with the one change, to `guru.txt`
+(replaced whole, so a power cut can't leave half a file) and reads it back,
+so what Guru shows is always what the card holds. If the card already had a
+`guru.txt` that Guru could not use (a typo on some line), it is kept as
+`guru.txt.bak` rather than written over. A new habit takes the lowest free
+id; a deleted habit's tick for today is cleared so a later habit given its
+number starts unticked (the log's past rows keep their category, which is
+what the week reads). The edited list stays in RAM for the rest of the boot.
+
+## Editing it on a computer
+
 1. In Guru, **Menu > Export habit list**. This writes `/sdcard/guru.txt`.
 2. Put the card in a computer and edit that file in any text editor.
 3. Put it back. Guru reads it when it next starts.

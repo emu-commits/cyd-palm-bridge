@@ -1,0 +1,25 @@
+# Astrolune: the cosmic line's last stage. The owner's drawing (2026-11-05).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Astrolune
+description: >-
+  Its wings are a piece of the night sky, stars and all. Where it has
+  flown, the sky is a little darker.
+category: Starmoon
+height_cm: 170
+weight_kg: 70
+drawing: tools/game_art/src/astrolune.png
+types: [cosmic]
+shape: humanoid
+stage: stage2
+experience_group: slow
+catch_rate: 25
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: crystal}
+- {level_learned: 1, technique: lineage}
+- {level_learned: 1, technique: ruby}
+- {level_learned: 1, technique: dreamwalk}
+- {level_learned: 38, technique: pyrokinesis}
+- {level_learned: 44, technique: energy_beam}

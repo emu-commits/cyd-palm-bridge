@@ -8,13 +8,14 @@ before touching anything.
 ## Where things are
 
 - `firmware/`: ESP-IDF v5.5 app. `firmware/main/ui.c` (about 12k lines)
-  is the whole UI. The device's DAV transport is
+  is the whole UI. The device's HTTPS transport (HotSync's fetches) is
   `firmware/components/bridge/dav_esp.c`.
-- `docs/ARCHITECTURE.md`: how the pieces fit, the sync engine, and how to
-  build and test each part.
+- `docs/ARCHITECTURE.md`: how the pieces fit, and how to build and test
+  each part.
 - `sim/`: the same UI built for desktop and wasm, with a device-sized LVGL
   pool and heap cap.
-- `bridge/`: the Palm↔CalDAV/CardDAV codec and sync (MIT).
+- `bridge/`: portable C shared by the host gates and the device: the PDB
+  container, Find, config, the RSS reader, weather and location (MIT).
 - `tests/`: host gates.
 - `docs/BACKLOG.md`: open work. **Its "RESUME HERE" sections say what to do
   next.**
@@ -51,40 +52,38 @@ before touching anything.
   rules are `tools/game_creatures/<slug>.yaml` with an "ours" allow-list
   line. Each drawing has a `<slug>.eyes.json` beside it: halving ruins eyes,
   so they're drawn again by hand (the README there; the first build drafts it). The first are the fire fox line (Cinderkit, Scorchvix, Pyrewing) and
-  the water axolotl line (Gillpip, Rillotl, Maelstrotl), the lightning line (Sparkip, Nimbolt, Fulminax), the wood line (Sprigling, Wildbough, Grovarch) the venom line (Skullick, Ossicoil, Banewyrm), the sky line (Cirrup, Cumulynx, Tempyre) and Rivetron (metal).
+  the water axolotl line (Gillpip, Rillotl, Maelstrotl), the lightning line (Sparkip, Nimbolt, Fulminax), the wood line (Sprigling, Wildbough, Grovarch) the venom line (Skullick, Ossicoil, Banewyrm), the sky line (Cirrup, Cumulynx, Tempyre), Rivetron (metal), the heroic line (Valkit, Valorix, Paladrax), the cosmic line (Starlet, Nebulet, Astrolune), the crystal line (Geodot, Quartzor, Prismyth), the rock line (Pebblub, Bouldrom, Tectorath) and the eye line (Oglet, Oculoth), 60 critters.
 - `docs/DEX_PLAN.md`: **Dex**, the critter index (Games folder, under
   Critters), a fixed hardware-like gadget: its bezel, title bar and keys never
   change, and all other text and the speaker come through its subscreens (no
   Coach or Guru bubble). **Built in the sim 2026-11-03** (`ui_dex.c`, `dex.c`, the
   TV effect in `crt.c`; game format 2.2, save version 4; gate `make -C sim dex`);
   its bench items are the owner's. §9 holds the owner's decisions.
+- `docs/EFFECTS_PLAN.md`: **Tuxemon's move effects, one at a time** (planned 2026-11-05, nothing built): each
+  effect switched on by data, measured by a balance run, shown as a status badge on the battle cards. Its
+  checklist is in `BACKLOG.md`; §8 holds the owner's open decisions.
 - `docs/APP_PLATFORM_PLAN.md`: native C apps loaded from the SD card.
   **On hold since 2026-09-29**; don't build any of it without the user's yes.
 
 ## Rules that always apply
 
-- **Never delete anything on the server. No exceptions, ever** (the owner,
-  2026-10-13). There is no `dav_delete`, no `DELETE` or `MOVE` request, and
-  none may be added: a delete on the device leaves the device only (a
-  *hidden* map row, `sync.c`'s `HIDDEN_HASH`), a record missing locally is
-  restored, and a record leaving the calendar window is pruned on the
-  device. `make test` runs `tests/nodelete.sh`, which fails on any of it in
-  `bridge/`, `firmware/` or `sim/`. The gates clear their local Radicale
-  with `tests/radicale_rm.h`, which refuses any server not on localhost.
-- **Contacts are read-only on the device while Address syncs** (the owner,
-  2026-10-14: all contact edits reach iCloud, or none are made). Address
-  has no New, Edit or Delete then (`data_app_readonly()`), and `hotsync.c`
-  syncs it pull-only whatever Settings says. Don't lift it until every
-  contact edit can be sent (`BACKLOG.md`, first RESUME HERE).
+- **No calendar, contacts or to-do sync** (the owner, 2026-11-07: "pointless
+  to compete with smartphones"). Date Book, Address, To Do and the
+  CalDAV/CardDAV sync were archived: the apps, the sync engine and its
+  Radicale gates are at the git tag `archive/pim-caldav`. Don't bring any of
+  it back without the owner's yes. HotSync fetches the clock, news, location
+  and weather; Memos stay on the device.
 - **Run every gate before a commit, not just the smoke:**
   - `make test` and `make ftest` (host; the programs build into `build/`);
-  - `./tests/run_gates.sh` (the sync engine against a local Radicale; needs
-    `pip install radicale`) whenever `bridge/` changes;
   - `sudo mkdir -p /sdcard && sudo chmod 777 /sdcard`, then `make -C sim`
     with the targets `poolparity nosecrets secretscan data graf mines wordie
-    sudoku zip clock coach guru gurupool dash course srs monster dex smoke smoke32`;
+    sudoku zip clock coach guru gurupool dash course srs monster balance dex smoke smoke32`
+    (on the owner's PC, run them in the `cyd-sim` / `cyd-sim32` images on a
+    scratch copy: `secretscan` empties `/sdcard`);
   - `python3 tests/mkcourse_test.py` (the course builder; needs the Pillow
     in `tools/requirements-course.txt`, and downloads the pinned font);
+  - `python3 tests/mkquest_test.py` (Knowledge's graph-to-course converter;
+    stdlib only);
   - `python3 tests/mkgame_test.py` (the game converter, on the fixture; needs
     `tools/requirements-game.txt`);
   - the firmware build in the `espressif/idf:release-v5.5` container
@@ -100,10 +99,10 @@ before touching anything.
 - **Don't let versions float.** LVGL is pinned at 9.5.0 in
   `firmware/main/idf_component.yml`, and the sim pins v9.2.2 separately.
   The LVGL pool is 32 KB; `make -C sim poolparity` enforces it.
-- **Watch static DRAM.** It is about 81.5 % used, with about 33.4 KB free
-  (2026-10-14: the 12 KB rewrite arena went; it was 89 % before). No new
-  large static buffers; allocate when a screen opens and free when it
-  closes.
+- **Watch static DRAM.** It is about 72.7 % used, with about 49.4 KB free
+  (2026-11-07, after the sync engine left; it was 80.3 % / 35.6 KB on
+  `origin/main` just before). No new large static buffers; allocate when a
+  screen opens and free when it closes.
 
 ## Cloud-session environment (learned 2026-09)
 
@@ -165,6 +164,7 @@ from there, or ask the user whether it has been merged.
    `gen_faces.py --from-exact`, and never regenerate it from the source.
 9. **The Planner is approved:** To Do and Memo become one launcher app
    (design in `BACKLOG.md`'s RESUME HERE). Storage and sync don't change.
+   (2026-11-07: To Do was archived; the tile is **Memos**.)
    The grid becomes Date Book, Address, Planner / News, HotSync, Games /
    Study, Guru, Coach.
 10. **Accepted:** JSON Lines as the course source format, CC0 for the demo
@@ -267,62 +267,45 @@ and S1**, which the owner asked for together:
   in the title bar was made as wide as fits (`tb_home_x()`: from the
   clock's widest to Menu), outlined.
 
-**Where things stand (2026-10-01):** all of the above is merged to `main`
-(PR #66, `79272fd`). The owner's bench checks are the open `[d]` items in
-`BACKLOG.md`'s first RESUME HERE; still untested there: a bigger iCloud
-sync and loading a second course into Study. Since the merge: the README
-and `docs/ARCHITECTURE.md`, comments without internal ticket codes, and the
-host build in `build/`.
+**Where things stood (2026-10-01 to 10-16):** Study merged (PR #66), then
+the iCloud sync for a real account and the Palm behaviours (P1–P8). The sync
+part of that is history now: see the next paragraph.
 
-**Now: the sync engine for a real account** (the owner, 2026-10-01: "start
-with the external sort, the window and pruning rule, batched downloads.
-Focus on a very tight time window"). The plan is `BACKLOG.md` §Engine,
-items 1 and 5. The rule that makes a window safe: **an object leaving the
-window is pruned on the device and never deleted on the server.** Built the
-same day: the sort in runs on the card (`sync_sort_file`), the window
-(`sync_set_window`, config `cal_days_back`/`cal_days_ahead`, Settings ▸
-Sync ▸ Calendar), and batched downloads (multiget into a body cache on the
-card); gates `sort_test`, `mget_test` (+`mget_asan`), `window`. Its bench
-checks are `[d]` items in `BACKLOG.md`'s first RESUME HERE. Still open:
-To Do (open tasks only) and Address (no photos, or one group).
-
-**2026-10-13: nothing is deleted from the cloud** (the first rule above).
-**2026-10-14: §Engine 6 to 10 are built** (`BUILD_PROGRESS.md`, newest
-entries): an edit is merged three ways into the server's copy
-(`bridge/objfile.c`, against each record's *base* beside the map, never a
-replacement); big objects are read through a Palm view; a read-only switch,
-on for a new account (Settings ▸ Sync ▸ Changes); every database rewrite on
-the device streams (an edit used to truncate a big database to 64
-records); repeating events show on every day they occur; To Do keeps the
-open tasks and those done in two weeks. Gates: `objfile_test`,
-`recur_test` (make test), `fidelity`, `todos` (run_gates.sh), the sim
-`data` gate. **Next is the owner's test with the 10-year account**: the
-`[d]` items in `BACKLOG.md`'s first RESUME HERE, read-only first.
-
-**2026-10-15: Palm behaviours, on branch `claude/palm-behaviours`** (on top
-of the sync branch, which is still to be tested on the device).
-`docs/PALM_ARCHIVE_REVIEW.md` measured the firmware against Palm's UI
-Guidelines and Zen of Palm (github.com/ardiri/dev-palmos; ideas only, its
-Palm OS source is all rights reserved). The owner had the bug and the seven
-items built, one commit each (`BACKLOG.md`'s "Palm behaviours" RESUME HERE,
-`BUILD_PROGRESS.md`):
-- P1 waking resumes the screen the lock went over (`resume_show()`, the
-  `g_resume` record), and leaving an edit form saves it (`g_edit_live` in
-  `content_clear()`);
-- P2 writing on the Day view makes an event; P3 the title opens the menu,
-  which remembers its last item; P4 Palm's alert order, titles, nothing
-  dimmed; P5 Find matches word starts; P6 reminders (`data_cal_alarms()`,
-  one list on wake, OK only); P7 the command stroke (`GRAF_COMMAND`) and an
-  Edit menu; P8 Tips.
-- Found on the way and fixed: a repeat set on the device packed a 1920 end
-  and showed on no day (`ApptUnpack()` now reads an end with no month or day
-  as none).
-- Smoke commands added: `R <back> <ahead>` (reminders over a span). The
-  `p1_*`..`p8_*` shots are the screens to look at.
-- `run_gates.sh`'s `probe_partial` used to fail ("discovery from the
-  server's root"): the earlier gates leave other, emptied address books and
-  the probe took book #1. Fixed 2026-10-16: the test names its book and picks
-  it with `--book-index`.
+**2026-11-07: Memos, Settings on the launcher, Guru editing; the PIM apps
+and the iCloud sync archived** (the owner's list; branch
+`claude/memos-settings-guru-edit`, `BUILD_PROGRESS.md`'s newest entry):
+- Date Book, Address and To Do are gone from the UI, `data.c` and the build;
+  the Planner is **Memos** (memo-only `data.c`, an empty `MemoDB.pdb` on a
+  new card, no demo data, no test events). The lock screen's AHEAD zone has
+  only STUDY; reminders and the Day-view writing went with Date Book.
+- The CalDAV/CardDAV sync is gone from HotSync, Settings (the Accounts and
+  Sync tiles, discovery) and the tree (`bridge/sync.c`, the DAV client, the
+  codecs, the Radicale gates, `run_gates.sh`, `nodelete.sh`). `dav_esp.c`
+  keeps only the HTTPS fetch HotSync uses; `config.c` still parses the old
+  account keys so an old card loads (a proposal in `BACKLOG.md` drops them).
+  Everything is at the tag `archive/pim-caldav` (made at `origin/main`
+  `07fe31d`, local until pushed).
+- The launcher: Settings (a gear, `icon_settings`), HotSync, Games / News,
+  Memos, Knowledge (below) / Study, Guru, Coach. Settings left the menu; every
+  full-screen menu is one row shorter, and the smoke tour's menu taps moved.
+- Guru: Home at the foot of her list; Edit on a habit (the strip comes up,
+  Edit becomes Save), Delete with a confirm, Menu ▸ New habit
+  (`gurupool_put`/`gurupool_remove` write the whole list to `guru.txt`).
+- Study's demo has no radicals (64 items: 24 kanji, 40 words); a card with
+  the old demo gets the new one (`.demo` holds the demo's size).
+- Plans only, not approved: `docs/COURSE_CATALOG_PLAN.md`,
+  `docs/KNOWLEDGEQUEST_PLAN.md`.
+- **Knowledge** (later the same day, the owner's word): launcher position 6
+  is a smiling tree that opens Study's engine on one built-in course,
+  `courses/kq-numbers/` (40 steps in one line, counting to percent change,
+  drafted by Claude and **not yet reviewed**). KnowledgeQuest's K0:
+  `tools/mkquest.py` turns `quest.json` + `nodes.jsonl` into the course
+  source; `tools/gen_study_demo.py` carries it in `study_demo.c` beside the
+  demo; `st_install_kq()` writes it to the card when it's missing. In
+  `ui.c`, `g_st->kq` swaps Study's words for a step's ("Step 12", "Builds
+  on", "Check") and adds the end-of-step screen (`st_show_unlocked`).
+  Study's course list leaves `kq-numbers` out; each tile's badge counts its
+  own courses (`st_glance_some`).
 
 1. **S6, the bench**, is the owner's (`[d]` items in `BACKLOG.md`). Any
    further work follows `SRS_PLAN.md` §10, keeping to its §7 budgets:
@@ -338,7 +321,7 @@ items built, one commit each (`BACKLOG.md`'s "Palm behaviours" RESUME HERE,
   leaves 32-bit objects in `sim/build`, and the next 64-bit link fails.
 - Clear the simulator's card (`find /sdcard -mindepth 1 -delete`) before a
   smoke run whose screenshots you're going to judge. The walk expects a fresh
-  card, and a previous run leaves demo data removed and Wi-Fi saved.
+  card, and a previous run leaves memos written and Wi-Fi saved.
 - `smoke32` needs `gcc-multilib` (`sudo apt-get update` first in a fresh
   container).
 
