@@ -1,5 +1,10 @@
 # App platform plan — native C apps from the SD card
 
+> **Note, 2026-11-07:** Date Book, Address, To Do and the iCloud sync were
+> archived (git tag `archive/pim-caldav`). This plan, on hold since
+> 2026-09-29, still mentions them and the iCloud password; read those parts as
+> history. A PIM capability today would cover Memos only.
+
 > **Status: ON HOLD (2026-09-29).** Nothing here is built. The owner's
 > main goal is one first-class SRS app, and that app is now being built into
 > the firmware instead (`SRS_PLAN.md` §1 has the reasons). Two groundwork

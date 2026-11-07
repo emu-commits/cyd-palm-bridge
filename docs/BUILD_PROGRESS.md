@@ -16,6 +16,59 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-07 — Memos, Settings on the launcher, Guru editing; Date Book, Address, To Do and the iCloud sync archived
+
+The owner's list, built in the simulator on `claude/memos-settings-guru-edit`. **The archive:** the git tag
+`archive/pim-caldav` (at `origin/main` `07fe31d`) holds everything that left: Date Book, Address and To Do (their
+screens, edit forms, pickers, the lock screen's NEXT and DUE rows, reminders, writing on the Day view), the
+CalDAV/CardDAV sync (`bridge/sync.c`, `objfile.c`, the DAV client and XML parsers, `ical.c`, `vcard.c`, `datebook.c`,
+`address.c`, `todo.c`, `tz.c`, `charset.c`, `bridge_cli`), HotSync's account phase and collection discovery, the
+Accounts and Sync tiles in Settings, the demo records and "Add test events", and the Radicale gates (`run_gates.sh`,
+`nodelete.sh`, `incremental`, `synctoken`, `category`, `bigsync`, `multiapp`, `uidmatch`, `idempotent`, `massdel`,
+`streamparse`, `objfile_test`, `recur_test`, `toobig`, `sort_test`, `window`, `fidelity`, `todos`, `mget_test`,
+`probe_partial`). The owner's word: "abandon this idea as it's pointless to compete with smartphones".
+
+What stays and changed:
+- **Memos** is the Planner without To Do: `data.c` is Memo-only, a card with no `MemoDB.pdb` gets an empty one
+  with the standard categories, and old cards' Date Book, Address and To Do databases are left alone. Find
+  searches memos. A memo's checklist lines are the device's to-do list now.
+- **HotSync** is Wi-Fi, the clock, the news, the location and the weather. `dav_esp.c` keeps only the HTTPS fetch
+  (GET only, no Authorization) and the keep-alive handle; `dav_break.c`'s breaker stays.
+- **The launcher**: Settings (a new gear, `icon_settings`, drawn in `tools/gen_settings_icons.py`), HotSync, Games /
+  News, Memos, a free cell / Study, Guru, Coach. Settings left the Options menu, so every menu is one row shorter.
+- **Guru**: Home at the foot of her list (the table sits in a scroller, its height its rows'); Edit on a habit's
+  page opens a form with the Graffiti strip (category by tap, name, why) and turns into Save; Delete on the form
+  with a confirm; Menu ▸ New habit. `gurupool_put()` / `gurupool_remove()` write the whole list to `guru.txt`
+  through safefile and read it back; a broken card file is kept as `guru.txt.bak`; `guru_forget()` clears a
+  deleted habit's tick. Gate: `make -C sim gurupool` (12 new checks).
+- **Study's demo** has no radicals: 64 items (24 kanji, 40 words), `course.srs` 81,760 → 79,264 B. Kanji are
+  built from nothing, so a level's kanji open together; words still wait for their kanji. The radicals' lines stay
+  in `ids.tsv`. `st_install_demo()` writes the demo's size into `study/.demo` and replaces an older demo on a card
+  that still has it (a removed demo stays removed). Gates: `srs_test` (unlocks rewritten, 4 new card checks),
+  `course_test` (64 items, the word links).
+- `confirm_open()` is the one Palm confirm alert (Delete Memo, Delete Habit).
+
+Measured with ESP-IDF v5.5 here (`idf.py build` and `idf.py size`, this branch against `origin/main` built the same
+way, both from clean):
+
+| | `origin/main` | this branch | change |
+|---|---|---|---|
+| Total image | 1,942,595 B | 1,852,819 B | −89,776 B |
+| Flash code | 1,324,988 B | 1,256,204 B | −68,784 B |
+| Flash data | 501,348 B | 480,468 B | −20,880 B |
+| Static DRAM used | 145,136 B (80.3 %) | 131,368 B (72.7 %) | −13,768 B |
+| Static DRAM free | 35,600 B | 49,368 B | +13,768 B |
+
+The simulator: `smoke` and `smoke32` pass (the tour rewritten for the new grid; the 32-bit pool's low-water is
+7,092 B, at `p7_graffiti_help`). Two lessons:
+
+- **A shorter menu moves every tap below the row that left.** Settings was the second Options row, so every menu
+  in the tour (launcher, Coach, Study, Critters, the Dex) lost 26 px under it; and `dex_regions.py` scanned the
+  Dex menu down to y 190 for "no scanlines", which the shorter menu no longer covers.
+- **A single tile on a grid row is centred.** Seven Settings tiles leave About alone on the third row, so it is at
+  x 120, not under Wi-Fi; the first tour's tap at x 46 photographed the grid. The same tour found an older miss:
+  "Screen off ▸ 1 minute" was tapped at y 121, which is "2 minutes".
+
 ### 2026-11-04 — Critters: the backlog of the owner's requests
 
 Built on "build through the CYD-critters backlog items", in the simulator. `BACKLOG.md` has each one and what's

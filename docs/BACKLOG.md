@@ -3,8 +3,9 @@
 The one list of what's left to do. **Only open work lives here.** When something
 is done it moves to `BUILD_PROGRESS.md` (the changelog, the hardware/RAM
 reference and the hard-won lessons) and leaves this file. `PRODUCT_PLAN.md` is
-the path to shipping; `COACH_DESIGN.md` and `GURU_HABITS.md` are per-app specs.
-Retired analyses are in git history: `git log --diff-filter=D -- docs/`.
+the path to shipping; `COACH_DESIGN.md`, `GURU_HABITS.md`, `SRS_PLAN.md`,
+`GAME_PLAN.md` and `DEX_PLAN.md` are per-app plans. Finished items and retired
+analyses are in git history (`git log -p -- docs/BACKLOG.md`).
 
 Every item is tagged by **where it can be worked**, because on this project that
 is the constraint that binds (a base CYD with no PSRAM, developed mostly away
@@ -12,774 +13,222 @@ from the bench):
 
 - **`[s]`** — buildable and verifiable *today* in the emulator (`make -C sim
   smoke`, or https://emu-commits.github.io/cyd-palm-bridge/). No hardware needed.
-- **`[d]`** — needs the physical CYD (touch, Wi-Fi/TLS, sound, battery) or a live
-  iCloud account. It can usually be *written* off-device and checked on return.
+- **`[d]`** — needs the physical CYD (touch, Wi-Fi/TLS, sound, battery). It can
+  usually be *written* off-device and checked on return.
 
 **Working agreement.** Tick a box only when it is *verified*, not when it is
 written: `[s]` means the smoke ran and the screenshot was looked at, `[d]` means
 someone looked at the glass. **The user runs the bench checks — never tick a
-`[d]` box for them.** One group per commit, on a branch off `main`.
+`[d]` box for them.** One group per commit, on a branch off `main`. Before a
+push: every gate, not just the smoke (`CLAUDE.md` lists them).
+
+**Consolidated 2026-11-07.** Date Book, Address, To Do and the iCloud
+(CalDAV/CardDAV) sync were archived that day (git tag `archive/pim-caldav`;
+`BUILD_PROGRESS.md` has the entry), and every item that was about them left
+this file. The rest was regrouped by area, with each open check kept once.
 
 ---
 
-## Dex, and Critters' new screens (built in the simulator 2026-11-03; the bench is next)
+## RESUME HERE — 2026-11-07: Memos, Settings on the launcher, Guru editing
 
-`DEX_PLAN.md` is the plan, §8 D4 and §10 what's here. On the board since 2026-11-03: the first report is in `BUILD_PROGRESS.md`.
+Built in the simulator on branch `claude/memos-settings-guru-edit` (the
+`memo_*`, `planner_*`, `p1_*`, `p4_*`, `p7_*`, `guru_edit*`, `guru_delete*`,
+`guru_new*`, `guru_list_end`, `study_*` and `settings_*` smoke shots looked
+at). Nothing is on the device yet.
 
-- [d] **Walking in Critters:** smooth, with no visible drawing down the screen (40 ms a
-  frame at 160 MHz, measured; it was 94). **The panel at 40 MHz:** no speckle, wrong colours or
-  shifted lines anywhere, in any app. If there are, `clock_speed_hz` in `display.c`.
-- [d] Critters and the Dex open within about half a second of the tap (measured at
-  160 MHz: 419 and 438 ms to first paint), and Wi-Fi and a sync still work (the SD card changed SPI host).
-- [d] The fade is very slight on the Dex's Talk page, at every strength,
-  and the Dex's bezel has no dark square corners.
-- [d] At 160 MHz (it was 240 for a day) and with the loop sleeping at least a tick
-  (`lvgl_port_run()`), does walking still feel smooth? It went from 33 to 40 ms a frame.
-  The battery gain isn't measured: `power.log` can A/B it.
-- [d] **The effect's strength on the panel:** Menu ▸ TV effect cycles Light, Standard,
-  Strong, Off, and is remembered. Is small text readable through it, in the Dex's
-  list? Which one do you want as the default? (Critters has given the effect up.)
-- [d] Dex opens from the Games folder; a caught critter shows in full after saving
-  in Critters; a save from before this firmware keeps its party in the Dex.
-- [d] Leaving the Dex gives the heap back; the title bar goes back to black.
-- [d] ◀ ▶ are fast enough, and the keys are easy to hit.
-- [d] The portrait and the green clock read well on the panel; Anoleaf and Fluttaflap
-  hold up on the blue.
-- [d] Critters' D-pad and A and B after moving 2 px, in the slightly smaller panel.
-- [d] A party of six: the icons on Party and on Auto-play's panel, and tapping a line
-  of Party (each is now 24 px).
-- For the owner to review, no bench needed: my drafts of his lines (`dex.c`), the shortened descriptions
-  (`game_region.json`, `tools/game_creatures/`), and our critters' categories and
-  sizes.
-- [x] **Dex trainer: more dialogue and a personality** `[s]` (2026-11-04; `dex_talk_story`,
-  `dex_talk_memory`, `dex_where_memory`): each Talk moves on. Still for the owner to review:
-  the lines in `dex.c` (`STORY`, `MEMORY`, `NEARLY`, `FULL`) are drafts.
+- [ ] The launcher on glass: Settings (the gear, position 1), HotSync, Games /
+  News, Memos, an empty cell / Study, Guru, Coach. The gear reads as a gear `[d]`
+- [ ] Settings from its tile: the seven tiles, the Assistant's greeting, and
+  every panel opens as it did from the menu `[d]`
+- [ ] Memos on glass: an empty list on a new card (no demo data), quick add,
+  the checklist memo (the [X] button, tick and untick by box and by words),
+  Find over memos `[d]`
+- [ ] A card from before this firmware: its old Date Book, Address and To Do
+  databases are left alone, and its memos (including any demo memos it was
+  seeded with) are all there `[d]`
+- [ ] HotSync on glass: "Sets the clock, and fetches the news and the
+  weather."; a run's status line; Cancel mid-run `[d]`
+- [ ] Guru's list: Home at the foot of the list after scrolling to the end, and
+  it goes to the launcher `[d]`
+- [ ] Guru's Edit: the strip comes up, the category steps on a tap, the name
+  and the why take Graffiti, Save hides the strip and the page shows the
+  change; `guru.txt` on the card holds it after a reboot `[d]`
+- [ ] Guru's Delete (on the form): the confirm, Cancel keeps it, Delete
+  removes it; a habit ticked today keeps today's count `[d]`
+- [ ] Guru's Menu ▸ New habit: Save with nothing written adds nothing; with a
+  name and a why it is added at the end of its category `[d]`
+- [ ] Heap after a Guru edit: the edited list is held in RAM for the rest of the
+  boot (`gurupool.c`'s arena, about 7–9 KB for the full list). A HotSync and
+  Critters still work after editing Guru `[d]`
+- [ ] Study's demo without radicals: a card that already had the old demo gets
+  the new one (the `.demo` mark holds its size), progress on the kanji kept;
+  the first lesson is five kanji, each quizzed on meaning and reading `[d]`
+- [ ] Owner: the kanji mnemonics that used to point at their radicals were
+  reworded (`courses/demo-kanji/items.jsonl`: 一 十 日 月 木 目 田 力 上 下);
+  the 40 words were kept — say if Study should teach the kanji alone
 
----
+Plans written with this change, **not approved, nothing built**:
 
-## A monster-catching game: Critters (G4 and the rooms done 2026-10-16 in the simulator; the bench is next)
-
-`GAME_PLAN.md` is the plan: a C engine in the Games menu, with content from
-Tuxemon (GPLv3 data, mostly CC-BY-SA art) converted into one file on the card,
-on-screen controls and an Auto-play checkbox. **G0 and G1 are built** (the
-owner asked for each on 2026-10-16), with nothing on the device yet:
-`GAME_FORMAT.md` and `tools/mkgame.py`, then the reader (`monster.c`) and
-the rules (`monster_play.c`) with their host gates. The owner answered every
-open question on 2026-10-16 and said yes to G2 (`GAME_PLAN.md` §13).
-
-- [x] The renders: the owner looked at Tuxemon's Route 1 as the device would
-  draw it, 8-bit (2026-10-16: "Looks good"). The Spriters Resource was
-  asked about and ruled out: its rips are the games' owners', not free.
-- [x] The owner reviewed `GAME_FORMAT.md` (2026-10-16: "fine").
-- [x] §13 Q6: clean licences only; towns laid out from the clean sheets.
-- [x] §13 Q1, Q2, Q3, Q5 (2026-10-16): the built file committed under
-  `courses/critters/` and offered by the web flasher; "Critters"; the screen
-  stays on on USB, dims and locks on battery, and the game pauses on lock;
-  built into the current test image now (the yes for G2).
-- [s] G2, the screens (`GAME_PLAN.md` §12): the `critters_*` smoke shots,
-  looked at (2026-10-16).
-- [d] Critters on the bench: the D-pad and A/B under a finger (a tap turns,
-  a hold walks), a step's smoothness and the frame rate, how long entering
-  Brideswood takes.
-- [d] Critters on USB power stays lit; unplugged it dims and locks as
-  usual, and waking comes back to the same battle (`power_on_usb()` reads
-  4.15 V and up as USB: a low cell that's charging counts as battery).
-- [x] The clean file: `courses/critters/game.bin` (Route 1 and Brideswood,
-  20 creatures), built `--strict` with a player sheet of our own, its credits
-  in `courses/critters/README.md` and `NOTICE`, round-tripped in `make -C sim
-  monster` and checked in `tests/mkgame_test.py`.
-- [s] G3, the first region (`GAME_PLAN.md` §12): Larkhollow and Kestrel laid
-  out from the clean sheets, Route 1, the Brideswood and the Cotton Tunnel;
-  people, keepers, healers, the foreman who stands aside, Warden Ivy; the
-  player's six looks; the battle cards. The `critters_*` smoke shots looked
-  at (2026-10-16).
-- [d] Critters on the bench after G3: choosing a look and a first critter;
-  talking (A facing someone); a keeper spotting you on Route 1 and their
-  second creature coming out; the battle cards read clearly; losing brings
-  you back to the last healer; walking Larkhollow to Kestrel (Foreman Dale
-  in the tunnel moves once Keeper Tom in the Brideswood is beaten); the
-  frame rate in Kestrel, the busiest screen (60 tiles and six people).
-- [s] The rooms (`GAME_PLAN.md` §12): Home, Wren's Lab and the Kestrel rest
-  house, in at each open door and out over the mat; Nurse Hale inside. The
-  `critters_home`, `critters_home_left`, `critters_lab` and
-  `critters_rest_house` shots looked at (2026-10-16).
-- [s] G4, Auto-play: `monster_bot.c`, the menu item ("Auto-play", then "Stop
-  Auto-play"), the title, a touch taking over; the gate that the bot beats
-  every keeper with each first critter from a fixed seed. The
-  `critters_auto_*` shots looked at (2026-10-16).
-- [d] Critters' rooms on the bench: walking in at Home's door, out over the
-  mat, Wren's Lab, the rest house (Nurse Hale rests the party inside).
-- [d] Auto-play on the bench: switched on from the menu, it walks, talks and
-  battles at a watchable pace (it walks without stopping between steps, as
-  a held press does; its creature stands on its ground in battle), the title says
-  "Auto-play", a tap on the game takes over, and the lock pauses it (waking
-  carries on). How long it runs on battery, and whether it ever stands still
-  or walks in circles.
-- [s] Five first critters (2026-10-30, the owner): Vamporm and Nut join
-  Agnite, Anoleaf and Cardiling (format 1.2, `META` `0x13`). The
-  `critters_pick_nut` and `critters_pick_vamporm` shots looked at.
-- [s] Auto-play's party panel (2026-10-30, the owner): in the controls'
-  place, each critter's name, level, HP bar and HP; the one fighting
-  marked. The `critters_auto_*` shots looked at, and a long Auto-play run's.
-- [d] The party panel on the bench: readable at arm's length, it keeps up
-  with the battle, and a touch on it takes over.
-- [s] Format 2.0 (2026-10-31): the player's looks stored once; `game.bin`
-  663,544 → 404,984 B. The `critters_look*` and map shots looked at.
-- [s] New areas (2026-10-31): Route 2, the Old Keep and Dragon's Cave,
-  past the tunnel's north mouth once Ivy is beaten. The `critters_route2`,
-  `critters_keep` and `critters_cave` shots looked at.
-- [s] Items and the store (2026-10-31): the Kestrel store after Ivy, the
-  Item menu (Catch it in a wild battle), the Bag, coins from keepers,
-  Auto-play shopping and healing. The `critters_shop*`, `critters_bag`,
-  `critters_battle_menu` and `critters_keeper_items` shots looked at.
-- [s] Acts 2 and 3 (2026-10-31): 32 keepers, rematches, the Old Keep's
-  captain, Dragon's Cave, Dr Wren's finale; the gate plays all five
-  starters to the end, the best critter at 36 or more.
-- [d] The longer game on the bench: an Auto-play run from a new game to Dr
-  Wren (it takes hours: the lock pauses it); a person's game into Act 2
-  (the rematches, Route 2, the keep), and whether its pace feels right.
-- [d] The store on the bench: Sam in the doorway before Ivy, behind the
-  counter after; buying with A; the Bag from the menu; a potion in a
-  battle; Auto-play walking into the store and buying.
-- [d] After flashing with Critters: the 2.0 game replaces the card's old
-  one at boot, and the look and the player draw as before.
-- [d] Choosing Vamporm or Nut on the bench: `<` from Agnite wraps round to
-  Nut, then Vamporm; the chosen one is yours in Larkhollow.
-- [x] The web flasher's optional install: a `game` partition, a second
-  manifest, a checkbox on the install page, the copy to the card at boot.
-- [d] Install from the web page with "Also install Critters" ticked: the
-  board starts, `games/monster/game.bin` is on the card, and Critters opens.
-  An install without the box leaves the card's game alone.
-
-### Critters: monster sprites face the right way (requested 2026-11-04; reviewed and fixed the same day)
-
-- [s] **Every monster sprite's facing, all 46 at 3x.** **My choice of convention, for the owner: Option B, battle heading**
-  (a front faces left toward the player, a back right toward the foe), because nearly all of Tuxemon's already do.
-  Critters drawn head-on (Nut, Pigabyte, Banewyrm, the wood line and others) count as fine. Wrong and fixed:
-  - **Vamporm's front** faced right: mirrored at `tools/game_art/vamporm-sheet.png` (an "edited" allow-list line, credited).
-  - **The backs of Sparkip, Nimbolt, Fulminax and Skullick** had the tail on the right, so they faced left: `"mirror": ["back"]`
-    in their `.eyes.json` (`mksheet.py`).
-  - **Correction to the note of 2026-11-04:** at full size Cardiling's front faces **left**, like Cardiwing's and Cardinale's;
-    nothing to change. Agnidon's are right too.
-  - Icons weren't changed. Judged by eye; a critter you'd call otherwise is one line to flip.
-
-### Critters: release, Auto-play's party rule, the map review, the end-game (requested 2026-11-04; built the same day on "build through the backlog")
-
-- [s] **Release a party member** (2026-11-04): Party ▸ a critter ▸ Send to the box or Release (with a
-  confirm), and "The box" under the party to see, take back and release from. Nobody can leave the party
-  without a critter that can fight. The Dex's marks stay. `make -C sim monster`; shots `critters_member`,
-  `critters_member_boxed`, `critters_party_box_line`, `critters_box`, `critters_release_ask`,
-  `critters_released`, `critters_box_empty` looked at.
-- [s] **Auto-play's party rule** (2026-11-04): a full party whose weakest is 10 or more levels under the
-  average of the last 8 foes sends that one to the box (`MB_BEHIND`, `MB_FOES`). Never the first
-  critter. Hunting, a full box lets its lowest go, the first critter excepted; the Dex's marks stay.
-  The gate's five games each move 16 to 21. **My choices, for the owner:** the last 8 foes rather
-  than the area's table; the last of a line may go, because the Dex keeps it.
-- [s] **Map review: less maze** (2026-11-04; `edits` in `tools/game_region.json`, painting Tuxemon's maps
-  from their own cells, credited in `courses/critters/README.md`). Shots `critters_brideswood_cut`,
-  `critters_tunnel_cut`, `critters_keep_gap`, `critters_route2_cut`, `critters_drove_road` looked at.
-  - Dead ends removed: Brideswood's four pockets (448 to 272 walkable cells, and no branch off the way
-    through), the tunnel's south-west strip and side room, Route 2's blind corridor.
-  - Widened to two: four runs in the tunnel; the Old Keep's long corridors, by opening the hedges between
-    them (57 one-wide cells to 25). **Left narrow:** the tunnel's remaining 14 and the Keep's 25, mostly
-    doorways and the east hedge's ends; Dragon's Cave's 15, which read as a cave.
-  - Shortcuts, shut by two people who step aside: the drove road Kestrel to Larkhollow and a ride across the
-    Brideswood and a hole through to the tunnel's far ladders (`beat_ivy`); Route 2 to the Keep and the
-    Keep's front hedge (`beat_captain`); the Reach back to the tunnel. Route 1's stranded east half joins it.
-  - Rooms' small corners (`Home`, the lab) were left: they're furniture, not maze.
-- [s] **End-game: the Reach, and Auto-play's hunt** (2026-11-04): a 48 x 36 meadow past the gate behind Ashe,
-  with all 46 critters at 34 to 46, a healer, and a way back to the tunnel. After every keeper Auto-play hunts
-  until every critter is caught (the Dex's *caught* mark, so a release doesn't undo it). `make -C sim monster`
-  plays all five starters to a full Dex. Shots `critters_reach`, `critters_reach_ranger`.
-- [d] Auto-play in the Reach on the bench: the map costs it 10.4 KB (6 B a cell; the Brideswood was 9.6);
-  a run to a full Dex takes 22,000 to 40,000 actions on top of the keepers' count, so hours.
-- [s] **Story: loose threads** (2026-11-04):
-  1. The rockfall needs no engine change: Digger Bram stands on the only way to the warp until `beat_ivy`, and
-     his line now says the rocks are cleared and why he's there.
-  2. Pip's critter is real (Agnite, on Route 1), and his line says Route 1. Mum's letter says what the news is.
-  3. Ashe's line names Dr Wren.
-  4. The plates are collected: Ivy, Rook, Ashe and Wren each hand one over, and Rowan counts them on the shelf at
-     home, with a line for each stage.
-- [s] **Story: two sources for every next task** (2026-11-04): `objectives` in `tools/game_region.json`, checked by
-  `tools/story_lint.py` from `tests/mkgame_test.py`; each of the ten has 3 to 12 sources today.
-- [s] **Story: urgency and an ending** (2026-11-04). **For the owner: I chose the threat, and a single scene over a
-  choice**; it's all data, so it's cheap to change. The wild has been rising, bigger critters closer to town every
-  season (the encounter tables already did this, act by act), because the Old Keep shut the gate to the Reach a hundred
-  years ago. Four plates open it. Wren's second line says so; after her, Mum takes the note off the pot, and past the
-  gate Ranger Sol closes it. The grass really settles: `beat_wren` steps Route 1, the Brideswood and the tunnel to
-  levels 8 to 16. Shots `critters_rowan_plates`, `critters_mum_end`, `critters_cave_gate`.
-- [s] **Dragon's Cave: the opening behind Ashe** (2026-11-04): it's the gate to the Reach now: a warp on (16,1), and a
-  Gate Guard on (16,2) until `beat_wren`, who says what it takes. `make -C sim monster` walks it.
-
-## RESUME HERE — Palm behaviours from the archive review (approved 2026-10-15)
-
-`PALM_ARCHIVE_REVIEW.md` measured the firmware against Palm's UI Guidelines
-and Zen of Palm (from github.com/ardiri/dev-palmos). The owner: "treat the
-bug and 7 items as backlog work … work through them". Its §3 has the rule,
-the current behaviour and the change for each. On branch
-`claude/palm-behaviours`, which sits on the untested sync work: the owner
-tests the sync separately. One commit each.
-
-- [x] **P1 — come back to where you were, and never lose an edit** (the bug,
-  §3.1). The lock's `content_clear()` threw the open app away, unlock always
-  built the launcher, and an edit form open when the screen slept (or on
-  Home) was discarded. Save an edit with at least one character on the way
-  out (lock and Home; the form's Cancel still discards), remember the screen,
-  and rebuild it on unlock `[s]` (2026-10-15; `p1_resumed_edit`, `p1_home_saved`,
-  `p1_memos_kept`, `p1_day_resumed`)
-- [ ] P1 on glass: write half a memo, let the screen sleep, wake and swipe up:
-  the memo is there, saved; the same for an event; Home from an edit saves it `[d]`
-- [x] **P2 — write in the Day view to make an event** (§3.2): a digit sets the
-  hour, a letter starts the description; New stays `[s]` (2026-10-15;
-  `p2_digit_event`, `p2_letter_event`)
-- [ ] P2 on glass: writing "3" on the day view opens a 3 pm event on that day `[d]`
-- [x] **P3 — tap the title to open the menu; it reopens on the last item**
-  (§3.3) `[s]` (2026-10-15; `p3_title_menu`, `p3_menu_remembered`)
-- [ ] P3 on glass: the title is an easy target and doesn't fight the category
-  pop-up `[d]`
-- [x] **P4 — alert conventions** (§3.4): the verb on the left and Cancel on
-  the right, alert titles that name the operation, no dimmed buttons (a tap
-  says why instead) `[s]` (2026-10-15; `p4_delete_confirm`, `p4_reviews_why`,
-  `p4_remove_course`)
-- [ ] P4 on glass: the delete dialog of a synced event (title, question, the
-  "From this device only" note and the buttons don't touch) `[d]`
-- [x] **P5 — Find matches the start of words** (§3.5): "the" finds "Then",
-  not "Lathe"; `find_test` covers it `[s]` (2026-10-15; host-tested, no screen
-  changed)
-- [ ] An event made on the device with Repeat Daily (Details) shows on its day
-  and the days after, and on the phone after a sync with "Send my changes";
-  one made that way before this fix shows again too `[d]`
-- [x] **P6 — reminders that wait** (§3.6): event alarms that came due while the
-  screen was dark are listed once on wake, dismissed together with OK `[s]`
-  (2026-10-15; `p6_reminders_on_wake`, `p6_still_there`, `p6_after_wake`)
-- [ ] P6 on glass: an event with an alarm five minutes out; leave the device
-  asleep past it; wake: the list names it `[d]`
-- [ ] Is the speaker connector populated (2-pin, beside the SD slot on most
-  ESP32-2432S028R revisions, GPIO26 through an amplifier)? If so, alarm sound
-  is unblocked `[d]`
-- [x] **P7 — an Edit menu and the command stroke** (§3.7): on an edit form the
-  menu has Edit (Undo, Graffiti Help, which opens the stroke reference; no
-  clipboard, as nothing would paste); the Graffiti command stroke (lower left
-  to upper right) then a letter runs a command: N New, D Delete (with its
-  confirmation), U Undo, G Graffiti Help, R Settings `[s]` (2026-10-15;
-  `p7_*`, and the command stroke in `make -C sim graf`)
-- [ ] P7 on glass: the command stroke recognises reliably and never fires by
-  accident while writing `[d]`
-- [x] **P8 — tips** (§3.8): an "i" on the dialogs that hide a gesture (Date
-  Book's Details, Find), with a short text that teaches it `[s]` (2026-10-15;
-  `p8_find_tips`, `p8_details_tips`)
-- [ ] P7/P8 on glass: the "i" is easy to hit and the tips read well; the
-  command stroke on the letter pad, then N, opens New `[d]`
-
-## RESUME HERE — the SRS app, the Planner, and two firmware items (approved 2026-09-29)
-
-**Done 2026-09-29:** the two firmware items and the Planner (`[s]` below;
-their `[d]` checks are open). **Done 2026-09-30:** SRS S0 to S5 in the sim
-(the owner approved the format and demo), then three rounds of bench
-feedback: the 2× answer, the 20 px readings and tidier cards, and full
-screen for lessons and reviews. S4 was replanned: no typed answers
-(`SRS_PLAN.md` §11 decision 9).
-
-**Merged to `main` 2026-10-01** (PR #66, `79272fd`). The `[d]` boxes below
-are the owner's bench checklist; leave them for the owner to tick. Still to
-bench besides them: a bigger iCloud sync, and loading a second course into
-Study. (The Pages deploy job fails on a repository setting, Pages source,
-not the code.)
-
-**Now: the owner's test with a 10-year iCloud account.** The hard rule,
-from the owner: **nothing is ever deleted from the cloud** (2026-10-13;
-`CLAUDE.md`'s first rule). §Engine 6 to 10 were built 2026-10-14 (below and
-`BUILD_PROGRESS.md`). The test, in order: flash; check Settings ▸ Sync says
-read-only; sync; compare counts on iCloud.com before and after (they must
-not move); then the `[d]` items below; then "Send my changes" and the edit
-checks.
-
-**The app platform is on hold.** The main goal is one first-class SRS app
-(WaniKani/Anki-style, with a large course on the SD card), and it's being
-built into the firmware: **`SRS_PLAN.md`**, with the reasons in its §1. The
-root **`CLAUDE.md`** ("Current work") has the step-by-step notes.
-
-**Firmware groundwork** (from the old Phase 1; one commit each)
-- [x] Passwords out of resident RAM, with a sim `secretscan` gate `[s]` (2026-09-29; `BUILD_PROGRESS.md`)
-- [ ] Wi-Fi join and an iCloud HotSync still work after that change `[d]` (2026-09-30: the user reports "wifi password and sync works fine"; the box is theirs to tick)
-- [x] Password editor: the character just typed shows for a second, "Show"/"Hide" shows it all, and the end stays in view, still outside LVGL (`secretscan`'s new `Y`) `[s]` (2026-09-30, from the bench)
-- [ ] Password entry on glass: the peek is long enough to read, Show/Hide, a long password scrolls with `<` `[d]`
-- [x] Firmware version from `git describe`, shown in Settings ▸ About `[s]` (2026-09-29)
-
-**Planner — To Do and Memo as one app** (built 2026-09-29; `BUILD_PROGRESS.md`)
-- [x] Planner built: one launcher tile, the To Do / Memo switch, checkbox lines in memos, new icon, and the new grid `[s]`
-- [ ] Planner on glass: the To Do / Memo switch, a checklist memo (the [X] button, tick and untick by box and by words), and To Do still syncs `[d]` (2026-09-30: the user reports the Planner "looks great" on the device; the box is theirs to tick)
-
-**SRS app** (phases in `SRS_PLAN.md` §10)
-- [x] S0 — `docs/COURSE_FORMAT.md`, the two-level demo kanji course source (`courses/demo-kanji/`), the test decks (`tests/data/study/`), and the Albanian fit check (its Appendix A) (2026-09-30)
-- [x] **The owner's review of `COURSE_FORMAT.md` and the demo content** (S0's exit): approved 2026-09-30 ("format and demo look good, start S3").
-- [x] S1 — `course.c` reader and `tools/mkcourse.py`, with round-trip, fuzz and demo-rebuild gates in CI (2026-09-30)
-- [x] S2 — `srs.c` with both schedulers and crash-safe progress, with host tests in CI (2026-09-30; sm2 matches the Albanian web app review for review)
-- [x] S3 — launcher tile (position 7), the user's finished portrait (`docs/img/study_face.png`), course picker, dashboard, lessons and reviews, and the demo installed on first run, in the sim `[s]` (2026-09-30; the `study_*` smoke shots)
-- [ ] Study on glass: the tile and portrait, a lesson and its quiz, reviews two hours later (Undo, the Card view), the kana answers, and whether 1-bit kanji read well at 64 and 24 px `[d]`
-- [x] S4a — the answer at 2x: the Palm bold font pixel-doubled (`tools/gen_font_2x.py`), for the answer and a term that's words `[s]` (2026-09-30; `study_review_answer`)
-- [ ] S4a on glass: the 2x answer reads well, and a long one falls back to 1x `[d]`
-- [x] S4b — the Week screen, as Coach and Guru have it: `history.dat` per course, the chart, this week against last, streak, right %, stage groups, her advice `[s]` (2026-09-30; `study_week`, and the history's host tests)
-- [ ] The Week screen on glass: after a few days of use, the bars match what was done, the streak holds overnight, Undo takes a review back off the count `[d]`
-- [x] S5 — the reviews due on the lock screen (AHEAD's STUDY row) and the launcher (a badge), from `summary.bin`, totalled across courses; the Week screen's forecast `[s]` (2026-09-30; `study_lock_due`, `study_lock_caught_up`, `study_launcher_badge`, `study_week`)
-- [x] Lesson cards cleaned up (from the bench: the readings' kana were twice the size needed and ran off the screen): readings a line per type in a 20 px kana font, the meaning big, beside a single kanji `[s]` (2026-09-30; `study_kanji_card`)
-- [x] Lessons, questions and the Card full screen: the Graffiti strip hidden (296 px, not 184), Home and Menu in the title bar, 42 px buttons along the bottom `[s]` (2026-09-30, from the bench; the `study_*` shots)
-- [ ] Full screen on glass: Home and Menu in the title bar are easy to hit, the strip is back on the dashboard, a lesson card mostly without scrolling `[d]`
-- [x] Guru's list and a habit full screen too, her week as it was `[s]` (2026-10-01, from the owner; the `guru_*` shots)
-- [ ] Guru full screen on glass: the list scrolls and ticks better, the greeting still dismisses, Home and Menu work there `[d]`
-- [x] Full screen's Home as wide as fits (clock to Menu, 43 px, outlined) `[s]` (2026-10-01, from the owner)
-- [ ] The wide Home on glass: easy to hit, never touching the clock `[d]`
-- [ ] The cleaned-up cards on glass: the 20 px kana read well, a kanji's readings on the first screen `[d]`
-- [ ] S5 on glass: the lock's STUDY row and the weather box above it read well, the air quality beside the reading, the badge on the icon, the count going up on its own as reviews come due (the lock repaints each minute) `[d]`
-- [ ] S6 — a full course on the real card: open time, next-card time, heap, battery pull, kanji readability `[d]`
-
-**Sync for a real account** (built 2026-10-01; `BUILD_PROGRESS.md`)
-- [x] The sort in runs on the card, a calendar window (default yesterday to two weeks ahead, Settings ▸ Sync ▸ Calendar), the pruning rule, batched downloads; gated by `sort_test`, `mget_test`, `window` and `bigsync` `[s]`
-- [ ] Against the real iCloud account: Date Book comes down to the window only; the log line shows `pruned=` and `fetched=N batched+0 single`; nothing disappears from iCloud on the phone `[d]`
-- [ ] Settings ▸ Sync ▸ Calendar: widen to a month, sync, the extra events arrive; narrow again, they leave the device and stay on the phone `[d]`
-- [ ] An event edited on the device, then left behind by the window, shows the edit on the phone `[d]`
-- [x] **Never delete from the cloud** (2026-10-13): `dav_delete` removed from both transports, the device allow-lists GET/PUT/PROPFIND/REPORT, a delete on the device leaves the device only (a hidden map row; the server keeps its copy and it isn't pulled back), a record missing locally is always restored; `tests/nodelete.sh` in `make test`, `massdel` rewritten, `incremental` and `window` assert the server keeps everything; the delete dialog says "From this device only" in an app that syncs `[s]`
-- [ ] Delete an event and a contact on the device, sync: both gone from the device, both still on the phone and iCloud.com; sync again, they stay gone from the device `[d]`
-- [ ] Edit the hidden event on the phone, sync: it comes back to the device `[d]`
-- [x] **An edit merges into the server's copy, never replaces it** (2026-10-14): `bridge/objfile.c` streams the copy onto the card and swaps in only the Palm-owned fields that changed, PUT with If-Match (the `local` policy too); a big object is read through its Palm view, so photo contacts come down with the 8 KB buffer; Apple's `item1.` grouped properties and `DURATION` are read; a series with moved occurrences can't be moved from the device (counted *unsent*); gated by `objfile_test` and `fidelity` `[s]`
-- [ ] On glass: edit an iCloud event that has invitees, a location and two alerts; on the phone it shows the edit and still has all of them `[d]`
-- [x] **Contacts are read-only on the device while Address syncs** (2026-10-14, the owner: "if we can't say all contact edits will sync, stop syncing any"): a merged contact over 16 KB (a real photo) was kept unsent, silently. Now Address has no New, Edit or Delete when it syncs (`data_app_readonly`), the detail says "Read-only: edit contacts on your phone", and `hotsync.c` runs the Address collection pull-only whatever Settings ▸ Sync ▸ Changes says; gated in `make -C sim data` `[s]` (scratch shots of the list, detail and menu)
-- [ ] With Address syncing: the list has no New, a contact's detail has Done and the read-only line, the menu has no Record section; the log's budget line says "contacts: never" when Changes is "Send my changes" `[d]`
-- [x] **A read-only probe for partial address-data** (2026-10-14): `tools/probe_partial_card.py`, run on a computer, asks the account's address book for the Palm's properties only and compares that with the whole contacts (PHOTO left out? `item1.` groups kept?), and sizes the book (total, over 8 KB, over 16 KB); PROPFIND and REPORT only, and the report holds no names or numbers; gated by `tests/probe_partial_test.py` (offline verdicts, and live against Radicale in `run_gates.sh`)
-- [ ] Run it against the real iCloud account: `python3 tools/probe_partial_card.py --user <Apple ID>` (an app-specific password), then again with `--all` for the whole book's size and download time; paste the report. HONOURED means building partial downloads is worth it; IGNORED means photos always come down `[d]`
-- [ ] Contact edits come back only when every one can reach iCloud: the PUT streamed from the card (no 16 KB cap), and the other refusals (no master component, a Palm view over 8 KB) settled; see §Engine 8
-- [ ] A contact with a big photo now arrives on the device (it used to be skipped) `[d]`
-- [x] **Read-only switch** (2026-10-14): Settings ▸ Sync ▸ Changes (read-only / send my changes), config `read_only`, on by default and turned back on when the Apple ID changes; the log and the Done line say "(read-only)"; gated by `config_test` and `fidelity` (nothing sent, edits wait, the phone's edits still come down, and turned off they go up) `[s]` (`w9_changes_pick`, `w9_sync_changes`)
-- [x] **Big databases on the device** (2026-10-14): an edit, a delete, a category change, the boot-time category backfill and removing the demo rows all stream through the card (`stream_rewrite` in `data.c`) and refuse, leaving the file as it was, unless every record was read; the 12 KB static arena is gone; the streaming writer's index is 12 bytes a record; gated in `make -C sim data` (2,000 contacts: an edit and a delete past the old cap, a category change, a new contact) `[s]`
-- [x] **Repeating events show on every day they occur** (2026-10-14): Day view, week counts, month dots and the lock screen's next event use `appt_occurs_on`/`appt_next_on`; the parser reads `BYDAY=2TU`/`-1FR` (Palm's monthly by day, written back the same), `COUNT` (an end date) and a weekly without `BYDAY`, and keeps the latest 16 exceptions; gated by `recur_test` (in `make test`) and `make -C sim data` (a weekly meeting from 2019 on a Monday in 2026, and the month's dots) `[s]`
-- [x] **To Do keeps the open tasks and those done lately** (2026-10-14): `sync_set_todo_window` lists the open VTODOs and those COMPLETED in the last `todo_done_days` (default 14) with two calendar-query REPORTs; not listed leaves the device, never the server; a task ticked on the device gets a COMPLETED time; Settings ▸ Sync ▸ To Do; gated by `todos` (Radicale) and `objfile_test` `[s]` (`w9_todo_pick`, `w9_sync_todo`)
-- [ ] With the real account: the To Do list shows only open tasks and those finished in the last two weeks; the log says "open tasks, and those done in the last 14 day(s)", not "wasn't answered"; a task ticked on the device shows done on the phone, and leaves the device two weeks later `[d]`
-- [ ] On glass: a weekly meeting that began years ago shows on this week's day, the month view dots every week, the lock screen names its next one; a "second Tuesday" meeting lands on the right Tuesday `[d]`
-- [ ] With the real address book on the device: edit and delete a contact far down the list; the count in Address doesn't change (bar the delete), the edit is on that contact, and the log shows no "rewrite refused" `[d]`
-- [ ] How many contacts a sync can write: watch the log's `OUTPUT FULL` / heap lines on the first full Address sync `[d]`
-- [ ] After flashing, Settings ▸ Sync shows "Changes: read-only"; a sync's Done line ends "(read-only)", an edit made on the device doesn't reach the phone, and does once "Send my changes" is picked `[d]`
+- `docs/COURSE_CATALOG_PLAN.md` — Study courses hosted on GitHub, a catalog
+  refreshed by HotSync, download on the next HotSync (Phase 2).
+- `docs/KNOWLEDGEQUEST_PLAN.md` — the KnowledgeQuest brief evaluated against
+  this device, and how it could be built on Study (Phase 3).
 
 ---
 
-## RESUME HERE — 2026-09-23
-
-**Flash from the browser is live** (PR #64; §Proposals ▸ User experience 1):
-an Install page beside the emulator (`/flash.html`), fed by CI, and a release
-job for `v*` tags. The user installed from it in Snap Chromium on 2026-09-23
-(see §Bench). It needed `snap connect` and a manual BOOT/RST, and the page now
-says so. No tag has been pushed, so no release exists yet — that is the
-user's call.
-
-**§R is merged** (PR #63, `243dedc`) **and on the bench device** (flashed
-2026-09-23 as the browser installer would write it), **not yet looked at**:
-fifteen refinements requested on 2026-09-23, built and sim-verified. R15's review is in §Proposals, and nothing in it is approved --
-except its **Robustness** list, which the user asked to have worked through and
-which is done. The bench follow-ups (fast keypad entry, the trainer prompt, sync
-with no Wi-Fi) are done too; their checks head §Bench.
-
-**Before that, everything was on `main` (`97874fc`)**: the W phase (Settings and
-its nine wizards) and the Q phase (quick entry) are both code-complete, the web
-emulator is deployed from `main`, and the bench device was flashed from
-`958a979`. **What is left of W and Q is on-glass checks only**, and they are all
-in §Bench now, in one list instead of four.
-
-**Before pushing anything: every gate, not just the smoke.** `make -C sim` has
-twelve gates plus `smoke32`; the wasm build is a different toolchain; ESP-IDF
-compiles with `-Werror=format-truncation`; `nosecrets` links a subset of the
-sources. Each of those has broken CI on its own at least once while the others
-were green. See `BUILD_PROGRESS.md` §Hard-won lessons.
-
-**Next after §R, in order of value:** the bench pass (§Bench — the device holds
-all of Q and none of it has been looked at), then §Engine 1 (external merge sort)
-and §Engine 2 (shrink the sync working set), then §Next 1 ("About this screen").
-
----
-
-## §R — PHASE: refinements (requested 2026-09-23, CODE COMPLETE — `[s]` all)
-
-**All fifteen are built and sim-verified** on `feat/r-phase-polish`; the
-on-glass checks are in §Bench ▸ *Unseen: the R phase*. What was learned is in
-`BUILD_PROGRESS.md`. The items below are kept as they were asked, until the
-phase is merged and seen on glass. Each is small on its own; the one that was a
-real design job is **R4**, the week screens. Design rules from the W phase still apply
-everywhere: **tap to pick, don't type; scroll-to-read is fine, scroll-to-select
-is not; Home is the way out; pool-safe widgets only** (no `lv_bar`, `lv_slider`,
-`lv_arc`, `lv_meter` — they allocate draw layers and live-lock the 31 KB pool).
-
-**The strip is a place to stand** — W3's finding, and R3/R4 extend it to Coach
-and Guru. The Graffiti strip is 240×112 px that a non-typing screen has no use
-for; `speaker_aside()` puts a speaker there on `lv_layer_top()` at `PDA_H`, over
-a screen that stays finished and live underneath. It costs the four silkscreen
-buttons until tapped away.
-
-### Coach and Guru
-- [x] **R1 — Guru's blank header row gets a job `[s]`.** The row under
-      "x of y today" is empty because the list is sized as `lv_pct(100) - 20`,
-      which LVGL reads as *80 %*, not *100 % minus 20 px*. Use it for a one-line
-      "what to do here" fragment on the left and a **Week** button on the right;
-      the button may span both header rows, with the streak ("day x") moved left
-      of it. The list's height becomes explicit pixels.
-- [x] **R2 — Guru's menu says "This week", not "Her week" `[s]`.** The report's
-      title bar too, so the menu entry and the screen it opens agree — and it
-      matches Coach's entry for the same screen.
-- [x] **R3 — the Coach and Guru greetings stand in the strip `[s]`.** Today the
-      hello *replaces* the landing page (it is drawn over the week screen) and
-      the tap that dismisses it rebuilds the app. Change: the landing page is
-      built and live, and the speaker stands in the Graffiti strip the way the
-      Assistant does — **but with the portrait on the right**, as it is today,
-      not on the left like hers. Nothing is blocked any more, so there is no
-      reason to show the week screen at that moment.
-- [x] **R4 — the week screens: speaker in the strip, and a real design `[s]`.**
-      The verdict moves into the strip (as R3), which gives the stats the whole
-      content area and should end the scrolling. Then redesign the stats, which
-      today are a monospace column of `#` bars. The brief: **clear at a glance,
-      intuitive, and sticky** — the screen should make you want to beat it.
-      Direction: a seven-day chart (one column per day, today marked, the target
-      drawn as a line) on the shared I1 canvas; the day-by-day "chain" of
-      active days, because an unbroken run is the most motivating thing a habit
-      screen can show; *this week vs your best* for the headline numbers; and
-      the per-category / per-domain split as proportional bars. Pool-safe:
-      one canvas (buffer from outside the pool) plus labels.
-
-### System
-- [x] **R5 — "Lock" in the Applications screen's Options menu `[s]`.** Launcher
-      only: locking from inside an app would throw away whatever the content
-      area holds (the lock calls `content_clear()`), including a half-edited
-      record.
-- [x] **R6 — the lock screen's "swipe up to unlock" is the thing you see `[s]`.**
-      Bold, with an up arrow, and visually distinct enough to catch a new user.
-      The font has no arrow glyph, so the arrow is drawn on the dash canvas.
-- [x] **R11 — the lock goes over the Calculator, and gives it back `[s]`.** The
-      calculator lives on `lv_layer_top()`, above the lock (which is on the
-      screen), so the lock came up *underneath* it. Hide it while locked, show
-      it again on unlock, expression intact.
-
-### PIM apps
-- [x] **R7 — To Do: pick the priority `[s]`.** Four tap targets, 1–4, below the
-      Due date on the edit form. One `lv_buttonmatrix` (one object). A record
-      that arrives from a sync with priority 5 shows nothing selected and keeps
-      its 5 unless you pick.
-- [x] **R8 — Address: a phone keypad for Phone and Zip `[s]`.** Tapping either
-      field opens a modal 3×4 keypad, read across: `1 2 3 / 4 5 6 / 7 8 9 /
-      * 0+ #`. The `0+` key types `0`, and `+` when held (as on a phone).
-- [x] **R9 — Graffiti auto-capitalises by field `[s]`.** Address Last, First,
-      Title, Company, Address, City, State: **Each Word**. First letter of the
-      field only: Address Note; Date Book Description and Note; To Do quick-add,
-      Description and Note; Memo quick-add and the memo text. A shift the user
-      armed still wins; Look Up and Find are not touched (they are filters).
-
-### Accessories and Graffiti
-- [x] **R10 — Calculator: grey digit keys `[s]`.** Grey separates the numbers
-      from the operators and functions, the way a real calculator does.
-- [x] **R12 — Graffiti: forgiving space and backspace swipes `[s]`.** Today a
-      swipe must be 24 px wide and 2.5× wider than tall. Loosen both, and add a
-      straightness test in their place so that loosening does not start eating
-      letters — gated by `make -C sim graf`, which must not lose accuracy.
-- [x] **R13 — Graffiti: a way out of punctuation mode `[s]`.** A stray tap on the
-      pane arms punctuation, and the only way out today is to write something.
-      Three exits, none of which types anything: tap the `PUNC` marker, swipe
-      backspace, or wait (it lapses after a few seconds).
-- [x] **R14 — News rotates between sources `[s]`.** The store is written feed by
-      feed, so the reader shows all of one source before the next. Interleave
-      the index round-robin by feed when a fetch commits — records are
-      self-contained, so reordering the index moves no body text. Host-gated in
-      `news_test`.
-
-### The repo
-- [x] **R15 — a review of the whole project** for user experience, robustness,
-      and repo/code cleanliness as an open-source project. The findings go in
-      §Proposals below, **as proposals** — nothing there is approved.
-- [x] **R0 — this file cleaned up.** DONE 2026-09-23. The finished P, W and Q
-      phases are in `BUILD_PROGRESS.md`; every open `[d]` check is in §Bench.
-
----
-
-## §Bench — needs the device `[d]`
+## Bench checks `[d]`, by area
 
 **Re-flash before reasoning about what is on the device.** The bench is only as
-current as the last flash (2026-09-23: CI's installer artifact from
-`feat/flash-from-browser` `86f7077`, whose firmware is `main` after #63, so W, Q,
-R and the robustness work).
+current as the last flash.
 
-### Unseen: flash from the browser
-- [x] **Install from the page, in Chrome or Edge** — once the branch is on
-      `main` and Pages has deployed. Open `/flash.html`, press Install, pick the
-      CH340 port, leave "erase" clear. It should finish, restart, and keep the
-      saved Wi-Fi password (a sync works without re-entering it). What has
-      already been checked: CI's own images, written at the manifest's offsets
-      with esptool and no erase, boot cleanly on the bench, and the clock, the
-      touch calibration and the password came back from NVS. What has not: the browser itself (Web
-      Serial, the port picker, esptool-js) — nothing here can press that button.
-      **Done 2026-09-23 (user):** installed from the live page in the Ubuntu
-      App Center's Chromium (a Snap). It needed `sudo snap connect
-      chromium:raw-usb` before the port showed, and the automatic reset failed
-      ("Failed to initialize"). Holding BOOT, tapping RST, then pressing
-      Install worked. The board ran touch calibration on its first boot. The
-      page now covers the Snap step, the BOOT/RST sequence and the calibration.
-      The Wi-Fi password did not survive: the user ticked "Erase device",
-      reading the page's "erase it the first time" as a first install from the
-      page. NVS read back fresh (only touch:cal and clock:clklost), which
-      matches a full erase. ESP Web Tools 10.4.0 erases only when that box is
-      ticked. The page now makes the test "is CYD Palm already on the board",
-      and says what erasing costs. Still unseen: an update with the box
-      clear, from the page.
+### Critters and the Dex (built in the simulator 2026-10-16 to 11-04)
+- [ ] Walking in Critters: smooth, no visible drawing down the screen (40 ms a
+  frame at 160 MHz, measured). The panel at 40 MHz: no speckle, wrong colours
+  or shifted lines anywhere, in any app; if there are, `clock_speed_hz` in
+  `display.c`.
+- [ ] Critters and the Dex open within about half a second of the tap
+  (measured 419 and 438 ms to first paint), and Wi-Fi and a HotSync still work
+  (the SD card changed SPI host).
+- [ ] At 160 MHz and with the loop sleeping at least a tick, walking still feels
+  smooth (33 → 40 ms a frame). The battery gain isn't measured: `power.log`
+  can A/B it.
+- [ ] The D-pad and A/B under a finger (a tap turns, a hold walks), and after
+  moving 2 px in the slightly smaller panel; how long entering Brideswood takes.
+- [ ] On USB power Critters stays lit; unplugged it dims and locks, and waking
+  comes back to the same battle (4.15 V and up reads as USB).
+- [ ] The story on glass: choosing a look and a first critter (`<` from Agnite
+  wraps to Nut, then Vamporm); talking; a keeper spotting you and their second
+  critter; losing brings you back to the last healer; Larkhollow to Kestrel;
+  the frame rate in Kestrel (60 tiles, six people).
+- [ ] The rooms: in at Home's door, out over the mat, Wren's Lab, the rest
+  house (Nurse Hale rests the party).
+- [ ] Auto-play: on from the menu, it walks, talks and battles at a watchable
+  pace, the title says so, a tap takes over, the lock pauses it; how long it
+  runs on battery, and whether it ever stands still or walks in circles. The
+  party panel is readable at arm's length and keeps up.
+- [ ] The longer game: an Auto-play run from a new game to Dr Wren (hours); a
+  person's game into Act 2; whether its pace feels right. Auto-play in the
+  Reach (the map costs 10.4 KB; a full Dex takes 22,000–40,000 more actions).
+- [ ] The store: Sam in the doorway before Ivy, behind the counter after;
+  buying with A; the Bag; a potion in battle; Auto-play buying.
+- [ ] After flashing with Critters: the 2.0 game replaces the card's old one at
+  boot. The web installer with "Also install Critters" ticked puts
+  `games/monster/game.bin` on the card; without the box the card's game is left.
+- [ ] A party of six: the icons on Party and on Auto-play's panel, and tapping a
+  line of Party (24 px each).
+- [ ] The Dex: opens from the Games folder; a caught critter shows in full after
+  saving in Critters; an old save keeps its party; leaving gives the heap back
+  and the title bar goes back to black; ◀ ▶ are fast enough; the portrait and
+  the green clock read well; Anoleaf and Fluttaflap hold up on the blue.
+- [ ] The Dex's fade is very slight on the Talk page at every strength, and its
+  bezel has no dark square corners. Menu ▸ TV effect (Light, Standard, Strong,
+  Off): is small text readable, and which do you want as the default?
 
-### Unseen: the bench follow-ups and the robustness work (2026-09-23)
-- [ ] **Fast keypad entry.** Type quickly on the Calculator and the phone
-      keypad; nothing should be missed now (10 ms touch reads, and a press that
-      jumps between keys is split into two taps). Also: does a deliberate slow
-      slide across keys ever type twice?
-- [ ] **The trainer and Kana prompts** on their own line — legible, not crowded?
-- [ ] **Sync with no Wi-Fi** lands on Settings ▸ Wi-Fi with the Assistant's
-      instructions: once with no network saved, once with a wrong password.
-- [ ] **FIRST BOOT AFTER THIS FLASH: the passwords move.** The boot log line
-      `appcfg: config: config.ini, N Wi-Fi network(s) (N with a password),
-      account set, password held; moved off the card` should appear once, and
-      then `config.ini` on the card must have empty password lines. Then a sync
-      must still work. If it says `password none`, the card never held the
-      Apple password -- it came from the retired compile-time secrets.h -- and
-      it has to be entered once in Settings ▸ Accounts.
-      *2026-09-23:* the first boot's line was not captured; the second boot
-      says `1 Wi-Fi network(s) (1 with a password), account set, password
-      held`. So the store holds a password. The card still needs looking at.
-- [ ] **A delete syncs.** Delete an event, sync, and check it is gone from
-      iCloud (the tombstone path, end to end).
-- [ ] **The pool line.** `lvgl: pool low-water: ... on "<screen>"` lines on the
-      UART while using the device -- which screen is the tightest on hardware?
+### Study
+- [ ] The tile and portrait, a lesson and its quiz, reviews two hours later
+  (Undo, the Card view), the kana answers, and whether 1-bit kanji read well at
+  64 and 24 px.
+- [ ] The 2x answer reads well, and a long one falls back to 1x.
+- [ ] Full screen: Home and Menu in the title bar are easy to hit (the wide Home
+  never touches the clock), the strip is back on the dashboard, a lesson card
+  mostly without scrolling; the 20 px kana read well.
+- [ ] The Week screen after a few days: the bars match what was done, the streak
+  holds overnight, Undo takes a review back off the count.
+- [ ] The lock's STUDY row and the weather box above it read well, the badge on
+  the icon, the count going up on its own as reviews come due.
+- [ ] S6 — a full course on the real card: open time, next-card time, heap,
+  battery pull, kanji readability; loading a second course.
 
-### Unseen: the R phase (on the device since 2026-09-23)
-- [ ] **R12 — the swipes on real glass.** The harness says 99.5 % of hurried
-      swipes now register (was 76.8 %) with no letter lost; a thumb on a
-      resistive panel is the real test. Also: does a sideways flick ever eat a
-      letter you meant?
-- [ ] **R4 — the week charts.** Legible at 18 px bars? Does the dashed target
-      line read as a line? Coach's day goal (6) dwarfs a normal day's bars —
-      honest, or discouraging?
-- [ ] **R3/R4 — the speakers in the strip**, portraits right. Same question as
-      the Assistant's pane below, now for three speakers.
-- [ ] **R8 — the keypad under a thumb**: 44 px keys, and whether the 0+ hold
-      (LVGL's 400 ms long press) feels like a phone's.
-- [ ] **R10 — the grey calculator keys**, which join the greys question below.
-- [ ] **R6 — the unlock band**: does it catch the eye without shouting?
-- [ ] **R13 — the PUNC chip** is a small target at the top of the strip, and
-      4 s may be too short or too long.
+### Guru and Coach
+- [ ] Guru full screen: the list scrolls and ticks well, the greeting
+  dismisses, Home and Menu work there.
+- [ ] The week charts: legible at 18 px bars? Does the dashed target line read
+  as a line? Coach's day goal (6) dwarfs a normal day — honest, or
+  discouraging?
+- [ ] The speakers in the strip (the Assistant, Coach, Guru; portraits right):
+  tolerable over the silkscreen until tapped away? Do they read as standing in
+  front of the writing area?
+- [ ] The portraits at 1:1 (thin ink outlines are what a resistive panel's
+  diffusion softens); tap-anywhere with a thumb.
+- [ ] Coach: does the 15 % session dim read as intentional (`CO_DIM_PCT`)?
+  Hollow (gave-up) marks are faint; the five-second give-up hold; the ritual's
+  three questions; is 1.4 s × 10 phases the right end flash (`CO_FLASH_MS`,
+  `CO_FLASH_N`); does the indefinite reflect hold read as insistent or annoying?
 
-### Unseen: the Q phase (in rough order of how likely the emulator lied)
-- [ ] **Q5's greys, and P9's with them.** The zone bars and the list hairlines
-      are `COL_RULE` `0xC8C8C8`, the dimmed text is `COL_DIM` `0x8C8C8C`.
-      Grey-on-grey behind a resistive panel is what an emulator judges worst.
-      If the bar disappears, it wants `COL_DIM`; if it competes with the data,
-      the old black was not the problem. §R10's grey keys join this question.
-- [ ] **Q4's stroke sheet** at 40 px cells: legible? Does the scroll feel right
-      under a thumb (it is scroll-to-read, so a drag landing as a tap must do
-      nothing)?
-- [ ] **Q7/Q8 quick-add with real Graffiti**: is the bar worth using over the
-      full form? **Q6**: is the shortened Look Up box still wide enough?
-- [ ] **12/24-hour** consistency across the title bar, weather strip, Rise/Set.
-- [ ] **The Assistant's strip pane** covers the silkscreen buttons until tapped
-      (W3) — tolerable? Does it read as her standing in front of the writing
-      area, or as the screen growing taller? §R3/§R4 put Coach and Guru there
-      too, so this answer now covers three speakers.
+### Memos, Graffiti and the Palm behaviours
+- [ ] P1: write half a memo, let the screen sleep, wake and swipe up: the memo
+  is there, saved; Home from an edit saves it.
+- [ ] P3: the title is an easy target and doesn't fight the category pop-up.
+- [ ] P4: the delete dialog (title, question and buttons don't touch).
+- [ ] P7: the command stroke recognises reliably and never fires by accident
+  while writing; the stroke then N opens New.
+- [ ] P8: the "i" is easy to hit and the tips read well.
+- [ ] The swipes on real glass: the harness says 99.5 % of hurried swipes
+  register with no letter lost; does a sideways flick ever eat a letter?
+- [ ] The PUNC chip is a small target at the top of the strip; is 4 s too short
+  or too long?
+- [ ] The stroke sheet at 40 px cells: legible, and a drag never lands as a tap.
+- [ ] Quick-add with real Graffiti: is the bar worth using over the full form?
+- [ ] Kana Tier 2: tune `KW_THRESH` on the real panel.
+- [ ] The 13 px drawn checkbox as a finger target.
 
-### Unseen: the speakers and lists (P phase)
-- [ ] **P2** launcher, **P3/P4/P5** Guru shell, habits and week, **P7** lock
-      restyle — each simply "look at it on glass".
-- [ ] **P8 — HotSync cancel.** Device-only: the sim's sync finishes before any
-      button can be pressed.
-- [ ] **P9 — the 13 px drawn checkbox** as a finger target (the greys are above).
-- [ ] **P10 — the portraits at 1:1** (thin ink outlines are exactly what a
-      resistive panel's diffusion softens), and **tap-anywhere with a thumb**:
-      scrolling a long week must not dump you home. *(§R4 may retire the
-      scroll, which retires the risk.)*
-- [ ] **Kana Tier 2** — tune `KW_THRESH` on the real panel.
-
-### Unseen: the W phase
-- [ ] **W5 Wi-Fi**: a real join, the scan against real APs, and whether 8 s is
-      enough for networks 2–4.
-- [ ] **W6 Accounts**: a real iCloud login and discovery.
-- [ ] **W8**: the clock write (`settimeofday` is refused in a container).
-- [ ] **W10**: a real accountless sync reports clock and news honestly.
-- [ ] **Location**: wipe `latitude`/`longitude`, sync, check the `geoip:` line
-      names the right town; a carrier NAT or captive portal must leave the
-      location unchanged; a PINNED location must survive two syncs.
-
-### Round 2 notes, still open
-- **Coach.** Does the 15 % session dim read as intentional (`CO_DIM_PCT`)?
-  Hollow (gave-up) marks are faint — ~1 px of ink at 30 px; thicker stroke or a
-  slash? The five-second give-up hold, the exported Date Book block, the
-  ritual's three questions.
-- **Wake + lock.** Is 1.4 s × 10 phases the right flash (`CO_FLASH_MS`,
-  `CO_FLASH_N`)? Does the wake land clean? Does the indefinite reflect hold read
-  as insistent or annoying? `WX_STALE_MIN` (24 h) is a guess.
-- **Games ship gate.** Zip's drag feel under a fingertip (`ZP_CELL`); `New`
-  latency and WDT quiet; play clocks across a real power cycle; re-measure
-  heap/BSS after the shared game canvas. **Open decision:** should a game's
-  clock pause when the backlight times out? (A hook from `idle_step()` into
-  `games_pause_clocks()`; decide it on glass.)
-- **A due date picked on glass survives a real HotSync** round-trip to iCloud.
-- **Coach's `UI_DEVTOOLS` seal escape** should be replaced by a build-time
-  short session or a harness-written `coach.sav`.
-
-### Live network
-- **RSS**: a feed fetches, items appear, heap holds. **Weather**: `weather.dat`
-  written and real numbers on the lock screen. **Sync self-heal**: To Do heals
-  and a second sync is `push=0 pull=0`. **Large collection** (>24 records).
-  **iCloud href relocation** against a photo-heavy contact. **`config.ini`
-  round-trip** through a live Discover → assign → Save.
+### System, Settings and HotSync
+- [ ] Password entry: the peek is long enough to read, Show/Hide, a long
+  password scrolls with `<`.
+- [ ] Fast keypad entry on the Calculator: nothing missed; a deliberate slow
+  slide across keys never types twice.
+- [ ] The trainer and Kana prompts on their own line — legible, not crowded?
+- [ ] HotSync with no Wi-Fi lands on Settings ▸ Wi-Fi with the Assistant's
+  instructions: once with no network saved, once with a wrong password.
+- [ ] Wi-Fi: a real join, the scan against real APs, and whether 8 s is enough
+  for networks 2–4.
+- [ ] Setting the clock by hand writes it (`settimeofday` is refused in a
+  container).
+- [ ] A HotSync reports the clock, news and weather honestly; an RSS feed
+  fetches and the heap holds; `weather.dat` is written and real numbers show.
+- [ ] Location: wipe `latitude`/`longitude`, sync, the `geoip:` line names the
+  right town; a carrier NAT or captive portal leaves it unchanged; a pinned
+  location survives two syncs.
+- [ ] The pool line: `lvgl: pool low-water: ... on "<screen>"` on the UART —
+  which screen is the tightest on hardware?
+- [ ] The greys: zone bars and list hairlines are `COL_RULE` `0xC8C8C8`, dimmed
+  text `COL_DIM` `0x8C8C8C`, the calculator's grey keys. Grey-on-grey behind a
+  resistive panel is what an emulator judges worst.
+- [ ] 12/24-hour consistency across the title bar, weather strip, Rise/Set.
+- [ ] The unlock band catches the eye without shouting.
+- [ ] Install from the web page with "Erase" clear: the update keeps the saved
+  Wi-Fi password.
+- [ ] Games: Zip's drag feel under a fingertip (`ZP_CELL`); `New` latency and
+  WDT quiet; play clocks across a real power cycle. **Open decision:** should a
+  game's clock pause when the backlight times out (a hook from `idle_step()`
+  into `games_pause_clocks()`)?
 
 ### Power and hardware
-- **U8 battery.** Does the gauge track a real discharge through the flat middle?
+- [ ] **Test the attached speaker** — plug it in and confirm it makes sound,
+  note which connector it used (the 2-pin beside the SD slot on most
+  revisions, GPIO26 through an amplifier) and whether it is loud enough without
+  a volume control. Gates §Next 4 and 5.
+- [ ] Battery: does the gauge track a real discharge through the flat middle?
   Is the divider on tolerance (`BAT_TRIM_PERMILLE` at unity; one multimeter
   reading at `JP2`)?
-- **U8b screen-on power.** Idle is solved (>24 h, <46 mA). Ranked, unmeasured:
-  (1) backlight level — a runtime setting, try first; (2) DFS *without* light
-  sleep (`esp_pm_configure`, `min_freq_mhz = 80`) — never tried, and it does not
-  gate APB the way the reverted light-sleep did; (3) CPU 160 → 80 MHz fixed —
-  A/B it with `power.log`; (4) panel `SLPIN` when the backlight blanks. If the
-  numbers are ambiguous, an inline meter beats a longer log.
-- **Hardware button → sleep.** The firmware reads no button today. BOOT/GPIO0 is
-  RTC-capable and can be both the trigger and the `ext0` wake; RESET/EN cannot
-  be intercepted. Deep sleep kills tap-to-wake (touch is SPI). Measure this
-  board's real sleep current first.
-- **C3 — Sound.** No speaker/DAC wired. Gates real alarms (VALARM already syncs)
-  and game feedback; highest perceived-charm-per-byte item on the list.
-- **U9 — Case.** Out of software scope; gating for launch.
+- [ ] Screen-on power (idle is solved: >24 h, <46 mA). Ranked, unmeasured:
+  (1) backlight level; (2) DFS *without* light sleep (`min_freq_mhz = 80`);
+  (3) CPU 160 → 80 MHz fixed, A/B with `power.log`; (4) panel `SLPIN` when the
+  backlight blanks.
+- [ ] A hardware button → sleep: BOOT/GPIO0 is RTC-capable and can be both the
+  trigger and the `ext0` wake; RESET/EN cannot be intercepted; deep sleep kills
+  tap-to-wake (touch is SPI). Measure this board's real sleep current first.
+- **The case** — out of software scope; gating for launch.
 
----
-
-## §Engine — the sync engine
-
-1. ~~**External merge sort.**~~ Done 2026-10-01: `sync_sort_file()` sorts in a
-   4 KB buffer on the device, and a bigger file in runs on the card, merged
-   four at a time (`tests/sort_test.c` offline, a 1 KB-budget phase in
-   `bigsync`). What follows is the original note. The ceiling was a few hundred records per collection:
-   `SV_RAW` (~60–80 B/record) must be sorted in one contiguous block, and ~30 KB
-   is the largest free block during the sort. A too-big collection is refused
-   safely today (`-6`, gated by `tests/toobig.c`). Sort fixed-size runs, spill to
-   SD, k-way merge back; every reconcile input is already a line-per-record
-   file, so nothing else changes. **This turns "refuses safely" into "handles a
-   real account."**
-2. **Shrink the working set 23.5 KB → ~7 KB.** Stream `g_objbuf` (8192) to SD
-   the way the news phase already does, and emit `g_body` (8192) straight to
-   `BODY_TMP`. `g_lrec` (4096) is `PALM_REC_MAX` — keep. `g_state` (3076) is two
-   sync tokens, probably shrinkable. Then make the budget in `hotsync.c` honest
-   (~29.7 KB including the TLS handshake) and leave it on.
-3. **The `heap[wifi-up]` creep:** ~13 KB lower after a session of app use than
-   after a fresh boot. Not chased. It is also the measurement that settles the
-   TLS handshake peak with the UI resident (`min_ever` between `pre-tls` and
-   `post-tls`, on a freshly booted device). The next thread if feed fetches fail
-   intermittently.
-4. **iCloud data hygiene** — one-time removal of the seed contacts and duplicate
-   events left in the real account from the broken-sync era. **By hand, on
-   the phone or iCloud.com**: the device never deletes anything on the server
-   (2026-10-13), so it can't do this and won't be made to.
-5. **Sync a window, not the whole account.** The window, the pruning rule
-   and batched downloads were **built 2026-10-01** (the owner asked for them,
-   with "a very tight time window"; `BUILD_PROGRESS.md`). Still open from
-   this plan: To Do (open tasks only) and Address (no photos, or one
-   group). The original proposal: A real account holds years of events and thousands of
-   contacts; today the first sync enumerates every object, GETs each one, and
-   refuses a collection past a few hundred records (item 1). Proposed:
-   - **Date Book: a time window**, e.g. 30 days back and 12 months ahead
-     (Settings ▸ Sync). Enumerate with a CalDAV `calendar-query` REPORT with a
-     `time-range` filter (RFC 4791 §9.9), which the server applies to
-     recurrences too, so a weekly meeting that began in 2019 is still in.
-     `sync-collection` can't filter, so the window replaces the delta token
-     for calendars: each sync lists the window's hrefs and ETags (small), and
-     only new or changed objects are fetched.
-   - **Leaving the window is not a deletion.** An object that drops out of the
-     listing, or a local record that ages out, is pruned locally and marked in
-     the map, never pushed as a delete. This is the one rule that makes a
-     window safe. (Since 2026-10-13 nothing is pushed as a delete at all.)
-   - **To Do: open tasks**, plus those completed in the last couple of weeks
-     (a `prop-filter` on `COMPLETED`; iCloud's support needs checking). Note
-     that reminders upgraded on iOS 13+ may not be reachable over CalDAV at
-     all; check that against the real account first.
-   - **Address: everyone, without photos, or one group.** Contacts have no
-     date to window by. Ask for the fields Palm keeps (CardDAV partial
-     `address-data`, RFC 6352 §10.4.2) so photos never arrive, or sync only
-     the members of a chosen iCloud group. Either way the count needs item 1.
-   - **Fetch in batches.** `calendar-multiget` / `addressbook-multiget`
-     streamed to the card, instead of one GET per object; the first sync of
-     a real account is otherwise minutes of round trips.
-   - **Order:** item 1 (the external sort) first, because it lifts the hard
-     ceiling for every collection; then the window and pruning, tested against
-     Radicale with a generated multi-year calendar; then multiget; then
-     contacts.
-
-
-**Finishing sync for a real account** (outlined 2026-10-13, after the
-no-delete rule; in this order):
-
-6. ~~**An edit on the device must not lose what Palm can't hold.**~~ Done
-   2026-10-14: `bridge/objfile.c` merges an edit into the server's copy
-   (`tests/objfile_test.c` offline, `tests/fidelity.c` against Radicale). The
-   original note: Today a device edit PUTs a body rebuilt from the Palm record, which *replaces*
-   the whole iCloud object. The codec keeps SUMMARY, DESCRIPTION, DTSTART,
-   DTEND, RRULE, EXDATE and one alarm for an event; N, ORG, TITLE, ADR,
-   NOTE and Palm's five phone/email slots for a contact. So editing a
-   10-year-old event drops its location, attendees, URL, extra alarms and
-   the changed occurrences of a series (RECURRENCE-ID overrides), and
-   editing a contact drops its photo, birthday, URLs and every phone or
-   email past the fifth. That is data loss on the server by another route.
-   Fix: merge, don't replace. Fetch the server's current body, swap in only
-   the properties Palm owns, keep everything else byte for byte, PUT with
-   `If-Match` (412: take the server's copy, as now). The conflict policy
-   `local` PUTs without `If-Match` today; give it one too. Gate: an
-   iCloud-shaped event (overrides, attendees, two alarms, X- properties)
-   and vCard (PHOTO, BDAY, eight TELs) edited on the "device" keep every
-   non-Palm line.
-7. ~~**Read-only until 6 is benched.**~~ Done 2026-10-14: config
-   `read_only`, Settings ▸ Sync ▸ Changes. The original note:
-   `sync_set_pull_only()` exists and
-   works (no PUT; local edits wait), but `hotsync.c` forces it off. Make it
-   a Settings ▸ Sync switch, on by default for a newly added account, so
-   the first syncs of a big account can't change it at all.
-8. **Contacts at real size.** Done 2026-10-14, bar the bench: a photo
-   contact comes down through its Palm view (first entry above); every
-   database rewrite on the device streams through the card (an edit used to
-   write back only the first 64 records); the writer's RAM is 12 bytes a
-   record. **Since then (2026-10-14) contacts are read-only on the device
-   while Address syncs** (first RESUME HERE): a merged contact over 16 KB
-   couldn't be sent and was kept unsent, and the owner's rule is all contact
-   edits reach iCloud or none are made. To lift it: a PUT streamed from the
-   card, and no other refusal left. `tools/probe_partial_card.py` checks
-   whether iCloud honours partial `address-data` (a read-only probe the
-   owner runs; below). **Partial `address-data` was not done, on purpose:** the
-   device's records would then be built from a different view than the
-   server's full copy, and whether iCloud's partial reply keeps Apple's
-   `item1.` grouped properties is unknown; it would save bandwidth and card
-   space, not RAM. Left to measure on the bench: the contact count at which
-   a sync's output index (12 bytes a record, one contiguous block) no longer
-   fits. The original note: No window applies. Ask for the Palm fields
-   only (CardDAV partial `address-data`, RFC 6352 §10.4.2) so photos never
-   arrive; check iCloud honours it. Today a vCard over the 8 KB fetch
-   buffer is skipped with a warning and fetched again every sync. Measure
-   how many contacts the device's AddressDB holds before "too large" (`-6`).
-9. **Recurring events from iCloud.** Done 2026-10-14, bar the bench: the
-   device draws a repeating event on every day it occurs (it used to draw
-   it on its start date only, so the window's recurring meetings were
-   invisible); `BYDAY=2TU`, `COUNT` and a weekly without days are read; the
-   latest 16 exceptions are kept. Moved occurrences show at the series'
-   time. Earlier the same day, the parse side: the
-   Palm view reads the series' own VEVENT, not a moved occurrence's; an end
-   given as DURATION is read; moving or re-repeating a series that has moved
-   occurrences from the device is refused (unsent), since they're tied to its
-   old start. Still to check against the real account. The original note:
-   A series with changed occurrences is
-   one object with several VEVENTs (the master and its overrides). Check
-   what the parser keeps against the real account, and show the master
-   with its EXDATEs at least; never PUT such an object back (6).
-10. ~~**To Do.**~~ Done 2026-10-14, bar the bench: the open tasks and
-    those done in the last two weeks (`todo_done_days`, Settings ▸ Sync ▸
-    To Do), the window's rule. Still to check on the real account: whether
-    its Reminders are reachable over CalDAV at all. The original note:
-    Open tasks only, plus recently completed. Check first that
-    the account's Reminders are reachable over CalDAV at all (lists
-    upgraded on iOS 13+ aren't).
-
-Then the owner's test: first sync read-only, compare counts on iCloud.com
-before and after (they must not move), then two-way with 6 in.
+### For the owner to review (no bench needed)
+- The Dex speaker's lines in `dex.c` (`STORY`, `MEMORY`, `NEARLY`, `FULL`) and
+  his biography are drafts; so are the shortened descriptions
+  (`game_region.json`, `tools/game_creatures/`) and our critters' categories
+  and sizes.
+- Critters choices made while building (2026-11-04): sprite facing by battle
+  heading (front left, back right); Auto-play's party rule (the last 8 foes,
+  10 levels under the average; the last of a line may go, the Dex keeps it);
+  the story's threat and its single-scene ending.
 
 ---
 
@@ -787,96 +236,78 @@ before and after (they must not move), then two-way with 6 in.
 
 1. **"About this screen" on every screen `[s]`.** Someone finished a Zip board
    and could not learn from the device why it still said "4 left". Extend
-   Menu ▸ About to show a couple of paragraphs *for the current screen*, keeping
-   the global About (GPLv3/PumpkinOS provenance). One scrollable label in the
-   overlay pattern, text in one static table keyed by screen (flash, not RAM).
-   Cover the four games, the four PIM apps, Graffiti, HotSync, News and the lock
-   screen. Smoke-gate one screen's panel.
+   Menu ▸ About to show a couple of paragraphs *for the current screen*,
+   keeping the global About. One scrollable label in the overlay pattern, text
+   in one static table keyed by screen (flash, not RAM). Cover the games,
+   Memos, Graffiti, HotSync, News, Study, Guru and the lock screen.
 2. **Graffiti writing *feel*.** Accuracy is done and gated (99.7 % letters at
    3 px jitter; `make -C sim graf`). Left: ink-trail / char-echo polish and
-   threshold tuning from real on-device telemetry. Train mode already records a
-   per-device template for a hand the built-ins misread.
-3. **The Assistant's other jobs** (parked until asked): a sync-failure explainer
-   (the highest value — sync errors are raw status text today), a first-boot
-   welcome, an SD missing/corrupt explainer. **Open:** should the launcher's
-   demo-data hint appear at all now that sync works without iCloud?
-4. **S5 — real sync in the simulator.** A `fetch()` DAV transport behind the
-   `dav.h` seam. Needs a decision on credentials in a browser first (today they
-   are deliberately never persisted); buys emulator parity and little else.
+   threshold tuning from real on-device telemetry.
+3. **The Assistant's other jobs** (parked until asked): a HotSync-failure
+   explainer, a first-boot welcome, an SD missing/corrupt explainer.
+4. [ ] **Short, charming beeps across the whole firmware — plan first `[s]`
+   for the plan, `[d]` to hear it.** One sound vocabulary: a few short tones (a
+   rising two-note "ready", a falling "done", a low "no", a soft tick for taps),
+   each under about 150 ms, with a single place that maps events to sounds.
+   Cover HotSync done/failed, a Study answer right or wrong, a Critters
+   encounter and the lock/unlock. Silent when the speaker is absent. Write the
+   plan (the event list, the tones, the RAM and flash cost, how it is tested
+   without hardware) before any code; the sound itself waits on the speaker
+   test above.
+5. [ ] **A volume setting in Settings `[s]` for the UI, `[d]` to hear.** A
+   Volume row (off, low, medium, high) saved with the other config, read by
+   the beep layer (§Next 4). The simulator checks the row and its saved value;
+   only the bench can say whether the levels are right.
+6. **Study courses from GitHub** — `docs/COURSE_CATALOG_PLAN.md`. Not approved.
+7. **KnowledgeQuest** — `docs/KNOWLEDGEQUEST_PLAN.md`. Not approved.
+8. **HotSync's memory, re-measured without the sync engine.** The task stack
+   is still the 32 KB the engine needed (`HOTSYNC_STACK`); the "stack:" line
+   at the end of a completed run says what it can be cut to. The
+   `heap[wifi-up]` creep (~13 KB lower after a session of app use than after a
+   fresh boot) is the next thread if feed fetches fail intermittently `[d]`.
 
 ---
 
-## §Proposals — from the R15 review, NOT approved
+## §Proposals — NOT approved
 
-A review of the whole project on 2026-09-23 for user experience, robustness,
-and fitness as an open-source repo. **Nothing here is approved.** Ranked within
-each heading by value for effort.
-
-### Robustness — ALL SEVEN DONE 2026-09-23
-Crash-safe writes, tombstones, the demo seed held back from the push, a release
-build profile, `secrets.h` retired, the pool watched on the device, and the
-passwords moved off the card. What each does and how it is gated is in
-`BUILD_PROGRESS.md`; the on-glass checks are in §Bench ▸ *Unseen: the bench
-follow-ups*.
+From the R15 review (2026-09-23) and since. Ranked within each heading by value
+for effort.
 
 ### User experience
-1. ~~**Flash from the browser.**~~ Built 2026-09-23 (`feat/flash-from-browser`);
-   its check heads §Bench, and it leaves this list when that is done.
-2. **A first-run path.** A fresh device boots to the lock screen and then a
-   launcher full of demo data; nothing points at Settings ▸ Wi-Fi and Accounts.
-   The Assistant could greet the first boot and say where to start (§Next 3).
-3. **"About this screen"** (§Next 1) and **a sync-failure explainer** (§Next 3)
-   remain the two highest-value features not yet built.
-4. **Undo a delete.** A "Deleted — Undo" toast for a few seconds; needs
-   tombstones (Robustness 2).
-5. **Menus that fit.** Coach's Options menu runs to the bottom edge of the
-   screen. Move the rarely used rows (Reset counters, Remove demo data) under
-   one "More..." or into Settings.
-6. **The public emulator shows developer items** ("Add test events" — the
-   Pages build defines `UI_SEED_TESTEVENTS`). Build the showcase without them.
+1. **A first-run path.** A fresh device boots to the lock screen and then the
+   launcher; nothing points at Settings ▸ Wi-Fi. The Assistant could greet the
+   first boot and say where to start (§Next 3).
+2. **Undo a delete.** A "Deleted — Undo" toast for a few seconds.
+3. **Menus that fit.** Coach's Options menu runs near the bottom edge. Move
+   the rarely used rows (Reset counters) under one "More..." or into Settings.
+4. **Position 6 on the launcher is empty** since 2026-11-07. Candidates: the
+   Graffiti trainer out of the Games folder, or the KnowledgeQuest app if that
+   plan is approved.
 
 ### Open-source readiness
-1. ~~**README.**~~ Done 2026-10-01: it leads with what it is, screenshots
-   and the browser link, then installing, setup through Settings, Study
-   courses and the license; the architecture and build notes are in
-   `docs/ARCHITECTURE.md`, with the stale facts fixed. **Still wanted: a
-   photo of the real device** at the top.
-2. **Split `ui.c`** (10.5k lines) into modules behind a private header —
-   lock/dashboard, PIM lists and forms, Settings, Coach, Guru, games, Graffiti,
-   overlays. It is the single largest barrier to a contributor, and it makes
-   every simulator rebuild recompile everything.
-3. ~~**Comments that outsiders can read.**~~ Done 2026-10-01 for the C
-   sources: the internal ticket codes (R4, W3, Q5, P10...) are gone, and the
-   comments that told a history now say why (the story is already in
-   `BUILD_PROGRESS.md`). Coach's and Guru's R0-R5 stay: they are the advice
-   rules, numbered where they are defined. **Left:** the smoke tour
-   (`sim/tests/smoke.txt`) still names its screenshots and steps by code
-   (`r5_locked`, `w6_discover`); renaming means renaming the shots.
+1. **A photo of the real device** at the top of the README.
+2. **Split `ui.c`** (about 12k lines) into modules behind a private header —
+   lock/dashboard, Memos, Settings, Coach, Guru, Study, games, Graffiti,
+   overlays. It is the largest barrier to a contributor, and it makes every
+   simulator rebuild recompile everything.
+3. **The smoke tour's shot names** still carry internal codes (`r5_locked`,
+   `p4_*`); renaming means renaming the shots.
 4. **One `make check`.** The rule "every gate, not just the smoke" lives in
-   this file and in a maintainer's head. One target that runs the host gates,
-   the twelve sim gates, `smoke32` and (when available) the wasm and IDF builds
-   makes it a command. Ship the simulator's toolchain as a Dockerfile or
-   devcontainer — today the working recipe is not in the repo.
-5. **Contributor scaffolding.** `CONTRIBUTING.md` (the gates, the design rules,
+   `CLAUDE.md` and a maintainer's head. One target that runs the host gates,
+   the simulator gates and `smoke32`.
+5. **The archived account keys in `config.ini`.** `bridge/config.c` and the
+   secret store still read `dav_*`, the collection paths and the sync policy
+   (so an old card's file still loads); nothing uses them. Drop them, with the
+   store's account-password slot, in one change with `config_test`.
+6. **Contributor scaffolding.** `CONTRIBUTING.md` (the gates, the design rules,
    the pool budget), issue templates, and tagged releases with a changelog.
-   (`SECURITY.md` exists as of the robustness work.)
-6. ~~**Build output out of the root.**~~ Done 2026-10-01: the host programs
-   go into `build/`.
-7. **Static analysis in CI.** `-Wextra`, `cppcheck`, and ASan/UBSan over the
-   host gates (today only the RSS parser has an ASan run).
+   Ship the simulator's toolchain as a Dockerfile or devcontainer.
+7. **Static analysis in CI.** `-Wextra`, `cppcheck`, and ASan/UBSan over more
+   of the host gates.
 
 ---
 
 ## Parked — offered, NOT approved (do not build without a yes)
-
-- **Planner: a workflow between checklist memos and To Do.** A "make this line
-  a To Do" was built and removed on 2026-09-29: To Do syncs to one server list
-  and the item landed in Unfiled, so it lost its project (the memo). Options
-  discussed: checklist memos as the project lists with an optional due date in
-  the item's text; To Do categories as the project lists ("Lists", named after
-  the memo, up to 15), with the category sent to the server (`CATEGORIES`) or
-  routed to its own collection (`sync_categorized` exists but the device does
-  not use it). The owner will decide later.
 
 - **The app platform** (`APP_PLATFORM_PLAN.md`): native C apps from the SD
   card, with an SDK, versions and a local inspection. **On hold since
@@ -890,28 +321,27 @@ follow-ups*.
   alarm pin to an RTC-capable GPIO), a piezo tick (one GPIO, a second LEDC
   channel), co-working over ESP-NOW (needs Wi-Fi resident during a session —
   measure heap and battery first).
-- **BLE + a companion iOS app: dropped, not parked** — see `PRODUCT_PLAN.md` §2.
-  Bluetooth without an app (PBAP, ANCS, posing as a Watch) was looked at on
-  2026-10-15: it can't sync Calendar or To Do. Same section.
 
 ## Decided — kept so the reasoning is not relitigated
 
+- **Date Book, Address, To Do and the iCloud sync are archived** (the owner,
+  2026-11-07: "pointless to compete with smartphones"). The code is at the git
+  tag `archive/pim-caldav`; nothing on the device or in `bridge/` syncs with a
+  calendar or contacts server any more. BLE and a companion phone app were
+  dropped earlier for the same reason (`PRODUCT_PLAN.md` §2).
 - **The SRS app is built in, not an SD app** (2026-09-29). The app framework
   would have cost several times the app, saved only the full-firmware flash,
   and limited the app to a small memory block, 1-bit bitmaps and no kana
   font. Courses are data on the card, which covers most of the benefit of
   adding things without reflashing. `SRS_PLAN.md` §1.
-
 - **No RTC part for timekeeping.** Drift on battery is under a minute a day and
   idle clears 24 h (measured 2026-08-27). An RTC survives only as the enabler for
   the parked 8:00 knock. If one is ever fitted it shares SPI2 with the SD card,
   and a breakout whose MISO does not go high-Z will corrupt every SD read.
 - **The LVGL pool is 32 KB** (`31100 bytes total` on hardware), and `make -C sim
-  poolparity` fails if the sim and the device drift. Older prose saying 24 KB is
-  stale; the gate is the authority. `smoke32` is 32-*bit*, not 32 KB.
+  poolparity` fails if the sim and the device drift. `smoke32` is 32-*bit*, not
+  32 KB.
 - **The Japanese trainer is frozen at Tier 2** (product decision 2026-07-19).
-- **P6 (a one-shot Assistant onboarding) is superseded by the W phase.** A sync
-  with no credentials does what it can and says so; it never pushes iCloud.
 
 ## Someday
 

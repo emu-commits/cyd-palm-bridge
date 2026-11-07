@@ -73,7 +73,7 @@ Launcher ─▶ Coach
               │       │
               └───────┴─▶ Today   mark joins the wall · streak held
                              │
-                             └─▶ Memo Pad record + Date Book block ─▶ iCloud
+                             └─▶ Memo (if a note was written)
 
 Menu ▸ Coach ▸  Marks · Weekly report · Session length · Day goal · Reset
 ```
@@ -255,27 +255,16 @@ screen.
 
 ## 7. What leaves the device
 
-Coach writes into two apps that already sync, so a week of focus turns into records on
-your actual phone. Neither costs new engineering — the sync engine is built and tested.
-
-**The note becomes a Memo.** Saved through `data_save_memo()` as a real Memo Pad record,
-so the next HotSync pushes it to iCloud:
+**The note becomes a Memo.** Saved through `data_save_memo()` as a real memo:
 
 ```
 Coach · 2026-08-17 · Career · Great
 Finally untangled the parser. Keep going here tomorrow.
 ```
 
-**The session becomes a calendar block.** Each finished session is also written as a
-Date Book record via `data_save_cal()` — a real block at the time it actually happened:
-
-```
-09:05-09:30   Focus · Career · Finish
-```
-
-This is the quieter of the two, and the more *essential*. Your calendar ends up showing
-the deep work you did rather than the deep work you scheduled, and for anyone who bills
-hours that's a defensible record. Both are opt-in from Menu ▸ Coach, default on.
+(Until 2026-11-07 each session was also written to Date Book as a block at the time it
+happened, and both rode HotSync to iCloud. Date Book and the iCloud sync were archived
+that day; the marks wall and the week screen are the record now.)
 
 ---
 
