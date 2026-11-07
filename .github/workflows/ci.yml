@@ -46,8 +46,12 @@ jobs:
         run: pip install -r tools/requirements-course.txt
       - name: Rebuild every course, ids.tsv rules, refusals
         run: python3 tests/mkcourse_test.py
-      - name: The demo course passes --check
-        run: python3 tools/mkcourse.py --check courses/demo-kanji/course.srs
+      - name: The built-in courses pass --check
+        run: |
+          python3 tools/mkcourse.py --check courses/demo-kanji/course.srs
+          python3 tools/mkcourse.py --check courses/kq-numbers/course.srs
+      - name: Knowledge's course source is what mkquest makes of its graph; bad graphs refused
+        run: python3 tests/mkquest_test.py
       - name: Pinned PyYAML (the game converter; same Pillow)
         run: pip install -r tools/requirements-game.txt
       - name: Rebuild the game fixture, ids rules, refusals (mkgame)

@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 #define DEMO     "../courses/demo-kanji/course.srs"
+#define KQ       "../courses/kq-numbers/course.srs"
 #define CARDS    "../tests/data/study/cards/course.srs"
 #define FEATURES "../tests/data/study/features/course.srs"
 #define REMAP1   "../tests/data/study/remap-v1/course.srs"
@@ -571,6 +572,21 @@ static void card(void){
     spit(p, b, 0);
     CHECK(st_install_demo(root, 0) == 0, "an older demo the user removed stays removed");
     CHECK(st_install_demo(root, 1) == 1, "and comes back on request");
+    /* Knowledge's course: written when missing, every time (the app is the
+     * course), and left alone while this firmware's mark stands */
+    st_remove_course(root, ST_KQ_ID);
+    snprintf(p, sizeof p, "%s/study/.kq", root); remove(p);
+    CHECK(st_install_kq(root) == 1, "Knowledge's first open writes its course");
+    snprintf(p, sizeof p, "%s/study/" ST_KQ_ID "/course.srs", root);
+    na = slurp(p, a, sizeof a); nb = slurp(KQ, b, sizeof b);
+    CHECK(na == nb && na > 0 && !memcmp(a, b, na), "the installed course is courses/kq-numbers, byte for byte");
+    CHECK(st_install_kq(root) == 0, "only once");
+    CHECK(st_remove_course(root, ST_KQ_ID) == 0 && st_install_kq(root) == 1, "removed, it comes back");
+    spit(p, b, 10);
+    CHECK(st_install_kq(root) == 0, "a course copied over it is left alone while the mark stands");
+    snprintf(p, sizeof p, "%s/study/.kq", root); spit(p, b, 0);
+    CHECK(st_install_kq(root) == 1, "a different firmware's mark: this one's course goes in");
+    st_remove_course(root, ST_KQ_ID);
     CHECK(st_remove_course(root, "../x") == -1, "an id can't climb out of study/");
     snprintf(p, sizeof p, "%s/study/b-course", root); mkdir(p, 0777);
     snprintf(p, sizeof p, "%s/study/b-course/course.srs", root); spit(p, b, 10);
@@ -768,6 +784,10 @@ static void summary(void){
     CHECK(st_glance(root, T0 + 1200, &g) == 2 && g.due == 7, "at the minute it's due, it is: %u", g.due);
     CHECK(st_glance(root, T0 + 11 * H, &g) == 2 && g.due == 8 && !g.next && !g.change,
           "all of it, and nothing more known: %u", g.due);
+    /* the launcher's two badges: one course alone, or every course but it */
+    CHECK(st_glance_some(root, T0 + 11 * H, "sum-b", 1, &g) == 1 && g.due == 2, "only sum-b: %u", g.due);
+    CHECK(st_glance_some(root, T0 + 11 * H, "sum-b", 0, &g) == 1 && g.due == 6, "all but sum-b: %u", g.due);
+    CHECK(st_glance_some(root, T0 + 11 * H, NULL, 0, &g) == 2 && g.due == 8, "NULL: every course");
     snprintf(p, sizeof p, "%s/study/sum-b/summary.bin", root);
     nb = slurp(p, fb, sizeof fb);
     fb[nb - 1] ^= 0x80; spit(p, fb, nb);

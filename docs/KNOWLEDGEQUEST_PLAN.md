@@ -1,8 +1,32 @@
 # KnowledgeQuest plan — exploring a graph of knowledge on the CYD
 
 _Written 2026-11-07 at the owner's request: evaluate the opportunity brief
-(`KNOWLEDGEQUEST_BRIEF.md`) and write a plan. **Not approved. Nothing here is
-built.**_
+(`KNOWLEDGEQUEST_BRIEF.md`) and write a plan._
+
+**Status, 2026-11-07 (later the same day): K0 is built in the simulator, not
+yet on the device.** The owner chose the launcher tile (question 1 of §10):
+position 6 is **Knowledge**, a smiling tree (`tools/gen_knowledge_icon.py`),
+and the first test is 40 steps in one line, each building on the one before
+(`courses/kq-numbers/`, from counting to percent change). What was built:
+
+- `tools/mkquest.py` (§5): a graph of concept cards (`quest.json` +
+  `nodes.jsonl`) to a Study course source; it refuses unreviewed cards unless
+  `--drafts` is given, and then marks the course `-draft`.
+- The pilot's 40 cards, **written by Claude and not yet reviewed by a person**
+  (question 3 of §10 is still open). Every answer was checked by hand.
+- Knowledge opens Study's engine on that one course, built into the firmware
+  like the demo and written to the card on first open. Because a tile needs
+  screens of its own, three small pieces of K1 came forward: a step's check
+  asks its own question and shows its own answer (not "what does the term
+  mean"); one step a lesson; and the end of a step says what was explored,
+  what it opened, and how many lie beyond (the fog, as a count).
+- Reviews stay on, lightly (question 4 answered by default: 1, 3, 7, 21 and
+  60 days, then retired). Say if Explore should be pure discovery instead.
+
+Not built: the reverse-link section (format 1.1), the map, the region list,
+anything past one course. The verdict below said "inside Study"; the owner
+chose the tile, which §9 had kept open as the fallback, and it shares
+`course.c`, `srs.c` and Study's screens as §9 described.
 
 ## 1) The brief, in one paragraph
 
@@ -197,11 +221,13 @@ exploring a graph one node at a time is good on this device in a hand.
   (chemistry, biology). Pilot first in mathematics, where they do.
 - **Two modes in one app** could confuse Study. If K1 shows that, Explore can
   take launcher position 6 (free since 2026-11-07) as its own tile, sharing
-  `course.c` and `srs.c`.
+  `course.c` and `srs.c`. (Done for K0, at the owner's word: the Knowledge
+  tile.)
 
 ## 10) Open questions for the owner
 
-1. Explore inside Study (recommended), or its own app on position 6?
+1. ~~Explore inside Study (recommended), or its own app on position 6?~~
+   Answered 2026-11-07: its own tile, Knowledge, on position 6.
 2. The pilot's audience: the taxonomy as it is (children, ages 4–12), or a
    small adult graph drafted for the pilot?
 3. Is a model-drafted, human-reviewed card acceptable, and who reviews?

@@ -17,6 +17,7 @@ extern const uint16_t dex_speaker[102 * 102];   /* the Dex's speaker, RGB565 (de
 extern const lv_image_dsc_t icon_coach;     /* Coach focus timer (ritual Pomodoro) */
 extern const lv_image_dsc_t icon_guru;      /* Guru longevity habits (gen_guru_icon.py) */
 extern const lv_image_dsc_t icon_study;     /* Study, the SRS app (gen_study_icon.py) */
+extern const lv_image_dsc_t icon_knowledge; /* Knowledge, the graph of ideas (gen_knowledge_icon.py) */
 /* The speakers: a portrait stands in the right-hand margin of a screen that has
  * something to say, beside the content and attached to a speech bubble. Coach's
  * is on the weekly report; the Assistant and the Guru are for the screens that

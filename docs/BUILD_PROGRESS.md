@@ -16,6 +16,46 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-07 — Knowledge: the tree at launcher position 6, and a 40-step pilot (KnowledgeQuest K0)
+
+The owner: position 6 is a cute tree labelled Knowledge, launching the KnowledgeQuest plan's content; first test,
+40 linear steps where each builds on the one before. Built in the simulator; nothing on the device yet.
+
+- **The tile.** `tools/gen_knowledge_icon.py` (24×22 A8, art as text): a lobed canopy in ink with two eyes and a
+  smile knocked out, a trunk, the ground. First drawn white in the black disc like Study's book; at 1x that read
+  as a round face, so it's ink on nothing. `APPS[5]` = "Knowledge".
+- **The course.** `courses/kq-numbers/`: 40 concepts in four parts (counting and place value, fractions, ratios
+  and rates, proportion and percent), each node's only prerequisite the node before it. Written by Claude, every
+  answer checked by hand, **not reviewed by a person**: all 40 are `"review": "draft"`, and the build marks the
+  course `0.1-draft`. Text only (Latin-1, × and ÷ included): 16,168 B, no pictures.
+- **`tools/mkquest.py`** (plan §5): `quest.json` + `nodes.jsonl` → `course.json` + `items.jsonl` (title → term,
+  idea → meaning, explanation → `mnemonic_meaning`, question/answer → the example and its translation, `after` →
+  `built_from`; `lessons.batch` 1; `unlock.level_percent` 0 with `by_links`, so only the links gate; stages at
+  1/3/7/21/60 days with `known` 1, so passing a step's check opens the next at once). It refuses unreviewed cards
+  without `--drafts`, a step before what it builds on, repeated ids, unknown regions, and text too long for the
+  screen. `--check` for the gates; `tests/mkquest_test.py`.
+- **On the device** the course rides in `study_demo.c` beside the demo (`gen_study_demo.py` now emits both), and
+  `st_install_kq()` writes it to `/study/kq-numbers/` whenever it's missing (the app is the course) or this
+  firmware's build differs (`.kq` holds the size; a course copied over it is left alone while the mark stands).
+  `install_builtin()`/`mark_size()` are shared with `st_install_demo()`, whose behaviour is unchanged (its tests
+  pass as they were).
+- **The screens** are Study's (`show_knowledge()` opens the course with `g_st->kq` set); what differs: "Knowledge"
+  in the title, "Part 2 of 4" and the next step's part, "Next step 12" on the door, "x of 40 steps explored",
+  no greeting (her lines are about batches of five); a card headed "Step 1 of 40" with "Builds on: <the step
+  before>", "Explanation", "Try it" and "Answer: …"; the idea never twice size; the check ("Step 1 · Check")
+  asks the step's question and shows its answer big; the menu has This week, About and Check only. After a
+  step, `st_show_unlocked()`: "Explored: Counting", "Newly open: Zero", "38 more beyond" (the fog, counted), Next
+  step / Done. Study's course list leaves `kq-numbers` out and doesn't record it as the last course; each tile's
+  badge counts its own (`st_glance_some()`; the lock's STUDY row still counts every course).
+- Gates: `poolparity nosecrets secretscan data graf mines wordie sudoku zip clock coach guru gurupool dash course
+  srs monster dex smoke smoke32`, `wasm`, `tests/mkcourse_test.py` (now rebuilds `kq-numbers` too),
+  `tests/mkquest_test.py`, the firmware build (ESP-IDF v5.5, local). The smoke tour gains a Knowledge section
+  after S5 (`knowledge_*`, looked at); B/E: leaving Knowledge gives back every byte (9,824 marked, 9,824 after).
+  Static DRAM unchanged at 131,368 B. The app image is 0x1c9130 (1,872,176 B), 40 % of the 3 MB partition free;
+  the course adds 16,168 B of flash data.
+- Open: the owner's review of the 40 cards; whether explored steps should come back as reviews (on, lightly, for
+  now); the device check (`BACKLOG.md`). K1's other parts (the reverse-link section, the map) aren't built.
+
 ### 2026-11-07 — The lock screen after the archive: AHEAD fits its one row; the moon drawn the right way round
 
 Asked afterwards: did removing Date Book and To Do leave bugs behind? One that shows: the lock screen's AHEAD zone

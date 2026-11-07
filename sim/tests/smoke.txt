@@ -1579,6 +1579,47 @@ m 120 90
 t 30
 u
 t 400
+# Knowledge (KNOWLEDGEQUEST_PLAN.md K0): the launcher's tree at position 6,
+# Study's engine on the built-in course of 40 steps in one line (the first
+# open writes it to /study/kq-numbers/). Its dashboard says "Next step 1" and
+# which part it's in; a step is a card (the idea, "Builds on", the
+# explanation, "Try it" and its answer), then a check that asks the step's
+# own question and shows its own answer; passing it ends the step on
+# "Explored: Counting -- Newly open: Zero" with the fog's count ("38 more
+# beyond"), and Next step goes straight on. Its menu has no Courses or
+# Remove: one course. After S5 so its review doesn't change Study's glance
+# shots. B/E: leaving gives back every byte, as Study does.
+B
+c 194 108
+t 500
+s knowledge_dash
+c 61 92
+t 400
+s knowledge_step1
+c 176 295
+t 300
+s knowledge_check
+c 120 295
+t 300
+s knowledge_check_answer
+c 226 12
+t 400
+s knowledge_menu
+c 60 132
+t 400
+s knowledge_about
+c 120 160
+t 300
+c 180 295
+t 300
+s knowledge_explored
+c 72 154
+t 400
+s knowledge_step2
+c 200 12
+t 300
+s knowledge_launcher
+E leaving Knowledge
 # Critters (GAME_PLAN.md G2 and G3), the monster game, from courses/critters/game.bin
 # (the Makefile puts it on the card). Full screen: the view above, the D-pad
 # (up 64,224 down 64,296 left 28,260 right 100,260) and A (204,246) and B

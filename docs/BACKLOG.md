@@ -37,7 +37,7 @@ Built in the simulator on branch `claude/memos-settings-guru-edit` (the
 at). Nothing is on the device yet.
 
 - [ ] The launcher on glass: Settings (the gear, position 1), HotSync, Games /
-  News, Memos, an empty cell / Study, Guru, Coach. The gear reads as a gear `[d]`
+  News, Memos, Knowledge / Study, Guru, Coach. The gear reads as a gear `[d]`
 - [ ] Settings from its tile: the seven tiles, the Assistant's greeting, and
   every panel opens as it did from the menu `[d]`
 - [ ] Memos on glass: an empty list on a new card (no demo data), quick add,
@@ -66,6 +66,16 @@ at). Nothing is on the device yet.
 - [ ] The lock screen: AHEAD is one row (STUDY), SUN & MOON has Rise / Set on
   one line and the moon's phase by name on the next, with a bigger disc; the
   disc's lit side matches the sky (a crescent is a sliver, not a full disc) `[d]`
+- [ ] Knowledge on glass (the tree, launcher position 6): the icon reads as a
+  tree at 1x; the first open writes `/study/kq-numbers/`; a step's card
+  scrolls (idea, Builds on, Explanation, Try it); the check shows the step's
+  own question and its answer big; "Explored / Newly open / N more beyond",
+  and Next step goes on. Is one step at this size pleasant, and does the
+  explanation read comfortably? (K0's own question.) `[d]`
+- [ ] Owner: review the 40 Knowledge cards (`courses/kq-numbers/nodes.jsonl`,
+  all `"review": "draft"`, written by Claude). Set each to `"reviewed"` when
+  it's right; when all are, rebuild without `--drafts` and the `-draft` mark
+  goes. Also: keep the light reviews (1 d … 60 d), or pure discovery?
 - [ ] Owner: the kanji mnemonics that used to point at their radicals were
   reworded (`courses/demo-kanji/items.jsonl`: 一 十 日 月 木 目 田 力 上 下);
   the 40 words were kept — say if Study should teach the kanji alone
@@ -75,7 +85,8 @@ Plans written with this change, **not approved, nothing built**:
 - `docs/COURSE_CATALOG_PLAN.md` — Study courses hosted on GitHub, a catalog
   refreshed by HotSync, download on the next HotSync (Phase 2).
 - `docs/KNOWLEDGEQUEST_PLAN.md` — the KnowledgeQuest brief evaluated against
-  this device, and how it could be built on Study (Phase 3).
+  this device, and how it could be built on Study (Phase 3). **K0 is built**
+  (the Knowledge tile and its 40-step pilot, above); K1 onward is not.
 
 ---
 

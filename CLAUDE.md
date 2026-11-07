@@ -79,6 +79,8 @@ before touching anything.
     scratch copy: `secretscan` empties `/sdcard`);
   - `python3 tests/mkcourse_test.py` (the course builder; needs the Pillow
     in `tools/requirements-course.txt`, and downloads the pinned font);
+  - `python3 tests/mkquest_test.py` (Knowledge's graph-to-course converter;
+    stdlib only);
   - `python3 tests/mkgame_test.py` (the game converter, on the fixture; needs
     `tools/requirements-game.txt`);
   - the firmware build in the `espressif/idf:release-v5.5` container
@@ -281,7 +283,7 @@ and the iCloud sync archived** (the owner's list; branch
   Everything is at the tag `archive/pim-caldav` (made at `origin/main`
   `07fe31d`, local until pushed).
 - The launcher: Settings (a gear, `icon_settings`), HotSync, Games / News,
-  Memos, free / Study, Guru, Coach. Settings left the menu; every
+  Memos, Knowledge (below) / Study, Guru, Coach. Settings left the menu; every
   full-screen menu is one row shorter, and the smoke tour's menu taps moved.
 - Guru: Home at the foot of her list; Edit on a habit (the strip comes up,
   Edit becomes Save), Delete with a confirm, Menu ▸ New habit
@@ -290,6 +292,17 @@ and the iCloud sync archived** (the owner's list; branch
   the old demo gets the new one (`.demo` holds the demo's size).
 - Plans only, not approved: `docs/COURSE_CATALOG_PLAN.md`,
   `docs/KNOWLEDGEQUEST_PLAN.md`.
+- **Knowledge** (later the same day, the owner's word): launcher position 6
+  is a smiling tree that opens Study's engine on one built-in course,
+  `courses/kq-numbers/` (40 steps in one line, counting to percent change,
+  drafted by Claude and **not yet reviewed**). KnowledgeQuest's K0:
+  `tools/mkquest.py` turns `quest.json` + `nodes.jsonl` into the course
+  source; `tools/gen_study_demo.py` carries it in `study_demo.c` beside the
+  demo; `st_install_kq()` writes it to the card when it's missing. In
+  `ui.c`, `g_st->kq` swaps Study's words for a step's ("Step 12", "Builds
+  on", "Check") and adds the end-of-step screen (`st_show_unlocked`).
+  Study's course list leaves `kq-numbers` out; each tile's badge counts its
+  own courses (`st_glance_some`).
 
 1. **S6, the bench**, is the owner's (`[d]` items in `BACKLOG.md`). Any
    further work follows `SRS_PLAN.md` §10, keeping to its §7 budgets:

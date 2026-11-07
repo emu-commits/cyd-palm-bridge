@@ -194,15 +194,18 @@ build/wordie_test: tests/wordie_test.c $(FW)/wordie.c $(FW)/wordie.h
 	$(CC) -O2 -Wall -I$(FW) tests/wordie_test.c $(FW)/wordie.c -o $@
 
 # ---- course: the Study course reader (firmware/main/course.c), pure C. Its
-# checks on the committed course files, then the round trip: the C reader's
+# checks on the committed course files (and that Knowledge's course source is
+# what tools/mkquest.py makes of its graph), then the round trip: the C reader's
 # dump of each file must equal tools/mkcourse.py's, byte for byte (the Python
 # side reads the file with its own reader, stdlib only). smoke32 runs the
 # checks again 32-bit, as on the device; make ftest fuzzes the reader. ----
-COURSE_FILES := ../courses/demo-kanji/course.srs ../tests/data/study/cards/course.srs \
+COURSE_FILES := ../courses/demo-kanji/course.srs ../courses/kq-numbers/course.srs \
+                ../tests/data/study/cards/course.srs \
                 ../tests/data/study/features/course.srs ../tests/data/study/remap-v1/course.srs \
                 ../tests/data/study/remap-v2/course.srs
 course: build/course_test
 	python3 ../tools/gen_study_demo.py --check
+	python3 ../tools/mkquest.py ../courses/kq-numbers --check
 	python3 ../tools/gen_font_2x.py --check
 	./build/course_test
 	@for f in $(COURSE_FILES); do \

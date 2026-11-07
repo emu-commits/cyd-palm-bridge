@@ -130,14 +130,15 @@ static uint8_t g_greet_last[GREET_NSPEAKER];  /* index of the line last shown   
  * with the iCloud sync: Settings first (it was a menu item; Palm's Prefs was
  * an app), then HotSync and Games, News where it was, Memos (the Planner
  * without To Do) in the middle, and Study, Guru and Coach where people's
- * thumbs already know them. A NULL is an empty cell that keeps its place in
- * the grid: position 6 is free. */
+ * thumbs already know them. Position 6, freed by the archive, is Knowledge
+ * (the tree): KNOWLEDGEQUEST_PLAN.md's graph of ideas, one step at a time,
+ * on Study's engine. A NULL would be an empty cell that keeps its place. */
 static const char *APPS[] = { "Settings", "HotSync", "Games",
-                              "News", "Memos", NULL,
+                              "News", "Memos", "Knowledge",
                               "Study", "Guru", "Coach" };
 /* Palm icons (from PumpkinOS) where Palm had the app; the rest drawn to match */
 static const lv_image_dsc_t *APP_ICONS[] = { &icon_settings, &icon_hotsync, &icon_games,
-                                             &icon_news, &icon_memo, NULL,
+                                             &icon_news, &icon_memo, &icon_knowledge,
                                              &icon_study, &icon_guru, &icon_coach };
 #define NAPPS ((int)(sizeof(APPS)/sizeof(APPS[0])))
 
@@ -145,6 +146,7 @@ static void show_launcher(void);
 /* Study, at a glance: the lock's STUDY row and the launcher's badge */
 static void st_glance_text(char *b, int cap, uint32_t *change);
 static uint32_t st_glance_due(void);
+static uint32_t st_glance_due_some(int kq);
 static uint32_t st_now(void);                 /* Study's clock (the smoke tour can move it) */
 static void show_trainer(void);
 static void show_kana(void);
@@ -161,6 +163,7 @@ static void show_minesweeper(void);
 static void show_wordie(void);
 static void show_sudoku(void);
 static void show_study(void);
+static void show_knowledge(void);   /* Study's engine, on Knowledge's course */
 static void st_free(void);       /* Study's session, when the screen leaves it */
 static void st_menu(lv_obj_t *panel);
 static int  g_st_open;
@@ -1454,6 +1457,7 @@ static void show_app(const char *name){
     if(!strcmp(name, "Coach")){ show_coach(); return; }
     if(!strcmp(name, "Guru")){ show_guru(); return; }
     if(!strcmp(name, "Study")){ show_study(); return; }
+    if(!strcmp(name, "Knowledge")){ show_knowledge(); return; }
     if(!strcmp(name, "Critters")){ show_critters(); return; }
     if(!strcmp(name, "Dex")){ show_dex(); return; }
     cur_app = NULL;
@@ -2628,6 +2632,7 @@ static void show_launcher(void){
         if(APPS[i]){
             lv_obj_t *cell = icon_cell(grid, APP_ICONS[i], APPS[i], app_cb, (void *)APPS[i]);
             if(APP_ICONS[i] == &icon_study) st_badge(cell, st_glance_due());
+            if(APP_ICONS[i] == &icon_knowledge) st_badge(cell, st_glance_due_some(1));
             continue;
         }
         lv_obj_t *gap = lv_obj_create(grid);           /* a free slot, held open */
@@ -10114,6 +10119,7 @@ typedef struct {
     Course    c;
     Srs       srs;
     uint8_t   course_ok, srs_ok;
+    uint8_t   kq;                             /* opened by Knowledge, on its course */
     char      id[ST_ID_MAX];
     /* a round: a lesson's cards and quiz, or reviews */
     StSession round;
@@ -10168,11 +10174,13 @@ static SrsSum *st_rescan(void){
     return u;
 }
 
-static uint32_t st_glance_due(void){
+/* the launcher's badges: Study's courses (kq 0), or Knowledge's (kq 1) */
+static uint32_t st_glance_due_some(int kq){
     StGlance g;
-    st_glance(ST_ROOT, st_now(), &g);
+    st_glance_some(ST_ROOT, st_now(), ST_KQ_ID, kq, &g);
     return g.due;
 }
+static uint32_t st_glance_due(void){ return st_glance_due_some(0); }
 
 /* the lock's STUDY row: "42 reviews due", "caught up · next 9:40p" */
 static void st_glance_text(char *b, int cap, uint32_t *change){
@@ -10252,6 +10260,12 @@ static void st_screen_full(const char *title){
     lv_label_set_text(title_lbl, title);
     update_cat_trigger();
 }
+
+/* Knowledge is Study's engine on one course (KNOWLEDGEQUEST_PLAN.md K0): the
+ * same screens, with its own name in the title bar and a concept's words on
+ * them -- "Step 12", "Builds on", "Explanation" -- where Study says "Lesson",
+ * "Built from" and "Remember the meaning". */
+static const char *st_app(void){ return g_st && g_st->kq ? "Knowledge" : "Study"; }
 
 /* ---- building blocks ---- */
 
@@ -10401,12 +10415,13 @@ static void st_term(lv_obj_t *par, int max_h){
  * into a scratch buffer, so the item on screen stays loaded. */
 static void st_links(lv_obj_t *par){
     static const char *const NAMES[] = { "", "Comes after", "Built from", "Family", "See also" };
+    const int kq = g_st->kq;                     /* a step names the steps it builds on */
     static const uint8_t ORDER[] = { CL_BUILT_FROM, CL_FAMILY, CL_RELATED, CL_UNLOCK_AFTER };
     uint8_t *tmp = NULL;
     for(size_t oi = 0; oi < sizeof ORDER; oi++){
         int type = ORDER[oi];
         char line[160];
-        int k = snprintf(line, sizeof line, "%s: ", NAMES[type]), any = 0;
+        int k = snprintf(line, sizeof line, "%s: ", kq && type == CL_BUILT_FROM ? "Builds on" : NAMES[type]), any = 0;
         for(uint16_t i = 0; i < g_st->it.n_links && k < (int)sizeof line - 24; i++){
             CourseLink l;
             course_link(g_st->buf, &g_st->it, i, &l);
@@ -10419,10 +10434,10 @@ static void st_links(lv_obj_t *par){
                 uint32_t pos = 0;
                 CourseField f;
                 while(course_field_next(tmp, t.text_len, &pos, &f) == 1)
-                    if(f.tag == CF_MEANING || (f.tag == CF_TERM && !(f.attr & (CF_A_PICTURE | CF_A_KANA)))){
+                    if((f.tag == CF_MEANING && !kq) || (f.tag == CF_TERM && !(f.attr & (CF_A_PICTURE | CF_A_KANA)))){
                         int m = f.len < (int)sizeof nb - 1 ? f.len : (int)sizeof nb - 1;
                         memcpy(nb, f.text, m); nb[m] = 0; name = nb;
-                        if(f.tag == CF_MEANING) break;
+                        if(f.tag == CF_MEANING || kq) break;
                     }
             }
             k += snprintf(line + k, sizeof line - k, "%s%s", any ? " + " : "", name);
@@ -10439,8 +10454,11 @@ static void st_links(lv_obj_t *par){
 static void st_card(lv_obj_t *page){
     char head[48];
     CourseItem *it = &g_st->it;
-    st_cap_kind(head, sizeof head, it->kind);
-    snprintf(head + strlen(head), sizeof head - strlen(head), "  \xC2\xB7  level %u", it->level);
+    if(g_st->kq) snprintf(head, sizeof head, "Step %u of %u", (unsigned)it->n + 1, (unsigned)g_st->c.n_items);
+    else {
+        st_cap_kind(head, sizeof head, it->kind);
+        snprintf(head + strlen(head), sizeof head - strlen(head), "  \xC2\xB7  level %u", it->level);
+    }
     lv_obj_t *h = st_label(page, head, NULL, 0);
     lv_obj_set_style_text_color(h, COL_DIM, 0);
     /* The term, centred. A picture gets a fixed box, centred in it: it's
@@ -10491,8 +10509,10 @@ static void st_card(lv_obj_t *page){
     also[0] = 0;
     for(pos = 0; course_field_next(g_st->buf, it->text_len, &pos, &f) == 1; ) if(f.tag == CF_MEANING){
         if(!nm++){
+            /* a step's idea is a sentence: bold, never twice size, so a short
+             * one doesn't shout and a long one doesn't look like small print */
             lv_obj_t *o = st_field(mcol, &f, &lv_font_palm_bold, ST_PIC_ROWS);
-            if(o && lv_obj_check_type(o, &lv_label_class) && !st_big_w(o, 2, mw)){
+            if(o && lv_obj_check_type(o, &lv_label_class) && (g_st->kq || !st_big_w(o, 2, mw))){
                 lv_obj_set_width(o, mw);
                 lv_obj_set_style_text_align(o, LV_TEXT_ALIGN_CENTER, 0);
             }
@@ -10558,10 +10578,13 @@ static void st_card(lv_obj_t *page){
     };
     for(size_t s = 0; s < sizeof SIDE / sizeof SIDE[0]; s++){
         int first = 1;
+        const char *head = SIDE[s].head;
+        if(g_st->kq && SIDE[s].tag == CF_MNEMONIC_MEANING) head = "Explanation";
+        if(g_st->kq && SIDE[s].tag == CF_EXAMPLE) head = "Try it";
         for(pos = 0; course_field_next(g_st->buf, it->text_len, &pos, &f) == 1; ){
             if(f.tag != SIDE[s].tag) continue;
-            if(first && SIDE[s].head){
-                lv_obj_t *l = st_label(page, SIDE[s].head, &lv_font_palm_bold, 0);
+            if(first && head){
+                lv_obj_t *l = st_label(page, head, &lv_font_palm_bold, 0);
                 lv_obj_set_style_pad_top(l, 4, 0);
             }
             first = 0;
@@ -10570,7 +10593,12 @@ static void st_card(lv_obj_t *page){
                 CourseField tr;
                 uint32_t p2 = pos;
                 if(course_field_next(g_st->buf, it->text_len, &p2, &tr) == 1 && tr.tag == CF_TRANSLATION){
-                    lv_obj_t *l = st_field(page, &tr, NULL, ST_PIC_ROWS);
+                    lv_obj_t *l;
+                    if(g_st->kq && !(tr.attr & CF_A_PICTURE)){   /* a step's answer, said as one */
+                        char a[96];
+                        snprintf(a, sizeof a, "Answer: %.*s", (int)tr.len, tr.text);
+                        l = st_label(page, a, NULL, LCD_W - 12);
+                    } else l = st_field(page, &tr, NULL, ST_PIC_ROWS);
                     lv_obj_set_style_text_color(l, COL_DIM, 0);
                 }
             }
@@ -10604,7 +10632,7 @@ static int st_open_course(const char *id){
     if(course_open(&g_st->c, path)){
         char m[200];
         snprintf(m, sizeof m, "The course \"%s\" can't be opened: %s.", id, g_st->c.err);
-        st_notice("Study", m);
+        st_notice(st_app(), m);
         return -1;
     }
     g_st->course_ok = 1;
@@ -10613,11 +10641,11 @@ static int st_open_course(const char *id){
         char m[240];
         snprintf(m, sizeof m, "Your progress in \"%s\" can't be read: %s. It has been left as it is.",
                  g_st->c.title, g_st->srs.err);
-        st_notice("Study", m);
+        st_notice(st_app(), m);
         return -1;
     }
     g_st->srs_ok = 1;
-    st_last_set(ST_ROOT, id);
+    if(strcmp(id, ST_KQ_ID)) st_last_set(ST_ROOT, id);   /* Study's last, not Knowledge's */
     return 0;
 }
 
@@ -10657,18 +10685,24 @@ static void st_lessons_cb(lv_event_t *e);
 static void st_reviews_cb(lv_event_t *e);
 
 static void st_show_dash(void){
-    if(!g_st || !g_st->course_ok || !g_st->srs_ok){ show_study(); return; }
-    st_screen("Study");
+    if(!g_st || !g_st->course_ok || !g_st->srs_ok){ if(g_st && g_st->kq) show_knowledge(); else show_study(); return; }
+    const int kq = g_st->kq;
+    st_screen(st_app());
     uint32_t now = st_now();
     free(st_rescan());
-    uint16_t level = 0;
-    int lessons = srs_lessons(&g_st->srs, NULL, 0, &level);
+    uint16_t level = 0, next = 0;
+    int lessons = srs_lessons(&g_st->srs, &next, 1, &level);
     Course *c = &g_st->c;
+    /* Knowledge opens every part at once and lets the links gate, so the
+     * part on show is the next step's, not the last one open */
+    CourseItem ni;
+    if(kq && lessons > 0 && !course_item(c, next, &ni)) level = ni.level;
 
     lv_obj_t *t = st_label(content, c->title, &lv_font_palm_bold, 170);
     lv_obj_set_pos(t, 6, 2);
     char b[96];
-    snprintf(b, sizeof b, "Level %u", level);
+    if(kq) snprintf(b, sizeof b, "Part %u of %u", level, (unsigned)c->n_levels);
+    else snprintf(b, sizeof b, "Level %u", level);
     lv_obj_t *lv = st_label(content, b, NULL, 0);
     lv_obj_align(lv, LV_ALIGN_TOP_RIGHT, -6, 2);
     /* the level's title, when it's text */
@@ -10695,7 +10729,9 @@ static void st_show_dash(void){
         return;
     }
     /* two big doors, the count on each */
-    snprintf(b, sizeof b, "Lessons\n%d", lessons);
+    if(!kq) snprintf(b, sizeof b, "Lessons\n%d", lessons);
+    else if(lessons > 0) snprintf(b, sizeof b, "Next step\n%u", (unsigned)next + 1);
+    else snprintf(b, sizeof b, "Next step\n-");
     lv_obj_t *lb = st_btn(content, 6, 40, 110, 56, b, st_lessons_cb, 0, 1);
     snprintf(b, sizeof b, "Reviews\n%u", (unsigned)g_st->srs.due_total);
     lv_obj_t *rb = st_btn(content, 124, 40, 110, 56, b, st_reviews_cb, 0, 1);
@@ -10719,16 +10755,19 @@ static void st_show_dash(void){
     else if(g_st->srs.next_due){
         st_span(g_st->srs.next_due - now, span, sizeof span);
         snprintf(b, sizeof b, "Next review in %s.", span);
-    } else snprintf(b, sizeof b, "%s", g_st->srs.started ? "Nothing is scheduled." : "Start with a lesson.");
+    } else snprintf(b, sizeof b, "%s", g_st->srs.started ? "Nothing is scheduled."
+                                     : kq ? "Start with step 1." : "Start with a lesson.");
     lv_obj_t *nx = st_label(content, b, NULL, 160);
     lv_obj_set_pos(nx, 6, 142);
-    snprintf(b, sizeof b, "%u of %u items started", (unsigned)g_st->srs.started, (unsigned)c->n_items);
+    snprintf(b, sizeof b, kq ? "%u of %u steps explored" : "%u of %u items started",
+             (unsigned)g_st->srs.started, (unsigned)c->n_items);
     lv_obj_t *st = st_label(content, b, NULL, 160);
     lv_obj_set_pos(st, 6, 160);
     lv_obj_set_style_text_color(st, COL_DIM, 0);
     st_btn(content, LCD_W - 72, 146, 66, 30, "Week", st_week_cb, 0, 0);
 
-    if(greet_due(GREET_STUDY)){
+    /* her lines are about Study's batches of five; Knowledge has none of that */
+    if(!kq && greet_due(GREET_STUDY)){
         greet_done(GREET_STUDY);
         char line[140];                          /* the balloon copies it */
         if(!g_st->srs.started) snprintf(line, sizeof line, "%s", ST_GREET_FIRST);
@@ -10863,7 +10902,11 @@ static void st_lessons_cb(lv_event_t *e){
     int batch = g_st->c.batch > 20 ? 20 : g_st->c.batch;
     int n = srs_lessons(&g_st->srs, g_st->lesson, batch, &level);
     if(n <= 0){
-        alert_titled("Lessons", g_st->srs.started >= g_st->c.n_items
+        if(g_st->kq) alert_titled("Next step", g_st->srs.started >= g_st->c.n_items
+                   ? "You've explored every step. Reviews keep it fresh."
+                   : "No step is open yet. Each one opens when you've passed the check "
+                     "on the step it builds on.");
+        else alert_titled("Lessons", g_st->srs.started >= g_st->c.n_items
                    ? "You've had every lesson in this course. Reviews keep it fresh."
                    : "No new lessons yet. More open as the ones you've learned "
                      "come through their reviews.");
@@ -10876,13 +10919,15 @@ static void st_lessons_cb(lv_event_t *e){
 
 static void st_show_card(void){
     char t[32];
-    snprintf(t, sizeof t, "Lesson %d of %d", g_st->card + 1, g_st->nlesson);
+    if(g_st->kq) snprintf(t, sizeof t, "Step %u", (unsigned)g_st->lesson[g_st->card] + 1);
+    else snprintf(t, sizeof t, "Lesson %d of %d", g_st->card + 1, g_st->nlesson);
     st_screen_full(t);
     lv_obj_t *page = st_page(0, ST_BTN_Y - 4);
     if(st_load(g_st->lesson[g_st->card])) st_label(page, g_st->c.err, NULL, 220);
     else st_card(page);
     if(g_st->card > 0) st_btn(content, 4, ST_BTN_Y, 96, ST_BTN_H, "< Back", st_card_nav_cb, -1, 0);
-    st_btn(content, LCD_W - 132, ST_BTN_Y, 128, ST_BTN_H, g_st->card + 1 < g_st->nlesson ? "Next >" : "Quiz >",
+    st_btn(content, LCD_W - 132, ST_BTN_Y, 128, ST_BTN_H,
+           g_st->card + 1 < g_st->nlesson ? "Next >" : g_st->kq ? "Check >" : "Quiz >",
            st_card_nav_cb, 1, 1);
 }
 
@@ -10950,15 +10995,21 @@ static void st_card_back_cb(lv_event_t *e){ (void)e; st_show_ask(); }
 static void st_show_ask(void){
     StQ q;
     if(!g_st || !g_st->round_on || !st_current(&g_st->round, &q)){ st_show_done(); return; }
-    st_screen_full(g_st->reviewing ? "Reviews" : "Quiz");
-    if(st_load(q.item)){ st_notice("Study", g_st->c.err); return; }
+    st_screen_full(g_st->reviewing ? "Reviews" : g_st->kq ? "Check" : "Quiz");
+    if(st_load(q.item)){ st_notice(st_app(), g_st->c.err); return; }
     const int reading = q.q == ST_READING;
 
     /* the banner: what's being asked. Reading is inverted, as WaniKani
      * marks it, so the two are told apart before the words are read. */
     char kind[32], b[64];
+    /* a step asks its own question and shows its own answer (its example
+     * and the example's translation), not "what does the term mean" */
+    CourseField kq_q, kq_a;
+    const int kq = g_st->kq && !reading && st_find(CF_EXAMPLE, 0, &kq_q) && !(kq_q.attr & CF_A_PICTURE)
+                   && st_find(CF_TRANSLATION, 0, &kq_a);
     st_cap_kind(kind, sizeof kind, g_st->it.kind);
-    snprintf(b, sizeof b, "%s  \xC2\xB7  %s", kind, reading ? "Reading" : "Meaning");
+    if(kq) snprintf(b, sizeof b, "Step %u  \xC2\xB7  Check", (unsigned)g_st->it.n + 1);
+    else snprintf(b, sizeof b, "%s  \xC2\xB7  %s", kind, reading ? "Reading" : "Meaning");
     lv_obj_t *ban = panel(content, 0, 0, LCD_W, ST_BAN_H, reading ? COL_LINE : COL_GRAF);
     lv_obj_t *bl = st_label(ban, b, &lv_font_palm_bold, 0);
     lv_obj_set_style_text_color(bl, reading ? COL_BODY : COL_LINE, 0);
@@ -10978,7 +11029,18 @@ static void st_show_ask(void){
     lv_obj_set_flex_flow(box, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(box, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
-    st_term(box, ST_ASK_PROMPT_H);
+    if(kq){
+        /* the step's name, small, over its question */
+        lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_row(box, 4, 0);
+        CourseField tf;
+        if(st_find(CF_TERM, 0, &tf) && !(tf.attr & CF_A_PICTURE)){
+            lv_obj_t *tl = st_label(box, st_ftext(&tf), NULL, 0);
+            lv_obj_set_style_text_color(tl, COL_DIM, 0);
+        }
+        lv_obj_t *ql = st_label(box, st_ftext(&kq_q), &lv_font_palm_bold, LCD_W - 24);
+        lv_obj_set_style_text_align(ql, LV_TEXT_ALIGN_CENTER, 0);
+    } else st_term(box, ST_ASK_PROMPT_H);
     char left[16];
     snprintf(left, sizeof left, "%d left", st_left(&g_st->round));
     lv_obj_t *ll = st_label(content, left, NULL, 0);
@@ -11012,6 +11074,10 @@ static void st_show_ask(void){
             if(o && lv_obj_check_type(o, &lv_label_class) && ((f.attr & CF_A_KANA) || !st_big(o, 2)))
                 lv_obj_set_style_text_align(o, LV_TEXT_ALIGN_CENTER, 0);
         }
+    } else if(kq){
+        lv_obj_t *o = st_field(ans, &kq_a, &lv_font_palm_bold, 60);
+        if(o && lv_obj_check_type(o, &lv_label_class) && !st_big(o, 2))
+            lv_obj_set_style_text_align(o, LV_TEXT_ALIGN_CENTER, 0);
     } else {
         if(st_find(CF_MEANING, CF_A_PRIMARY, &f) || st_find(CF_MEANING, 0, &f)){
             lv_obj_t *o = prim = st_field(ans, &f, &lv_font_palm_bold, 60);
@@ -11068,10 +11134,57 @@ static void st_card_over_cb(lv_event_t *e){
 
 static void st_done_cb(lv_event_t *e){ (void)e; st_show_dash(); }
 
+/* a step's name, into out (empty if it can't be read). Loads the item. */
+static void st_term_of(uint16_t n, char *out, int cap){
+    CourseField f;
+    out[0] = 0;
+    if(!st_load(n) && st_find(CF_TERM, 0, &f) && !(f.attr & CF_A_PICTURE))
+        snprintf(out, cap, "%.*s", (int)f.len, f.text);
+}
+
+/* Knowledge, after a step's check (the brief's "the session is complete"):
+ * what was explored, what that opened, and how much lies beyond it, counted
+ * but not named -- the fog. Then go on, or put the device down. */
+static void st_show_unlocked(void){
+    st_screen("Step done");
+    char b[200], name[48];
+    int k;
+    st_term_of(g_st->lesson[g_st->nlesson - 1], name, sizeof name);
+    snprintf(b, sizeof b, "Explored: %s", name);
+    lv_obj_t *h = st_label(content, b, &lv_font_palm_bold, LCD_W - 16);
+    lv_obj_set_pos(h, 8, 10);
+    uint16_t open[3];
+    int n = srs_lessons(&g_st->srs, open, 3, NULL);
+    if(n > 0){
+        k = snprintf(b, sizeof b, "Newly open: ");
+        for(int i = 0; i < n && i < 3 && k < (int)sizeof b - 8; i++){
+            st_term_of(open[i], name, sizeof name);
+            k += snprintf(b + k, sizeof b - k, "%s%s", i ? ", " : "", name);
+        }
+    } else if(g_st->srs.started >= g_st->c.n_items)
+        snprintf(b, sizeof b, "That was the last step. Reviews will bring them back now and then.");
+    else snprintf(b, sizeof b, "Nothing new opens yet.");
+    lv_obj_t *o = st_label(content, b, NULL, LCD_W - 16);
+    lv_obj_set_pos(o, 8, 46);
+    int beyond = (int)g_st->c.n_items - (int)g_st->srs.started - (n > 0 ? n : 0);
+    if(beyond > 0){
+        snprintf(b, sizeof b, "%d more beyond", beyond);
+        lv_obj_t *f = st_label(content, b, NULL, 0);
+        lv_obj_set_pos(f, 8, 84);
+        lv_obj_set_style_text_color(f, COL_DIM, 0);
+    }
+    if(n > 0){
+        lv_obj_t *nb = st_btn(content, 8, 112, 128, 36, "Next step >", st_lessons_cb, 0, 1);
+        (void)nb;
+        st_btn(content, LCD_W - 96, 112, 88, 36, "Done", st_done_cb, 0, 0);
+    } else st_btn(content, 60, 112, LCD_W - 120, 36, "Done", st_done_cb, 0, 1);
+}
+
 static void st_show_done(void){
     if(!g_st){ show_study(); return; }
     int reviewing = g_st->reviewing;
     if(g_st->round_on){ st_end(&g_st->round); g_st->round_on = 0; }
+    if(g_st->kq && !reviewing && g_st->learned && g_st->nlesson > 0){ st_show_unlocked(); return; }
     st_screen(reviewing ? "Reviews done" : "Lesson done");
     char line[160];
     char b[64];
@@ -11139,10 +11252,19 @@ static void st_reviews_cb(lv_event_t *e){
 
 /* ---- picking a course, and the empty card ---- */
 
+/* Study's courses: the card's, less Knowledge's (its own app opens it) */
+static int st_study_courses(char ids[][ST_ID_MAX], int max){
+    char all[9][ST_ID_MAX];
+    int n = st_list_courses(ST_ROOT, all, max + 1 < 9 ? max + 1 : 9), m = 0;
+    for(int i = 0; i < n && m < max; i++)
+        if(strcmp(all[i], ST_KQ_ID)) memcpy(ids[m++], all[i], ST_ID_MAX);
+    return m;
+}
+
 static void st_pick_cb(lv_event_t *e){
     int i = (int)(intptr_t)lv_event_get_user_data(e);
     char ids[8][ST_ID_MAX];
-    int n = st_list_courses(ST_ROOT, ids, 8);
+    int n = st_study_courses(ids, 8);
     if(!g_st || i >= n) return;
     if(!st_open_course(ids[i])) st_show_dash();
 }
@@ -11156,7 +11278,7 @@ static void st_reinstall_cb(lv_event_t *e){
 
 static void st_show_pick(void){
     char ids[8][ST_ID_MAX];
-    int n = st_list_courses(ST_ROOT, ids, 8);
+    int n = st_study_courses(ids, 8);
     st_screen("Courses");
     if(!n){
         lv_obj_t *l = st_label(content, "No courses on the card. Copy a course.srs into "
@@ -11174,14 +11296,29 @@ static void show_study(void){
         if(!g_st){ toast_show("(low memory)"); return; }
     }
     st_install_demo(ST_ROOT, 0);                 /* once, the first time */
+    if(g_st->kq){ st_close_course(); g_st->kq = 0; }   /* Knowledge had it: Study's own course */
     if(g_st->course_ok && g_st->srs_ok){ st_show_dash(); return; }
     char ids[8][ST_ID_MAX], last[ST_ID_MAX];
-    int n = st_list_courses(ST_ROOT, ids, 8), pick = -1;
+    int n = st_study_courses(ids, 8), pick = -1;
     if(st_last_get(ST_ROOT, last))
         for(int i = 0; i < n; i++) if(!strcmp(ids[i], last)) pick = i;
     if(pick < 0 && n == 1) pick = 0;
     if(pick < 0){ st_show_pick(); return; }
     if(!st_open_course(ids[pick])) st_show_dash();
+}
+
+/* Knowledge: the launcher's tree. Study's session and screens, opened on the
+ * built-in course (put back on the card if it's missing), never on another. */
+static void show_knowledge(void){
+    if(!g_st){
+        g_st = calloc(1, sizeof *g_st);
+        if(!g_st){ toast_show("(low memory)"); return; }
+    }
+    st_install_kq(ST_ROOT);
+    if(g_st->kq && g_st->course_ok && g_st->srs_ok){ st_show_dash(); return; }
+    st_close_course();
+    g_st->kq = 1;
+    if(!st_open_course(ST_KQ_ID)) st_show_dash();
 }
 
 /* ---- the menu's Study items ---- */
@@ -11269,7 +11406,15 @@ static void act_st_remove(lv_event_t *e){
 }
 
 static void st_menu(lv_obj_t *panel){
-    menu_header(panel, "Study");
+    menu_header(panel, st_app());
+    if(g_st && g_st->kq){                        /* one course: nothing to pick or remove */
+        if(g_st->course_ok){
+            if(g_st->srs_ok) menu_item(panel, "This week", act_st_week);
+            menu_item(panel, "About this course", act_st_info);
+            menu_item(panel, "Check course", act_st_check);
+        }
+        return;
+    }
     menu_item(panel, "Courses", act_st_courses);
     if(g_st && g_st->course_ok){
         if(g_st->srs_ok) menu_item(panel, "This week", act_st_week);

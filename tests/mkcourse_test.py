@@ -26,7 +26,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import mkcourse  # noqa: E402
 
 FONT = os.environ.get("COURSE_FONT")
-COURSES = ["courses/demo-kanji", "tests/data/study/cards", "tests/data/study/features",
+COURSES = ["courses/demo-kanji", "courses/kq-numbers", "tests/data/study/cards", "tests/data/study/features",
            "tests/data/study/remap-v1", "tests/data/study/remap-v2"]
 fails = 0
 

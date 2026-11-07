@@ -1,0 +1,79 @@
+{
+  "format": 1,
+  "id": "kq-numbers",
+  "title": "Counting to percent",
+  "version": "0.1-draft",
+  "author": "The CYD Palm project",
+  "licence": "CC0-1.0",
+  "language": "en",
+  "description": "Forty steps in one line, from counting to percent change. Each step builds on the one before it. Draft: not yet reviewed by a person.",
+  "source": "The KnowledgeQuest K0 pilot (KNOWLEDGEQUEST_PLAN.md): number, fractions, ratios, proportion. Written for this project.",
+  "kinds": [
+    {
+      "name": "concept",
+      "quiz": [
+        "meaning"
+      ],
+      "level_up": true
+    }
+  ],
+  "scheduler": {
+    "type": "stages",
+    "intervals": [
+      "1d",
+      "3d",
+      "7d",
+      "21d",
+      "60d",
+      null
+    ],
+    "groups": [
+      {
+        "from": 1,
+        "name": "Explored"
+      },
+      {
+        "from": 3,
+        "name": "Settled"
+      },
+      {
+        "from": 6,
+        "name": "Kept"
+      }
+    ],
+    "drop": 1,
+    "drop_high": 2,
+    "high_from": 4,
+    "known": 1
+  },
+  "grading": "two",
+  "lessons": {
+    "batch": 1
+  },
+  "unlock": {
+    "level_percent": 0,
+    "by_links": true
+  },
+  "levels": [
+    {
+      "level": 1,
+      "title": "Counting and place value",
+      "theme": "From one, two, three to sharing equally"
+    },
+    {
+      "level": 2,
+      "title": "Fractions",
+      "theme": "Equal parts of a whole"
+    },
+    {
+      "level": 3,
+      "title": "Ratios and rates",
+      "theme": "Comparing parts, and how much for one"
+    },
+    {
+      "level": 4,
+      "title": "Proportion and percent",
+      "theme": "Amounts that grow together"
+    }
+  ]
+}
