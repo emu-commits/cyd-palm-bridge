@@ -330,6 +330,13 @@ Three requests from the owner, written as backlog items; nothing built.
     comes from one area only. **(mine: the number is the owner's to set.)**
   - **Open question for the owner:** the full-Dex hunt in the Reach (22,000 to 40,000 actions, `[d]` above) is the
     same kind of walking. Is it a post-game chore to keep, a side quest with a reward, or cut?
+- [ ] **4. A travel screen between Larkhollow and Kestrel, so the road feels like distance.** Requested 2026-11-06
+  (the owner). Today the drove road is two warps, so Larkhollow and Kestrel sit side by side with no sense of the
+  miles between them. Add a travel moment on the road: a short scene (a screen or a scrolling strip of the road
+  with hills, a ford or a waymark, and the journey's time passing) shown as the player crosses, before they arrive at
+  the other town. Keep it short so it adds weight without becoming a walk. It should use the same road as item 1
+  (the gate once shut, the open road after `beat_ivy`) and not change the warps' logic. **(mine: the look and length
+  are the owner's to judge; I'd keep it to one screen with no input beyond a key to continue.)**
 
 ### Critters: Auto-play's catch and run rules (requested 2026-11-06; not started)
 
