@@ -87,8 +87,10 @@ keep.**
 
 This is the screen a buyer sees in the Etsy photos and the screen that's lit on their
 desk all day. Tiles: time + date, world time, weather now + next hours, battery,
-Study's due reviews, moon phase, sunrise/sunset. (The next calendar event and the
-next to-do went with Date Book and To Do, 2026-11-07.)
+Study's due reviews, sunrise/sunset, moon phase. (The next calendar event and the
+next to-do went with Date Book and To Do, 2026-11-07; AHEAD shrank to its one
+STUDY row and SUN & MOON took the space: the sun on one line, the moon's phase
+by name on the next, and a bigger disc.)
 
 **Weather is the one real dependency,** and it is built: **Open-Meteo**, free and
 keyless, fetched during the HotSync Wi-Fi window, `&format=csv` so there is no JSON

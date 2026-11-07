@@ -619,7 +619,8 @@ mock-ups: §11 decision 10).
 - **The lock screen:** AHEAD gets a third row, STUDY. The 14 px came from
   the weather box: the air quality moved up beside the reading (and
   shortens, then goes, if the reading is long), and the rain bars top out
-  at 20 px.
+  at 20 px. (Since 2026-11-07 STUDY is AHEAD's only row: the NEXT and DUE
+  rows went with Date Book and To Do.)
 - **The launcher:** a black count at the Study icon's shoulder, 99+ at
   most, none at 0.
 - **The Week screen's lower half is the week ahead:** "Coming up", the

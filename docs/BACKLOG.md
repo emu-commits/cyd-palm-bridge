@@ -63,6 +63,9 @@ at). Nothing is on the device yet.
 - [ ] Study's demo without radicals: a card that already had the old demo gets
   the new one (the `.demo` mark holds its size), progress on the kanji kept;
   the first lesson is five kanji, each quizzed on meaning and reading `[d]`
+- [ ] The lock screen: AHEAD is one row (STUDY), SUN & MOON has Rise / Set on
+  one line and the moon's phase by name on the next, with a bigger disc; the
+  disc's lit side matches the sky (a crescent is a sliver, not a full disc) `[d]`
 - [ ] Owner: the kanji mnemonics that used to point at their radicals were
   reworded (`courses/demo-kanji/items.jsonl`: 一 十 日 月 木 目 田 力 上 下);
   the 40 words were kept — say if Study should teach the kanji alone

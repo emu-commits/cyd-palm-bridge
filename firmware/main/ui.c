@@ -565,7 +565,8 @@ static void list_draw_cb(lv_event_t *e){
     lv_draw_dsc_base_t *b = lv_draw_task_get_draw_dsc(task);
     if(!b || b->part != LV_PART_ITEMS) return;
     /* the descriptor names the object being drawn, so there is no guessing about
-     * targets here (see due_cal_cb for what guessing costs) */
+     * targets here (a target guessed wrong once made a calendar tap pick the
+     * wrong day) */
     lv_obj_t *t = b->obj;
     if(!t) return;
 
@@ -628,10 +629,9 @@ static void list_draw_cb(lv_event_t *e){
  * row, and the draw hook above. Call it on every list table so they cannot
  * drift apart -- a list that skips this is a list that looks like a table. */
 /* ONE wall-clock formatter, because "12-hour or 24-hour" is a setting and a
- * setting that half the screens ignore is worse than no setting. The Date Book
- * had two different hard-coded answers -- the day list printed "18:00" and the
- * week list printed "6:00p" -- so the same event read differently depending on
- * which way you had zoomed into it, and Settings ▸ Date & Time changed neither.
+ * setting that half the screens ignore is worse than no setting. The old Date
+ * Book (archived 2026-11-07) had two different hard-coded answers -- "18:00" in
+ * one view and "6:00p" in another -- and Settings ▸ Date & Time changed neither.
  *
  * `pad` zero-pads the hour, which the 24-hour form always wants and the 12-hour
  * form never does. */
@@ -3081,7 +3081,7 @@ static void show_secret_edit(int i){
 
 /* ---- News feeds manager (Preferences -> "News feeds...") --------------------
  * The RSS reader's sources: an lv_table (the pool-safe record-list widget) with a
- * checkbox column (tap col 0 = enable/disable, like To Do) and a name column (tap
+ * checkbox column (tap col 0 = enable/disable, like Guru's list) and a name column (tap
  * = edit). "Add" opens the same editor for a new feed. The URL is typed on the tap
  * keyboard (the Preferences field pattern); the name is auto-derived from the host.
  * The list persists to feeds.txt on every change, and HotSync fetches the enabled
@@ -3730,10 +3730,10 @@ static void show_set_clock(void){
                "second later -- this is for getting there first.");
 }
 
-/* The date, on the calendar the Date Book already uses. ONE calendar widget in
- * the build, reached from two places: writing a second one is how the two end up
- * disagreeing about which event a tap means (see due_cal_cb's note on
- * lv_event_get_current_target -- that bug is not worth having twice). */
+/* The date, on LVGL's calendar. The tap is read off
+ * lv_event_get_current_target, not lv_event_get_target: the latter is the
+ * button matrix inside the calendar, and reading the date off it picks the
+ * wrong day. */
 static void date_cal_cb(lv_event_t *e){
     lv_obj_t *cal = (lv_obj_t *)lv_event_get_current_target(e);
     lv_calendar_date_t d;
@@ -3766,10 +3766,9 @@ static void show_set_date(void){
     /* The header's month arrows are LV_SYMBOL glyphs, which live in montserrat
      * and NOT in lv_font_palm -- and this calendar is in `content`, which
      * inherits the Palm font from the screen, so both arrows drew as empty
-     * boxes. (The Date Book's due-date calendar has always looked right for the
-     * accidental reason that it sits on lv_layer_top(), which inherits nothing
-     * and therefore falls back to montserrat. Same mechanism as the greeting
-     * pane's font; see spk_pane.) The day numbers stay in the Palm font. */
+     * boxes; cal_arrows() names montserrat for them. (Same mechanism as the
+     * greeting pane's font; see spk_pane.) The day numbers stay in the Palm
+     * font. */
     cal_arrows(cal);
     lv_obj_add_event_cb(cal, date_cal_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
@@ -5778,9 +5777,9 @@ static void clock_tick(lv_timer_t *t){
 /* ===================== Lock-screen dashboard ================================
  * A full-screen, info-dense glance view drawn in the mono Palm LCD: big clock,
  * two world times, cached weather (temp / rain / air + a 6-hour strip), battery,
- * next event + next due, sunrise/sunset, and the moon phase. It renders entirely
+ * Study's due reviews, sunrise/sunset, and the moon phase. It renders entirely
  * OFFLINE -- weather comes from an SD snapshot refreshed on HotSync (dash.c); the
- * clock/agenda/astronomy are computed on-device. Pool-safe: one I1 canvas for all
+ * clock and the astronomy are computed on-device. Pool-safe: one I1 canvas for all
  * the graphics (clock digits, moon, rain bars) plus flat labels; no draw-layer
  * widgets. Swipe up to unlock into the launcher. */
 #define DASH_CW LCD_W
@@ -5802,12 +5801,20 @@ static void clock_tick(lv_timer_t *t){
 #define DASH_Y_WX       106              /* CONDITIONS header                */
 #define DASH_H_WX       98               /*   ...closing rule at 204         */
 #define DASH_Y_AGENDA   208              /* AHEAD header                     */
-#define DASH_H_AGENDA   58               /*   ...closing rule at 266         */
-#define DASH_Y_ROW1     224              /* AHEAD's rows: NEXT, DUE, STUDY   */
-#define DASH_ROW_H      14
-#define DASH_ROW_VX     (DASH_MARGIN+50) /* their values' column             */
-#define DASH_Y_SUN      268              /* SUN & MOON header, open-bottomed */
-#define DASH_H_SUN      36
+#define DASH_H_AGENDA   32               /*   ...closing rule at 240         */
+#define DASH_Y_ROW1     223              /* AHEAD's one row: STUDY           */
+#define DASH_ROW_VX     (DASH_MARGIN+50) /* its value's column               */
+/* AHEAD had three rows (NEXT, DUE, STUDY) until Date Book and To Do were
+ * archived (2026-11-07). The 28 px it gave up went to SUN & MOON, which had
+ * been squeezed onto one line: now the sun has a line, the moon a line (its
+ * phase by name), and the disc is bigger. */
+#define DASH_Y_SUN      242              /* SUN & MOON header, open-bottomed */
+#define DASH_H_SUN      62
+#define DASH_Y_SUNROW   259              /* Rise / Set                       */
+#define DASH_Y_MOONROW  279              /* the phase and how much is lit    */
+#define DASH_MOON_CX    214              /* the disc, at the zone's right    */
+#define DASH_MOON_CY    280
+#define DASH_MOON_R     15
 
 /* content baselines inside the weather zone. It gives 14 px to AHEAD's
  * STUDY row: the air quality sits beside the reading (and shortens, or goes,
@@ -5998,13 +6005,17 @@ static void world_tag(const char *zone, char *out, int cap){
     out[n]=0;
 }
 
-/* moon disc: illuminated fraction k=illum/100, lit on the right when waxing. */
+/* moon disc: illuminated fraction k=illum/100, lit on the right when waxing.
+ * The terminator on each row sits at xt: everything right of it is lit while
+ * waxing (left of -xt while waning). k=0 puts it at +span (nothing lit), k=1
+ * at -span (all lit). It had the sign the other way round until 2026-11-07, so
+ * a thin crescent drew as a nearly full disc and a full moon as a dark one. */
 static void dash_moon_draw(int cx,int cy,int r,int illum,int waxing){
     double k = illum/100.0;
     for(int dy=-r; dy<=r; dy++){
         double span = (r*r - dy*dy);
         span = span>0 ? sqrt(span) : 0;
-        double xt = span*(2.0*k - 1.0);
+        double xt = span*(1.0 - 2.0*k);
         for(int dx=-r; dx<=r; dx++){
             double dist = sqrt((double)(dx*dx + dy*dy));
             if(dist > r+0.5) continue;
@@ -6245,7 +6256,7 @@ static void dash_paint(void){
     /* moon disc (far right, clear of its label) */
     { int illum=0,wax=1;
       dash_moon(now,&illum,&wax,NULL);
-      dash_moon_draw(222,292,10,illum,wax); }
+      dash_moon_draw(DASH_MOON_CX,DASH_MOON_CY,DASH_MOON_R,illum,wax); }
 
     /* one invalidate for the whole canvas, instead of one per pixel */
     lv_obj_invalidate(g_dash_cv);
@@ -6399,9 +6410,8 @@ void ui_show_lock(void){
         dash_lbl(DASH_MARGIN+4,DASH_Y_WXNOW,"Weather syncs on HotSync",0);
     }
 
-    /* ---- agenda ----
-     * The NEXT (event) and DUE (to do) rows went with Date Book and To Do
-     * (archived 2026-11-07); STUDY is what is ahead now. */
+    /* ---- agenda: what is ahead is Study's reviews (the NEXT and DUE rows
+     * went with Date Book and To Do, 2026-11-07) ---- */
     { char e[64];
       const int y1 = DASH_Y_ROW1;
       dash_lbl(DASH_MARGIN+4,y1,"STUDY",1);
@@ -6417,15 +6427,17 @@ void ui_show_lock(void){
         /* one line rather than two stacked: the zone is the shortest on the
          * screen and the moon has to share it. */
         fmt_hm(rh, rm, sun, sizeof sun);
-        dash_lbl(DASH_MARGIN+4,286,"Rise",1); dash_lbl(DASH_MARGIN+36,286,sun,0);
+        dash_lbl(DASH_MARGIN+4,DASH_Y_SUNROW,"Rise",1); dash_lbl(DASH_MARGIN+36,DASH_Y_SUNROW,sun,0);
         fmt_hm(sh, sm, sun, sizeof sun);
-        dash_lbl(DASH_MARGIN+80,286,"Set",1); dash_lbl(DASH_MARGIN+106,286,sun,0);
+        dash_lbl(DASH_MARGIN+80,DASH_Y_SUNROW,"Set",1); dash_lbl(DASH_MARGIN+106,DASH_Y_SUNROW,sun,0);
     }
+    /* the moon needs no weather: it is worked out on the device, so its line
+     * is there even before the first HotSync. The disc is drawn on the canvas
+     * in dash_paint(). */
     { int illum=0; const char *nm="";
-      dash_moon(now,&illum,NULL,&nm);       /* the disc is drawn on the canvas in dash_paint() */
-      char ml[24]; snprintf(ml,sizeof ml,"%s",nm);
-      snprintf(ml,sizeof ml,"%d%% lit",illum);
-      lv_obj_t*o=dash_lbl(0,286,ml,0); lv_obj_align(o,LV_ALIGN_TOP_RIGHT,-42,286); }
+      dash_moon(now,&illum,NULL,&nm);
+      char ml[48]; snprintf(ml,sizeof ml,"%s \xC2\xB7 %d%% lit",nm,illum);
+      dash_lbl(DASH_MARGIN+4,DASH_Y_MOONROW,ml,0); }
 
     /* ---- unlock hint ---- */
     /* ---- the bottom line: the way in, and whose device this is ----
@@ -9442,11 +9454,11 @@ static void gu_build_header(void){
  * difference between this screen fitting in the 24 KB object pool and not: a
  * table is a single object that paints its cells, so forty habits cost one
  * object plus their cell strings, where forty containers-and-labels would be
- * eighty objects and would not fit. The record lists (To Do, Memo) already work
- * this way; this is the same trick applied to a fixed pool instead of a PDB.
+ * eighty objects and would not fit. The Memos list works this way; this is the
+ * same trick applied to a fixed pool instead of a PDB.
  *
- * Column 0 is the tick box and column 1 the name, exactly as To Do lays it out,
- * so the tap that toggles is in the place a Palm user already aims at. Category
+ * Column 0 is the tick box and column 1 the name, the way Palm's To Do laid it
+ * out, so the tap that toggles is in the place a Palm user already aims at. Category
  * headings are rows with an empty box column. */
 /* Home at the foot of the list, found by scrolling to the end of it: the
  * list is full screen, so the only other way out is the small Home in the
@@ -9534,7 +9546,7 @@ static void gu_toggle_row(int row, int id){
     gu_build_header();
 }
 
-/* Column 0 toggles, column 1 opens the task -- the split To Do already uses, so
+/* Column 0 toggles, column 1 opens the habit -- Palm's To Do split, so
  * the box is the box and the words are a link. See the note by tbl_click_cb on
  * why this must be VALUE_CHANGED rather than CLICKED. */
 static void gu_tbl_click_cb(lv_event_t *e){
@@ -11286,8 +11298,8 @@ void ui_init(void){
      * weight. It is how "Remove demo data" came to be clipped in a menu sized
      * for the Palm font. The two overlays that had noticed (the greeting pane
      * and the Coach seal) name their own font and are unaffected; the one
-     * widget that NEEDS montserrat -- the due-date calendar's LV_SYMBOL month
-     * arrows -- now asks for it by name, as the Date & Time calendar does. */
+     * widget that NEEDS montserrat -- the Date & Time calendar's LV_SYMBOL
+     * month arrows -- asks for it by name (cal_arrows). */
     lv_obj_set_style_text_font(lv_layer_top(), &lv_font_palm, 0);
     lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 

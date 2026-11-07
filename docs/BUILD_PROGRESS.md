@@ -16,6 +16,26 @@ longer than a changelog needs to be.
 
 ## Changelog (newest first)
 
+### 2026-11-07 — The lock screen after the archive: AHEAD fits its one row; the moon drawn the right way round
+
+Asked afterwards: did removing Date Book and To Do leave bugs behind? One that shows: the lock screen's AHEAD zone
+was still three rows tall (NEXT, DUE, STUDY) with only STUDY in it, so two empty rows sat in the middle of the
+screen (`r5_locked`, `study_lock_*` before). The rest (reminders, the Day view's writing, Coach's calendar block)
+left nothing on screen; only comments pointing at code that is gone (`due_cal_cb`, "the Date Book's calendar",
+"like To Do"), now reworded.
+
+- **AHEAD** closes at y 240 (`DASH_H_AGENDA` 58 → 32). **SUN & MOON** starts at 242 and gets the 28 px: Rise / Set
+  on one line (`DASH_Y_SUNROW` 259), the moon on the next by name and fraction ("Waning crescent · 5% lit",
+  `DASH_Y_MOONROW` 279; the name was worked out and then overwritten before), and the disc at r 15 (was 10).
+  The moon line doesn't need the weather, so it shows before the first HotSync.
+- **The moon disc was inverted** (older than this branch): `dash_moon_draw()` put the terminator at
+  `span·(2k−1)`, so a 5 % crescent drew nearly full and a full moon dark. Now `span·(1−2k)`; checked by drawing
+  5/50/95 % waxing and 5/50 % waning from the same loop on the host, and in `r5_locked` (a thin left sliver at
+  5 % waning).
+- Gates: `poolparity`, `dash`, `smoke`, `smoke32`, `wasm`, the firmware build (ESP-IDF v5.5, local). Static DRAM
+  unchanged at 131,368 B. Labels: the moon line replaces the "% lit" label one for one, so the lock screen's
+  object count doesn't change.
+
 ### 2026-11-07 — Memos, Settings on the launcher, Guru editing; Date Book, Address, To Do and the iCloud sync archived
 
 The owner's list, built in the simulator on `claude/memos-settings-guru-edit`. **The archive:** the git tag
