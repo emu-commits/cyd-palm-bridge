@@ -113,7 +113,7 @@ jobs:
         run: make -C sim nosecrets
       - name: No password left in RAM after use (Settings, then a sync)
         run: make -C sim secretscan
-      - name: Data layer gate (Memos: the empty database, saves, deletes)
+      - name: "Data layer gate (Memos: the empty database, saves, deletes)"
         run: make -C sim data
       - name: Graffiti recognizer accuracy gate
         run: make -C sim graf
