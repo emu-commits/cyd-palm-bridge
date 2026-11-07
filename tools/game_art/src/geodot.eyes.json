@@ -1,0 +1,18 @@
+{
+  "scale": 4,
+  "holes": [],
+  "keep": [[230, 70, 190]],
+  "front": [
+    {"wipe": [5, 13, 9, 17], "at": [5, 13], "draw": [".DDD.", "DHPPD", "DPPPD", "DPPPD", ".DDD."], "colors": {"P": [230, 70, 190]}},
+    {"wipe": [21, 13, 25, 17], "at": [21, 13], "draw": [".DDD.", "DHCCD", "DCCCD", "DCCCD", ".DDD."], "colors": {"C": [63, 202, 220]}}
+  ],
+  "back": [],
+  "icon1": [
+    {"wipe": [2, 10, 5, 13], "at": [2, 10], "draw": [".DD.", "DHPD", "DPPD", ".DD."], "colors": {"P": [230, 70, 190]}},
+    {"wipe": [15, 10, 18, 13], "at": [15, 10], "draw": [".DD.", "DHCD", "DCCD", ".DD."], "colors": {"C": [63, 202, 220]}}
+  ],
+  "icon2": [
+    {"wipe": [0, 10, 2, 12], "at": [0, 10], "draw": ["DDD", "DHD", "DPD"], "colors": {"P": [230, 70, 190]}},
+    {"wipe": [10, 9, 13, 12], "at": [10, 9], "draw": [".DD.", "DHCD", "DCCD", ".DD."], "colors": {"C": [63, 202, 220]}}
+  ]
+}

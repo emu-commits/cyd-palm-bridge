@@ -540,12 +540,17 @@ int mb_world(MbBot *b, MpWorld *w, int *dir){
      * because another is nearer there), else the nearest not yet beaten */
     uint32_t best = FAR;
     int top = 0, goal = -1;
-    for(int pass = 0; pass < 2 && goal < 0; pass++)
+    /* passes: the goal it chose, if it can beat them now; the nearest it can beat now;
+     * the goal; the nearest. A keeper it can beat comes before a nearer one it would
+     * have to train for (BACKLOG.md, "progress without grinding"): a player takes the
+     * fights that are open before walking the grass */
+    for(int pass = 0; pass < 4 && goal < 0; pass++)
         for(int k = 0; k < b->n_people; k++){
             const MbPerson *p = &b->people[k];
             int wh, dd;
             if(p->kind != MG_P_TRAINER || mp_flag(w, p->flag) || !present(w, p)) continue;
-            if(pass == 0 && k + 1 != b->goal) continue;
+            if((pass == 0 || pass == 2) && k + 1 != b->goal) continue;
+            if(pass < 2 && best_level(w) < p->top + p->margin + 2) continue;    /* comfortably */
             uint32_t s = to_person(b, w, p, &wh, &dd);
             if(s < best){ best = s; what = wh; d = dd; top = p->top + p->margin; goal = k; }
         }
@@ -610,33 +615,120 @@ static int owned(const MpWorld *w, uint16_t mon){
     return 0;
 }
 
-/* what slot s is worth now: expected damage (or healing when low), times accuracy */
-static uint32_t worth(MbBot *b, const MpCreature *me, const MpCreature *foe, int s, const uint8_t *rech){
+/* What slot s is worth now: expected damage (or healing when low), times
+ * accuracy. me and foe are as the battle sees them (mp_view). A status is worth
+ * a share of the damage it saves or adds, if the one it would go to has none
+ * and isn't immune (EFFECTS_PLAN.md 6). */
+static uint32_t worth(MbBot *b, const MpCreature *me, const MpCreature *foe, int s, const uint8_t *rech, uint32_t dmax){
+    MonGame *g = b->g;
     MgMove m;
-    if(me->moves[s] == MP_NO_MOVE || rech[s] || mg_move(b->g, me->moves[s], &m)) return 0;
-    uint32_t v = 0;
+    if(me->moves[s] == MP_NO_MOVE || rech[s] || mg_move(g, me->moves[s], &m)) return 0;
+    mp_view_move(g, me, &m);
+    uint32_t v = 0, d = 0;
+    int damage = 0;
+    for(int e = 0; e < 3; e++) if(m.eff_kind[e] == MG_E_DAMAGE) damage = 1;
+    if(m.range != MG_SPECIAL) d = mp_damage(g, me, &m, foe, NULL);
+    uint32_t base = dmax ? dmax : (uint32_t)me->level + 5;     /* what a turn is worth: the best blow it has */
+    int long_fight = foe->hp > 2 * base;    /* a status pays only in a fight that lasts: the best blow
+                                               won't end it within two turns */
     for(int e = 0; e < 3; e++){
-        if(m.eff_kind[e] == MG_E_DAMAGE && m.range != MG_SPECIAL){
-            uint32_t d = mp_damage(b->g, me, &m, foe, NULL);
-            v += d < foe->hp ? d : foe->hp;
+        uint8_t k = m.eff_kind[e], tg = m.eff_target[e];
+        switch(k){
+        case MG_E_SPLASH:
+            if(damage) break;
+            /* fall through */
+        case MG_E_DAMAGE:
+        case MG_E_DISAPPEAR:
+            if(m.range != MG_SPECIAL) v += d < foe->hp ? d : foe->hp;
+            break;
+        case MG_E_MULTI: {
+            uint32_t t = d * m.eff_status[e];
+            v += t < foe->hp ? t : foe->hp;
+            break;
         }
-        else if(m.eff_kind[e] == MG_E_HEALING && m.eff_target[e] == MG_T_OWN && me->hp * 2u < me->stat[MG_HP]){
-            uint32_t h = 7 + (uint32_t)me->level * m.heal / 100, room = (uint32_t)me->stat[MG_HP] - me->hp;
-            v += h < room ? h : room;
+        case MG_E_PROP_DAMAGE: {
+            uint32_t t = (uint32_t)foe->stat[MG_HP] * m.eff_status[e] / 100;
+            if(tg != MG_T_OWN) v += t < foe->hp ? t : foe->hp;
+            if(tg != MG_T_ENEMY){ if(t >= me->hp) return 1; v = v > t / 2 ? v - t / 2 : 0; }
+            break;
         }
-        else if(m.eff_kind[e] == MG_E_GIVE && m.eff_target[e] == MG_T_ENEMY && !foe->status) v += 1;
+        case MG_E_HEALING:
+        case MG_E_PROP_HEAL:
+            if(tg == MG_T_OWN && me->hp * 2u < me->stat[MG_HP]){
+                uint32_t h = k == MG_E_HEALING ? 7 + (uint32_t)me->level * m.heal / 100
+                                               : (uint32_t)me->stat[MG_HP] * m.eff_status[e] / 100;
+                uint32_t room = (uint32_t)me->stat[MG_HP] - me->hp;
+                v += h < room ? h : room;
+            }
+            break;
+        case MG_E_GIVE: {
+            const MgStatus *st = &g->statuses[m.eff_status[e]];
+            int neg = st->flags & MG_SF_NEGATIVE;
+            uint32_t share = st->kind == MG_S_POISON || st->kind == MG_S_BURN ? 1 :      /* the first three as before 2.3 */
+                             st->kind == MG_S_RECOVER || !long_fight ? 0 : st->kind == MG_S_ASLEEP ? base : base / 3;
+            share = share * m.potency / 100;
+            if(tg != MG_T_OWN && !foe->status && neg) v += share;
+            if(tg != MG_T_ENEMY){
+                if(!me->status && !neg) v += share;
+                else if(neg && tg == MG_T_OWN) v = v > share ? v - share : 0;     /* it costs itself */
+            }
+            break;
+        }
+        case MG_E_REMOVE: {
+            const MgStatus *fs = mp_status(g, foe), *ms = mp_status(g, me);
+            if(tg != MG_T_OWN && fs && !(fs->flags & MG_SF_NEGATIVE) && long_fight) v += base / 2;
+            if(tg != MG_T_ENEMY && ms && (ms->flags & MG_SF_NEGATIVE) && long_fight) v += base / 2;
+            break;
+        }
+        case MG_E_STAGE:
+            if(long_fight) v += base / 6;
+            break;
+        default:
+            break;
+        }
     }
     return v * m.accuracy + 1;              /* + 1: any move beats none */
 }
 
-static int best_move(MbBot *b, const MpCreature *me, const MpCreature *foe, const uint8_t *rech, uint32_t *score){
-    int best = -1;
+/* the most damage one of me's moves can do now (no statuses counted) */
+static uint32_t best_blow(MbBot *b, const MpCreature *me, const MpCreature *foe, const uint8_t *rech){
     uint32_t top = 0;
     for(int s = 0; s < MP_MOVES; s++){
-        uint32_t v = worth(b, me, foe, s, rech);
+        MgMove m;
+        if(me->moves[s] == MP_NO_MOVE || rech[s] || mg_move(b->g, me->moves[s], &m) || m.range == MG_SPECIAL) continue;
+        mp_view_move(b->g, me, &m);
+        uint32_t d = mp_damage(b->g, me, &m, foe, NULL);
+        if(d > top) top = d;
+    }
+    return top;
+}
+
+static int best_move(MbBot *b, const MpBattle *bt, const MpCreature *me, const MpCreature *foe, const uint8_t *rech, uint32_t *score){
+    int best = -1;
+    uint32_t top = 0;
+    MpCreature vm, vf;
+    mp_view(b->g, bt, 0, me, &vm);
+    mp_view(b->g, bt, 1, foe, &vf);
+    uint32_t dmax = best_blow(b, &vm, &vf, rech);
+    for(int s = 0; s < MP_MOVES; s++){
+        uint32_t v = worth(b, &vm, &vf, s, rech, dmax);
         if(v > top){ top = v; best = s; }
     }
     if(score) *score = top;
+    return best;
+}
+
+int mb_pick(MbBot *b, const MpBattle *bt, int side, const MpCreature *me, const MpCreature *foe, const uint8_t *rech){
+    MpCreature vm, vf;
+    int best = -1;
+    uint32_t top = 0;
+    mp_view(b->g, bt, side, me, &vm);
+    mp_view(b->g, bt, !side, foe, &vf);
+    uint32_t dmax = best_blow(b, &vm, &vf, rech);
+    for(int s = 0; s < MP_MOVES; s++){
+        uint32_t v = worth(b, &vm, &vf, s, rech, dmax);
+        if(v > top){ top = v; best = s; }
+    }
     return best;
 }
 
@@ -683,7 +775,7 @@ void mb_battle(MbBot *b, MpWorld *w, MpBattle *bt, int *act, int *arg){
     if(!bt->trainer){
         if(worn(w)){ *act = MP_ACT_RUN; *arg = 0; return; }
         uint32_t sc;
-        int s = best_move(b, me, &bt->wild, bt->recharge[0], &sc);
+        int s = best_move(b, bt, me, &bt->wild, bt->recharge[0], &sc);
         uint32_t dmg = s >= 0 ? sc / 100 : 0;
         MgMon wm;
         int hunted = mb_done(b, w) && !mg_mon(b->g, bt->wild.mon, &wm) && !mp_caught(w, wm.id) && (w->n_party < room || w->n_box < MP_BOX);
@@ -698,10 +790,30 @@ void mb_battle(MbBot *b, MpWorld *w, MpBattle *bt, int *act, int *arg){
     if(bt->trainer && me->hp * 3u < me->stat[MG_HP]){
         /* low in a keeper's battle: heal, unless the next blow wins */
         uint32_t sc;
-        int mv = best_move(b, me, &bt->wild, bt->recharge[0], &sc), it = heal_for(b, w, bt->active);
+        int mv = best_move(b, bt, me, &bt->wild, bt->recharge[0], &sc), it = heal_for(b, w, bt->active);
         if(it >= 0 && !(mv >= 0 && sc / 100 >= bt->wild.hp)){
             *act = MP_ACT_ITEM; *arg = it | bt->active << 8;
             return;
+        }
+    }
+    /* a status that costs turns (asleep, flinching): cure it, or send another out
+     * (EFFECTS_PLAN.md 6) */
+    {
+        const MgStatus *st = mp_status(b->g, me);
+        if(st && (st->kind == MG_S_ASLEEP || st->kind == MG_S_WEAKEN) && !bt->land[0]){
+            for(uint32_t i = 0; st->kind == MG_S_ASLEEP && i < b->g->n_items && i < MP_BAG; i++){
+                MgItem it;
+                if(w->bag[i] && !mg_item(b->g, i, &it) && (it.effects & MG_I_CURE) && mp_item_helps(w, (uint16_t)i, bt->active, NULL)){
+                    *act = MP_ACT_ITEM; *arg = (int)i | bt->active << 8;
+                    return;
+                }
+            }
+            int o = strongest(w, bt->active);
+            if(o >= 0 && w->party[o].level + 3 >= me->level && w->party[o].hp * 2u >= w->party[o].stat[MG_HP] &&
+               !w->party[o].status){
+                *act = MP_ACT_SWAP; *arg = o;
+                return;
+            }
         }
     }
     int s = strongest(w, -1);
@@ -709,7 +821,7 @@ void mb_battle(MbBot *b, MpWorld *w, MpBattle *bt, int *act, int *arg){
         *act = MP_ACT_SWAP; *arg = s;
         return;
     }
-    *arg = best_move(b, me, &bt->wild, bt->recharge[0], NULL);
+    *arg = best_move(b, bt, me, &bt->wild, bt->recharge[0], NULL);
 }
 
 /* a move's worth with no foe in mind */
@@ -718,7 +830,10 @@ static uint32_t plain_worth(MbBot *b, uint16_t mv){
     if(mv == MP_NO_MOVE || mg_move(b->g, mv, &m)) return 0;
     uint32_t v = 0;
     for(int e = 0; e < 3; e++){
-        if(m.eff_kind[e] == MG_E_DAMAGE && m.range != MG_SPECIAL) v += m.power;
+        if((m.eff_kind[e] == MG_E_DAMAGE || m.eff_kind[e] == MG_E_DISAPPEAR) && m.range != MG_SPECIAL) v += m.power;
+        else if(m.eff_kind[e] == MG_E_SPLASH && m.range != MG_SPECIAL){ int dmg = 0; for(int k = 0; k < 3; k++) dmg |= m.eff_kind[k] == MG_E_DAMAGE; if(!dmg) v += m.power; }
+        else if(m.eff_kind[e] == MG_E_MULTI && m.range != MG_SPECIAL) v += m.power * m.eff_status[e];
+        else if(m.eff_kind[e] >= MG_E_REMOVE) v += 10;
         else if(m.eff_kind[e] == MG_E_HEALING) v += 60;
         else if(m.eff_kind[e] == MG_E_GIVE) v += 10;
     }

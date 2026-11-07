@@ -1711,6 +1711,9 @@ t 1500
 u
 t 600
 s critters_battle
+W 13 12 2
+s critters_badges
+W -1 -1 0
 c 204 246
 t 300
 s critters_battle_menu
@@ -1932,6 +1935,14 @@ s critters_keep
 G 10 12 37 0
 t 300
 s critters_cave
+G 0 21 12 1
+t 300
+s critters_drove_gate
+c 204 246
+t 300
+s critters_drove_gate_says
+c 204 246
+t 300
 F 10 2000
 G 11 5 4 0
 t 300
@@ -2098,6 +2109,9 @@ s critters_drove_road
 G 0 21 11 1
 t 300
 s critters_drove_road_home
+G 13 26 7 3
+t 300
+s critters_mere
 G 5 7 3 1
 t 300
 c 204 246

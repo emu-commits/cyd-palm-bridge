@@ -42,6 +42,8 @@ typedef struct {
     uint8_t  iv[MG_NSTATS];
     uint16_t moves[MP_MOVES];   /* positions in MOVE, or MP_NO_MOVE */
     uint16_t stat[MG_NSTATS];   /* derived: mp_stats() */
+    uint8_t  sturn;             /* 2.3: the turns it has had its status (asleep, wasting); not saved */
+    uint8_t  xtype;             /* 2.3: in a battle, the one type a switch gave it, + 1 (0 its own); not saved */
 } MpCreature;
 
 /* what happened: the screens' script */
@@ -93,6 +95,21 @@ enum {
     MP_EV_ITEM,         /* item a is used on party member b: n HP gained */
     MP_EV_PRIZE,        /* the keeper beaten pays n coins */
     MP_EV_SHOP,         /* person a keeps a shop: the screens offer ITEM's priced items (mp_buy) */
+    /* the move effects (2.3, EFFECTS_PLAN.md) */
+    MP_EV_ASLEEP,       /* side's creature is asleep (status a) and does nothing */
+    MP_EV_FLINCH,       /* side flinches (status a) and does nothing */
+    MP_EV_CONFUSED,     /* side is confused (status a): it uses a move at random */
+    MP_EV_DRAIN,        /* side loses n HP to status a, and the other side gains it */
+    MP_EV_NO_HEAL,      /* side can't be healed (status a; unused since festering stops items alone) */
+    MP_EV_HOLD_ON,      /* side holds on with 1 HP (status a), which ends */
+    MP_EV_HIT_BACK,     /* side loses n HP to the other side's status a */
+    MP_EV_VANISH,       /* side goes out of reach: its move lands next turn */
+    MP_EV_OUT_OF_REACH, /* side's foe is out of reach: the move does nothing */
+    MP_EV_HITS,         /* the move hit a times */
+    MP_EV_STAGE,        /* side's stat a (MG_X_*) moves by (int16_t)b steps; n the stage now + 6 */
+    MP_EV_TYPE,         /* side's type becomes a (b 1: it was already) */
+    MP_EV_REMOVED,      /* side's status a is taken away */
+    MP_EV_GIFT,         /* person a gives the player b of item n */
 };
 
 typedef struct {
@@ -115,6 +132,11 @@ typedef struct {
     uint8_t    trainer;         /* 0 wild; else the person's position in the area + 1 */
     uint8_t    n_team, next;    /* a trainer's creatures, and the next to come out */
     MpCreature team[MG_TEAM];   /* a trainer's, as made when the battle started */
+    /* 2.3, the move effects: for each side's creature out now */
+    int8_t     stage[2][MG_NX]; /* a move's steps on its stats, -6 .. 6 */
+    uint8_t    gone[2];         /* out of reach (it used a move that disappears) */
+    uint8_t    land[2];         /* the slot + 1 whose move lands next turn, 0 none */
+    uint8_t    foe_set, foe_slot;   /* the caller chooses the other side's move (the balance run) */
 } MpBattle;
 
 typedef struct {
@@ -164,6 +186,14 @@ int  mp_learn(MonGame *g, MpCreature *c, uint16_t move, int slot);
 uint32_t mp_multiplier(MonGame *g, const MgMove *m, const MpCreature *def, MgMon *def_mon);  /* 1/100 */
 uint32_t mp_damage(MonGame *g, const MpCreature *att, const MgMove *m, const MpCreature *def, uint32_t *mult);
 uint32_t mp_speed_score(const MpCreature *c, const MgMove *m);
+/* A creature as a battle sees it (2.3): its stats times its status's multipliers
+ * and, with b, its side's steps. out may be c. */
+void mp_view(MonGame *g, const MpBattle *b, int side, const MpCreature *c, MpCreature *out);
+/* Move m as creature c uses it: a weakening status (stuck, grabbed) on its range
+ * divides its power and potency. */
+void mp_view_move(MonGame *g, const MpCreature *c, MgMove *m);
+/* status position st of c, or NULL */
+const MgStatus *mp_status(const MonGame *g, const MpCreature *c);
 uint32_t mp_shake_check(MonGame *g, const MpCreature *c, const MgMon *m, uint32_t u);   /* u in 1/100 */
 
 /* ---- the world ---- */

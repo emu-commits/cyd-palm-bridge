@@ -1,0 +1,26 @@
+# Pebblub: drawn for the project by the owner (2026-11-05).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Pebblub
+description: >-
+  It sits so still that people take it for a stone. It squeaks if you pick
+  it up.
+category: Pebble
+height_cm: 35
+weight_kg: 20
+drawing: tools/game_art/src/pebblub.jpg
+types: [earth]
+shape: blob
+stage: basic
+experience_group: default
+catch_rate: 100
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: gnaw}
+- {level_learned: 1, technique: hammerhead}
+- {level_learned: 5, technique: ram}
+- {level_learned: 9, technique: rock}
+- {level_learned: 12, technique: fluff_up}
+evolutions:
+- {at_level: 16, monster_slug: bouldrom}

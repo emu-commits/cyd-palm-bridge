@@ -106,6 +106,8 @@ character	player_orange	CC0 1.0	CYD Palm	tools/game_art/player_orange.png	ours
 character	player_olive	CC0 1.0	CYD Palm	tools/game_art/player_olive.png	ours
 character	player_violet	CC0 1.0	CYD Palm	tools/game_art/player_violet.png	ours
 character	player_rose	CC0 1.0	CYD Palm	tools/game_art/player_rose.png	ours
+character	gate	CC0 1.0	CYD Palm	tools/game_art/gate.png	ours
+character	gate_right	CC0 1.0	CYD Palm	tools/game_art/gate_right.png	ours
 character	childactor	CC0 1.0	pboop	ATTRIBUTIONS.md "Child Actor"	credited
 character	catgirl	CC-BY-SA 4.0	pboop; Sanglorian; tamashihoshi	ATTRIBUTIONS.md "Cat Girl", "Cat Lady 01"	credited
 character	tennisplayer	CC-BY-SA 4.0	pboop; Sanglorian	ATTRIBUTIONS.md "Tennis Player", "Tennis Ace Trainer"	credited
@@ -121,3 +123,17 @@ character	scientist	CC BY 3.0, per Tuxemon	Catch Challenger (Jordan Brule, Herma
 character	shopassistant	CC BY 3.0, per Tuxemon	Catch Challenger (Jordan Brule, Herman Brule)	ATTRIBUTIONS.md "Shop Assistant"	credited
 character	monk	CC BY 3.0, per Tuxemon	Catch Challenger (Jordan Brule, Herman Brule); Sanglorian	ATTRIBUTIONS.md "Monk"	credited
 character	knightlord	CC BY 3.0, per Tuxemon	Catch Challenger (Jordan Brule, Herman Brule)	ATTRIBUTIONS.md "Knight Lord"	credited
+creature	valkit	CC0 1.0	CYD Palm	tools/game_art/valkit-sheet.png	ours
+creature	valorix	CC0 1.0	CYD Palm	tools/game_art/valorix-sheet.png	ours
+creature	paladrax	CC0 1.0	CYD Palm	tools/game_art/paladrax-sheet.png	ours
+creature	starlet	CC0 1.0	CYD Palm	tools/game_art/starlet-sheet.png	ours
+creature	nebulet	CC0 1.0	CYD Palm	tools/game_art/nebulet-sheet.png	ours
+creature	astrolune	CC0 1.0	CYD Palm	tools/game_art/astrolune-sheet.png	ours
+creature	geodot	CC0 1.0	CYD Palm	tools/game_art/geodot-sheet.png	ours
+creature	quartzor	CC0 1.0	CYD Palm	tools/game_art/quartzor-sheet.png	ours
+creature	prismyth	CC0 1.0	CYD Palm	tools/game_art/prismyth-sheet.png	ours
+creature	pebblub	CC0 1.0	CYD Palm	tools/game_art/pebblub-sheet.png	ours
+creature	bouldrom	CC0 1.0	CYD Palm	tools/game_art/bouldrom-sheet.png	ours
+creature	tectorath	CC0 1.0	CYD Palm	tools/game_art/tectorath-sheet.png	ours
+creature	oglet	CC0 1.0	CYD Palm	tools/game_art/oglet-sheet.png	ours
+creature	oculoth	CC0 1.0	CYD Palm	tools/game_art/oculoth-sheet.png	ours

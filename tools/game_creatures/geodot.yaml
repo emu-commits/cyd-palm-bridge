@@ -1,0 +1,26 @@
+# Geodot: drawn for the project by the owner (2026-11-05).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Geodot
+description: >-
+  A geode that learnt to roll. It glitters in the dark, and the gem in its
+  middle hums when it's happy.
+category: Geode
+height_cm: 30
+weight_kg: 12
+drawing: tools/game_art/src/geodot.jpg
+types: [earth]
+shape: blob
+stage: basic
+experience_group: default
+catch_rate: 100
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: gnaw}
+- {level_learned: 1, technique: hammerhead}
+- {level_learned: 5, technique: crystal}
+- {level_learned: 9, technique: rock}
+- {level_learned: 12, technique: fluff_up}
+evolutions:
+- {at_level: 16, monster_slug: quartzor}

@@ -41,6 +41,13 @@ Tuxemon. Each one is three files and an allow-list line:
    `"mirror": ["back"]` (or `"front"`) flips that part last: in battle a front faces left and a back right.
    `"holes": [[x, y], ...]` in the eyes file, a point in the picture inside
    each real gap, `[]` if there are none. Everything else enclosed then stays.
+   If a gem or a glowing eye of a few pixels comes out as a big area's shade
+   (the heroic line's red gems went brown), `"keep": [[r, g, b], ...]` gives
+   each colour named its own place among the 15, front, back and icons alike;
+   draw the gem again as an eye (below) in that colour. If the icons are drawn
+   close under the front's feet and the tool takes them for part of it (it
+   says "no icons drawn" though there are), `"icon_row": y` names the picture's
+   y where the icons start: nothing below it joins anything above it.
 
    The front and back share **15 colours**, as every critter in the game
    does, so a drawing with many shades loses some. A drawing already at
@@ -228,3 +235,103 @@ evolution, all ours to change but the drawing. Moves: Slice, Blade, Bullet,
 Perfect Cut, Saber, Steel Jaws, Needle and Adamantine. It lives in Cotton Tunnel,
 17–20, and The Old Keep, 28–32. 1/2 with `"ink": 2`, 35 × 48. Its back is cut
 off at the waist, as drawn.
+
+## The heroic line (2026-11-05)
+
+The owner's seventh line, on real transparency: **Valkit** (heroic, varmint)
+evolves at 16 into **Valorix** (heroic, hunter), which evolves at 32 into
+**Paladrax** (heroic, brute). The names, types, moves, places and Dex text are
+ours for the owner to change. Moves: Lantern, Shadow Boxing, Punch, Radiance
+and All In, with Gnaw, Fluff Up, Assault and Adamantine. One Two, Sudden Glow,
+Hook, Lock Horns, Invictus and Berserk need effects the game doesn't play yet.
+
+| | Act 1 | Act 2 | Act 3 |
+|---|---|---|---|
+| Valkit | Route 1, 3–5 | Route 2, 14–17 | |
+| Valorix | | The Old Keep, 19–22 | Cotton Tunnel, 26–30 |
+| Paladrax | | | The Old Keep once Wyrmkeeper Ashe is beaten, 34–36 |
+
+All three are in the Reach too, as every line is. Scales 1/5, 1/5 and 1/4
+(30 × 34, 41 × 45, 52 × 58), the backs mirrored; Valorix and Paladrax are fine
+drawings, set `"ink": 2`. The red gem on each forehead (and Paladrax's chest)
+went brown in the 15 colours: `"keep"` holds the red, and the gems are drawn
+again by hand, as are all the gold eyes.
+
+## The cosmic line (2026-11-05)
+
+The owner's eighth line, on real transparency: **Starlet** (cosmic, sprite)
+evolves at 16 into **Nebulet** (cosmic, sprite), which evolves at 32 into
+**Astrolune** (cosmic, humanoid). Ours to change but the drawings, as above.
+Moves: Crystal, Lineage, Ruby and Dreamwalk, with Gnaw, Phantasmal Force, Fluff
+Up, Pyrokinesis and Energy Beam. Arcane Eye, Starfall, Mind Vise, Counterspell,
+Cloud Aether, Divinity Beam, Sands of Time and Demiurge need effects the game
+doesn't play yet.
+
+| | Act 1 | Act 2 | Act 3 |
+|---|---|---|---|
+| Starlet | Route 1, 3–5 | Route 1, 12–15 | |
+| Nebulet | | The Old Keep, 19–22 | Route 1, 22–26 |
+| Astrolune | | | Dragon's Cave once Wyrmkeeper Ashe is beaten, 36–38 |
+
+Scales 1/6, 1/5 and 1/5 (30 × 38, 39 × 49, 48 × 50); Starlet's back is
+mirrored, and Nebulet and Astrolune are `"ink": 2`. Nebulet's and Astrolune's
+icons sit close under their feet, so they need `"icon_row": 755`. The cyan
+eyes and forehead stars of all three are drawn by hand; the icons' closed eyes
+came through. Nebulet and Astrolune are dark, busy drawings and come out
+grainy, Astrolune most.
+
+## The crystal line (2026-11-05)
+
+The owner's ninth line, a JPEG on a drawn checkerboard: **Geodot** (earth,
+blob) evolves at 16 into **Quartzor** (earth, brute), which evolves at 32 into
+**Prismyth** (earth and cosmic, humanoid). Ours to change but the drawings.
+Moves: Hammerhead, Rock, Grinding, Greenstone and Earthquake, with Gnaw,
+Crystal, Ruby, Fluff Up and Adamantine. They take the venom line's places:
+
+| | Act 1 | Act 2 | Act 3 |
+|---|---|---|---|
+| Geodot | Cotton Tunnel, 6–8 | Route 1, 12–15 | |
+| Quartzor | | Cotton Tunnel, 17–20 | The Old Keep, 28–32 |
+| Prismyth | | | Dragon's Cave once Wyrmkeeper Ashe is beaten, 36–38 |
+
+Scales 1/4, 1/3 and 1/3 (32 × 30, 48 × 50, 53 × 50), all `"holes": []`: the
+tool took light crystals and Geodot's gold gem for see-through gaps. The
+pink eyes needed `"keep"` (and Prismyth's gold one too, with `"ink": 2`).
+Geodot's two-coloured eyes are drawn by hand on the front and icons; Quartzor's
+icons and the brow of its cyan eye too.
+
+## The rock line (2026-11-05)
+
+The owner's tenth line, JPEGs on a drawn checkerboard: **Pebblub** (earth,
+blob) evolves at 16 into **Bouldrom** (earth, brute), which evolves at 32 into
+**Tectorath** (earth and shadow, brute). Ours to change but the drawings.
+Moves: Hammerhead, Rock, Greenstone, Entomb and Earthquake, with Gnaw, Ram,
+Fluff Up and Assault. They take the fire line's places:
+
+| | Act 1 | Act 2 | Act 3 |
+|---|---|---|---|
+| Pebblub | Cotton Tunnel, 6–8 | Route 1, 12–15 | |
+| Bouldrom | | Cotton Tunnel, 17–20 | Route 2, 26–30; Dragon's Cave, 30–32 |
+| Tectorath | | | Dragon's Cave once Wyrmkeeper Ashe is beaten, 36–38 |
+
+Scales 1/5, 1/3 and 1/2 (30 × 27, 35 × 38, 49 × 44): Tectorath's drawing has
+5.3 picture pixels to its own, so 1/2 is as big as it goes, and Bouldrom stays
+under it. Pebblub came through as drawn; Bouldrom's two glowing eyes and
+Tectorath's three are drawn by hand in a kept pink.
+
+## The eye line (2026-11-05)
+
+The owner's eleventh line and the first of two stages: **Oglet** (water and
+shadow, blob) evolves at 24 into **Oculoth** (water and shadow, serpent), and
+no further. Ours to change but the drawings. Moves: Bubbles, Water Bullet,
+Water Blast and Kraken, with Phantasmal Force, Mobbing and Strangulation. They
+take the axolotl line's places:
+
+| | Act 1 | Act 2 | Act 3 |
+|---|---|---|---|
+| Oglet | Brideswood, 5–7 | Brideswood, 14–17 | |
+| Oculoth | | | Route 1, 22–26; Brideswood, 24–28 |
+
+Scales 1/4 and 1/3 (32 × 34, 42 × 56), `"holes": []` for the bubbles. Their
+many stalked eyes come through as cream and dark dots; nothing is drawn by
+hand.

@@ -90,6 +90,170 @@ Plans written with this change, **not approved, nothing built**:
 
 ---
 
+## Critters: the work of 2026-11-05 and 11-06
+
+From `claude/critters-backlog`, merged into this file when the branches came
+together (2026-11-07). `[s]` items here are built and were looked at in the
+simulator; their `[d]` checks are with the rest below.
+
+### Critters: a healing stalemate (reported 2026-11-05; built the same day, option: the healing move costs more)
+
+- [s] **Vamporm can out-heal an equal foe, so a battle never ends.** A level 6 Vamporm against a level 6 Vamporm
+  never ended: `refresh` (healing power 3.0, recharge 3) healed a full bar every few turns. **Chosen, for the owner
+  to confirm:** the healing move costs more: `refresh`'s recharge is 8 (`move_edits` in `tools/game_region.json`,
+  applied by `tools/mkgame.py`, credited to Tuxemon's move data). Measured in the sim with the same battles
+  (random moves, both sides): recharge 3 left 32 of 200 battles unended after 2,000 turns; recharge 8 ended all
+  1,000 seeds, the longest in 176 turns and the mean in 20. Recharge 7 also ended all 1,000, with a longer tail
+  (1,323 turns). `make -C sim monster` still passes: Auto-play beats every keeper, and the new mirror gate
+  (`monster_test` check 8, 200 seeds, 400-turn limit) is green. Not measured: a human player choosing moves, and
+  the other healers (`recover`, `lifeleech`), which weren't changed.
+
+### Critters: keep the screen awake in Auto-play (reported 2026-11-05; a regression)
+
+- [d] **Auto-play must hold the screen awake.** It used to; the last update broke it, and now the screen auto-sleeps
+  while Auto-play is running. Expected: with Auto-play on, the idle screen-off and the automatic light-sleep stay
+  off until Auto-play is stopped or the game is touched, as they do on USB.
+  **Fixed in code (2026-11-05, not yet on the bench):** `mon_ui_keep_awake()` (`firmware/main/ui_monster.c`) returned
+  `g_mon && power_on_usb()`, so it ignored Auto-play. It now returns `g_mon && (g_mon->autoplay || power_on_usb())`.
+  A lock or a touch clears `autoplay`, so the screen dims again once the game is no longer playing itself.
+  Bench check: run Auto-play on the battery for longer than the idle timeout, with `backlight_sec` set low, and
+  confirm the screen stays on; then stop Auto-play (touch) and confirm it dims again.
+
+### Critters: five more lines, 60 critters (drawn by the owner 2026-11-05; built the same day)
+
+- [s] **Heroic, cosmic, crystal, rock and eye lines** (14 critters; `tools/game_creatures/README.md` has each line's
+  scales, places and what was drawn by hand). Each drawing's eyes and gems are checked at 10× with `--look` and at game
+  size. `mksheet.py` gained `"keep"` (colours with their own place among the 15: the heroic red gems, the crystal and
+  rock lines' pink eyes) and `"icon_row"` (icons drawn close under the feet). Neither changes an earlier sheet:
+  `mkgame_test` proves each is the same to the byte. `make -C sim monster` still finishes with the Dex full.
+- **For the owner:** the names, types, moves, places and Dex text are mine, all to change. Types: Valkit's line heroic,
+  Starlet's cosmic, Geodot's earth (Prismyth earth and cosmic), Pebblub's earth (Tectorath earth and shadow), Oglet's
+  water and shadow. Many of Tuxemon's heroic and cosmic moves need effects the game doesn't play, so those lines lean
+  on Lantern, Punch, Radiance, Crystal, Lineage, Ruby and Dreamwalk.
+- [d] **On the panel:** each new critter's front and back in battle read as its drawing at arm's length: the heroic
+  gems red, the cosmic eyes cyan, Geodot's one pink and one cyan eye, Prismyth's gold eye, the rock line's pink glow.
+  Nebulet, Astrolune, Valorix, Paladrax and Tectorath are the grainiest.
+
+### Critters: Tuxemon's move effects, one at a time (requested 2026-11-05; plan written the same day)
+
+The game plays damage, healing and three statuses; 192 of Tuxemon's 274 moves need effects it doesn't, which
+leaves 64 moves (173 move slots, 27 critters) out of this game. **The plan: `docs/EFFECTS_PLAN.md`.** Each effect is
+switched on by data (`"effects"` in `tools/game_region.json`), one per commit, measured by a balance run before and
+after, and shown on the battle cards as a status badge.
+
+- [ ] **Owner: review the plan's decisions** (§8): the order, the balance gate numbers, splash as plain damage,
+  the badge design and drawing our own icons, the left-out list, no new status outlasting a battle.
+- [s] **E0, the foundation** (no effect switched on): format 2.3 (the save stays 4: nothing new outlasts a battle),
+  the `"effects"` list, the status badge on both battle cards, `tools/gen_status_icons.py`, `sim/tests/balance.c` and
+  its baseline run. Built 2026-11-06 (`BUILD_PROGRESS.md`); shot `critters_badges`.
+- [s] **E1, stat multipliers**, one step each: exhausted, blinded, enraged, hardshell, sniping, slow, softened,
+  focused, chargedup, charging. Built 2026-11-06; one tune (Thunderclap) and two gate refinements for the owner
+  (`BUILD_PROGRESS.md`).
+- [s] **E2, statuses that cost turns**: noddingoff (asleep), stuck, grabbed, flinching, confused, harpooned, and
+  "teams". Built 2026-11-06; asleep ships switched on (the quietest by the run). **Owner:** its review is still yours,
+  and taking it off is one line in `"effects"`.
+- [s] **E3, over time**: festering, lifeleech, wasting (plague is left out: E6). Built 2026-11-06, with a change to
+  Auto-play's policy the game gate asked for (`BUILD_PROGRESS.md`).
+- [s] **E4, shields and comebacks**: elementalshield, diehard, revenge, retaliate, prickly, spiky. Built 2026-11-06.
+- [s] **E5, effects that aren't statuses**: remove, splash, multiattack, appear/disappear, statchange, switch,
+  prop_damage (charging came with E1). Built 2026-11-06. **prop_healing is played but off the list**: it brought back
+  the healing stalemate in the Vamporm line (244 unended); Hibernate and Shadow Blast stay out until it's tuned.
+- [s] **E6**: the effects left out on purpose, each with its reason in `GAME_FORMAT.md` §2 (charmed, lockdown,
+  feedback, lifegift, wild, plague, and the effects swap, run, forfeit, money, scope, transfer, life_swap, life_share,
+  photogenesis, foresight, cooldown_modifier).
+- [d] **Bench, per phase:** a few battles with the phase's effects on the board, the badge readable at arm's length.
+
+### Critters: the drove road, Kestrel's look, and progress without grinding (requested 2026-11-06; not started)
+
+Three requests from the owner, written as backlog items; nothing built.
+
+- [s] **1. The shortcut between Larkhollow and Kestrel: more reasonable logic and a visible foundation.** Built
+  2026-11-06: a locked gate (our CC0 drawing, `tools/gen_gate_sheet.py`) stands across the road at both ends, two
+  leaves each, with its own words (the notice: closed to travellers, the herds' road, kept by the Ring, opened on
+  the Warden's word); the drovers stand beside the road and give the reason (wild critters took the herds on it, so
+  the Ring locked it, and Ivy keeps the key), and once `beat_ivy` is set the gates are gone and one drover at each
+  end says what changed. Shots `critters_drove_gate`, `critters_drove_gate_says`, and the open road
+  (`critters_drove_road`, `critters_drove_road_home`). **Owner:** the words are my drafts. Today the
+  drove road is two warps (`larkhollow` 23,11 ↔ `kestrel` 0,16 in `tools/game_region.json`) with nothing on the
+  ground: two drovers stand on the road (Drover Lad in Larkhollow, Tam and Lil at Kestrel's end) and their words are
+  the only gate, which the player reads as "a person in the way" rather than a closed road. Make it read as a road:
+  a physical barrier (a gate or a chain across the road, drawn in the map) at each end, one reason the story gives
+  for it (the Warden's word, so `beat_ivy` opens it), the road drawn as a road with a sight line from either end, and
+  one drover who says what changed once it's open. Check the logic against the other route: the tunnel way from
+  Larkhollow is long, so the road must be the sensible shortcut after Ivy and not an accident of the map. **(mine:
+  a fixed gate that opens by flag, not a drover stood on a tile.)**
+- [s] **2. Redo Kestrel's town so it doesn't look like Larkhollow.** Built 2026-11-06 from the same two clean sheets:
+  dry earth and sandy roads (`core_outdoor`'s brown family, 16 columns right of Larkhollow's green), the Ring a
+  walled flagstone arena with banners below its gate hall, and a market square south of the crossroads (an awning
+  stall, fruit crates, a fountain); the town is six rows longer (26 x 27) and its south exit moved from row 20 to 26,
+  every other place unchanged. At most 79 tiles on one screen (the cache keeps 96). Shot `critters_kestrel`,
+  looked at, before and after. **Owner:** the two houses are still the sheet's only two wooden designs. Both towns use the same two sheets
+  (`core_city_and_country` and `core_outdoor`, see `tools/game_maps/larkhollow.json` and `kestrel.json`), so they read
+  as one village. Give Kestrel its own look: a different ground and building palette from the sheets (or a second
+  sheet, if one fits), its own roof and wall styles, and a town plan that suits a Ring town (a walled arena, stands,
+  a market street) rather than a village. Kestrel stays laid out for this game (`tools/game_maps/`), so no Tuxemon map
+  is copied. Shots `critters_kestrel` before and after, looked at.
+- [s] **3. Progress must not come from walking back and forth.** Built 2026-11-06, for the owner to judge on the
+  bench: **the Mere**, a side area of our own off Larkhollow's west road (gated until Keeper Tom), with three tiers of
+  optional keepers (8-11 before Ivy; 21-24 after Ivy; 36-38 after her rematch, for Ashe at 40), a grass table that
+  steps up with them, Hermit Bryn's rest at its entrance, and Fisher Ola's request, paid in 3 Super Potions (a new
+  "gift" person kind). Auto-play now takes the keepers it can beat before training for a harder one. Measured over
+  the five games (seed 1): **wild battles fought only to train fell from 676 to 300**, the worst stretch before one
+  keeper from 97 to 40, and losses are 101 (E0 had 87). `make -C sim monster` fails past **50** in one stretch
+  (`GRIND_MAX`, mine: **owner, set the number**). Still open below: more side areas and quests, and the Reach hunt.
+  - **Side areas to explore** off the main road: a path with its own wild table and a reason to go (a cave, a
+    shrine, a lake, a mine, a Wren specimen trail), each with a healer and something to find. Each one takes a
+    few hours, not a few minutes of walking.
+  - **Side quests that pay in levels and items**: a local request per town (a Ring errand in Kestrel, a Woodcutter's
+    job in the Brideswood, a delivery from Ned, a specimen from Sam's shop, Mum's errands at home). Each one sends
+    the player through a side area and ends at a person, so the xp comes with a story beat, not a loop.
+  - **A level curve per beat**: for each keeper, the level the player should have reached by then and the side
+    content that brings them there (the `steps` and encounter tables in `game_region.json` already change by act;
+    extend that to side areas).
+  - **A gate, so this can't come back**: a balance check (`make -C sim monster` or a new one) that fails when Auto-play
+    needs more than a set number of consecutive wild battles in one area before a keeper, or when a keeper's level
+    comes from one area only. **(mine: the number is the owner's to set.)**
+  - **Open question for the owner:** the full-Dex hunt in the Reach (22,000 to 40,000 actions, `[d]` above) is the
+    same kind of walking. Is it a post-game chore to keep, a side quest with a reward, or cut?
+- [ ] **4. A travel screen between Larkhollow and Kestrel, so the road feels like distance.** Requested 2026-11-06
+  (the owner). Today the drove road is two warps, so Larkhollow and Kestrel sit side by side with no sense of the
+  miles between them. Add a travel moment on the road: a short scene (a screen or a scrolling strip of the road
+  with hills, a ford or a waymark, and the journey's time passing) shown as the player crosses, before they arrive at
+  the other town. Keep it short so it adds weight without becoming a walk. It should use the same road as item 1
+  (the gate once shut, the open road after `beat_ivy`) and not change the warps' logic. **(mine: the look and length
+  are the owner's to judge; I'd keep it to one screen with no input beyond a key to continue.)**
+
+### Critters: Auto-play's catch and run rules (requested 2026-11-06; not started)
+
+Three requests from the owner, written as backlog items; nothing built. Today's rules are in
+`firmware/main/monster_bot.c` (the battle choice): a catch is thrown when the wild critter is at or under half HP
+(or one blow would take it), or at once while hunting; a run is chosen when the party is `worn()`.
+
+- [ ] **1. Don't catch a critter at full health.** Auto-play should not throw at an opponent whose HP is full (it
+  has not been worn down, so the throw is wasted). Hunting throws at once (`hunted`), which breaks this: the rule
+  must hold in hunting too, so a full-health critter is weakened first. Gate: a battle log with a catch on a
+  full-HP foe fails `make -C sim monster`.
+- [ ] **2. Don't catch when the party has no open space.** Auto-play should only try to catch while the party has
+  5 or fewer members, so the catch has a free slot. Today the hunting branch also allows a catch on a full party
+  when the box has room (`w->n_box < MP_BOX`), which the owner does not want. A full party sends its straggler to
+  the box first (see the 2026-11-04 release section), so the catch comes after that move, not instead of it.
+  Gate: no catch attempt with 6 in the party.
+- [ ] **3. Don't run while another party member can still fight.** Auto-play should not choose Run (`MP_ACT_RUN`)
+  while any party member other than the active one is at full health, since that member could win the battle.
+  `worn()` allows a run on total HP alone, which can fire with a full-health member still in the party. Run only
+  when no other party member is at full HP. Gate: a run chosen with a full-health bench member fails
+  `make -C sim monster`. **(mine: "full health" means HP at its maximum, and a fainted member does not count as
+  able to fight.)**
+
+### Critters: battle screen overlap (reported 2026-11-06; not started)
+
+- [ ] **1. The opponent's sprite must not overlap the player's status box.** In battle, the opponent critter's
+  sprite currently draws over the player's critter's name, HP and status box. The sprites and the boxes should be
+  laid out so neither covers the other, at the device's screen size. Gate: a battle smoke shot showing both
+  cards with no overlap, looked at (`[s]`); the bench check is the owner's (`[d]`).
+
+---
+
 ## Bench checks `[d]`, by area
 
 **Re-flash before reasoning about what is on the device.** The bench is only as

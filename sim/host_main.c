@@ -311,6 +311,12 @@ int main(int argc, char **argv){
             sim_step(60);
         }
         else if(line[0] == 'J' && (line[1] == '\n' || !line[1])){ mon_ui_test_full_party(); sim_step(60); }
+        else if(line[0] == 'W' && line[1] == ' '){    /* W <ours> <foe> <turns>: the battle's statuses, by STAT position (-1 none) */
+            int s0, s1, tn;
+            if(sscanf(line + 2, "%d %d %d", &s0, &s1, &tn) != 3){ fprintf(stderr, "script: bad W: %s", line); rc = 1; break; }
+            if(!mon_ui_test_status(s0, s1, tn)){ rc = 1; break; }
+            sim_step(100);
+        }
         else if(line[0] == 'F' && line[1] == ' '){
             int fl, coins;
             if(sscanf(line + 2, "%d %d", &fl, &coins) != 2){ fprintf(stderr, "script: bad F: %s", line); rc = 1; break; }

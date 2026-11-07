@@ -1,0 +1,26 @@
+# Valorix: the heroic line's second stage. The owner's drawing (2026-11-05).
+# Rules in Tuxemon's shape (tools/game_creatures/README.md); moves are Tuxemon's.
+name: Valorix
+description: >-
+  Its armour is still too big, and it wears it anyway. It never lets a
+  smaller critter take the blame.
+category: Valiant
+height_cm: 90
+weight_kg: 28
+drawing: tools/game_art/src/valorix.png
+types: [heroic]
+shape: hunter
+stage: stage1
+experience_group: default
+catch_rate: 60
+lower_catch_resistance: 0.95
+upper_catch_resistance: 1.25
+moveset:
+- {level_learned: 1, technique: struggle}
+- {level_learned: 1, technique: lantern}
+- {level_learned: 1, technique: shadow_boxing}
+- {level_learned: 1, technique: punch}
+- {level_learned: 20, technique: assault}
+- {level_learned: 26, technique: radiance}
+evolutions:
+- {at_level: 32, monster_slug: paladrax}

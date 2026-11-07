@@ -52,13 +52,16 @@ before touching anything.
   rules are `tools/game_creatures/<slug>.yaml` with an "ours" allow-list
   line. Each drawing has a `<slug>.eyes.json` beside it: halving ruins eyes,
   so they're drawn again by hand (the README there; the first build drafts it). The first are the fire fox line (Cinderkit, Scorchvix, Pyrewing) and
-  the water axolotl line (Gillpip, Rillotl, Maelstrotl), the lightning line (Sparkip, Nimbolt, Fulminax), the wood line (Sprigling, Wildbough, Grovarch) the venom line (Skullick, Ossicoil, Banewyrm), the sky line (Cirrup, Cumulynx, Tempyre) and Rivetron (metal).
+  the water axolotl line (Gillpip, Rillotl, Maelstrotl), the lightning line (Sparkip, Nimbolt, Fulminax), the wood line (Sprigling, Wildbough, Grovarch) the venom line (Skullick, Ossicoil, Banewyrm), the sky line (Cirrup, Cumulynx, Tempyre), Rivetron (metal), the heroic line (Valkit, Valorix, Paladrax), the cosmic line (Starlet, Nebulet, Astrolune), the crystal line (Geodot, Quartzor, Prismyth), the rock line (Pebblub, Bouldrom, Tectorath) and the eye line (Oglet, Oculoth), 60 critters.
 - `docs/DEX_PLAN.md`: **Dex**, the critter index (Games folder, under
   Critters), a fixed hardware-like gadget: its bezel, title bar and keys never
   change, and all other text and the speaker come through its subscreens (no
   Coach or Guru bubble). **Built in the sim 2026-11-03** (`ui_dex.c`, `dex.c`, the
   TV effect in `crt.c`; game format 2.2, save version 4; gate `make -C sim dex`);
   its bench items are the owner's. §9 holds the owner's decisions.
+- `docs/EFFECTS_PLAN.md`: **Tuxemon's move effects, one at a time** (planned 2026-11-05, nothing built): each
+  effect switched on by data, measured by a balance run, shown as a status badge on the battle cards. Its
+  checklist is in `BACKLOG.md`; §8 holds the owner's open decisions.
 - `docs/APP_PLATFORM_PLAN.md`: native C apps loaded from the SD card.
   **On hold since 2026-09-29**; don't build any of it without the user's yes.
 
@@ -74,7 +77,7 @@ before touching anything.
   - `make test` and `make ftest` (host; the programs build into `build/`);
   - `sudo mkdir -p /sdcard && sudo chmod 777 /sdcard`, then `make -C sim`
     with the targets `poolparity nosecrets secretscan data graf mines wordie
-    sudoku zip clock coach guru gurupool dash course srs monster dex smoke smoke32`
+    sudoku zip clock coach guru gurupool dash course srs monster balance dex smoke smoke32`
     (on the owner's PC, run them in the `cyd-sim` / `cyd-sim32` images on a
     scratch copy: `secretscan` empties `/sdcard`);
   - `python3 tests/mkcourse_test.py` (the course builder; needs the Pillow

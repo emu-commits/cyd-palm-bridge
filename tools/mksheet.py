@@ -28,7 +28,8 @@ front made small. Nothing has to be on an exact grid. The tool:
    transparency says so itself, and nothing is guessed from its colours;
 2. finds the drawings (front, back, two icons) as the groups of what's left,
    the two biggest being the front (left) and the back. A splash or a flame
-   apart from the body joins the big piece it's nearest to, never both;
+   apart from the body joins the big piece it's nearest to, never both, and
+   nothing below the eyes file's "icon_row" joins anything above it;
 3. finds the drawing's pixel size from where the colour changes, across all
    of them together, then each drawing's own offset (generated art often
    sits a little differently in each);
@@ -45,7 +46,8 @@ front made small. Nothing has to be on an exact grid. The tool:
    centred;
 7. reduces the front and back together to 15 colours (the game's budget,
    GAME_FORMAT.md 3.9), keeping small, distinct colours (eyes, gems,
-   highlights) over shades of big areas; the icons get their own 15;
+   highlights) over shades of big areas, and any the eyes file "keep"s; the
+   icons get their own 15;
 8. draws the eyes again by hand. Halving makes a pupil swell and loses its
    highlight, and eyes are what a face is read by, so the blown-up eye is wiped
    and a small drawn one goes in its place, from SRC's .eyes.json beside it.
@@ -250,10 +252,11 @@ def components(bg, w, h, least, label=None):
     return out
 
 
-def nearest_big(pieces, label, w, h, gap):
+def nearest_big(pieces, label, w, h, gap, side=lambda p: 0):
     """The pieces near a big one (a quarter of the biggest or more) joined to it, each to
     the big piece whose pixels are nearest (not whose box is: a splash between the front's
-    tornado and the back's tail belongs to the nearer). Returns the pieces left."""
+    tornado and the back's tail belongs to the nearer). Returns the pieces left. `side`
+    keeps pieces apart that are on two sides of the eyes file's "icon_row"."""
     big = max(p[4] for p in pieces) // 4
     owner = [-1] * (w * h)
     dist = [0] * (w * h)
@@ -268,7 +271,7 @@ def nearest_big(pieces, label, w, h, gap):
         i = q.popleft()
         d = dist[i]
         k = label[i]
-        if k >= 0 and pieces[k][4] < big:
+        if k >= 0 and pieces[k][4] < big and side(pieces[k]) == side(pieces[owner[i]]):
             if k not in near or (d, owner[i]) < near[k]:
                 near[k] = (d, owner[i])
         if d >= gap:
@@ -286,7 +289,7 @@ def nearest_big(pieces, label, w, h, gap):
     return [p for k, p in enumerate(out) if k not in near]
 
 
-def group(boxes, gap):
+def group(boxes, gap, side=lambda p: 0):
     """Join pieces whose boxes come within `gap` of each other (a flame apart from its ear),
     the closest pair first, but never two big ones (a quarter of the biggest or more):
     those are the front and the back, however close a tail comes to the other's tornado."""
@@ -304,7 +307,7 @@ def group(boxes, gap):
         for i in range(len(boxes)):
             for j in range(i + 1, len(boxes)):
                 a, b = boxes[i], boxes[j]
-                if a[5] and b[5]:
+                if a[5] and b[5] or side(a) != side(b):
                     continue
                 d = apart(a, b)
                 if d[0] < gap and (best is None or d < best[0]):
@@ -474,11 +477,13 @@ def shrink(rows, k, where=None, ink_share=4):
 
 # ---------------------------------------------------------------- 6: colours
 
-def reduce_colours(images, colours=COLOURS):
+def reduce_colours(images, colours=COLOURS, keep=()):
     """One palette of at most `colours` for the images together, then the images in it.
     Median cut to 64 first, then the closest two are joined until `colours` are left,
     the distance scaled by the smaller one's size, so a few pixels of a distinct colour
-    (an eye, a gem) outlast a shade of a big area."""
+    (an eye, a gem) outlast a shade of a big area. `keep` (the eyes file's "keep") names
+    colours that have their own place in the palette whatever their size: a gem of a few
+    pixels that the joining would otherwise fold into a big area's shade."""
     from PIL import Image
     opaque = [p[:3] for im in images for p in im.get_flattened_data() if p[3] >= 128]
     if not opaque:
@@ -493,6 +498,10 @@ def reduce_colours(images, colours=COLOURS):
         g[0] += c[0]; g[1] += c[1]; g[2] += c[2]; g[3] += 1
     cl = sorted([[g[0] / g[3], g[1] / g[3], g[2] / g[3], g[3]] for g in groups.values()])
     del pal
+    keep = sorted({tuple(int(v) for v in c) for c in keep})
+    if len(keep) >= colours:
+        fail(f"keep names {len(keep)} colours, and the budget is {colours}")
+    colours -= len(keep)
     while len(cl) > colours:
         best = None
         for a in range(len(cl)):
@@ -505,13 +514,13 @@ def reduce_colours(images, colours=COLOURS):
         n = A[3] + B[3]
         cl[a] = [(A[k] * A[3] + B[k] * B[3]) / n for k in range(3)] + [n]
         del cl[b]
-    palette = sorted({tuple(int(v + 0.5) for v in c[:3]) for c in cl})
+    palette = sorted({tuple(int(v + 0.5) for v in c[:3]) for c in cl} | set(keep))
     for _ in range(2):           # two rounds of moving each colour to the mean of its pixels
         sums = {c: [0, 0, 0, 0] for c in palette}
         for c in opaque:
             s = sums[min(palette, key=lambda p: (wdist(p, c), p))]
             s[0] += c[0]; s[1] += c[1]; s[2] += c[2]; s[3] += 1
-        palette = sorted({tuple(int(v / s[3] + 0.5) for v in s[:3]) if s[3] else c
+        palette = sorted({c if c in keep or not s[3] else tuple(int(v / s[3] + 0.5) for v in s[:3])
                           for c, s in sums.items()})
     memo = {}
     out = []
@@ -635,7 +644,7 @@ def eyes_path(src):
 
 
 def write_eyes(path, eyes):
-    lines = [f'  {json.dumps(key)}: {eyes[key]}' for key in ("scale", "ink", "holes", "mirror") if eyes.get(key) is not None]
+    lines = [f'  {json.dumps(key)}: {eyes[key]}' for key in ("scale", "ink", "holes", "mirror", "keep", "icon_row") if eyes.get(key) is not None]
     for part in PARTS:
         rows = [json.dumps(e) for e in eyes[part]]
         body = "[\n    " + ",\n    ".join(rows) + "\n  ]" if rows else "[]"
@@ -645,8 +654,12 @@ def write_eyes(path, eyes):
 
 def read_eyes(path):
     eyes = json.loads(Path(path).read_text())
-    if set(eyes) - {"scale", "ink", "holes", "mirror"} != set(PARTS):
-        fail(f"{path}: want exactly the parts {PARTS}, and may have a scale, an ink, holes and mirror")
+    if set(eyes) - {"scale", "ink", "holes", "mirror", "keep", "icon_row"} != set(PARTS):
+        fail(f"{path}: want exactly the parts {PARTS}, and may have a scale, an ink, holes, mirror, keep and icon_row")
+    if not isinstance(eyes.get("icon_row", 0), int):
+        fail(f"{path}: icon_row is a y of the drawing: {eyes['icon_row']}")
+    if any(not isinstance(c, list) or len(c) != 3 for c in eyes.get("keep", [])):
+        fail(f"{path}: keep is a list of [r, g, b]: {eyes['keep']}")
     if set(eyes.get("mirror", [])) - {"front", "back"}:
         fail(f"{path}: mirror lists \"front\" or \"back\": {eyes['mirror']}")
     if not isinstance(eyes.get("scale", 1), int) or eyes.get("scale", 1) < 1:
@@ -694,7 +707,11 @@ def build(src, notes, scale=None, draft=False):
     label = [-1] * (w * h)
     pieces = components(bg, w, h, least=max(16, w * h // 20000), label=label)
     gap = max(4, w // 64)
-    parts = group(nearest_big(pieces, label, w, h, gap), gap)
+    # "icon_row": the icons start at this y of the drawing, and nothing below it joins
+    # anything above it (icons drawn close under the front's feet)
+    row = saved.get("icon_row") if saved else None
+    side = (lambda p: p[1] >= row) if row is not None else (lambda p: 0)
+    parts = group(nearest_big(pieces, label, w, h, gap, side), gap, side)
     parts = [p for p in parts if p[4] >= max(q[4] for q in parts) // 50]
     if len(parts) not in (2, 4):
         fail(f"{src}: found {len(parts)} drawings, want a front, a back and two icons "
@@ -771,7 +788,7 @@ def build(src, notes, scale=None, draft=False):
         for part in ("front", "icon1", "icon2"):
             if k >= PARTS.index(part) and len(eyes[part]) != 2:
                 notes.append(f"eyes: {len(eyes[part])} found on the {part} (narrow or slanted eyes aren't found): place them by hand")
-    (front, back), pal = reduce_colours([front, back])
+    (front, back), pal = reduce_colours([front, back], keep=eyes.get("keep", ()))
     front = apply_eyes(front, eyes["front"], pal, f"{src} front")
     back = apply_eyes(back, eyes["back"], pal, f"{src} back")
     # in battle a front faces left and a back right (the facing review, 2026-11-04)
@@ -780,7 +797,7 @@ def build(src, notes, scale=None, draft=False):
     if "back" in eyes.get("mirror", []):
         back = back.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
     notes.append(f"front and back: {len(pal)} colours")
-    ic, ipal = reduce_colours(ic)
+    ic, ipal = reduce_colours(ic, keep=eyes.get("keep", ()))
     notes.append(f"icons: {len(ipal)} colours")
     ic = [apply_eyes(a, eyes[p], ipal, f"{src} {p}") for a, p in zip(ic, ("icon1", "icon2"))]
     sheet = Image.new("RGBA", (SHEET_W, SHEET_H), (0, 0, 0, 0))
